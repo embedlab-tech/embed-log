@@ -1,0 +1,417 @@
+/* ============================================================
+   log-viewer — stylesheet
+   Themes: Whitesand (warm light, default) · Dracula (dark)
+   ============================================================ */
+
+:root {
+    /* --- Dracula (dark) --- */
+    --bg:        #282a36;
+    --panel:     #21222c;
+    --header:    #21222c;
+    --text:      #f8f8f2;
+    --accent:    #bd93f9;
+    --border:    #44475a;
+    --selection: #44475a;
+    --input-bg:  #21222c;
+
+    /* ANSI */
+    --ansi-0: #6272a4;   /* dim / timestamp (Dracula comment) */
+    --ansi-1: #ff5555;   /* red   */
+    --ansi-2: #50fa7b;   /* green */
+    --ansi-3: #f1fa8c;   /* yellow */
+    --ansi-4: #6272a4;   /* blue  */
+    --ansi-5: #bd93f9;   /* purple */
+    --ansi-6: #8be9fd;   /* cyan  */
+    --ansi-7: #f8f8f2;   /* white */
+
+    --font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco,
+                   Consolas, 'Courier New', monospace;
+    --font-size: 14px;
+}
+
+[data-theme="whitesand"] {
+    /* --- Whitesand (warm light) --- */
+    --bg:        #fbf6ee;
+    --panel:     #f4ede1;
+    --header:    #efe6d8;
+    --text:      #3f3a33;
+    --accent:    #2f7bbd;
+    --border:    #d7cbb8;
+    --selection: #e6dac6;
+    --input-bg:  #efe6d8;
+
+    --ansi-0: #6b6257;
+    --ansi-1: #b6404b;
+    --ansi-2: #2f7f4f;
+    --ansi-3: #a06a00;
+    --ansi-4: #2f7bbd;
+    --ansi-5: #7a4db3;
+    --ansi-6: #0f7c78;
+    --ansi-7: #3f3a33;
+}
+
+/* ---- Reset / base ---- */
+* { box-sizing: border-box; }
+
+body {
+    font-family: var(--font-family);
+    background: var(--bg);
+    color: var(--text);
+    margin: 0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* ---- Toolbar ---- */
+#toolbar {
+    height: 44px;
+    background: var(--header);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+#toolbar .app-name {
+    font-weight: 700;
+    color: var(--accent);
+    font-size: 14px;
+    margin-right: 4px;
+}
+
+button, select {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+button:hover, select:hover { border-color: var(--accent); color: var(--accent); }
+button.active { background: var(--selection); border-color: var(--accent); color: var(--accent); }
+
+.sep { width: 1px; height: 20px; background: var(--border); }
+
+/* WS status badge */
+#ws-status {
+    margin-left: auto;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: none;
+    cursor: default;
+}
+#ws-status:hover { border-color: var(--border); color: var(--text); }
+#ws-status.connected    { color: var(--ansi-2); border-color: var(--ansi-2); }
+#ws-status.connecting   { color: var(--ansi-3); border-color: var(--ansi-3); }
+#ws-status.disconnected { color: var(--ansi-1); border-color: var(--ansi-1); }
+
+/* ---- Settings panel ---- */
+#settings-panel {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    font-size: 12px;
+}
+#settings-panel.open { display: flex; }
+#settings-panel .set-sep  { color: var(--border); margin: 0 4px; }
+#settings-panel .set-label { color: var(--ansi-0); margin-right: 2px; }
+
+/* ---- Tag colours — entire line is tinted + slightly bold ---- */
+.log-line.line-wrn { color: var(--ansi-3); font-weight: 600; }  /* yellow */
+.log-line.line-dbg { font-weight: 600; }                        /* normal color, slightly bold */
+.log-line.line-err { color: var(--ansi-1); font-weight: 600; }  /* red    */
+/* <inf> lines are intentionally left unstyled */
+
+/* ---- Embedded (secondary) timestamp ---- */
+.emb-ts   { color: var(--ansi-0); }
+
+/* ---- File import ---- */
+.pane-body.drag-over {
+    outline: 2px dashed var(--accent);
+    outline-offset: -4px;
+}
+
+/* ---- Tab bar ---- */
+#tab-bar {
+    display: flex;   /* always shown — contains the + button */
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    background: var(--header);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.tab-btn.tab-add {
+    font-size: 16px;
+    padding: 0 10px;
+    line-height: 1.6;
+    border-style: dashed;
+    opacity: 0.6;
+}
+.tab-btn.tab-add:hover { opacity: 1; }
+
+.tab-btn {
+    padding: 3px 14px;
+    border-radius: 3px;
+    font-size: 12px;
+    cursor: pointer;
+}
+.tab-btn.active {
+    background: var(--accent);
+    color: var(--header);
+    border-color: var(--accent);
+}
+
+/* ---- Main layout ---- */
+#container {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+/* Each tab's pane group; only the active one is visible */
+.tab-content {
+    flex: 1;
+    display: flex;
+    flex-direction: row;
+    overflow: hidden;
+    background: var(--border);
+    gap: 1px;
+}
+
+.pane {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    background: var(--bg);
+}
+
+/* ---- Pane header ---- */
+.pane-header {
+    height: 30px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    gap: 6px;
+    flex-shrink: 0;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--accent);
+}
+.pane-header .pane-name { flex: 1; }
+.pane-header button { padding: 2px 6px; font-size: 11px; }
+
+/* ---- Filter bar ---- */
+.filter-bar {
+    height: 26px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    gap: 6px;
+    flex-shrink: 0;
+}
+.filter-input {
+    flex: 1;
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 12px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    outline: none;
+}
+.filter-input:focus  { border-color: var(--accent); }
+.filter-input.invalid { border-color: var(--ansi-1); }
+
+/* ---- Log area ---- */
+.pane-body {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+}
+
+.log-area {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 4px 0;
+    scroll-behavior: auto;
+    white-space: pre;
+}
+.log-area.wrap { white-space: pre-wrap; word-break: break-all; }
+
+.log-line {
+    font-size: var(--font-size);
+    line-height: 1.55;
+    padding: 0 10px;
+    min-height: 1.55em;
+    cursor: pointer;
+}
+.log-line:hover  { background: var(--selection); }
+.log-line.tx-line { opacity: 0.8; }
+
+.log-line .ts {
+    color: var(--ansi-0);
+    margin-right: 6px;
+    user-select: none;
+    font-size: 0.92em;
+}
+.log-line .ts.hidden { display: none; }
+
+/* Clipboard accumulation indicator */
+#clip-indicator {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 3px;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+}
+#clip-indicator .clip-sep { opacity: 0.4; }
+#clip-indicator .clip-clear {
+    background: none;
+    border: none;
+    color: var(--accent);
+    padding: 0;
+    font-size: 11px;
+    cursor: pointer;
+    opacity: 0.7;
+}
+#clip-indicator .clip-clear:hover { opacity: 1; border: none; }
+
+/* Line selection — drag along .ts gutter */
+.log-line.selected {
+    background: var(--selection);
+    box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* Copy-selection overlay button */
+.copy-btn {
+    position: absolute;
+    right: 8px;
+    top: 8px;
+    padding: 3px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    background: var(--panel);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s;
+    z-index: 10;
+    font-size: 11px;
+}
+.copy-btn.visible { opacity: 0.9; pointer-events: auto; }
+.copy-btn:hover   { opacity: 1; }
+
+mark.hl {
+    background: var(--ansi-3);
+    color: var(--header);
+    border-radius: 2px;
+    padding: 0 1px;
+}
+
+/* Persistent sync highlight — cleared on next click */
+.log-line.sync-highlight {
+    background: var(--selection);
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+}
+
+/* Jump-to-bottom overlay */
+.jump-btn {
+    position: absolute;
+    left: 50%;
+    bottom: 8px;
+    transform: translateX(-50%);
+    padding: 3px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    background: var(--panel);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s;
+    z-index: 10;
+    font-size: 11px;
+}
+.jump-btn.visible { opacity: 0.9; pointer-events: auto; }
+.jump-btn:hover   { opacity: 1; }
+
+/* ---- Input row ---- */
+.input-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.serial-input {
+    flex: 1;
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 3px;
+    outline: none;
+}
+.serial-input:focus { border-color: var(--accent); }
+.send-btn { padding: 4px 12px; flex-shrink: 0; }
+
+/* ---- Splitter ---- */
+.splitter {
+    width: 6px;
+    flex: 0 0 6px;
+    cursor: col-resize;
+    background: var(--border);
+    position: relative;
+    user-select: none;
+}
+.splitter::after {
+    content: '';
+    position: absolute;
+    top: 0; bottom: 0; left: 2px;
+    width: 2px;
+    background: var(--panel);
+}
+.splitter:hover::after,
+.splitter.dragging::after { background: var(--accent); }
+
+/* ---- ANSI color spans ---- */
+.ansi-1 { color: var(--ansi-1); }
+.ansi-2 { color: var(--ansi-2); }
+.ansi-3 { color: var(--ansi-3); }
+.ansi-4 { color: var(--ansi-4); }
+.ansi-5 { color: var(--ansi-5); }
+.ansi-6 { color: var(--ansi-6); }
+.ansi-7 { color: var(--ansi-7); }
+.ansi-b { font-weight: 700; }

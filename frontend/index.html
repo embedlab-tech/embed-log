@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="whitesand">
+<head>
+    <meta charset="UTF-8">
+    <title>log-viewer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="viewer.css">
+</head>
+<body>
+
+<!-- ── TOOLBAR ────────────────────────────────────────────── -->
+<div id="toolbar">
+    <span class="app-name">log-viewer</span>
+
+    <button id="btn-wrap"     title="Toggle word wrap">Wrap</button>
+    <button id="btn-ts"       title="Toggle timestamps" class="active">Time</button>
+    <button id="btn-sync"     title="Click a line to sync the other pane to the same timestamp" class="active">Sync</button>
+    <div class="sep"></div>
+    <button id="btn-font-dec" title="Decrease font size">A-</button>
+    <button id="btn-font-inc" title="Increase font size">A+</button>
+    <div class="sep"></div>
+    <button id="btn-clear"    title="Clear all panes">Clear</button>
+    <button id="btn-export"   title="Export current session to a self-contained HTML file">Export</button>
+    <div class="sep"></div>
+    <button id="btn-theme" title="Toggle light / dark theme">🌙</button>
+
+    <div id="ws-status" class="disconnected">WS: disconnected</div>
+</div>
+
+<!-- ── TAB BAR — hidden by tabs.js when only one tab ─────── -->
+<div id="tab-bar"></div>
+
+<!-- ── PANES ──────────────────────────────────────────────── -->
+<div id="container">
+    <!-- panes are created dynamically by ws.js as devices connect -->
+</div>
+
+<script src="state.js"></script>
+<script src="ansi.js"></script>
+<script src="lines.js"></script>
+<script src="tabs.js"></script>
+<script src="ui.js"></script>
+<script src="settings.js"></script>
+<script src="tsparse.js"></script>
+<script src="import.js"></script>
+<script src="selection.js"></script>
+<script src="themes.js"></script>
+<script src="tabcreate.js"></script>
+<script src="ws.js"></script>
+<script src="export.js"></script>
+</body>
+</html>

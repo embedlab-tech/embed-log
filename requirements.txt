@@ -1,0 +1,2 @@
+pyserial>=3.5
+aiohttp>=3.9
