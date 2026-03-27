@@ -23,6 +23,11 @@ embed-log/
 │   ├── log_client.py  marker + subscribe client API
 │   └── tx_client.py   TX-only client API
 │
+├── mcp/               MCP proof-of-concept servers
+│   ├── _mcp_stdio.py         minimal stdio MCP helper (JSON-RPC framing)
+│   ├── device_control_server.py  inject/tail/wait/send_tx tools
+│   └── log_intel_server.py       error summaries and run comparison tools
+│
 └── utils/
     ├── merge_logs.py        offline HTML viewer generator
     ├── udp_log_simulator.py UDP traffic simulator for udp:PORT sources
@@ -464,3 +469,34 @@ python3 utils/inject_log_demo.py \
 ```
 
 Messages are randomly selected from `utils/inject_messages.txt`.
+
+---
+
+## MCP proof-of-concept servers
+
+Two MCP servers are provided under `mcp/` as POCs.
+
+Start device-control MCP server (stdio transport):
+
+```bash
+python3 mcp/device_control_server.py
+```
+
+Available tools:
+- `inject_marker` (write marker JSON to inject port)
+- `send_tx` (send TX JSON to inject port)
+- `tail_log` (read last N lines from a log file)
+- `wait_for_pattern` (poll file until a string appears)
+
+Start log-intelligence MCP server:
+
+```bash
+python3 mcp/log_intel_server.py
+```
+
+Available tools:
+- `summarize_errors`
+- `cluster_failures`
+- `compare_runs`
+
+These are intentionally lightweight, stdlib-only POCs for experimentation.
