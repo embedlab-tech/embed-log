@@ -20,13 +20,15 @@ embed-log/
 │
 ├── backend/           server and client library
 │   ├── server.py      log server (serial + TCP + WebSocket)
-│   ├── log_client.py  Python client for pytest / Robot Framework
+│   ├── log_client.py  marker + subscribe client API
+│   └── tx_client.py   TX-only client API
 │
 └── utils/
     ├── merge_logs.py        offline HTML viewer generator
     ├── udp_log_simulator.py UDP traffic simulator for udp:PORT sources
     ├── sim_messages.txt     message corpus for simulator
-    └── inject_log_demo.py   inject-port marker + TX demo client
+    ├── inject_messages.txt  message corpus for inject demo
+    └── inject_log_demo.py   inject-port marker demo client
 ```
 
 ---
@@ -99,7 +101,7 @@ When running tests against embedded hardware it is hard to correlate what the te
 
 **UART auto-reconnects** — boards reset during flashing; the serial reader retries every 3 seconds silently.
 
-**Inject port is bidirectional** — clients can inject log markers and TX commands (send JSON lines) and simultaneously receive a stream of all log entries for that source. Use `LogClient.subscribe()` to consume the stream without printing to stdout.
+**Inject port is bidirectional** — clients can inject log markers and TX commands (send JSON lines) and simultaneously receive a stream of all log entries for that source. Use `LogClient.subscribe()` for marker/stream workflows and `TxClient` for TX-only workflows.
 
 **WebSocket broadcaster** — aiohttp serves the browser UI and a WebSocket endpoint on the same port. On connect it sends a `config` message with the tab layout so the browser builds the pane structure before any log data arrives. TX commands typed in the browser are sent back to the source via the same WebSocket.
 
@@ -230,7 +232,7 @@ ANSI color codes are embedded in the log file, so `tail -f` in a terminal shows 
 
 ---
 
-## Client API (`backend/log_client.py`)
+## Client APIs (`backend/log_client.py`, `backend/tx_client.py`)
 
 ### pytest
 
@@ -246,7 +248,6 @@ def test_boot(dut):
     dut.step("flashing firmware")        # cyan marker in log
     # ... flash ...
     dut.success("firmware flashed OK")   # green marker
-    dut.sendline("reboot")               # sends to serial TX
     dut.warning("waiting for reboot")    # yellow marker
 ```
 
@@ -258,7 +259,7 @@ Library    backend.log_client.LogClient    127.0.0.1    5001    source=robot
 *** Test Cases ***
 Heap Check
     Step    running heap stat
-    Sendline    heap stat
+    Success    command scheduled
 ```
 
 ### All methods
@@ -271,8 +272,6 @@ Heap Check
 | `success(msg)` | green | Pass / OK marker |
 | `warning(msg)` | yellow | Warning marker |
 | `error(msg)` | red | Error / fail marker |
-| `send(data)` | — | Send bytes or string to serial TX |
-| `sendline(text, eol="\r\n")` | — | Send a line to serial TX |
 | `subscribe(callback, daemon=True)` | — | Receive log stream in background thread |
 
 Available colors: `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`, `bold`.
@@ -296,7 +295,7 @@ def dut():
         yield client
 
 def test_boot(dut):
-    dut.sendline("reboot")
+    dut.step("waiting for boot complete")
     # Wait for "boot complete" to appear in the log stream
     while True:
         entry = log_q.get(timeout=10)
@@ -314,6 +313,15 @@ LogClient(
     auto_reconnect=True,   # reconnect silently if connection drops
     connect_timeout=30,    # retry initial connect for up to 30 s (useful in CI)
 )
+```
+
+### TX-only API
+
+```python
+from backend.tx_client import TxClient
+
+with TxClient("127.0.0.1", 5001, source="pytest", connect_timeout=30) as tx:
+    tx.sendline("reboot")
 ```
 
 ---
@@ -440,18 +448,19 @@ server CLI shape and source names.
 ```bash
 # Server
 python3 backend/server.py \
-  --source READER     udp:6000 \
-  --source CONTROLLER udp:6001 \
-  --inject READER     5001 \
-  --inject CONTROLLER 5002 \
-  --tab "Simulated Devices" READER CONTROLLER \
+  --source SENSOR_A udp:6000 \
+  --source SENSOR_B udp:6001 \
+  --inject SENSOR_A 5001 \
+  --inject SENSOR_B 5002 \
+  --tab "Simulated Devices" SENSOR_A SENSOR_B \
   --ws-port 8080
 
-# Inject marker + TX traffic to both sources
+# Inject randomized marker traffic to both sources
 python3 utils/inject_log_demo.py \
-  --inject READER 5001 \
-  --inject CONTROLLER 5002 \
+  --inject SENSOR_A 5001 \
+  --inject SENSOR_B 5002 \
   --interval 5 \
-  --command "heap stat" \
   --source demo
 ```
+
+Messages are randomly selected from `utils/inject_messages.txt`.

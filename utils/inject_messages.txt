@@ -1,0 +1,40 @@
+<inf> test harness started
+<inf> running smoke checks
+<inf> preparing device for command run
+<inf> asserting heartbeat is present
+<inf> collecting diagnostics snapshot
+<inf> network session negotiated
+<inf> writing baseline configuration
+<inf> waiting for steady state
+<inf> test step completed successfully
+<inf> finalizing scenario
+<dbg> ping response latency=24ms
+<dbg> retry counter incremented to 1
+<dbg> checking parser state transition
+<dbg> decoded payload length=128
+<dbg> cache stats hits=42 misses=3
+<dbg> validating watchdog tick cadence
+<dbg> sample window mean=0.842
+<dbg> command queue depth=2
+<dbg> worker thread alive=true
+<dbg> timer drift within tolerance
+<wrn> response delay above threshold
+<wrn> stale sample detected and ignored
+<wrn> temporary backpressure on uplink
+<wrn> fallback path activated
+<wrn> retrying command after timeout
+<wrn> battery level approaching warning zone
+<wrn> clock sync offset increased
+<wrn> temporary storage pressure observed
+<wrn> sensor returned borderline value
+<wrn> watchdog margin reduced
+<err> command execution failed code=E01
+<err> protocol framing error detected
+<err> unable to allocate response buffer
+<err> operation aborted by safety guard
+<err> backend dependency unavailable
+<err> telemetry publish failed
+<err> command channel disconnected
+<err> checksum verification failed
+<err> device reported unrecoverable fault
+<err> scenario marked as failed

@@ -1,7 +1,6 @@
 """
-Inject log demo — connects to one or more server inject ports and every interval:
-  1. Writes a log marker (visible in log files and browser UI)
-  2. Sends a TX command to the mapped source
+Inject log demo — connects to one or more server inject ports and periodically
+injects marker lines selected from a predefined message corpus.
 
 CLI mirrors the server naming style by using repeated:
     --inject NAME PORT
@@ -22,6 +21,7 @@ Then in a separate terminal:
 """
 
 import argparse
+import random
 import sys
 import threading
 import time
@@ -35,11 +35,19 @@ from backend.log_client import LogClient
 
 DEFAULT_INTERVAL = 10.0   # seconds between each cycle
 DEFAULT_DURATION = 60.0   # total run time in seconds
+DEFAULT_MESSAGES_FILE = Path(__file__).with_name("inject_messages.txt")
+
+SEVERITY_COLORS = {
+    "inf": "white",
+    "dbg": "cyan",
+    "wrn": "yellow",
+    "err": "red",
+}
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generate marker + TX traffic against server inject ports."
+        description="Generate marker traffic against server inject ports."
     )
     parser.add_argument(
         "--inject",
@@ -67,21 +75,17 @@ def parse_args() -> argparse.Namespace:
         help=f"Total runtime in seconds, 0 means run forever (default: {DEFAULT_DURATION}).",
     )
     parser.add_argument(
-        "--command",
-        default="heap stat",
-        help="TX command sent each cycle with sendline() (default: 'heap stat').",
+        "--messages",
+        type=Path,
+        default=DEFAULT_MESSAGES_FILE,
+        help=f"Path to message corpus file (default: {DEFAULT_MESSAGES_FILE.name}).",
     )
     parser.add_argument(
         "--source",
         default="demo",
         help="Marker source label visible in logs (default: demo).",
     )
-    parser.add_argument(
-        "--color",
-        default="cyan",
-        choices=["red", "green", "yellow", "blue", "magenta", "cyan", "white", "bold"],
-        help="Marker color (default: cyan).",
-    )
+    parser.add_argument("--seed", type=int, default=None, help="Optional random seed.")
     return parser.parse_args()
 
 
@@ -106,26 +110,49 @@ def _parse_inject_entries(entries: list[list[str]]) -> list[dict]:
     return devices
 
 
+def _load_messages(path: Path) -> list[str]:
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise ValueError(f"messages file not found: {path}") from exc
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    if not lines:
+        raise ValueError(f"messages file is empty: {path}")
+    return lines
+
+
+def _parse_message(raw: str) -> tuple[str, str]:
+    if raw.startswith("<") and ">" in raw:
+        tag, rest = raw[1:].split(">", 1)
+        tag = tag.strip().lower()
+        message = rest.strip()
+        if message:
+            return message, SEVERITY_COLORS.get(tag, "white")
+    return raw, "white"
+
+
 def device_writer(
     name: str,
     host: str,
     port: int,
     interval: float,
     marker_source: str,
-    marker_color: str,
-    command: str,
+    messages: list[str],
+    seed: int,
     stop: threading.Event,
 ) -> None:
     counter = 0
+    rng = random.Random(seed)
     with LogClient(host, port, source=marker_source, connect_timeout=30) as client:
         print(f"[inject-demo] connected to {name} on {host}:{port}")
         while not stop.wait(interval):
             counter += 1
+            chosen = rng.choice(messages)
+            text, color = _parse_message(chosen)
             client.marker(
-                f"[{name}] sending '{command}' (cycle #{counter})",
-                color=marker_color,
+                f"[{name}] {text} (cycle #{counter})",
+                color=color,
             )
-            client.sendline(command)
 
 
 def main() -> None:
@@ -135,6 +162,8 @@ def main() -> None:
     if args.duration < 0:
         raise SystemExit("--duration must be >= 0")
     devices = _parse_inject_entries(args.inject)
+    messages = _load_messages(args.messages)
+    rng = random.Random(args.seed)
 
     stop = threading.Event()
 
@@ -147,8 +176,8 @@ def main() -> None:
                 "port": d["port"],
                 "interval": args.interval,
                 "marker_source": args.source,
-                "marker_color": args.color,
-                "command": args.command,
+                "messages": messages,
+                "seed": rng.randrange(0, 2**32),
                 "stop": stop,
             },
             daemon=True,
@@ -162,13 +191,13 @@ def main() -> None:
 
     if args.duration == 0:
         print(
-            f"[inject-demo] running until Ctrl+C — command {args.command!r} "
-            f"sent every {args.interval:g}s to {len(devices)} source(s)"
+            f"[inject-demo] running until Ctrl+C — marker lines sent every "
+            f"{args.interval:g}s to {len(devices)} source(s)"
         )
     else:
         print(
-            f"[inject-demo] running for {args.duration:g}s — command {args.command!r} "
-            f"sent every {args.interval:g}s to {len(devices)} source(s)"
+            f"[inject-demo] running for {args.duration:g}s — marker lines sent every "
+            f"{args.interval:g}s to {len(devices)} source(s)"
         )
     try:
         if args.duration == 0:

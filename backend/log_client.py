@@ -1,11 +1,10 @@
 """
-LogClient — inject timestamped log markers and serial TX data into a running
-log-server source channel, and optionally subscribe to its log stream.
+LogClient — inject timestamped log markers into a running log-server source
+channel, and optionally subscribe to its log stream.
 
 Socket protocol (newline-delimited JSON)
 ----------------------------------------
     Log marker:  {"type": "log", "source": "...", "message": "...", "color": "cyan"}
-    Serial TX:   {"type": "tx",  "source": "...", "data": "AT+RST\\r\\n"}
 
     "type" defaults to "log" for backwards compatibility.
 
@@ -23,8 +22,7 @@ Typical pytest usage
 
     def test_boot(dut1):
         dut1.step("resetting board")
-        dut1.sendline("reboot")        # sends to serial TX
-        dut1.success("reboot sent")
+        dut1.success("reboot requested")
 
 Subscribe usage (receive log entries without polluting stdout)
 --------------------------------------------------------------
@@ -192,39 +190,6 @@ class LogClient:
                     self._connect_locked()
                 else:
                     raise
-
-    # ------------------------------------------------------------------
-    # Serial TX
-    # ------------------------------------------------------------------
-
-    def send(self, data: str | bytes, *, source: Optional[str] = None) -> None:
-        """
-        Send raw bytes (or a UTF-8 string) to the source serial TX.
-
-        The server logs everything sent as a yellow TX entry.
-
-        Parameters
-        ----------
-        data:
-            Bytes or string to transmit.  Strings are sent as-is (no line
-            ending added).  Use ``sendline()`` to append ``\\r\\n``.
-        source:
-            Override the source label for this TX entry.
-        """
-        if isinstance(data, bytes):
-            data = data.decode("utf-8", errors="replace")
-        payload = json.dumps({
-            "type": "tx",
-            "source": source or self._source,
-            "data": data,
-        }).encode("utf-8") + b"\n"
-        with self._lock:
-            self._send_locked(payload)
-
-    def sendline(self, text: str, *, eol: str = "\r\n",
-                 source: Optional[str] = None) -> None:
-        """Send a text line with a line ending (default ``\\r\\n``) to serial TX."""
-        self.send(text + eol, source=source)
 
     # ------------------------------------------------------------------
     # Subscribe — receive the log stream without printing to stdout
