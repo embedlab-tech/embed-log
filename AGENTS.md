@@ -13,7 +13,8 @@ Quick onboarding notes for future coding agents and humans working in `embed-log
    - stdout (only in verbose mode)
    - per-session raw log files in `logs/<session_id>/`
    - WebSocket payloads (if UI enabled)
-   - inject-port stream clients
+   - inject-port stream clients (JSON)
+   - optional forward-port clients (raw RX lines)
 3. **WebSocketBroadcaster** serves UI and pushes `rx`/`tx` events.
 4. **Session artifacts** are generated in each session directory:
    - `manifest.json`

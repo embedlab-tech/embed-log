@@ -222,6 +222,7 @@ sources:
     type: udp
     port: 6000
     inject_port: 5002
+    forward_ports: [7001]
 
 tabs:
   - label: Devices
@@ -245,6 +246,7 @@ tabs:
   --source NAME TYPE      NAME  uart:/dev/path[@baud] | udp:PORT
                           repeat for multiple sources
   --inject NAME PORT      TCP inject/stream port for a source (optional, repeat)
+  --forward NAME PORT     read-only TCP forward port for raw RX lines (optional, repeat)
   --tab LABEL S1 [S2]     group 1 or 2 sources into a UI tab (optional, repeat)
 
   --baudrate BAUD         default baud rate for uart sources without @baud

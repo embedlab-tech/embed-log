@@ -70,6 +70,7 @@ def load_config(path: str | Path) -> dict:
     source_names: set[str] = set()
     sources: list[tuple[str, str]] = []
     injects: list[tuple[str, int]] = []
+    forwards: list[tuple[str, int]] = []
 
     for i, item in enumerate(sources_raw):
         src = _require_dict(item, f"sources[{i}]")
@@ -95,6 +96,17 @@ def load_config(path: str | Path) -> dict:
         if inject_port is not None:
             injects.append((name, _as_int(inject_port, f"sources[{i}].inject_port")))
 
+        # Optional forwarding ports (read-only stream fanout)
+        forward_port = src.get("forward_port")
+        if forward_port is not None:
+            forwards.append((name, _as_int(forward_port, f"sources[{i}].forward_port")))
+
+        forward_ports = src.get("forward_ports")
+        if forward_ports is not None:
+            fp_list = _require_list(forward_ports, f"sources[{i}].forward_ports")
+            for j, fp in enumerate(fp_list):
+                forwards.append((name, _as_int(fp, f"sources[{i}].forward_ports[{j}]")))
+
     # tabs
     tabs_raw = cfg.get("tabs", [])
     tabs_raw = _require_list(tabs_raw, "tabs")
@@ -119,6 +131,7 @@ def load_config(path: str | Path) -> dict:
     out = {
         "sources": sources,
         "injects": injects,
+        "forwards": forwards,
         "tabs": tabs,
     }
 

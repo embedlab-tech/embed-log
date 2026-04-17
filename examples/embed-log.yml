@@ -22,6 +22,8 @@ sources:
     type: udp
     port: 6000
     inject_port: 5002
+    # optional: mirror raw RX lines to one or more read-only TCP forward ports
+    # forward_ports: [7001]
 
 tabs:
   - label: Devices

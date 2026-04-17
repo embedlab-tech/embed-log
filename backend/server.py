@@ -428,6 +428,7 @@ class SourceManager:
         log_file: str,
         socket_host: str,
         inject_port: Optional[int] = None,
+        forward_ports: Optional[list[int]] = None,
         verbose: bool = False,
         broadcaster: Optional[WebSocketBroadcaster] = None,
     ):
@@ -436,6 +437,7 @@ class SourceManager:
         self.log_file = Path(log_file)
         self.socket_host = socket_host
         self.inject_port = inject_port
+        self.forward_ports = list(forward_ports or [])
         self.verbose = verbose
         self.broadcaster = broadcaster
 
@@ -443,6 +445,8 @@ class SourceManager:
         self._stop = threading.Event()
         self._stream_clients: list = []
         self._clients_lock = threading.Lock()
+        self._forward_clients: list = []
+        self._forward_lock = threading.Lock()
         self._writer_thread: Optional[threading.Thread] = None
 
     def start(self) -> None:
@@ -457,17 +461,39 @@ class SourceManager:
         if self.inject_port:
             threading.Thread(target=self._inject_loop, daemon=True,
                              name=f"{self.name}-inject").start()
+        for port in self.forward_ports:
+            threading.Thread(
+                target=self._forward_loop,
+                args=(port,),
+                daemon=True,
+                name=f"{self.name}-fwd-{port}",
+            ).start()
         logging.info(
-            "[%s] started  source=%s  inject=%s  log=%s",
+            "[%s] started  source=%s  inject=%s  forward=%s  log=%s",
             self.name,
             type(self.source).__name__,
             f":{self.inject_port}" if self.inject_port else "none",
+            ",".join(f":{p}" for p in self.forward_ports) if self.forward_ports else "none",
             self.log_file,
         )
 
     def stop(self) -> None:
         self._stop.set()
         self._queue.put(None)
+        with self._clients_lock:
+            for conn in list(self._stream_clients):
+                try:
+                    conn.close()
+                except OSError:
+                    pass
+            self._stream_clients.clear()
+        with self._forward_lock:
+            for conn in list(self._forward_clients):
+                try:
+                    conn.close()
+                except OSError:
+                    pass
+            self._forward_clients.clear()
         if self._writer_thread and self._writer_thread.is_alive():
             self._writer_thread.join(timeout=2.0)
 
@@ -534,6 +560,8 @@ class SourceManager:
                 if self.broadcaster:
                     self.broadcaster.broadcast(self._ws_payload(entry))
                 self._stream_to_clients(self._stream_payload(entry))
+                if entry.source == "SERIAL":
+                    self._forward_to_clients((entry.message + "\n").encode("utf-8", errors="replace"))
 
     def _stream_to_clients(self, data: bytes) -> None:
         with self._clients_lock:
@@ -545,6 +573,20 @@ class SourceManager:
                     dead.append(conn)
             for conn in dead:
                 self._stream_clients.remove(conn)
+
+    def _forward_to_clients(self, data: bytes) -> None:
+        with self._forward_lock:
+            dead = []
+            for conn in self._forward_clients:
+                try:
+                    conn.sendall(data)
+                except OSError:
+                    dead.append(conn)
+            for conn in dead:
+                try:
+                    self._forward_clients.remove(conn)
+                except ValueError:
+                    pass
 
     # ------------------------------------------------------------------
     # Serial TX
@@ -608,6 +650,50 @@ class SourceManager:
             with self._clients_lock:
                 try:
                     self._stream_clients.remove(conn)
+                except ValueError:
+                    pass
+            try:
+                conn.close()
+            except OSError:
+                pass
+
+    def _forward_loop(self, forward_port: int) -> None:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
+            srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            srv.bind((self.socket_host, forward_port))
+            srv.listen(16)
+            srv.settimeout(1.0)
+            while not self._stop.is_set():
+                try:
+                    conn, addr = srv.accept()
+                except socket.timeout:
+                    continue
+                with self._forward_lock:
+                    self._forward_clients.append(conn)
+                threading.Thread(
+                    target=self._handle_forward_client,
+                    args=(conn, addr),
+                    daemon=True,
+                    name=f"{self.name}-fwd-client-{addr[1]}",
+                ).start()
+
+    def _handle_forward_client(self, conn: socket.socket, addr) -> None:
+        try:
+            conn.settimeout(1.0)
+            while not self._stop.is_set():
+                try:
+                    data = conn.recv(1)
+                except socket.timeout:
+                    continue
+                except OSError:
+                    break
+                if not data:
+                    break
+                # Read-only forwarding socket: ignore any inbound bytes.
+        finally:
+            with self._forward_lock:
+                try:
+                    self._forward_clients.remove(conn)
                 except ValueError:
                     pass
             try:
@@ -701,6 +787,7 @@ class LogServer:
                 log_file=s["log_file"],
                 socket_host=host,
                 inject_port=s.get("inject_port"),
+                forward_ports=s.get("forward_ports", []),
                 verbose=verbose,
                 broadcaster=broadcaster,
             )
@@ -849,6 +936,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="NAME PORT — TCP inject/stream port for a source (optional, repeat)",
     )
     parser.add_argument(
+        "--forward", nargs=2, action="append", metavar=("NAME", "PORT"),
+        dest="forwards", default=[],
+        help="NAME PORT — read-only TCP forward port for raw RX lines (optional, repeat)",
+    )
+    parser.add_argument(
         "--tab", nargs="+", action="append", metavar="ARG",
         dest="tabs", default=[],
         help=(
@@ -888,6 +980,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     source_specs = args.sources if args.sources else cfg.get("sources", [])
     inject_specs = args.injects if args.injects else cfg.get("injects", [])
+    forward_specs = args.forwards if args.forwards else cfg.get("forwards", [])
     tab_specs = args.tabs if args.tabs else cfg.get("tabs", [])
 
     baudrate = args.baudrate if args.baudrate is not None else cfg.get("baudrate", 115200)
@@ -928,6 +1021,17 @@ def main(argv: Optional[list[str]] = None) -> int:
         except ValueError:
             parser.error(f"--inject {name!r}: port must be an integer, got {port_value!r}")
 
+    # --- forwards ---
+    forward_ports: dict[str, list[int]] = {}
+    for name, port_value in forward_specs:
+        if name not in source_objects:
+            parser.error(f"--forward {name!r}: no --source with that name")
+        try:
+            port = int(port_value)
+        except ValueError:
+            parser.error(f"--forward {name!r}: port must be an integer, got {port_value!r}")
+        forward_ports.setdefault(name, []).append(port)
+
     # --- tabs ---
     tabs: list[dict] = []
     for tab_entry in tab_specs:
@@ -965,6 +1069,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             "name": name,
             "source": source_objects[name],
             "inject_port": inject_ports.get(name),
+            "forward_ports": forward_ports.get(name, []),
             "log_file": str(session_dir / log_name),
         })
 
