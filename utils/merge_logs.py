@@ -189,6 +189,11 @@ def _strip_module_syntax(src: str) -> str:
     return src
 
 
+def _esc_script_text(src: str) -> str:
+    """Prevent embedded </script> from terminating the surrounding script tag."""
+    return re.sub(r"</script", "<\\/script", src, flags=re.IGNORECASE)
+
+
 # ---------------------------------------------------------------------------
 # HTML generation
 # ---------------------------------------------------------------------------
@@ -250,7 +255,7 @@ def generate_html(tab_specs: list) -> str:
 
     # Read frontend assets (strip ES module syntax for classic <script> embedding)
     def _js(filename: str) -> str:
-        return _strip_module_syntax(_read_asset(filename))
+        return _esc_script_text(_strip_module_syntax(_read_asset(filename)))
 
     css          = _read_asset("viewer.css")
     state_js     = _js("state.js")
@@ -294,13 +299,13 @@ def generate_html(tab_specs: list) -> str:
     # Config script: sets window.TABS and window.PANES before state.js loads.
     # state.js reads window.TABS ?? [] so pre-populated panes are initialised
     # correctly when the module runs.
-    config_js = (
+    config_js = _esc_script_text(
         f"window.TABS = {tabs_json};\n"
         f"window.PANES = {panes_json};"
     )
 
     # Bootstrap script: runs after all other scripts to inject log data
-    bootstrap_js = f"""\
+    bootstrap_js = _esc_script_text(f"""\
 (function () {{
     "use strict";
 
@@ -322,7 +327,7 @@ def generate_html(tab_specs: list) -> str:
     }}
 
     PANES.forEach(_loadPane);
-}})();"""
+}})();""")
 
     return f"""<!DOCTYPE html>
 <html lang="en" data-theme="whitesand">

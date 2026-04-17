@@ -212,6 +212,10 @@ class WebSocketBroadcaster:
         self._sessions_root = Path(sessions_root) if sessions_root else None
         self._on_all_clients_disconnected = on_all_clients_disconnected
         self._no_clients_handle = None
+        self._thread: Optional[threading.Thread] = None
+        self._started = threading.Event()
+        self._start_error: Optional[Exception] = None
+        self._stop_async: Optional[asyncio.Event] = None
 
     def register_source(self, name: str, mgr) -> None:
         self._source_map[name] = mgr
@@ -236,12 +240,32 @@ class WebSocketBroadcaster:
         self._clients -= dead
 
     def start(self) -> None:
-        threading.Thread(target=self._run, daemon=True, name="ws-broadcaster").start()
+        self._thread = threading.Thread(target=self._run, daemon=True, name="ws-broadcaster")
+        self._thread.start()
+        self._started.wait(timeout=5.0)
+        if self._start_error is not None:
+            raise RuntimeError(f"failed to start WebSocket UI: {self._start_error}")
+
+    def stop(self) -> None:
+        if self._loop and not self._loop.is_closed() and self._stop_async is not None:
+            self._loop.call_soon_threadsafe(self._stop_async.set)
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=3.0)
 
     def _run(self) -> None:
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
-        self._loop.run_until_complete(self._serve())
+        try:
+            self._loop.run_until_complete(self._serve())
+        except Exception as exc:
+            self._start_error = exc
+            self._started.set()
+            logging.warning("WebSocket UI failed: %s", exc)
+        finally:
+            try:
+                self._loop.close()
+            except Exception:
+                pass
 
     async def _serve(self) -> None:
         app = web.Application()
@@ -255,9 +279,12 @@ class WebSocketBroadcaster:
         await runner.setup()
         site = web.TCPSite(runner, self._host, self._port)
         await site.start()
+        self._stop_async = asyncio.Event()
+        self._started.set()
         logging.info("UI ready at http://%s:%d/  (WebSocket: ws://%s:%d/ws)",
                      self._host, self._port, self._host, self._port)
-        await asyncio.Event().wait()
+        await self._stop_async.wait()
+        await runner.cleanup()
 
     async def _index_handler(self, request: web.Request) -> web.Response:
         if not self._html_path.exists():
@@ -736,12 +763,18 @@ class LogServer:
     def start(self) -> None:
         if self._broadcaster:
             self._broadcaster.start()
-        for mgr in self._managers:
-            mgr.start()
+        try:
+            for mgr in self._managers:
+                mgr.start()
+        except Exception:
+            self.stop()
+            raise
 
     def stop(self) -> None:
         for mgr in self._managers:
             mgr.stop()
+        if self._broadcaster:
+            self._broadcaster.stop()
 
     def run_forever(self) -> None:
         self.start()
