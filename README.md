@@ -4,6 +4,37 @@ Serial log server for embedded device CI. Reads UART output from one or more dev
 
 ---
 
+## Quick backend audit (short)
+
+### Implemented now
+- **Multi-source ingestion** via `backend/server.py`: `uart:` and `udp:` sources.
+- **Per-source manager pipeline**: source reader thread → ordered queue → writer thread → file + console + live streams.
+- **Inject/TX channel per source** (`--inject NAME PORT`): accepts newline-delimited JSON for marker logs and TX commands.
+- **Bidirectional inject sockets**: clients can both send messages and receive streamed entries on the same TCP connection.
+- **Web UI transport** with `aiohttp` WebSocket (`/ws`) and static UI serving (`/`).
+- **Client SDKs**:
+  - `backend/log_client.py` for marker injection + background subscription.
+  - `backend/tx_client.py` for TX-only flows.
+
+### Good next backend improvements (possible)
+- **Backpressure/retention controls** (bounded queues, drop counters, source health stats).
+- **Session persistence API** (save/restore run metadata server-side, not only browser cache).
+- **Operational endpoints** (`/health`, `/metrics`, `/stats`) for CI monitoring.
+- **Auth/network hardening** for non-local deployments (token, stricter bind model).
+- **Replay/search APIs** (server-side history window, regex search across buffered logs).
+
+---
+
+## Documentation index
+
+- [INSTALL.md](INSTALL.md) — setup instructions
+- [FRONTEND.md](FRONTEND.md) — frontend architecture and behavior
+- [MERGE.md](MERGE.md) — offline merge/export tooling
+- [DIRECTORY_GUIDE.md](DIRECTORY_GUIDE.md) — short explanation of each project directory
+- [AGENTS.md](AGENTS.md) — quick onboarding notes for future coding agents/humans
+
+---
+
 ## Project structure
 
 ```
@@ -22,11 +53,6 @@ embed-log/
 │   ├── server.py      log server (serial + TCP + WebSocket)
 │   ├── log_client.py  marker + subscribe client API
 │   └── tx_client.py   TX-only client API
-│
-├── mcp/               MCP proof-of-concept servers
-│   ├── _mcp_stdio.py         minimal stdio MCP helper (JSON-RPC framing)
-│   ├── device_control_server.py  inject/tail/wait/send_tx tools
-│   └── log_intel_server.py       error summaries and run comparison tools
 │
 └── utils/
     ├── merge_logs.py        offline HTML viewer generator
@@ -100,7 +126,7 @@ When running tests against embedded hardware it is hard to correlate what the te
                    └─────────────┘
 ```
 
-**Log sources are pluggable** — each named source can be a UART serial port (`uart:`), a tailed file (`file:`), or a UDP listener (`udp:`). The rest of the pipeline is identical regardless of source type.
+**Log sources are pluggable** — each named source can be a UART serial port (`uart:`) or a UDP listener (`udp:`). The rest of the pipeline is identical regardless of source type.
 
 **One write queue per source** — source RX and injected markers are always in chronological order with no interleaving.
 
@@ -144,14 +170,13 @@ python3 backend/server.py \
   --tab "Devices" DEVICE_A DEVICE_B \
   --ws-port 8080
 
-# Mixed sources — UART + tailed file + UDP listener
+# Mixed sources — UART + UDP listener
 python3 backend/server.py \
   --source DEVICE_A uart:/dev/ttyUSB0 \
-  --source APP_LOG  file:/var/log/app.log \
   --source SENSOR   udp:6000 \
   --inject DEVICE_A 5001 \
   --tab "Hardware" DEVICE_A \
-  --tab "Software" APP_LOG SENSOR \
+  --tab "Software" SENSOR \
   --ws-port 8080
 
 # All options
@@ -177,13 +202,12 @@ Log files are written to `<log-dir>/<NAME>.log` (default: `logs/<NAME>.log`).
 |---|---|
 | `uart:/dev/path` | UART serial port at default baud rate |
 | `uart:/dev/path@9600` | UART with explicit baud rate |
-| `file:/path/to/file.log` | Tail a file (like `tail -f`) |
 | `udp:PORT` | Listen for UDP datagrams on PORT |
 
 ### All CLI options
 
 ```
-  --source NAME TYPE      NAME  uart:/dev/path[@baud] | file:/path | udp:PORT
+  --source NAME TYPE      NAME  uart:/dev/path[@baud] | udp:PORT
                           repeat for multiple sources (required)
   --inject NAME PORT      TCP inject/stream port for a source (optional, repeat)
   --tab LABEL S1 [S2]     group 1 or 2 sources into a UI tab (optional, repeat)
@@ -470,33 +494,3 @@ python3 utils/inject_log_demo.py \
 
 Messages are randomly selected from `utils/inject_messages.txt`.
 
----
-
-## MCP proof-of-concept servers
-
-Two MCP servers are provided under `mcp/` as POCs.
-
-Start device-control MCP server (stdio transport):
-
-```bash
-python3 mcp/device_control_server.py
-```
-
-Available tools:
-- `inject_marker` (write marker JSON to inject port)
-- `send_tx` (send TX JSON to inject port)
-- `tail_log` (read last N lines from a log file)
-- `wait_for_pattern` (poll file until a string appears)
-
-Start log-intelligence MCP server:
-
-```bash
-python3 mcp/log_intel_server.py
-```
-
-Available tools:
-- `summarize_errors`
-- `cluster_failures`
-- `compare_runs`
-
-These are intentionally lightweight, stdlib-only POCs for experimentation.

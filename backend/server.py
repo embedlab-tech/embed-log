@@ -123,34 +123,6 @@ class UartSource(LogSource):
                 stop.wait(3)
 
 
-class FileSource(LogSource):
-    """Tails a file, similar to `tail -f`. Retries if the file does not exist."""
-
-    def __init__(self, path: str):
-        self.path = path
-
-    def start(self, on_line, stop, name):
-        threading.Thread(
-            target=self._run, args=(on_line, stop, name),
-            daemon=True, name=f"{name}-file",
-        ).start()
-
-    def _run(self, on_line, stop, name):
-        while not stop.is_set():
-            try:
-                with open(self.path, encoding="utf-8", errors="replace") as f:
-                    f.seek(0, 2)  # start at end
-                    while not stop.is_set():
-                        line = f.readline()
-                        if line:
-                            on_line(line.rstrip())
-                        else:
-                            stop.wait(0.1)
-            except FileNotFoundError:
-                logging.warning("[%s] file not found: %s — retrying in 3 s", name, self.path)
-                stop.wait(3)
-
-
 class UdpSource(LogSource):
     """Listens for UDP datagrams; each datagram may contain multiple newline-separated lines."""
 
@@ -580,7 +552,7 @@ class LogServer:
 # CLI
 # ---------------------------------------------------------------------------
 
-_SOURCE_RE = re.compile(r"^(uart|file|udp):(.+)$", re.IGNORECASE)
+_SOURCE_RE = re.compile(r"^(uart|udp):(.+)$", re.IGNORECASE)
 _UART_BAUD_RE = re.compile(r"^(.+)@(\d+)$")
 
 
@@ -589,7 +561,7 @@ def _parse_source(name: str, spec: str, default_baudrate: int) -> LogSource:
     if not m:
         raise argparse.ArgumentTypeError(
             f"--source {name!r}: invalid spec {spec!r}. "
-            f"Use uart:/dev/path[@baud], file:/path, or udp:PORT"
+            f"Use uart:/dev/path[@baud] or udp:PORT"
         )
     kind, arg = m.group(1).lower(), m.group(2)
 
@@ -598,9 +570,6 @@ def _parse_source(name: str, spec: str, default_baudrate: int) -> LogSource:
         if bm:
             return UartSource(bm.group(1), int(bm.group(2)))
         return UartSource(arg, default_baudrate)
-
-    if kind == "file":
-        return FileSource(arg)
 
     # udp
     try:
@@ -630,7 +599,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--source", nargs=2, action="append", metavar=("NAME", "TYPE"),
         dest="sources", required=True,
         help=(
-            "NAME  uart:/dev/path[@baud] | file:/path | udp:PORT  "
+            "NAME  uart:/dev/path[@baud] | udp:PORT  "
             "— repeat for multiple sources"
         ),
     )
