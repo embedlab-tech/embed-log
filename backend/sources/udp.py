@@ -26,7 +26,8 @@ class UdpSource(LogSource):
             logging.info("[%s] listening on UDP :%d", name, self.port)
             while not stop.is_set():
                 try:
-                    data, _ = sock.recvfrom(65535)
+                    data, addr = sock.recvfrom(65535)
+                    logging.info("[%s] UDP datagram %d B from %s:%s", name, len(data), addr[0], addr[1])
                     for line in data.decode("utf-8", errors="replace").splitlines():
                         if line.strip():
                             on_line(line.rstrip())

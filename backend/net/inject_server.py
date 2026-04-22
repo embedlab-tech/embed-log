@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import select
 import socket
 import threading
@@ -40,6 +41,7 @@ class InjectServer:
                     conn, addr = srv.accept()
                 except socket.timeout:
                     continue
+                logging.info("[%s] inject client connected: %s:%s", self._name, addr[0], addr[1])
                 self._on_client_connect(conn)
                 threading.Thread(
                     target=self._handle_client,
@@ -70,6 +72,7 @@ class InjectServer:
                     self._on_json_line(raw_line)
         finally:
             self._on_client_disconnect(conn)
+            logging.info("[%s] inject client disconnected: %s:%s", self._name, addr[0], addr[1])
             try:
                 conn.close()
             except OSError:

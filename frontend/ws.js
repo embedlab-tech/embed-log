@@ -79,6 +79,10 @@ function wsConnect() {
             currentSessionId = sessionId || currentSessionId;
 
             window.__embedLogSetSession?.(msg.session || null);
+            window.__embedLogOnSessionHtmlStatus?.({
+                ...msg.session,
+                type: "session_html_status",
+            });
             if (TABS.length === 0 && msg.tabs && msg.tabs.length > 0) {
                 msg.tabs.forEach(tab =>
                     createTabWithPanes(tab.label, tab.panes, { switchTo: false })
@@ -86,6 +90,11 @@ function wsConnect() {
                 switchTab(0);
             }
             window.__embedLogAfterConfig?.(msg.tabs || []);
+            return;
+        }
+
+        if (msg.type === "session_html_status") {
+            window.__embedLogOnSessionHtmlStatus?.(msg);
             return;
         }
 

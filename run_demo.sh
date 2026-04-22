@@ -197,11 +197,11 @@ if ! _free_port_if_stale tcp "$WS_PORT"; then
   fi
 fi
 
-echo "Starting embed-log server (YAML config) on port $WS_PORT..."
+echo "Starting embed-log server (YAML config) on port $WS_PORT in -v mode..."
 if [ "$OPEN_BROWSER" = true ]; then
-  "$PYTHON" backend/server.py run --config embed-log.demo.yml --ws-port "$WS_PORT" &
+  "$PYTHON" backend/server.py run --config embed-log.demo.yml --ws-port "$WS_PORT" -v &
 else
-  "$PYTHON" backend/server.py run --config embed-log.demo.yml --ws-port "$WS_PORT" --no-open-browser &
+  "$PYTHON" backend/server.py run --config embed-log.demo.yml --ws-port "$WS_PORT" --no-open-browser -v &
 fi
 SERVER_PID=$!
 

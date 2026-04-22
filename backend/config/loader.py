@@ -35,6 +35,13 @@ def _require_str(value: Any, field: str) -> str:
     return value.strip()
 
 
+def _require_choice(value: Any, field: str, choices: set[str]) -> str:
+    s = _require_str(value, field).lower()
+    if s not in choices:
+        raise ConfigError(f"{field} must be one of: {', '.join(sorted(choices))}")
+    return s
+
+
 def load_config(path: str | Path) -> dict:
     p = Path(path)
     if not p.is_file():
@@ -145,6 +152,8 @@ def load_config(path: str | Path) -> dict:
         out["app_name"] = _require_str(server.get("app_name"), "server.app_name")
     if "open_browser" in server:
         out["open_browser"] = bool(server.get("open_browser"))
+    if "verbosity" in server:
+        out["verbosity"] = _require_choice(server.get("verbosity"), "server.verbosity", {"quiet", "events", "full"})
     if "verbose" in server:
         out["verbose"] = bool(server.get("verbose"))
     if "job_id" in server:

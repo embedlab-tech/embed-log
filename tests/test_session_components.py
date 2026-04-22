@@ -30,15 +30,18 @@ class SessionManagerTests(unittest.TestCase):
             self.assertEqual(info["job_id"], "CI-1")
             self.assertEqual(info["app_name"], "demo")
             self.assertFalse(info["html_ready"])
+            self.assertEqual("pending", info["html_status"])
 
             mgr.write_manifest(reason="start", exported_html=False)
             manifest = json.loads(mgr.manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(manifest["session_id"], "2026-01-01_00-00-00")
             self.assertIsNone(manifest["session_html"])
+            self.assertEqual("pending", manifest["html_status"])
 
             mgr.write_manifest(reason="signal", exported_html=True)
             manifest = json.loads(mgr.manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(manifest["last_export_reason"], "signal")
+            self.assertEqual("pending", manifest["html_status"])
             self.assertTrue(str(mgr.html_path).endswith("session.html"))
 
 

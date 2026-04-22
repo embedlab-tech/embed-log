@@ -53,7 +53,7 @@ btnTs.addEventListener("click", () => {
 })();
 
 // ---------------------------------------------------------------------------
-// Settings panel — sessions list popup (open session.html directly)
+// Settings panel — sessions list popup + manual session.html save
 // ---------------------------------------------------------------------------
 (function () {
     const panel = document.getElementById("settings-panel");
@@ -63,17 +63,23 @@ btnTs.addEventListener("click", () => {
     sep.className = "set-sep";
     sep.textContent = "|";
 
-    const btn = document.createElement("button");
-    btn.id = "btn-sessions";
-    btn.title = "Browse saved sessions";
-    btn.textContent = "Sessions";
+    const btnSave = document.createElement("button");
+    btnSave.id = "btn-save-session-html";
+    btnSave.title = "Generate/refresh session HTML on backend";
+    btnSave.textContent = "Save HTML";
 
     const btnCurrent = document.createElement("button");
     btnCurrent.id = "btn-current-session";
     btnCurrent.title = "Open current session HTML";
     btnCurrent.textContent = "Current HTML";
 
+    const btn = document.createElement("button");
+    btn.id = "btn-sessions";
+    btn.title = "Browse saved sessions";
+    btn.textContent = "Sessions";
+
     panel.appendChild(sep);
+    panel.appendChild(btnSave);
     panel.appendChild(btnCurrent);
     panel.appendChild(btn);
 
@@ -82,34 +88,79 @@ btnTs.addEventListener("click", () => {
     menu.innerHTML = `<div class="sessions-head">Saved sessions</div><div class="sessions-body">Loading…</div>`;
     document.body.appendChild(menu);
 
-    async function openCurrentSessionHtml() {
-        try {
-            const res = await fetch("/api/session/current", { cache: "no-store" });
-            if (!res.ok) throw new Error(String(res.status));
-            const data = await res.json();
-            if (!data || !data.html) throw new Error("no html path");
-            if (!data.html_ready) {
-                const prev = btnCurrent.textContent;
-                btnCurrent.textContent = "HTML pending";
-                btnCurrent.disabled = true;
-                setTimeout(() => {
-                    btnCurrent.textContent = prev;
-                    btnCurrent.disabled = false;
-                }, 1200);
-                return;
-            }
-            window.open(data.html, "_blank", "noopener");
-        } catch {
-            const prev = btnCurrent.textContent;
-            btnCurrent.textContent = "Unavailable";
+    let currentSession = null;
+
+    function updateCurrentButtons() {
+        const status = currentSession?.html_status || (currentSession?.html_ready ? "ready" : "pending");
+
+        if (status === "updating") {
+            btnSave.disabled = true;
+            btnSave.textContent = "Saving…";
+        } else {
+            btnSave.disabled = false;
+            btnSave.textContent = "Save HTML";
+        }
+
+        if (currentSession?.html_ready && currentSession?.html) {
+            btnCurrent.disabled = false;
+            btnCurrent.textContent = "Current HTML";
+            btnCurrent.title = currentSession?.html_updated_at
+                ? `Open current session HTML (updated ${currentSession.html_updated_at})`
+                : "Open current session HTML";
+        } else {
             btnCurrent.disabled = true;
-            setTimeout(() => {
-                btnCurrent.textContent = prev;
-                btnCurrent.disabled = false;
-            }, 1200);
+            btnCurrent.textContent = status === "error" ? "HTML error" : "No HTML yet";
+            btnCurrent.title = status === "error"
+                ? (currentSession?.html_error || "Last HTML export failed")
+                : "Generate HTML first";
         }
     }
 
+    async function refreshCurrentSession() {
+        try {
+            const res = await fetch("/api/session/current", { cache: "no-store" });
+            if (!res.ok) throw new Error(String(res.status));
+            currentSession = await res.json();
+            updateCurrentButtons();
+        } catch {
+            currentSession = null;
+            btnSave.disabled = true;
+            btnCurrent.disabled = true;
+        }
+    }
+
+    async function saveCurrentSessionHtml() {
+        btnSave.disabled = true;
+        btnSave.textContent = "Saving…";
+        try {
+            const res = await fetch("/api/session/export", {
+                method: "POST",
+                cache: "no-store",
+            });
+            if (!res.ok) throw new Error(String(res.status));
+            const data = await res.json();
+            if (data?.session) {
+                currentSession = data.session;
+            }
+        } catch {
+            const prev = btnSave.textContent;
+            btnSave.textContent = "Save failed";
+            setTimeout(() => {
+                btnSave.textContent = prev;
+                updateCurrentButtons();
+            }, 1200);
+            return;
+        }
+        updateCurrentButtons();
+        if (menu.classList.contains("open")) loadSessions();
+    }
+
+    function openCurrentSessionHtml() {
+        if (!currentSession?.html_ready || !currentSession?.html) return;
+        window.open(currentSession.html, "_blank", "noopener");
+    }
+
+    btnSave.addEventListener("click", saveCurrentSessionHtml);
     btnCurrent.addEventListener("click", openCurrentSessionHtml);
 
     async function loadSessions() {
@@ -144,10 +195,10 @@ btnTs.addEventListener("click", () => {
                     tag.textContent = "current";
                     tags.appendChild(tag);
                 }
-                if (!s.html_ready) {
+                if (s.html_status && s.html_status !== "ready") {
                     const tag = document.createElement("span");
                     tag.className = "session-tag pending";
-                    tag.textContent = "html pending";
+                    tag.textContent = `html ${s.html_status}`;
                     tags.appendChild(tag);
                 }
 
@@ -212,6 +263,18 @@ btnTs.addEventListener("click", () => {
     document.addEventListener("keydown", ev => {
         if (ev.key === "Escape") closeMenu();
     });
+
+    window.__embedLogOnSessionHtmlStatus = function (msg) {
+        if (!msg) return;
+        currentSession = {
+            ...(currentSession || {}),
+            ...msg,
+        };
+        updateCurrentButtons();
+        if (menu.classList.contains("open")) loadSessions();
+    };
+
+    refreshCurrentSession();
 })();
 
 // ---------------------------------------------------------------------------
@@ -229,14 +292,19 @@ btnSync.addEventListener("click", () => {
 // ---------------------------------------------------------------------------
 (function () {
     const btn = document.getElementById("btn-theme");
-    const mgr = window.__embedLogTheme;
+
+    function themeMgr() {
+        return window.__embedLogTheme;
+    }
 
     function syncIcon() {
+        const mgr = themeMgr();
         const isDark = mgr?.isDark ? mgr.isDark() : (document.documentElement.getAttribute("data-theme") === "");
         btn.textContent = isDark ? "☀" : "🌙";
     }
 
     btn.addEventListener("click", () => {
+        const mgr = themeMgr();
         if (mgr?.toggle) mgr.toggle();
         else {
             const isDark = document.documentElement.getAttribute("data-theme") === "";
@@ -245,7 +313,20 @@ btnSync.addEventListener("click", () => {
         syncIcon();
     });
 
-    mgr?.onChange?.(syncIcon);
+    const tryBindThemeEvents = () => {
+        const mgr = themeMgr();
+        if (!mgr?.onChange) return false;
+        mgr.onChange(syncIcon);
+        return true;
+    };
+
+    if (!tryBindThemeEvents()) {
+        window.addEventListener("embedlog-theme-ready", () => {
+            tryBindThemeEvents();
+            syncIcon();
+        }, { once: true });
+    }
+
     syncIcon();
 })();
 

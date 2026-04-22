@@ -139,8 +139,9 @@ def parse_log_file(path: str) -> list:
     Continuation lines (no timestamp) are appended to the preceding entry
     so multi-line stack traces stay together.
 
-    Note: we keep the ORIGINAL line text (including embedded/full timestamps)
-    and only extract a normalised `ts` value for UI sorting/sync.
+    Note: we remove the leading system timestamp from stored text and keep it
+    only in normalised `ts`, so the viewer renders exactly one system timestamp
+    per line.
     """
     entries = []
     pending_ts: str | None = None
@@ -162,7 +163,10 @@ def parse_log_file(path: str) -> list:
                 if parsed:
                     _flush()
                     pending_ts = parsed[0]
-                    pending_text = raw
+                    # Keep only message payload in exported HTML — the leading
+                    # system timestamp is already rendered by the viewer from
+                    # `ts`, so keeping raw line would duplicate it.
+                    pending_text = parsed[1]
                 elif pending_ts is not None and raw.strip():
                     # Continuation line — append to current entry
                     pending_text += " " + raw.strip()

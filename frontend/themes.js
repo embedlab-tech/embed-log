@@ -45,6 +45,13 @@ let _lightKey = DEFAULT_LIGHT;
 let _darkKey = DEFAULT_DARK;
 const _listeners = new Set();
 
+const _initial = window.__embedLogInitialThemeState;
+if (_initial && typeof _initial === "object") {
+    if (_initial.mode === "light" || _initial.mode === "dark") _mode = _initial.mode;
+    if (typeof _initial.lightKey === "string") _lightKey = _initial.lightKey;
+    if (typeof _initial.darkKey === "string") _darkKey = _initial.darkKey;
+}
+
 function _find(list, key) {
     return list.find(p => p.key === key) || list[0];
 }
@@ -94,6 +101,7 @@ window.__embedLogTheme = {
     toggle: _toggle,
     isDark: () => _mode === "dark",
     mode: () => _mode,
+    getState: () => ({ mode: _mode, lightKey: _lightKey, darkKey: _darkKey }),
     onChange: fn => {
         if (typeof fn !== "function") return () => {};
         _listeners.add(fn);
@@ -159,3 +167,4 @@ function _mountSettingsControls() {
 })();
 
 _applyCurrent();
+window.dispatchEvent(new Event("embedlog-theme-ready"));

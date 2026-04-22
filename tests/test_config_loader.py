@@ -14,6 +14,7 @@ server:
   ws_port: 8080
   app_name: demo
   open_browser: true
+  verbosity: events
   job_id: CI-42
 logs:
   dir: logs/
@@ -40,12 +41,29 @@ tabs:
         self.assertEqual(cfg["ws_port"], 8080)
         self.assertEqual(cfg["app_name"], "demo")
         self.assertTrue(cfg["open_browser"])
+        self.assertEqual(cfg["verbosity"], "events")
         self.assertEqual(cfg["job_id"], "CI-42")
         self.assertEqual(cfg["log_dir"], "logs/")
         self.assertEqual(len(cfg["sources"]), 2)
         self.assertEqual(len(cfg["injects"]), 1)
         self.assertEqual(len(cfg["forwards"]), 2)
         self.assertEqual(len(cfg["tabs"]), 1)
+
+    def test_invalid_verbosity_fails(self):
+        cfg_text = """
+version: 1
+server:
+  verbosity: noisy
+sources:
+  - name: A
+    type: udp
+    port: 6000
+""".strip()
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "cfg.yml"
+            p.write_text(cfg_text, encoding="utf-8")
+            with self.assertRaises(ConfigError):
+                load_config(p)
 
     def test_duplicate_source_name_fails(self):
         cfg_text = """

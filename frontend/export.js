@@ -52,30 +52,24 @@ async function exportToHtml() {
                tsparseJs, importJs, selectionJs, themesJs, tabcreateJs, exportJs] = texts;
 
         // ------------------------------------------------------------------
-        // Capture current theme and all CSS variable values so the exported
-        // file looks identical to what the user sees right now.
+        // Capture current theme mode/palette and pass it to the exported file.
+        // Avoid hard-overriding CSS vars in <style>, because that freezes the
+        // theme toggle in static HTML.
         // ------------------------------------------------------------------
         const currentTheme = document.documentElement.dataset.theme || "";
-        const cs = getComputedStyle(document.documentElement);
-        const v  = name => cs.getPropertyValue(name).trim();
-        const CSS_VARS = [
-            "--bg", "--panel", "--header", "--text", "--accent",
-            "--border", "--selection", "--input-bg",
-            "--ansi-0", "--ansi-1", "--ansi-2", "--ansi-3",
-            "--ansi-4", "--ansi-5", "--ansi-6", "--ansi-7",
-            "--font-family", "--font-size",
-        ];
-        const cssOverride =
-            `:root {\n` +
-            CSS_VARS.map(p => `    ${p}: ${v(p) || "inherit"};`).join("\n") +
-            `\n}`;
+        const themeState = window.__embedLogTheme?.getState?.() || {
+            mode: currentTheme === "whitesand" ? "light" : "dark",
+            lightKey: "whitesand",
+            darkKey: "one-dark",
+        };
 
         // ------------------------------------------------------------------
-        // Config: inject TABS + PANES via window before state.js reads them
+        // Config: inject TABS + PANES + initial theme state before scripts run
         // ------------------------------------------------------------------
         const configJs =
             `window.TABS = ${_safeJson(TABS)};\n` +
-            `window.PANES = ${_safeJson(PANES)};`;
+            `window.PANES = ${_safeJson(PANES)};\n` +
+            `window.__embedLogInitialThemeState = ${_safeJson(themeState)};`;
 
         // ------------------------------------------------------------------
         // Serialize all pane data as { ts, text, isTx }.
@@ -168,7 +162,6 @@ async function exportToHtml() {
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>${css}</style>
-<style>${cssOverride}</style>
 </head>
 <body>
 

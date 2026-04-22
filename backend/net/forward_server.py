@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import socket
 import threading
 from typing import Callable
@@ -41,6 +42,7 @@ class ForwardServer:
                     conn, addr = srv.accept()
                 except socket.timeout:
                     continue
+                logging.info("[%s] forward client connected on :%d from %s:%s", self._name, self._port, addr[0], addr[1])
                 self._on_client_connect(conn)
                 threading.Thread(
                     target=self._handle_client,
@@ -64,6 +66,7 @@ class ForwardServer:
                 # Read-only forwarding socket: ignore any inbound bytes.
         finally:
             self._on_client_disconnect(conn)
+            logging.info("[%s] forward client disconnected on :%d from %s:%s", self._name, self._port, addr[0], addr[1])
             try:
                 conn.close()
             except OSError:

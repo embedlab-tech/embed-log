@@ -33,6 +33,7 @@ class WebSocketBroadcaster:
         session_info: Optional[dict] = None,
         sessions_root: Optional[str] = None,
         on_all_clients_disconnected: Optional[Callable[[], None]] = None,
+        on_export_session_html: Optional[Callable[[], bool]] = None,
         open_browser: bool = False,
         app_name: str = "embed-log",
     ):
@@ -46,6 +47,7 @@ class WebSocketBroadcaster:
         self._session_info = session_info or {}
         self._sessions_root = Path(sessions_root) if sessions_root else None
         self._on_all_clients_disconnected = on_all_clients_disconnected
+        self._on_export_session_html = on_export_session_html
         self._no_clients_handle = None
         self._thread: Optional[threading.Thread] = None
         self._started = threading.Event()
@@ -108,6 +110,7 @@ class WebSocketBroadcaster:
         app = web.Application()
         app.router.add_get("/ws", self._ws_handler)
         app.router.add_get("/api/session/current", self._session_current_handler)
+        app.router.add_post("/api/session/export", self._session_export_handler)
         app.router.add_get("/api/sessions", self._sessions_list_handler)
         app.router.add_get("/sessions/{session_id}/{filename}", self._session_file_handler)
         app.router.add_get("/", self._index_handler)
@@ -141,9 +144,19 @@ class WebSocketBroadcaster:
         return web.FileResponse(path)
 
     async def _session_current_handler(self, request: web.Request) -> web.Response:
+        logging.info("API /api/session/current from %s", request.remote)
         return web.json_response(self._session_info)
 
+    async def _session_export_handler(self, request: web.Request) -> web.Response:
+        logging.info("API /api/session/export from %s", request.remote)
+        if self._on_export_session_html is None:
+            return web.json_response({"ok": False, "error": "export unavailable"}, status=503)
+        ok = await asyncio.to_thread(self._on_export_session_html)
+        status = 200 if ok else 409
+        return web.json_response({"ok": ok, "session": self._session_info}, status=status)
+
     async def _sessions_list_handler(self, request: web.Request) -> web.Response:
+        logging.info("API /api/sessions from %s", request.remote)
         if self._sessions_root is None or not self._sessions_root.is_dir():
             return web.json_response({"sessions": [], "current": self._session_info.get("id")})
 
@@ -158,11 +171,17 @@ class WebSocketBroadcaster:
 
             started_at = None
             tabs = []
+            html_status = "ready" if html_path.is_file() else "pending"
+            html_updated_at = None
+            html_error = None
             if manifest_path.is_file():
                 try:
                     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
                     started_at = manifest.get("started_at")
                     tabs = manifest.get("tabs") or []
+                    html_status = manifest.get("html_status") or html_status
+                    html_updated_at = manifest.get("html_updated_at")
+                    html_error = manifest.get("html_error")
                 except Exception:
                     pass
 
@@ -170,6 +189,9 @@ class WebSocketBroadcaster:
                 "id": session_id,
                 "started_at": started_at,
                 "html_ready": html_path.is_file(),
+                "html_status": html_status,
+                "html_updated_at": html_updated_at,
+                "html_error": html_error,
                 "html": f"/sessions/{session_id}/session.html",
                 "manifest": f"/sessions/{session_id}/manifest.json",
                 "tabs": tabs,
@@ -180,6 +202,7 @@ class WebSocketBroadcaster:
     async def _session_file_handler(self, request: web.Request) -> web.Response:
         if self._sessions_root is None:
             raise web.HTTPNotFound()
+        logging.info("GET /sessions/%s/%s from %s", request.match_info.get("session_id"), request.match_info.get("filename"), request.remote)
         session_id = request.match_info["session_id"]
         filename = request.match_info["filename"]
         if any(x in session_id for x in ["..", "/"]) or any(x in filename for x in ["..", "/"]):
@@ -238,13 +261,19 @@ class WebSocketBroadcaster:
         threading.Thread(target=self._on_all_clients_disconnected, daemon=True).start()
 
     async def _handle_command(self, msg: dict) -> None:
-        if msg.get("cmd") != "send_raw":
+        cmd = msg.get("cmd")
+        if cmd == "send_raw":
+            name = msg.get("id", "")
+            data = msg.get("data", "")
+            logging.info("WS cmd send_raw source=%s bytes=%d", name, len(data.encode("utf-8", errors="replace")))
+            mgr = self._source_map.get(name)
+            if mgr:
+                try:
+                    mgr._write_source(data.encode("utf-8"), source="UI")
+                except (serial.SerialException, TypeError) as exc:
+                    logging.warning("send_raw failed for '%s': %s", name, exc)
             return
-        name = msg.get("id", "")
-        data = msg.get("data", "")
-        mgr = self._source_map.get(name)
-        if mgr:
-            try:
-                mgr._write_source(data.encode("utf-8"), source="UI")
-            except (serial.SerialException, TypeError) as exc:
-                logging.warning("send_raw failed for '%s': %s", name, exc)
+
+        if cmd == "export_session_html" and self._on_export_session_html is not None:
+            logging.info("WS cmd export_session_html")
+            await asyncio.to_thread(self._on_export_session_html)

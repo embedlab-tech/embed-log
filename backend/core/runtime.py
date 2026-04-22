@@ -326,6 +326,7 @@ class LogServer:
             tabs=self._tabs,
         )
         self._session_info = self._session.build_session_info()
+        self._export_lock = threading.Lock()
 
         broadcaster: Optional[WebSocketBroadcaster] = None
         if ws_port:
@@ -337,6 +338,7 @@ class LogServer:
                 session_info=dict(self._session_info),
                 sessions_root=str(self._logs_root),
                 on_all_clients_disconnected=lambda: self.export_session_html("last_ws_disconnect"),
+                on_export_session_html=lambda: self.export_session_html("manual_ui"),
                 open_browser=open_browser,
                 app_name=app_name,
             )
@@ -360,16 +362,79 @@ class LogServer:
             for mgr in self._managers:
                 broadcaster.register_source(mgr.name, mgr)
 
-        self._session.write_manifest(reason="start")
+        self._session.write_manifest(
+            reason="start",
+            exported_html=self._session_info.get("html_ready", False),
+            html_status=self._session_info.get("html_status", "pending"),
+            html_updated_at=self._session_info.get("html_updated_at"),
+            html_error=self._session_info.get("html_error"),
+        )
 
-    def export_session_html(self, reason: str) -> None:
-        if not self._exporter.export_html(reason):
+    def _publish_html_state(self) -> None:
+        if not self._broadcaster:
             return
+        updates = {
+            "html_ready": self._session_info.get("html_ready", False),
+            "html_status": self._session_info.get("html_status", "pending"),
+            "html_updated_at": self._session_info.get("html_updated_at"),
+            "html_error": self._session_info.get("html_error"),
+            "last_export_reason": self._session_info.get("last_export_reason"),
+        }
+        self._broadcaster.update_session_info(updates)
+        self._broadcaster.broadcast({
+            "type": "session_html_status",
+            "session_id": self._session_id,
+            **updates,
+        })
 
-        self._session.write_manifest(reason=reason, exported_html=True)
-        self._session_info["html_ready"] = True
-        if self._broadcaster:
-            self._broadcaster.update_session_info({"html_ready": True})
+    def export_session_html(self, reason: str) -> bool:
+        with self._export_lock:
+            if self._session_info.get("html_status") == "updating":
+                return False
+
+            self._session_info.update({
+                "html_status": "updating",
+                "html_error": None,
+                "last_export_reason": reason,
+            })
+            self._publish_html_state()
+
+            ok = self._exporter.export_html(reason)
+            if ok:
+                updated_at = datetime.now().astimezone().isoformat(timespec="seconds")
+                self._session.write_manifest(
+                    reason=reason,
+                    exported_html=True,
+                    html_status="ready",
+                    html_updated_at=updated_at,
+                    html_error=None,
+                )
+                self._session_info.update({
+                    "html_ready": True,
+                    "html_status": "ready",
+                    "html_updated_at": updated_at,
+                    "html_error": None,
+                    "last_export_reason": reason,
+                })
+                self._publish_html_state()
+                return True
+
+            err = "export failed"
+            self._session.write_manifest(
+                reason=reason,
+                exported_html=self._session.html_path.is_file(),
+                html_status="error",
+                html_updated_at=self._session_info.get("html_updated_at"),
+                html_error=err,
+            )
+            self._session_info.update({
+                "html_ready": self._session.html_path.is_file(),
+                "html_status": "error",
+                "html_error": err,
+                "last_export_reason": reason,
+            })
+            self._publish_html_state()
+            return False
 
     def start(self) -> None:
         if self._broadcaster:

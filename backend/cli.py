@@ -21,7 +21,12 @@ server:
   # ws_ui: /absolute/path/to/index.html
   app_name: embed-log
   open_browser: false
-  verbose: false
+  # quiet | events | full
+  # quiet: warnings/errors only
+  # events: connection/request/source activity logs
+  # full: events + print every log line to stdout
+  verbosity: quiet
+  # legacy switch still supported: verbose: true (maps to full)
   # optional: include CI/job id in session directory and log file names
   # job_id: GH-12345
 
@@ -150,8 +155,12 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="do not open browser automatically (overrides config)")
     parser.add_argument("--job-id", metavar="ID", default=None, dest="job_id",
                         help="optional CI/job identifier included in session/log naming")
+    parser.add_argument("--verbosity", choices=["quiet", "events", "full"], default=None,
+                        help="logging verbosity mode")
     parser.add_argument("-v", "--verbose", action="store_const", const=True, default=None,
-                        help="verbose mode: print live lines to stdout, show INFO diagnostics, and prefix lines with [name][source]")
+                        help="shortcut for --verbosity events")
+    parser.add_argument("--verbose-full", action="store_const", const=True, default=None,
+                        help="shortcut for --verbosity full (prints every log line)")
     return parser
 
 
@@ -186,12 +195,25 @@ def main(argv: Optional[list[str]] = None) -> int:
     ws_port = args.ws_port if args.ws_port is not None else cfg.get("ws_port", 0)
     ws_ui = args.ws_ui if args.ws_ui is not None else cfg.get("ws_ui", DEFAULT_WS_UI)
     app_name = args.app_name if args.app_name is not None else cfg.get("app_name", "embed-log")
-    verbose = args.verbose if args.verbose is not None else cfg.get("verbose", False)
+    cfg_verbosity = cfg.get("verbosity")
+    cfg_legacy_verbose = bool(cfg.get("verbose", False))
+    if args.verbosity is not None:
+        verbosity = args.verbosity
+    elif args.verbose_full is not None:
+        verbosity = "full"
+    elif args.verbose is not None:
+        verbosity = "events"
+    elif cfg_verbosity in {"quiet", "events", "full"}:
+        verbosity = cfg_verbosity
+    else:
+        verbosity = "full" if cfg_legacy_verbose else "quiet"
+
+    full_verbose = verbosity == "full"
     open_browser = args.open_browser if args.open_browser is not None else cfg.get("open_browser", False)
     job_id = args.job_id if args.job_id is not None else cfg.get("job_id", None)
 
     logging.basicConfig(
-        level=logging.INFO if verbose else logging.WARNING,
+        level=logging.INFO if verbosity in {"events", "full"} else logging.WARNING,
         format="%(asctime)s  %(levelname)-8s  %(message)s",
         datefmt="%H:%M:%S",
     )
@@ -250,7 +272,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         tabs=tabs,
         logs_root=logs_root,
         host=host,
-        verbose=verbose,
+        verbose=full_verbose,
         ws_port=ws_port,
         ws_ui=ws_ui,
         config_path=args.config,
