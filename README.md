@@ -130,6 +130,39 @@ embed-log --config my-embed-log.yml --open-browser
 embed-log --config my-embed-log.yml --verbosity events
 ```
 
+## Slicing logs for analysis
+
+Use `embed-log slice` to extract smaller, timestamp-based log files from a session. If you do not pass a session directory, the newest session from `logs.dir` in the config is used.
+
+```bash
+# last 10 minutes from the newest session
+embed-log slice --config my-embed-log.yml --last 10m
+
+# last 10 minutes from a specific session
+embed-log slice logs/<session_id> --last 10m
+
+# around a specific timestamp
+embed-log slice --config my-embed-log.yml \
+  --around "2026-05-14T12:15:30+02:00" \
+  --before 2m \
+  --after 5m
+
+# context around matching lines
+embed-log slice --config my-embed-log.yml --grep "ERROR" --before 2m --after 2m
+
+# only selected sources/panes
+embed-log slice --config my-embed-log.yml --last 10m --source DUT_UART
+```
+
+By default, slice output is compact: ANSI codes are removed, full ISO timestamps are shortened to `HH:MM:SS.mmm`, and redundant per-line source tags are stripped. Use `--raw` to preserve original log lines or `--time-format full` to keep full timestamps in compact output.
+
+The command writes:
+
+- `combined.log` — selected lines from all sources, sorted by timestamp
+- `<SOURCE>.log` — selected lines per source
+- `summary.md` — slice summary for humans/agents
+- `manifest.json` — slice metadata
+
 ## Output files
 
 Each run creates a session directory:
