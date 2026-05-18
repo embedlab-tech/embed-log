@@ -96,7 +96,7 @@ btnWrap.addEventListener("click", () => {
 
         if (btnCleanSession) {
             btnCleanSession.disabled = status === "updating";
-            if (btnCleanSession.textContent !== "Rotating…") btnCleanSession.textContent = "Clean session";
+            btnCleanSession.textContent = status === "updating" ? "Rotating…" : "Clean session";
         }
 
         if (currentSession?.html_ready && currentSession?.html) {
