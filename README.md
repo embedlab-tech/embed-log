@@ -9,6 +9,7 @@
 - YAML-configured UI layout: tabs and panes per source
 - per-session logs and artifacts in `logs/<session_id>/`
 - automatic session export to `session.html`
+- clean session rotation from the UI (`Clean session` button)
 - session manifest: `manifest.json`
 - optional TCP ports for inject/TX and raw RX forwarding
 - CLI for config initialization, validation, and running the app
@@ -28,6 +29,31 @@ embed-log --help
 ```
 
 If your shell cannot find it, open a new terminal window or refresh your `PATH`.
+
+## Update / reinstall
+
+To update an existing installation, get the latest repository version and run the installer again:
+
+```bash
+cd embed-log
+git pull
+./install.sh
+```
+
+If you do not have the repository locally anymore, clone it again and run the installer:
+
+```bash
+git clone <repo-url>
+cd embed-log
+./install.sh
+```
+
+After updating, force-refresh the browser UI to avoid using cached frontend files:
+
+- macOS: `Cmd + Shift + R`
+- Windows/Linux: `Ctrl + Shift + R` or `Ctrl + F5`
+
+This is especially important in Firefox, where old JavaScript/CSS files may remain cached after an update.
 
 ## Configuration
 
@@ -104,6 +130,62 @@ embed-log --config my-embed-log.yml --open-browser
 # show more runtime logs in the terminal
 embed-log --config my-embed-log.yml --verbosity events
 ```
+
+## Parsing exported HTML
+
+If you received an exported `session.html`, convert it back into a session directory first:
+
+```bash
+embed-log parse session.html --output parsed-session
+```
+
+Then use slicing on the parsed session:
+
+```bash
+embed-log slice parsed-session --last 10m
+```
+
+## Slicing logs for analysis
+
+Use `embed-log slice` to extract smaller, timestamp-based log files from a session. If you do not pass a session directory, the newest session from `logs.dir` in the config is used.
+
+```bash
+# last 10 minutes from the newest session
+embed-log slice --config my-embed-log.yml --last 10m
+
+# last 10 minutes from a specific session
+embed-log slice logs/<session_id> --last 10m
+
+# around a specific timestamp
+embed-log slice --config my-embed-log.yml \
+  --around "2026-05-14T12:15:30+02:00" \
+  --before 2m \
+  --after 5m
+
+# context around matching lines
+embed-log slice --config my-embed-log.yml --grep "ERROR" --before 2m --after 2m
+
+# only selected sources/panes
+embed-log slice --config my-embed-log.yml --last 10m --source DUT_UART
+```
+
+By default, slice output is compact: ANSI codes are removed, full ISO timestamps are shortened to `HH:MM:SS.mmm`, and redundant per-line source tags are stripped. Use `--raw` to preserve original log lines or `--time-format full` to keep full timestamps in compact output.
+
+The command writes:
+
+- `combined.log` — selected lines from all sources, sorted by timestamp
+- `<SOURCE>.log` — selected lines per source
+- `summary.md` — slice summary for humans/agents
+- `manifest.json` — slice metadata
+- `analysis/severity.md|json` — counts and index of errors/warnings
+- `analysis/repetition.md|json` — repeated message clusters with first/last seen
+- `analysis/timeline.md|json` — derived timeline of important events
+- `analysis/incidents.md|json` — heuristic incident windows
+- `analysis/anchors.md|json` — grouped context around `--grep` matches
+
+## Clean session rotation
+
+In the live UI, use **Clean session** to close the current session and start a new empty one without restarting the server. The old session is saved/exported to `session.html`, source log files are rotated to a new session directory, and the browser view is cleared.
 
 ## Output files
 

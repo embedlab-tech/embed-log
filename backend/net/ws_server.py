@@ -34,6 +34,7 @@ class WebSocketBroadcaster:
         sessions_root: Optional[str] = None,
         on_all_clients_disconnected: Optional[Callable[[], None]] = None,
         on_export_session_html: Optional[Callable[[], bool]] = None,
+        on_rotate_session: Optional[Callable[[], dict]] = None,
         open_browser: bool = False,
         app_name: str = "embed-log",
         theme_defaults: Optional[dict] = None,
@@ -49,6 +50,7 @@ class WebSocketBroadcaster:
         self._sessions_root = Path(sessions_root) if sessions_root else None
         self._on_all_clients_disconnected = on_all_clients_disconnected
         self._on_export_session_html = on_export_session_html
+        self._on_rotate_session = on_rotate_session
         self._no_clients_handle = None
         self._thread: Optional[threading.Thread] = None
         self._started = threading.Event()
@@ -113,6 +115,7 @@ class WebSocketBroadcaster:
         app.router.add_get("/ws", self._ws_handler)
         app.router.add_get("/api/session/current", self._session_current_handler)
         app.router.add_post("/api/session/export", self._session_export_handler)
+        app.router.add_post("/api/session/rotate", self._session_rotate_handler)
         app.router.add_get("/api/sessions", self._sessions_list_handler)
         app.router.add_get("/sessions/{session_id}/{filename}", self._session_file_handler)
         app.router.add_get("/", self._index_handler)
@@ -156,6 +159,17 @@ class WebSocketBroadcaster:
         ok = await asyncio.to_thread(self._on_export_session_html)
         status = 200 if ok else 409
         return web.json_response({"ok": ok, "session": self._session_info}, status=status)
+
+    async def _session_rotate_handler(self, request: web.Request) -> web.Response:
+        logging.info("API /api/session/rotate from %s", request.remote)
+        if self._on_rotate_session is None:
+            return web.json_response({"ok": False, "error": "session rotation unavailable"}, status=503)
+        try:
+            result = await asyncio.to_thread(self._on_rotate_session)
+        except Exception as exc:
+            logging.exception("session rotation failed")
+            return web.json_response({"ok": False, "error": str(exc)}, status=500)
+        return web.json_response({"ok": True, **result})
 
     async def _sessions_list_handler(self, request: web.Request) -> web.Response:
         logging.info("API /api/sessions from %s", request.remote)

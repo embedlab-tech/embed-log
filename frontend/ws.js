@@ -18,6 +18,7 @@ function resetLayoutForNewSession() {
 
     state.activeTab = 0;
     state.syncTs = null;
+    state.syncTabSwitch = false;
     state.filters = {};
     state.rawLines = {};
     state.atBottom = {};
@@ -96,6 +97,20 @@ function wsConnect() {
 
         if (msg.type === "session_html_status") {
             window.__embedLogOnSessionHtmlStatus?.(msg);
+            return;
+        }
+
+        if (msg.type === "session_rotated") {
+            currentSessionId = msg.session?.id || currentSessionId;
+            state.syncTs = null;
+            state.syncTabSwitch = false;
+            clearAllPaneContents();
+            window.__embedLogSetSession?.(msg.session || null);
+            window.__embedLogOnSessionHtmlStatus?.({
+                ...msg.session,
+                type: "session_html_status",
+            });
+            window.__embedLogSchedulePersist?.();
             return;
         }
 

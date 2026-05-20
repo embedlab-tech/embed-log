@@ -103,6 +103,14 @@ export function updateJumpBtn(paneId) {
         .classList.toggle("visible", !state.atBottom[paneId]);
 }
 
+export function scrollPaneToBottom(paneId) {
+    const logEl = document.getElementById("log-" + paneId);
+    if (!logEl) return;
+    logEl.scrollTop = logEl.scrollHeight;
+    state.atBottom[paneId] = true;
+    updateJumpBtn(paneId);
+}
+
 export function _linesSetupPane(id) {
     const logEl = document.getElementById("log-" + id);
     logEl.addEventListener("scroll", () => {
@@ -110,9 +118,8 @@ export function _linesSetupPane(id) {
         updateJumpBtn(id);
     });
     document.getElementById("jump-" + id).addEventListener("click", () => {
-        logEl.scrollTop = logEl.scrollHeight;
-        state.atBottom[id] = true;
-        updateJumpBtn(id);
+        state.syncTabSwitch = false;
+        scrollPaneToBottom(id);
     });
     document.querySelector(`.pane-clear-btn[data-pane="${id}"]`)
         ?.addEventListener("click", () => {
@@ -199,6 +206,7 @@ export function onMiddleClick(paneId, numTs, div) {
     updateJumpBtn(paneId);
 
     state.syncTs = numTs;
+    state.syncTabSwitch = true;
     highlightLine(paneId, div);
     syncPanes(paneId, numTs, div);
 }
@@ -222,6 +230,7 @@ export function onLineClick(paneId, numTs, div) {
     }
 
     state.syncTs = numTs;
+    state.syncTabSwitch = true;
     highlightLine(paneId, div);
     syncPanes(paneId, numTs, div);
 }

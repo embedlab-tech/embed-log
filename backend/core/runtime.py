@@ -83,6 +83,7 @@ class SourceManager:
         self._forward_clients: list = []
         self._forward_lock = threading.Lock()
         self._writer_thread: Optional[threading.Thread] = None
+        self._file_lock = threading.Lock()
         self._inject_server: Optional[InjectServer] = None
         self._forward_servers: list[ForwardServer] = []
 
@@ -190,21 +191,48 @@ class SourceManager:
         return json.dumps(payload).encode("utf-8") + b"\n"
 
     def _writer_loop(self) -> None:
-        with open(self.log_file, "a", encoding="utf-8") as f:
-            while True:
-                entry = self._queue.get()
+        while True:
+            entry = self._queue.get()
+            try:
                 if entry is None:
                     break
                 line = self._format(entry)
                 if self.verbose:
                     print(line, flush=True)
-                f.write(line + "\n")
-                f.flush()
+                with self._file_lock:
+                    log_file = self.log_file
+                    log_file.parent.mkdir(parents=True, exist_ok=True)
+                    with open(log_file, "a", encoding="utf-8") as f:
+                        f.write(line + "\n")
+                        f.flush()
                 if self.broadcaster and not entry.no_ws:
                     self.broadcaster.broadcast(self._ws_payload(entry))
                 self._stream_to_clients(self._stream_payload(entry))
                 if entry.source == "SERIAL":
                     self._forward_to_clients((entry.message + "\n").encode("utf-8", errors="replace"))
+            finally:
+                self._queue.task_done()
+
+    def wait_until_flushed(self) -> None:
+        self._queue.join()
+
+    def lock_log_file(self) -> None:
+        self._file_lock.acquire()
+
+    def unlock_log_file(self) -> None:
+        self._file_lock.release()
+
+    def rotate_log_file(self, log_file: str, *, locked: bool = False) -> None:
+        if locked:
+            self.log_file = Path(log_file)
+            self.log_file.parent.mkdir(parents=True, exist_ok=True)
+            return
+        with self._file_lock:
+            self.log_file = Path(log_file)
+            self.log_file.parent.mkdir(parents=True, exist_ok=True)
+
+    def add_session_marker(self, message: str, *, no_ws: bool = True) -> None:
+        self._queue.put(LogEntry(datetime.now().astimezone(), "SYSTEM", message, "cyan", no_ws=no_ws))
 
     def _stream_to_clients(self, data: bytes) -> None:
         with self._clients_lock:
@@ -318,6 +346,7 @@ class LogServer:
         self._job_id = job_id
         self._app_name = app_name
         self._theme_defaults = theme_defaults or {}
+        self._rotate_lock = threading.Lock()
 
         self._source_files = {s["name"]: str(s["log_file"]) for s in sources}
         self._session = SessionManager(
@@ -349,6 +378,7 @@ class LogServer:
                 sessions_root=str(self._logs_root),
                 on_all_clients_disconnected=lambda: self.export_session_html("last_ws_disconnect"),
                 on_export_session_html=lambda: self.export_session_html("manual_ui"),
+                on_rotate_session=lambda: self.rotate_session("manual_ui"),
                 open_browser=open_browser,
                 app_name=app_name,
                 theme_defaults=self._theme_defaults,
@@ -398,6 +428,32 @@ class LogServer:
             **updates,
         })
 
+    def _build_source_files_for_session(self, session_id: str, session_dir: Path) -> dict[str, str]:
+        tab_label_by_source: dict[str, str] = {}
+        for tab in self._tabs:
+            for pane in tab.get("panes", []):
+                tab_label_by_source[pane] = tab.get("label", "session")
+        files = {}
+        for mgr in self._managers:
+            tab_label = tab_label_by_source.get(mgr.name, "session")
+            log_name = f"{slugify(tab_label)}__{slugify(mgr.name)}__{session_id}.log"
+            files[mgr.name] = str(session_dir / log_name)
+        return files
+
+    def _new_session_id_and_dir(self) -> tuple[str, Path]:
+        base_session_id = datetime.now().astimezone().strftime("%Y-%m-%d_%H-%M-%S")
+        if self._job_id:
+            base_session_id = f"{base_session_id}__{slugify(self._job_id)}"
+        session_id = base_session_id
+        session_dir = self._logs_root / session_id
+        i = 1
+        while session_dir.exists():
+            session_id = f"{base_session_id}_{i}"
+            session_dir = self._logs_root / session_id
+            i += 1
+        session_dir.mkdir(parents=True, exist_ok=True)
+        return session_id, session_dir
+
     def export_session_html(self, reason: str) -> bool:
         with self._export_lock:
             if self._session_info.get("html_status") == "updating":
@@ -446,6 +502,74 @@ class LogServer:
             })
             self._publish_html_state()
             return False
+
+    def rotate_session(self, reason: str = "manual_ui") -> dict:
+        with self._rotate_lock:
+            old_info = dict(self._session_info)
+            close_msg = f"[embed-log] session closed: {reason}"
+            for mgr in self._managers:
+                mgr.add_session_marker(close_msg, no_ws=False)
+            for mgr in self._managers:
+                mgr.wait_until_flushed()
+
+            locked: list[SourceManager] = []
+            try:
+                for mgr in self._managers:
+                    mgr.lock_log_file()
+                    locked.append(mgr)
+
+                self.export_session_html(f"rotate:{reason}")
+
+                session_id, session_dir = self._new_session_id_and_dir()
+                started_at = datetime.now().astimezone().isoformat(timespec="seconds")
+                source_files = self._build_source_files_for_session(session_id, session_dir)
+
+                for mgr in self._managers:
+                    mgr.rotate_log_file(source_files[mgr.name], locked=True)
+            finally:
+                for mgr in reversed(locked):
+                    mgr.unlock_log_file()
+
+            self._session_id = session_id
+            self._started_at = started_at
+            self._session_dir = session_dir
+            self._source_files = source_files
+            self._session = SessionManager(
+                session_id=self._session_id,
+                session_dir=self._session_dir,
+                tabs=self._tabs,
+                source_files=self._source_files,
+                started_at=self._started_at,
+                config_path=self._session.config_path if hasattr(self._session, "config_path") else None,
+                job_id=self._job_id,
+                app_name=self._app_name,
+            )
+            self._exporter = SessionExporter(
+                session_html_path=self._session.html_path,
+                source_files=self._source_files,
+                tabs=self._tabs,
+            )
+            self._session_info = self._session.build_session_info()
+            self._session.write_manifest(
+                reason="rotate_start",
+                exported_html=False,
+                html_status="pending",
+                html_updated_at=None,
+                html_error=None,
+            )
+
+            if self._broadcaster:
+                self._broadcaster.update_session_info(dict(self._session_info))
+                self._broadcaster.broadcast({
+                    "type": "session_rotated",
+                    "old_session": old_info,
+                    "session": self._session_info,
+                })
+
+            start_msg = f"[embed-log] clean session started: {reason}"
+            for mgr in self._managers:
+                mgr.add_session_marker(start_msg, no_ws=False)
+            return {"old_session": old_info, "session": self._session_info}
 
     def start(self) -> None:
         if self._broadcaster:

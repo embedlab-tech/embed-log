@@ -135,7 +135,27 @@ def _parse_line(raw: str):
     return None
 
 
-def parse_log_file(path: str) -> list:
+def _strip_embedlog_prefixes(text: str, pane_label: str | None = None) -> str:
+    """Remove metadata prefixes added by embed-log's file writer.
+
+    The live UI renders only the payload from WebSocket messages. Session HTML
+    exports are rebuilt from .log files, where each line may contain extra
+    prefixes such as [CONTROLLER][SERIAL] or [SYSTEM]. Strip those so saved
+    session HTML looks like the live UI.
+    """
+    if pane_label:
+        variants = {pane_label, pane_label.replace("-", "_"), pane_label.replace("_", "-")}
+        for variant in variants:
+            text = re.sub(r"^\s*\[" + re.escape(variant) + r"\]\s*", "", text, flags=re.I)
+
+    # Remove only redundant transport/source-type metadata that can be inferred
+    # from the pane/session config. Event prefixes such as [TX::UI], [SYSTEM],
+    # [demo], [TEST] carry meaning and must stay visible.
+    text = re.sub(r"^\s*\[SERIAL\]\s*", "", text, flags=re.I)
+    return text
+
+
+def parse_log_file(path: str, pane_label: str | None = None) -> list:
     """
     Read a .log file and return a list of line dicts:
         { "ts": "MM-DD HH:MM:SS.mmm", "text": str, "isTx": bool }
@@ -150,14 +170,15 @@ def parse_log_file(path: str) -> list:
     entries = []
     pending_ts: str | None = None
     pending_text: str | None = None
+    pending_is_tx = False
 
     def _flush():
-        nonlocal pending_ts, pending_text
+        nonlocal pending_ts, pending_text, pending_is_tx
         if pending_ts is None:
             return
-        is_tx = "[TX::" in pending_text
-        entries.append({"ts": pending_ts, "text": pending_text, "isTx": is_tx})
+        entries.append({"ts": pending_ts, "text": pending_text, "isTx": pending_is_tx})
         pending_ts = pending_text = None
+        pending_is_tx = False
 
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
@@ -167,10 +188,11 @@ def parse_log_file(path: str) -> list:
                 if parsed:
                     _flush()
                     pending_ts = parsed[0]
+                    pending_is_tx = "[TX::" in parsed[1]
                     # Keep only message payload in exported HTML — the leading
                     # system timestamp is already rendered by the viewer from
                     # `ts`, so keeping raw line would duplicate it.
-                    pending_text = parsed[1]
+                    pending_text = _strip_embedlog_prefixes(parsed[1], pane_label)
                 elif pending_ts is not None and raw.strip():
                     # Continuation line — append to current entry
                     pending_text += " " + raw.strip()
@@ -271,7 +293,7 @@ def generate_html(tab_specs: list) -> str:
     log_data: dict[str, list] = {}
     for tab in tab_specs:
         for pane_id, pane_label, file_path in tab["panes"]:
-            entries = parse_log_file(file_path)
+            entries = parse_log_file(file_path, pane_label)
             log_data[pane_id] = entries
             print(f"  [{tab['label']}] {pane_label!r}: {len(entries)} lines  ({file_path})")
 

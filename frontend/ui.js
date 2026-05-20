@@ -1,5 +1,5 @@
 import { state, TABS, PANES } from './state.js';
-import { rerenderPane } from './lines.js';
+import { clearPane, rerenderPane } from './lines.js';
 
 // ---------------------------------------------------------------------------
 // Toolbar — wrap
@@ -55,6 +55,11 @@ btnWrap.addEventListener("click", () => {
         btnSave.title = "Generate/refresh session HTML on backend";
         btnSave.textContent = "Save HTML";
     }
+    const btnCleanSession = document.getElementById("btn-clean-session");
+    if (btnCleanSession) {
+        btnCleanSession.title = "Save current session HTML and start a clean session";
+        btnCleanSession.textContent = "Clean session";
+    }
 
     const btnCurrent = document.createElement("button");
     btnCurrent.id = "btn-current-session";
@@ -87,6 +92,11 @@ btnWrap.addEventListener("click", () => {
                 btnSave.disabled = false;
                 btnSave.textContent = "Save HTML";
             }
+        }
+
+        if (btnCleanSession) {
+            btnCleanSession.disabled = status === "updating";
+            btnCleanSession.textContent = status === "updating" ? "Rotating…" : "Clean session";
         }
 
         if (currentSession?.html_ready && currentSession?.html) {
@@ -150,7 +160,37 @@ btnWrap.addEventListener("click", () => {
         window.open(currentSession.html, "_blank", "noopener");
     }
 
+    async function createCleanSession() {
+        if (!window.confirm("Save current session HTML and start a clean session?")) return;
+        if (btnCleanSession) {
+            btnCleanSession.disabled = true;
+            btnCleanSession.textContent = "Rotating…";
+        }
+        try {
+            const res = await fetch("/api/session/rotate", {
+                method: "POST",
+                cache: "no-store",
+            });
+            if (!res.ok) throw new Error(String(res.status));
+            const data = await res.json();
+            if (data?.session) currentSession = data.session;
+            PANES.forEach(paneId => clearPane(paneId));
+            state.syncTs = null;
+            state.syncTabSwitch = false;
+            window.__embedLogSetSession?.(data?.session || null);
+            window.__embedLogSchedulePersist?.();
+            updateCurrentButtons();
+            if (menu.classList.contains("open")) loadSessions();
+        } catch {
+            if (btnCleanSession) {
+                btnCleanSession.textContent = "Rotate failed";
+                setTimeout(updateCurrentButtons, 1200);
+            }
+        }
+    }
+
     btnSave?.addEventListener("click", saveCurrentSessionHtml);
+    btnCleanSession?.addEventListener("click", createCleanSession);
     btnCurrent.addEventListener("click", openCurrentSessionHtml);
 
     async function loadSessions() {

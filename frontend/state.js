@@ -10,7 +10,8 @@ export const state = {
     showTs:      true,
     fontSize:    14,
     activeTab:   0,
-    syncTs:      null,   // last-clicked numeric timestamp, persists across tab switches
+    syncTs:      null,   // last-clicked numeric timestamp
+    syncTabSwitch: false, // true after explicit line sync; next tab switches follow syncTs
     filters:     {},
     rawLines:    {},
     atBottom:    {},

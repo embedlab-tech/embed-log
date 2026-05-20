@@ -1,5 +1,5 @@
 import { state, TABS } from './state.js';
-import { scrollPaneToTs } from './lines.js';
+import { scrollPaneToBottom, scrollPaneToTs } from './lines.js';
 import { createDynamicTab } from './tabcreate.js';
 
 // ---------------------------------------------------------------------------
@@ -54,10 +54,13 @@ export function switchTab(newIdx) {
     const next = document.getElementById("tab-content-" + newIdx);
     if (next) next.style.display = "flex";
 
-    // Scroll the new tab's panes to the last synced timestamp so the user
-    // lands in the right context without having to click again.
-    if (state.syncTs !== null) {
+    // Plain tab switch: show the latest log content by default.
+    // Explicit sync gesture (line click / middle-click): keep previous behavior
+    // and land near the synced timestamp when switching tabs.
+    if (state.syncTabSwitch && state.syncTs !== null) {
         TABS[newIdx].panes.forEach(paneId => scrollPaneToTs(paneId, state.syncTs));
+    } else {
+        TABS[newIdx].panes.forEach(paneId => scrollPaneToBottom(paneId));
     }
 
     // Update active button (ignore + button)
