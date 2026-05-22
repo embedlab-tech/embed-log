@@ -51,3 +51,6 @@ htmlcov/
 # Local runtime logs/artifacts
 logs/
 *.log
+
+# Benchmark output
+.benchmark-runs/
