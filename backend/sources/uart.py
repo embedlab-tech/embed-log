@@ -13,7 +13,7 @@ class UartSource(LogSource):
     def __init__(self, port: str, baudrate: int = 115200):
         self.port = port
         self.baudrate = baudrate
-        self._ser: Optional[serial.Serial] = None
+        self._ser: Optional[serial.SerialBase] = None
         self._ser_lock = threading.Lock()
 
     @property
@@ -35,7 +35,7 @@ class UartSource(LogSource):
     def _run(self, on_line, stop, name):
         while not stop.is_set():
             try:
-                with serial.Serial(self.port, self.baudrate, timeout=1) as ser:
+                with serial.serial_for_url(self.port, baudrate=self.baudrate, timeout=1) as ser:
                     logging.info("[%s] opened serial %s @ %d", name, self.port, self.baudrate)
                     with self._ser_lock:
                         self._ser = ser

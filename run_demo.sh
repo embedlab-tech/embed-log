@@ -11,6 +11,14 @@ for arg in "$@"; do
     --browser) OPEN_BROWSER=true ;;
     -h|--help)
       echo "Usage: ./run_demo.sh [--no-browser|--browser]"
+      echo ""
+      echo "Optional env vars for demo traffic:"
+      echo "  DEMO_PROFILE            random|test (default: random)"
+      echo "  DEMO_UDP_INTERVAL_MIN   random profile default: 5.00"
+      echo "  DEMO_UDP_INTERVAL_MAX   random profile default: 20.00"
+      echo "  DEMO_INJECT_INTERVAL    random profile default: 5"
+      echo "  DEMO_TEST_TICK_MS       test profile default: 100"
+      echo "  DEMO_LOG_DIR            optional log directory override"
       exit 0
       ;;
     *)
@@ -108,7 +116,8 @@ _is_embedlog_demo_pid() {
   cmd=$(ps -p "$pid" -o command= 2>/dev/null || true)
   [[ "$cmd" == *"backend/server.py"* ]] || \
   [[ "$cmd" == *"utils/udp_log_simulator.py"* ]] || \
-  [[ "$cmd" == *"utils/inject_log_demo.py"* ]]
+  [[ "$cmd" == *"utils/inject_log_demo.py"* ]] || \
+  [[ "$cmd" == *"utils/deterministic_demo_traffic.py"* ]]
 }
 
 _port_pids() {
@@ -177,11 +186,20 @@ done
 WS_PORT=8080
 _free_port_if_stale tcp "$WS_PORT" || exit 1
 
+DEMO_LOG_DIR="${DEMO_LOG_DIR:-}"
+LOG_DIR_ARGS=()
+if [ -n "$DEMO_LOG_DIR" ]; then
+  LOG_DIR_ARGS=(--log-dir "$DEMO_LOG_DIR")
+fi
+
 echo "Starting embed-log server (YAML config) on port $WS_PORT in -v mode..."
+if [ -n "$DEMO_LOG_DIR" ]; then
+  echo "Demo logs directory override: $DEMO_LOG_DIR"
+fi
 if [ "$OPEN_BROWSER" = true ]; then
-  "$PYTHON" backend/server.py run --config embed-log.demo.yml --ws-port "$WS_PORT" -v &
+  "$PYTHON" backend/server.py run --config embed-log.demo.yml --ws-port "$WS_PORT" "${LOG_DIR_ARGS[@]}" -v &
 else
-  "$PYTHON" backend/server.py run --config embed-log.demo.yml --ws-port "$WS_PORT" --no-open-browser -v &
+  "$PYTHON" backend/server.py run --config embed-log.demo.yml --ws-port "$WS_PORT" "${LOG_DIR_ARGS[@]}" --no-open-browser -v &
 fi
 SERVER_PID=$!
 
@@ -192,22 +210,46 @@ if ! kill -0 "$SERVER_PID" 2>/dev/null; then
   exit 1
 fi
 
-echo "Starting UDP simulator..."
-"$PYTHON" utils/udp_log_simulator.py \
-  --target 127.0.0.1:6000 \
-  --target 127.0.0.1:6001 \
-  --target 127.0.0.1:6002 \
-  --interval-min 5.00 \
-  --interval-max 20.00 &
+DEMO_PROFILE="${DEMO_PROFILE:-random}"
 
-echo "Starting marker injector..."
-"$PYTHON" utils/inject_log_demo.py \
-  --inject SENSOR_A 5001 \
-  --inject SENSOR_B 5002 \
-  --inject SENSOR_C 5003 \
-  --interval 5 \
-  --duration 0 \
-  --source demo &
+case "$DEMO_PROFILE" in
+  random)
+    DEMO_UDP_INTERVAL_MIN="${DEMO_UDP_INTERVAL_MIN:-5.00}"
+    DEMO_UDP_INTERVAL_MAX="${DEMO_UDP_INTERVAL_MAX:-20.00}"
+    DEMO_INJECT_INTERVAL="${DEMO_INJECT_INTERVAL:-5}"
+
+    echo "Starting UDP simulator (interval ${DEMO_UDP_INTERVAL_MIN}-${DEMO_UDP_INTERVAL_MAX}s)..."
+    "$PYTHON" utils/udp_log_simulator.py \
+      --target 127.0.0.1:6000 \
+      --target 127.0.0.1:6001 \
+      --target 127.0.0.1:6002 \
+      --interval-min "$DEMO_UDP_INTERVAL_MIN" \
+      --interval-max "$DEMO_UDP_INTERVAL_MAX" &
+
+    echo "Starting marker injector (interval ${DEMO_INJECT_INTERVAL}s)..."
+    "$PYTHON" utils/inject_log_demo.py \
+      --inject SENSOR_A 5001 \
+      --inject SENSOR_B 5002 \
+      --inject SENSOR_C 5003 \
+      --interval "$DEMO_INJECT_INTERVAL" \
+      --duration 0 \
+      --source demo &
+    ;;
+  test)
+    DEMO_TEST_TICK_MS="${DEMO_TEST_TICK_MS:-100}"
+    echo "Starting deterministic demo traffic (tick ${DEMO_TEST_TICK_MS}ms)..."
+    "$PYTHON" utils/deterministic_demo_traffic.py \
+      --udp SENSOR_A=127.0.0.1:6000 \
+      --udp SENSOR_B=127.0.0.1:6001 \
+      --udp SENSOR_C=127.0.0.1:6002 \
+      --tick-ms "$DEMO_TEST_TICK_MS" \
+      --cycles 0 &
+    ;;
+  *)
+    echo "ERROR: invalid DEMO_PROFILE=$DEMO_PROFILE (expected random|test)"
+    exit 1
+    ;;
+esac
 
 echo ""
 echo "Demo running!"

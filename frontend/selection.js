@@ -1,5 +1,6 @@
 import { state, PANES } from './state.js';
 import { onLineClick } from './lines.js';
+import { exportHtmlSnapshot } from './export.js';
 
 // ---------------------------------------------------------------------------
 // Line selection + copy
@@ -78,18 +79,42 @@ export function _selectionSetupPane(id) {
     addBtn.className = "copy-btn";
     addBtn.id = "copy-add-" + id;
     addBtn.textContent = "Clipboard add";
-    addBtn.title = "Append selected lines to internal clipboard buffer";
+    addBtn.title = "Append selected lines from this pane to internal clipboard buffer";
     addBtn.addEventListener("click", e => { e.stopPropagation(); _addSelectedToBuffer(id); });
 
     const copyBtn = document.createElement("button");
     copyBtn.className = "copy-btn";
     copyBtn.id = "copy-" + id;
     copyBtn.textContent = "Copy";
-    copyBtn.title = "Copy selected lines directly to system clipboard";
+    copyBtn.title = "Copy selected lines from this pane to system clipboard";
     copyBtn.addEventListener("click", e => { e.stopPropagation(); _copySelectedDirect(id); });
+
+    const rangeCopyBtn = document.createElement("button");
+    rangeCopyBtn.className = "copy-btn";
+    rangeCopyBtn.id = "copy-range-" + id;
+    rangeCopyBtn.textContent = "Copy range";
+    rangeCopyBtn.title = "Copy synchronized raw snippet from all panes in this selected time range";
+    rangeCopyBtn.addEventListener("click", e => { e.stopPropagation(); _copyRangeRaw(id); });
+
+    const rangeRawBtn = document.createElement("button");
+    rangeRawBtn.className = "copy-btn";
+    rangeRawBtn.id = "download-range-raw-" + id;
+    rangeRawBtn.textContent = "Raw file";
+    rangeRawBtn.title = "Download synchronized raw snippet from all panes in this selected time range";
+    rangeRawBtn.addEventListener("click", e => { e.stopPropagation(); _downloadRangeRaw(id); });
+
+    const rangeHtmlBtn = document.createElement("button");
+    rangeHtmlBtn.className = "copy-btn";
+    rangeHtmlBtn.id = "download-range-html-" + id;
+    rangeHtmlBtn.textContent = "HTML snippet";
+    rangeHtmlBtn.title = "Download a self-contained HTML snippet for this selected time range";
+    rangeHtmlBtn.addEventListener("click", e => { e.stopPropagation(); _downloadRangeHtml(id); });
 
     wrap.appendChild(addBtn);
     wrap.appendChild(copyBtn);
+    wrap.appendChild(rangeCopyBtn);
+    wrap.appendChild(rangeRawBtn);
+    wrap.appendChild(rangeHtmlBtn);
     body.appendChild(wrap);
 }
 PANES.forEach(_selectionSetupPane);
@@ -103,17 +128,22 @@ function _syncCopyBtn(paneId) {
     const wrap = document.getElementById("copy-actions-" + paneId);
     const addBtn = document.getElementById("copy-add-" + paneId);
     const copyBtn = document.getElementById("copy-" + paneId);
+    const rangeCopyBtn = document.getElementById("copy-range-" + paneId);
+    const rangeRawBtn = document.getElementById("download-range-raw-" + paneId);
+    const rangeHtmlBtn = document.getElementById("download-range-html-" + paneId);
     if (!wrap || !addBtn || !copyBtn) return;
 
     const count = state.selected[paneId].size;
     const visible = count > 0;
     wrap.classList.toggle("visible", visible);
-    addBtn.classList.toggle("visible", visible);
-    copyBtn.classList.toggle("visible", visible);
+    wrap.querySelectorAll(".copy-btn").forEach(btn => btn.classList.toggle("visible", visible));
 
     if (visible) {
         addBtn.textContent = `Clipboard add (${count})`;
         copyBtn.textContent = `Copy (${count})`;
+        if (rangeCopyBtn) rangeCopyBtn.textContent = "Copy range";
+        if (rangeRawBtn) rangeRawBtn.textContent = "Raw file";
+        if (rangeHtmlBtn) rangeHtmlBtn.textContent = "HTML snippet";
     }
 }
 
@@ -124,6 +154,18 @@ function _applySelection(paneId) {
         div.classList.toggle("selected", sel.has(i))
     );
     _syncCopyBtn(paneId);
+}
+
+function _selectIndexRange(paneId, startIdx, endIdx) {
+    if (!Number.isFinite(startIdx) || !Number.isFinite(endIdx)) return;
+    _clearOtherSelections(paneId);
+    const lines = state.rawLines[paneId] || [];
+    const lo = Math.max(0, Math.min(startIdx, endIdx));
+    const hi = Math.min(lines.length - 1, Math.max(startIdx, endIdx));
+    const sel = new Set();
+    for (let i = lo; i <= hi; i++) sel.add(i);
+    state.selected[paneId] = sel;
+    _applySelection(paneId);
 }
 
 function _clearOtherSelections(keepPane) {
@@ -156,6 +198,109 @@ function _linePlain(line) {
 
 function _lineRaw(line) {
     return `${line.ts}  ${_linePlain(line)}`;
+}
+
+function _safeFilePart(str) {
+    return String(str || "snippet").replace(/[^0-9A-Za-z_.-]+/g, "-").replace(/^-+|-+$/g, "") || "snippet";
+}
+
+function _downloadText(filename, text, type = "text/plain") {
+    const blob = new Blob([text], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+function _copyText(text) {
+    if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try { document.execCommand("copy"); }
+    finally { ta.remove(); }
+    return Promise.resolve();
+}
+
+function _selectionRange(paneId) {
+    const sel = state.selected[paneId];
+    if (!sel?.size) return null;
+    const lines = state.rawLines[paneId] || [];
+    const nums = Array.from(sel)
+        .map(i => lines[i]?.numTs)
+        .filter(n => Number.isFinite(n) && n > 0);
+    if (!nums.length) return null;
+    return { from: Math.min(...nums), to: Math.max(...nums) };
+}
+
+function _collectRangeEntries(paneId) {
+    const range = _selectionRange(paneId);
+    if (!range) return [];
+    const entries = [];
+    PANES.forEach(id => {
+        (state.rawLines[id] || []).forEach((line, idx) => {
+            const n = line?.numTs;
+            if (Number.isFinite(n) && n >= range.from && n <= range.to) {
+                entries.push({ paneId: id, idx, line });
+            }
+        });
+    });
+    entries.sort((a, b) =>
+        (a.line.numTs - b.line.numTs) || a.paneId.localeCompare(b.paneId) || (a.idx - b.idx)
+    );
+    return entries;
+}
+
+function _rangeBoundsLabel(entries) {
+    if (!entries.length) return "snippet";
+    const first = entries[0].line.ts;
+    const last = entries[entries.length - 1].line.ts;
+    return `${first}_to_${last}`;
+}
+
+function _escapeRegExp(str) {
+    return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function _snippetMessageText(entry) {
+    let text = _linePlain(entry.line).trim();
+    const sourcePrefix = new RegExp(`^\\[${_escapeRegExp(entry.paneId)}\\]\\s*`);
+    // Demo/UDP logs can already contain their own timestamp/source prefix.
+    // The merged snippet adds one normalized prefix, so strip duplicated ones
+    // only when they are unambiguous.
+    for (let i = 0; i < 4; i++) {
+        const before = text;
+        text = text
+            .replace(/^\[\d{4}-\d{2}-\d{2}T[^\]]+\]\s*/, "")
+            .replace(sourcePrefix, "")
+            .trim();
+        if (text === before) break;
+    }
+    return text;
+}
+
+function _formatRangeRaw(entries) {
+    return entries.map(e => `[${e.line.ts}] [${e.paneId}] ${_snippetMessageText(e)}`).join("\n");
+}
+
+function _buildRangeLogData(entries) {
+    const logData = {};
+    PANES.forEach(id => { logData[id] = []; });
+    entries.forEach(e => {
+        if (!logData[e.paneId]) logData[e.paneId] = [];
+        logData[e.paneId].push({
+            ts: e.line.ts,
+            text: _snippetMessageText(e),
+            isTx: e.line.isTx,
+        });
+    });
+    return logData;
 }
 
 function _formatSelectionBlock(paneId, indices) {
@@ -279,7 +424,7 @@ function _copySelectedDirect(paneId) {
     const text = _formatSelectionBlock(paneId, indices);
     if (!text) return;
 
-    navigator.clipboard.writeText(text).then(() => {
+    _copyText(text).then(() => {
         const btn = document.getElementById("copy-" + paneId);
         if (!btn) return;
         const prev = btn.textContent;
@@ -288,11 +433,46 @@ function _copySelectedDirect(paneId) {
     }).catch(() => {});
 }
 
+function _copyRangeRaw(paneId) {
+    const entries = _collectRangeEntries(paneId);
+    const text = _formatRangeRaw(entries);
+    if (!text) return;
+    _copyText(text).then(() => {
+        const btn = document.getElementById("copy-range-" + paneId);
+        if (!btn) return;
+        const prev = btn.textContent;
+        btn.textContent = "Copied";
+        setTimeout(() => { btn.textContent = prev; _syncCopyBtn(paneId); }, 900);
+    }).catch(() => {});
+}
+
+function _downloadRangeRaw(paneId) {
+    const entries = _collectRangeEntries(paneId);
+    const text = _formatRangeRaw(entries);
+    if (!text) return;
+    const name = `embed-log-snippet-${_safeFilePart(_rangeBoundsLabel(entries))}.log`;
+    _downloadText(name, text + "\n", "text/plain");
+}
+
+function _downloadRangeHtml(paneId) {
+    const entries = _collectRangeEntries(paneId);
+    if (!entries.length) return;
+    const btn = document.getElementById("download-range-html-" + paneId);
+    exportHtmlSnapshot({
+        button: btn,
+        logData: _buildRangeLogData(entries),
+        filenamePrefix: `embed-log-snippet-${_safeFilePart(_rangeBoundsLabel(entries))}`,
+        title: `snippet ${_rangeBoundsLabel(entries)}`,
+        activeTab: state.activeTab,
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Pointer drag — selection
 // ---------------------------------------------------------------------------
 let _drag = null;          // { paneId, startIdx, startY, lineEl, active }
 let _suppressClick = false;
+let _rangeAnchor = null;   // { paneId, idx } set by a normal line click for Shift+Click range selection
 
 document.addEventListener("pointerdown", e => {
     if (e.button !== 0) return;
@@ -353,6 +533,24 @@ document.addEventListener("click", e => {
             return;
         }
         _suppressClick = false;
+    }
+
+    const clickedLine = e.target.closest(".log-line");
+    const clickedLogArea = clickedLine?.closest(".log-area");
+    if (clickedLine && clickedLogArea) {
+        const paneId = clickedLogArea.id.slice(4);
+        const idx = parseInt(clickedLine.dataset.idx, 10);
+
+        if (e.shiftKey && _rangeAnchor?.paneId === paneId && Number.isFinite(idx)) {
+            e.preventDefault();
+            e.stopPropagation();
+            _selectIndexRange(paneId, _rangeAnchor.idx, idx);
+            return;
+        }
+
+        if (!e.shiftKey && Number.isFinite(idx)) {
+            _rangeAnchor = { paneId, idx };
+        }
     }
 
     const inClipUi = e.target.closest("#clip-indicator") || e.target.closest("#clip-peek-menu");

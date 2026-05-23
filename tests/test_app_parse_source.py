@@ -16,6 +16,12 @@ class ParseSourceTests(unittest.TestCase):
         self.assertIsInstance(src, UartSource)
         self.assertEqual(src.baudrate, 921600)
 
+    def test_uart_socket_url(self):
+        src = parse_source("DUT", "uart:socket://127.0.0.1:12345@921600", 115200)
+        self.assertIsInstance(src, UartSource)
+        self.assertEqual(src.port, "socket://127.0.0.1:12345")
+        self.assertEqual(src.baudrate, 921600)
+
     def test_udp(self):
         src = parse_source("DUT", "udp:6000", 115200)
         self.assertIsInstance(src, UdpSource)

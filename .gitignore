@@ -50,4 +50,14 @@ htmlcov/
 
 # Local runtime logs/artifacts
 logs/
+.benchmark-runs/
 *.log
+
+# Node / Playwright UI tests
+node_modules/
+tests-ui/.tmp/
+tests-ui/playwright-report/
+tests-ui/test-results/
+
+# Benchmark output
+.benchmark-runs/
