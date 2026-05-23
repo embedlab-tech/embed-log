@@ -121,11 +121,7 @@ export function _linesSetupPane(id) {
         state.syncTabSwitch = false;
         scrollPaneToBottom(id);
     });
-    document.querySelector(`.pane-clear-btn[data-pane="${id}"]`)
-        ?.addEventListener("click", () => {
-            window.wsSend?.({ cmd: "clear_logs", scope: "pane", id });
-            clearPane(id);
-        });
+
 }
 PANES.forEach(_linesSetupPane);
 

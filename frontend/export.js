@@ -105,7 +105,7 @@ export async function exportHtmlSnapshot(options = {}) {
             return `        <div class="pane" id="pane-${paneId}">
             <div class="pane-header">
                 <span class="pane-name">${label}</span>
-                <button class="pane-clear-btn" data-pane="${paneId}">clear</button>
+
             </div>
             <div class="filter-bar">
                 <input class="filter-input" data-pane="${paneId}" placeholder="Filter (regex)\u2026">

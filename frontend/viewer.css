@@ -138,11 +138,7 @@ button.active { background: var(--selection); border-color: var(--accent); color
 .log-line.line-err { color: var(--ansi-1); font-weight: 600; }  /* red    */
 /* <inf> lines are intentionally left unstyled */
 
-/* ---- File import ---- */
-.pane-body.drag-over {
-    outline: 2px dashed var(--accent);
-    outline-offset: -4px;
-}
+
 
 /* ---- Tab bar ---- */
 #tab-bar {

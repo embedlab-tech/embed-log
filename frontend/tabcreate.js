@@ -2,8 +2,9 @@ import { state, TABS, PANES } from './state.js';
 import { _linesSetupPane } from './lines.js';
 import { _uiSetupPane, _uiSetupTxPane } from './ui.js';
 import { _selectionSetupPane } from './selection.js';
-import { _importSetupPane } from './import.js';
 import { renderTabBar, switchTab } from './tabs.js';
+
+
 
 // ---------------------------------------------------------------------------
 // Tab creation
@@ -48,7 +49,7 @@ export function createTabWithPanes(label, paneIds, { switchTo = true } = {}) {
         <div class="pane" id="pane-${paneId}">
             <div class="pane-header">
                 <span class="pane-name">${_escHtml(paneId)}</span>
-                <button class="pane-clear-btn" data-pane="${paneId}">clear</button>
+
             </div>
             <div class="filter-bar">
                 <input class="filter-input" data-pane="${paneId}" placeholder="Filter (regex)…">
@@ -72,7 +73,7 @@ export function createTabWithPanes(label, paneIds, { switchTo = true } = {}) {
         _uiSetupPane(paneId);
         _uiSetupTxPane(paneId);
         _selectionSetupPane(paneId);
-        _importSetupPane(paneId);
+
     });
 
     // ---- 4. Show ----
