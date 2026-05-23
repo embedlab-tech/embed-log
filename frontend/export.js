@@ -1,10 +1,12 @@
 import { state, TABS, PANES } from './state.js';
 
-async function exportToHtml() {
-    const btn  = document.getElementById("btn-export");
-    const prev = btn.textContent;
-    btn.textContent = "…";
-    btn.disabled    = true;
+export async function exportHtmlSnapshot(options = {}) {
+    const btn = options.button === undefined ? document.getElementById("btn-export") : options.button;
+    const prev = btn?.textContent;
+    if (btn) {
+        btn.textContent = "…";
+        btn.disabled = true;
+    }
 
     // Escape <\/script> sequences in embedded JSON so they can't break the
     // surrounding <\/script> tag — same issue affects any log message.
@@ -84,12 +86,14 @@ async function exportToHtml() {
             return _tmpEl.textContent;
         }
 
-        const logData = {};
-        PANES.forEach(id => {
-            logData[id] = state.rawLines[id].map(line => ({
-                ts: line.ts, text: _rawOf(line), isTx: line.isTx,
-            }));
-        });
+        const logData = options.logData || {};
+        if (!options.logData) {
+            PANES.forEach(id => {
+                logData[id] = state.rawLines[id].map(line => ({
+                    ts: line.ts, text: _rawOf(line), isTx: line.isTx,
+                }));
+            });
+        }
 
         // ------------------------------------------------------------------
         // Build pane + tab HTML (mirrors merge_logs.py's _pane_html /
@@ -127,7 +131,7 @@ async function exportToHtml() {
         // ------------------------------------------------------------------
         // Bootstrap: runs last, populates all panes with log data
         // ------------------------------------------------------------------
-        const activeTabIdx = state.activeTab;
+        const activeTabIdx = Number.isInteger(options.activeTab) ? options.activeTab : state.activeTab;
         const bootstrapJs = `(function () {
     "use strict";
     window.wsSend = function () {};
@@ -150,8 +154,8 @@ async function exportToHtml() {
         // Assemble final HTML
         // ------------------------------------------------------------------
         const ts    = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -1);
-        const title = TABS.map(t => t.label).join(" + ")
-            .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        const rawTitle = options.title || TABS.map(t => t.label).join(" + ");
+        const title = rawTitle.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         const themeAttr = currentTheme ? ` data-theme="${currentTheme}"` : "";
 
         const html = `<!DOCTYPE html>
@@ -204,7 +208,7 @@ ${tabContentsHtml}
         const url  = URL.createObjectURL(blob);
         const a    = document.createElement("a");
         a.href     = url;
-        a.download = `embed-log-${ts}.html`;
+        a.download = `${options.filenamePrefix || "embed-log"}-${ts}.html`;
         a.click();
         URL.revokeObjectURL(url);
 
@@ -212,9 +216,17 @@ ${tabContentsHtml}
         console.error("Export failed:", err);
         alert("Export failed: " + err.message);
     } finally {
-        btn.textContent = prev;
-        btn.disabled    = false;
+        if (btn) {
+            btn.textContent = prev;
+            btn.disabled = false;
+        }
     }
 }
 
-document.getElementById("btn-export").addEventListener("click", exportToHtml);
+async function exportToHtml() {
+    return exportHtmlSnapshot();
+}
+
+window.__embedLogExportSnapshot = exportHtmlSnapshot;
+
+document.getElementById("btn-export")?.addEventListener("click", exportToHtml);
