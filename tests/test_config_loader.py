@@ -15,6 +15,7 @@ server:
   app_name: demo
   open_browser: true
   verbosity: events
+  queue_size: 32768
   job_id: CI-42
 logs:
   dir: logs/
@@ -43,6 +44,7 @@ tabs:
         self.assertTrue(cfg["open_browser"])
         self.assertEqual(cfg["verbosity"], "events")
         self.assertEqual(cfg["job_id"], "CI-42")
+        self.assertEqual(cfg["queue_size"], 32768)
         self.assertEqual(cfg["log_dir"], "logs/")
         self.assertEqual(len(cfg["sources"]), 2)
         self.assertEqual(len(cfg["injects"]), 1)

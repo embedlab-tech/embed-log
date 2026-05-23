@@ -62,6 +62,7 @@ def run_app(
     app_name: str,
     default_light_theme: Optional[str],
     default_dark_theme: Optional[str],
+    queue_maxsize: int = 20000,
 ) -> int:
     tab_label_by_source: dict[str, str] = {}
     for tab in tabs:
@@ -113,5 +114,6 @@ def run_app(
             "light": default_light_theme,
             "dark": default_dark_theme,
         },
+        queue_maxsize=queue_maxsize,
     ).run_forever()
     return 0

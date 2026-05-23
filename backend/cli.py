@@ -227,6 +227,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     job_id = args.job_id if args.job_id is not None else cfg.get("job_id", None)
     default_light_theme = args.default_light_theme if args.default_light_theme is not None else cfg.get("default_light_theme")
     default_dark_theme = args.default_dark_theme if args.default_dark_theme is not None else cfg.get("default_dark_theme")
+    queue_maxsize = cfg.get("queue_size", 20000) if args.config else 20000
 
     logging.basicConfig(
         level=logging.INFO if verbosity in {"events", "full"} else logging.WARNING,
@@ -297,6 +298,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         app_name=app_name,
         default_light_theme=default_light_theme,
         default_dark_theme=default_dark_theme,
+        queue_maxsize=queue_maxsize,
     )
 
 

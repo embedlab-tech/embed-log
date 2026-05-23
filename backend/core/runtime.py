@@ -31,6 +31,79 @@ ANSI = {
     "reset":   "\033[0m",
 }
 
+class TrackedQueue:
+    """Bounded queue with throughput and saturation tracking.
+
+    Blocks on put() when full (backpressure — never drops entries).
+    Tracks enqueue/dequeue counts, peak depth, and near-full events.
+    """
+
+    __slots__ = (
+        "_queue", "_maxsize", "_near_full_pct",
+        "_enqueued", "_dequeued", "_peak_depth", "_near_full_count",
+        "_lock",
+    )
+
+    NEAR_FULL_PCT = 0.80
+
+    def __init__(self, maxsize: int = 0):
+        if maxsize <= 0:
+            maxsize = 0  # 0 = unbounded in Queue
+        self._queue: queue.Queue[Optional[LogEntry]] = queue.Queue(maxsize)
+        self._maxsize = maxsize
+        self._near_full_pct = self.NEAR_FULL_PCT
+        self._enqueued = 0
+        self._dequeued = 0
+        self._peak_depth = 0
+        self._near_full_count = 0
+        self._lock = threading.Lock()
+
+    @property
+    def maxsize(self) -> int:
+        return self._maxsize
+
+    def put(self, item: Optional[LogEntry]) -> None:
+        self._queue.put(item)
+        with self._lock:
+            self._enqueued += 1
+            depth = self._queue.qsize()
+            if depth > self._peak_depth:
+                self._peak_depth = depth
+            if self._maxsize > 0 and depth >= self._maxsize * self._near_full_pct:
+                self._near_full_count += 1
+
+    def get(self) -> Optional[LogEntry]:
+        item = self._queue.get()
+        with self._lock:
+            self._dequeued += 1
+        return item
+
+    def task_done(self) -> None:
+        self._queue.task_done()
+
+    def join(self) -> None:
+        self._queue.join()
+
+    def stats(self) -> dict:
+        with self._lock:
+            qsize = self._queue.qsize()
+            return {
+                "maxsize": self._maxsize,
+                "depth": qsize,
+                "utilization_pct": round(qsize / self._maxsize * 100, 1) if self._maxsize > 0 else 0.0,
+                "enqueued": self._enqueued,
+                "dequeued": self._dequeued,
+                "peak_depth": self._peak_depth,
+                "near_full_events": self._near_full_count,
+            }
+
+    def clear_stats(self) -> None:
+        with self._lock:
+            self._enqueued = 0
+            self._dequeued = 0
+            self._peak_depth = self._queue.qsize()
+            self._near_full_count = 0
+
 
 def _slug(value: str) -> str:
     return slugify(value)
@@ -66,6 +139,7 @@ class SourceManager:
         forward_ports: Optional[list[int]] = None,
         verbose: bool = False,
         broadcaster: Optional[WebSocketBroadcaster] = None,
+        queue_maxsize: int = 0,
     ):
         self.name = name
         self.source = source
@@ -76,7 +150,8 @@ class SourceManager:
         self.verbose = verbose
         self.broadcaster = broadcaster
 
-        self._queue: queue.Queue[Optional[LogEntry]] = queue.Queue()
+        self._queue: TrackedQueue = TrackedQueue(queue_maxsize)
+        self._queue_maxsize = queue_maxsize
         self._stop = threading.Event()
         self._stream_clients: list = []
         self._clients_lock = threading.Lock()
@@ -196,6 +271,19 @@ class SourceManager:
             try:
                 if entry is None:
                     break
+                # Log near-full warning periodically when queue is congested
+                if self._queue_maxsize > 0:
+                    stats = self._queue.stats()
+                    if stats["utilization_pct"] >= 80:
+                        if stats["near_full_events"] % 100 == 1:
+                            logging.warning(
+                                "[%s] queue congested: %d/%d (%.0f%%)  near_full=%d",
+                                self.name,
+                                stats["depth"],
+                                self._queue_maxsize,
+                                stats["utilization_pct"],
+                                stats["near_full_events"],
+                            )
                 line = self._format(entry)
                 if self.verbose:
                     print(line, flush=True)
@@ -296,6 +384,16 @@ class SourceManager:
         self._queue.put(LogEntry(datetime.now().astimezone(), "SYSTEM", "", "cyan", no_ws=True))
         self._queue.put(LogEntry(datetime.now().astimezone(), "SYSTEM", marker, "cyan", no_ws=True))
         self._queue.put(LogEntry(datetime.now().astimezone(), "SYSTEM", "", "cyan", no_ws=True))
+    def get_stats(self) -> dict:
+        """Return per-source queue and throughput statistics."""
+        qs = self._queue.stats()
+        return {
+            "name": self.name,
+            "queue": qs,
+            "source_type": type(self.source).__name__,
+            "inject_port": self.inject_port,
+            "forward_ports": list(self.forward_ports),
+        }
 
     def _ingest_json(self, raw: bytes) -> None:
         try:
@@ -337,6 +435,7 @@ class LogServer:
         open_browser: bool = False,
         app_name: str = "embed-log",
         theme_defaults: Optional[dict] = None,
+        queue_maxsize: int = 20000,
     ):
         self._tabs = tabs
         self._session_id = session_id
@@ -346,6 +445,7 @@ class LogServer:
         self._job_id = job_id
         self._app_name = app_name
         self._theme_defaults = theme_defaults or {}
+        self._queue_maxsize = queue_maxsize
         self._rotate_lock = threading.Lock()
 
         self._source_files = {s["name"]: str(s["log_file"]) for s in sources}
@@ -395,6 +495,7 @@ class LogServer:
                 forward_ports=s.get("forward_ports", []),
                 verbose=verbose,
                 broadcaster=broadcaster,
+                queue_maxsize=self._queue_maxsize,
             )
             for s in sources
         ]
