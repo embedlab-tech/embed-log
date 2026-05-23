@@ -1,4 +1,9 @@
 import { state, TABS, PANES } from './state.js';
+
+// Maximum DOM elements kept per pane when tailing (at bottom).
+// Older lines are removed from the DOM to prevent unbounded growth.
+// Full data is always preserved in state.rawLines for search/export.
+const MAX_RENDERED = 200;
 import { parseAnsi, tsToNum } from './ansi.js';
 
 // ---------------------------------------------------------------------------
@@ -63,10 +68,15 @@ export function appendLine(paneId, ts, rawText, isTx) {
         div.innerHTML = buildLineHtml(line, state.showTs, rx);
     }
 
-    div.addEventListener("click",     () => onLineClick(paneId, numTs, div));
-    div.addEventListener("mousedown", e  => { if (e.button === 1) e.preventDefault(); });
-    div.addEventListener("auxclick",  e  => { if (e.button === 1) onMiddleClick(paneId, numTs, div); });
+
     logEl.appendChild(div);
+
+    // Prune old DOM elements when tailing to prevent unbounded growth
+    if (state.atBottom[paneId]) {
+        while (logEl.children.length > MAX_RENDERED) {
+            logEl.removeChild(logEl.firstChild);
+        }
+    }
 
     if (state.atBottom[paneId]) logEl.scrollTop = logEl.scrollHeight;
     updateJumpBtn(paneId);
@@ -116,6 +126,25 @@ export function _linesSetupPane(id) {
     logEl.addEventListener("scroll", () => {
         state.atBottom[id] = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
         updateJumpBtn(id);
+    });
+    // Event delegation — replaces per-line listeners for better performance
+    logEl.addEventListener("click", e => {
+        const lineDiv = e.target.closest(".log-line");
+        if (!lineDiv) return;
+        const idx = parseInt(lineDiv.dataset.idx, 10);
+        const line = state.rawLines[id] ? state.rawLines[id][idx] : null;
+        if (!line) return;
+        onLineClick(id, line.numTs, lineDiv);
+    });
+    logEl.addEventListener("mousedown", e => { if (e.button === 1) e.preventDefault(); });
+    logEl.addEventListener("auxclick", e => {
+        if (e.button !== 1) return;
+        const lineDiv = e.target.closest(".log-line");
+        if (!lineDiv) return;
+        const idx = parseInt(lineDiv.dataset.idx, 10);
+        const line = state.rawLines[id] ? state.rawLines[id][idx] : null;
+        if (!line) return;
+        onMiddleClick(id, line.numTs, lineDiv);
     });
     document.getElementById("jump-" + id).addEventListener("click", () => {
         state.syncTabSwitch = false;
@@ -175,9 +204,7 @@ export function repopulatePaneLogs(paneId) {
         } else {
             div.style.display = "none";
         }
-        div.addEventListener("click",     () => onLineClick(paneId, line.numTs, div));
-        div.addEventListener("mousedown", e  => { if (e.button === 1) e.preventDefault(); });
-        div.addEventListener("auxclick",  e  => { if (e.button === 1) onMiddleClick(paneId, line.numTs, div); });
+
         logEl.appendChild(div);
     });
     if (state.atBottom[paneId]) logEl.scrollTop = logEl.scrollHeight;

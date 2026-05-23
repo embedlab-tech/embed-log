@@ -81,4 +81,24 @@ test.describe('embed-log deterministic demo smoke', () => {
     expect(html).toMatch(/\[SENSOR_A\]/);
     expect(html).not.toContain('<h1>embed-log snippet</h1>');
   });
+
+test('DOM does not grow unbounded when tailing - lines are pruned past threshold', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+
+  // Wait long enough for many lines to accumulate (past MAX_RENDERED of 200)
+  // At ~3.5 lines/tick with 100ms tick, 200 lines = ~5.7s.  We wait 8s for margin.
+  await page.waitForTimeout(8000);
+
+  // DOM should be capped at roughly MAX_RENDERED (200) lines per pane
+  const aCount = await page.locator('#log-SENSOR_A .log-line').count();
+  const bCount = await page.locator('#log-SENSOR_B .log-line').count();
+  expect(aCount).toBeLessThanOrEqual(210);
+  expect(bCount).toBeLessThanOrEqual(210);
+
+  // Lines should still be arriving (not stuck)
+  await expect(page.locator('#log-SENSOR_A')).toContainText('TEST src=SENSOR_A');
 });
+
+});
+
