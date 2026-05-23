@@ -3,10 +3,21 @@ import { onLineClick } from './lines.js';
 import { exportHtmlSnapshot } from './export.js';
 
 // ---------------------------------------------------------------------------
-// Line selection + copy
+// Line selection + copy / export actions
 //
-// Copy       -> copies only current selection to system clipboard.
-// Clipboard add -> appends selection to internal buffer (peek/copy-all via 📋).
+// Two explicit scopes (toggled per-pane overlay):
+//   Exact   → only the user-selected lines in the active pane
+//   Context → selected lines + synchronized lines from all panes
+//
+// Primary actions:
+//   Copy         (respects current scope)
+//   Download raw (respects current scope)
+//
+// Secondary actions (accessible via More ··· dropdown):
+//   Export HTML  (respects current scope)
+//   Add to clipboard (respects current scope)
+//
+// Keyboard Ctrl+C / Cmd+C always copies exact selection (predictable).
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -65,7 +76,7 @@ import { exportHtmlSnapshot } from './export.js';
 })();
 
 // ---------------------------------------------------------------------------
-// Inject per-pane copy actions
+// Inject per-pane selection actions (scope toggle + actions)
 // ---------------------------------------------------------------------------
 export function _selectionSetupPane(id) {
     const body = document.querySelector(`#pane-${id} .pane-body`);
@@ -75,46 +86,78 @@ export function _selectionSetupPane(id) {
     wrap.className = "copy-actions";
     wrap.id = "copy-actions-" + id;
 
-    const addBtn = document.createElement("button");
-    addBtn.className = "copy-btn";
-    addBtn.id = "copy-add-" + id;
-    addBtn.textContent = "Clipboard add";
-    addBtn.title = "Append selected lines from this pane to internal clipboard buffer";
-    addBtn.addEventListener("click", e => { e.stopPropagation(); _addSelectedToBuffer(id); });
+    // Scope toggle
+    const scopeRow = document.createElement("div");
+    scopeRow.className = "scope-row";
+
+    const scopeExact = document.createElement("button");
+    scopeExact.className = "scope-btn active";
+    scopeExact.id = "scope-exact-" + id;
+    scopeExact.textContent = "Exact";
+    scopeExact.title = "Only selected lines in this pane";
+    scopeExact.addEventListener("click", e => { e.stopPropagation(); _setScope(id, "exact"); });
+
+    const scopeContext = document.createElement("button");
+    scopeContext.className = "scope-btn";
+    scopeContext.id = "scope-context-" + id;
+    scopeContext.textContent = "Context";
+    scopeContext.title = "Selected lines + synchronized lines from all panes";
+    scopeContext.addEventListener("click", e => { e.stopPropagation(); _setScope(id, "context"); });
+
+    scopeRow.appendChild(scopeExact);
+    scopeRow.appendChild(scopeContext);
+
+    // Primary action row
+    const actionRow = document.createElement("div");
+    actionRow.className = "action-row";
 
     const copyBtn = document.createElement("button");
     copyBtn.className = "copy-btn";
     copyBtn.id = "copy-" + id;
-    copyBtn.textContent = "Copy";
-    copyBtn.title = "Copy selected lines from this pane to system clipboard";
-    copyBtn.addEventListener("click", e => { e.stopPropagation(); _copySelectedDirect(id); });
+    copyBtn.addEventListener("click", e => { e.stopPropagation(); _copy(id); });
 
-    const rangeCopyBtn = document.createElement("button");
-    rangeCopyBtn.className = "copy-btn";
-    rangeCopyBtn.id = "copy-range-" + id;
-    rangeCopyBtn.textContent = "Copy range";
-    rangeCopyBtn.title = "Copy synchronized raw snippet from all panes in this selected time range";
-    rangeCopyBtn.addEventListener("click", e => { e.stopPropagation(); _copyRangeRaw(id); });
+    const rawBtn = document.createElement("button");
+    rawBtn.className = "copy-btn";
+    rawBtn.id = "download-raw-" + id;
+    rawBtn.addEventListener("click", e => { e.stopPropagation(); _downloadRaw(id); });
 
-    const rangeRawBtn = document.createElement("button");
-    rangeRawBtn.className = "copy-btn";
-    rangeRawBtn.id = "download-range-raw-" + id;
-    rangeRawBtn.textContent = "Raw file";
-    rangeRawBtn.title = "Download synchronized raw snippet from all panes in this selected time range";
-    rangeRawBtn.addEventListener("click", e => { e.stopPropagation(); _downloadRangeRaw(id); });
+    // More ··· toggle
+    const moreToggle = document.createElement("button");
+    moreToggle.className = "copy-btn more-toggle";
+    moreToggle.id = "more-toggle-" + id;
+    moreToggle.textContent = "\u00B7\u00B7\u00B7";
+    moreToggle.title = "More actions";
+    moreToggle.addEventListener("click", e => { e.stopPropagation(); _toggleMore(id); });
 
-    const rangeHtmlBtn = document.createElement("button");
-    rangeHtmlBtn.className = "copy-btn";
-    rangeHtmlBtn.id = "download-range-html-" + id;
-    rangeHtmlBtn.textContent = "HTML snippet";
-    rangeHtmlBtn.title = "Download a self-contained HTML snippet for this selected time range";
-    rangeHtmlBtn.addEventListener("click", e => { e.stopPropagation(); _downloadRangeHtml(id); });
+    // Secondary actions dropdown
+    const moreDropdown = document.createElement("div");
+    moreDropdown.className = "more-dropdown";
+    moreDropdown.id = "more-dropdown-" + id;
 
-    wrap.appendChild(addBtn);
-    wrap.appendChild(copyBtn);
-    wrap.appendChild(rangeCopyBtn);
-    wrap.appendChild(rangeRawBtn);
-    wrap.appendChild(rangeHtmlBtn);
+    const htmlBtn = document.createElement("button");
+    htmlBtn.className = "copy-btn";
+    htmlBtn.id = "export-html-" + id;
+    htmlBtn.textContent = "Export HTML";
+    htmlBtn.title = "Export selection to self-contained HTML file";
+    htmlBtn.addEventListener("click", e => { e.stopPropagation(); _exportHtml(id); });
+
+    const clipAddBtn = document.createElement("button");
+    clipAddBtn.className = "copy-btn";
+    clipAddBtn.id = "clip-add-" + id;
+    clipAddBtn.textContent = "Add to clipboard";
+    clipAddBtn.title = "Append selected lines to internal clipboard buffer";
+    clipAddBtn.addEventListener("click", e => { e.stopPropagation(); _addSelectedToBuffer(id); });
+
+    moreDropdown.appendChild(htmlBtn);
+    moreDropdown.appendChild(clipAddBtn);
+
+    actionRow.appendChild(copyBtn);
+    actionRow.appendChild(rawBtn);
+    actionRow.appendChild(moreToggle);
+    actionRow.appendChild(moreDropdown);
+
+    wrap.appendChild(scopeRow);
+    wrap.appendChild(actionRow);
     body.appendChild(wrap);
 }
 PANES.forEach(_selectionSetupPane);
@@ -124,26 +167,49 @@ PANES.forEach(_selectionSetupPane);
 // ---------------------------------------------------------------------------
 function _stripHtml(str) { return str.replace(/<[^>]+>/g, ""); }
 
-function _syncCopyBtn(paneId) {
+function _setScope(paneId, scope) {
+    state.selectionScope = scope;
+    PANES.forEach(id => {
+        const eBtn = document.getElementById("scope-exact-" + id);
+        const cBtn = document.getElementById("scope-context-" + id);
+        if (eBtn) eBtn.classList.toggle("active", scope === "exact");
+        if (cBtn) cBtn.classList.toggle("active", scope === "context");
+    });
+    _syncSelectionActions(paneId);
+}
+
+function _toggleMore(paneId) {
+    const dd = document.getElementById("more-dropdown-" + paneId);
+    if (!dd) return;
+    const isOpen = dd.classList.contains("open");
+    PANES.forEach(id => {
+        document.getElementById("more-dropdown-" + id)?.classList.remove("open");
+    });
+    if (!isOpen) dd.classList.add("open");
+}
+
+function _closeAllMore() {
+    PANES.forEach(id => {
+        document.getElementById("more-dropdown-" + id)?.classList.remove("open");
+    });
+}
+
+function _syncSelectionActions(paneId) {
     const wrap = document.getElementById("copy-actions-" + paneId);
-    const addBtn = document.getElementById("copy-add-" + paneId);
     const copyBtn = document.getElementById("copy-" + paneId);
-    const rangeCopyBtn = document.getElementById("copy-range-" + paneId);
-    const rangeRawBtn = document.getElementById("download-range-raw-" + paneId);
-    const rangeHtmlBtn = document.getElementById("download-range-html-" + paneId);
-    if (!wrap || !addBtn || !copyBtn) return;
+    const rawBtn = document.getElementById("download-raw-" + paneId);
+    if (!wrap || !copyBtn) return;
 
     const count = state.selected[paneId].size;
     const visible = count > 0;
     wrap.classList.toggle("visible", visible);
-    wrap.querySelectorAll(".copy-btn").forEach(btn => btn.classList.toggle("visible", visible));
+    wrap.querySelectorAll(".copy-btn, .scope-btn, .more-toggle").forEach(el =>
+        el.classList.toggle("visible", visible)
+    );
 
     if (visible) {
-        addBtn.textContent = `Clipboard add (${count})`;
         copyBtn.textContent = `Copy (${count})`;
-        if (rangeCopyBtn) rangeCopyBtn.textContent = "Copy range";
-        if (rangeRawBtn) rangeRawBtn.textContent = "Raw file";
-        if (rangeHtmlBtn) rangeHtmlBtn.textContent = "HTML snippet";
+        rawBtn.textContent = `Download raw`;
     }
 }
 
@@ -153,7 +219,7 @@ function _applySelection(paneId) {
     Array.from(logEl.children).forEach((div, i) =>
         div.classList.toggle("selected", sel.has(i))
     );
-    _syncCopyBtn(paneId);
+    _syncSelectionActions(paneId);
 }
 
 function _selectIndexRange(paneId, startIdx, endIdx) {
@@ -182,7 +248,7 @@ function _clearAllSelections() {
             state.selected[id] = new Set();
             _applySelection(id);
         }
-        _syncCopyBtn(id);
+        _syncSelectionActions(id);
     });
 }
 
@@ -264,6 +330,17 @@ function _rangeBoundsLabel(entries) {
     return `${first}_to_${last}`;
 }
 
+function _rangeBoundsLabelExact(paneId) {
+    const sel = state.selected[paneId];
+    if (!sel?.size) return "snippet";
+    const lines = state.rawLines[paneId] || [];
+    const indices = Array.from(sel).sort((a, b) => a - b);
+    const first = lines[indices[0]]?.ts;
+    const last = lines[indices[indices.length - 1]]?.ts;
+    if (!first || !last) return "snippet";
+    return `${first}_to_${last}`;
+}
+
 function _escapeRegExp(str) {
     return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -271,9 +348,6 @@ function _escapeRegExp(str) {
 function _snippetMessageText(entry) {
     let text = _linePlain(entry.line).trim();
     const sourcePrefix = new RegExp(`^\\[${_escapeRegExp(entry.paneId)}\\]\\s*`);
-    // Demo/UDP logs can already contain their own timestamp/source prefix.
-    // The merged snippet adds one normalized prefix, so strip duplicated ones
-    // only when they are unambiguous.
     for (let i = 0; i < 4; i++) {
         const before = text;
         text = text
@@ -313,7 +387,7 @@ function _formatSelectionBlock(paneId, indices) {
 }
 
 // ---------------------------------------------------------------------------
-// Clipboard accumulation buffer (only via "Clipboard add")
+// Clipboard accumulation buffer
 // ---------------------------------------------------------------------------
 let _clipBuffer = "";
 let _clipLineCount = 0;
@@ -325,7 +399,7 @@ function _updateClipIndicator() {
     if (!el) return;
     el.style.display = _clipLineCount > 0 ? "" : "none";
     const span = el.querySelector(".clip-count");
-    if (span) span.textContent = `📋 ${_clipLineCount} lines`;
+    if (span) span.textContent = `\uD83D\uDCCB ${_clipLineCount} lines`;
     const peekBtn = document.getElementById("clip-peek-btn");
     if (peekBtn) peekBtn.disabled = _clipLineCount <= 0;
 }
@@ -392,79 +466,150 @@ function _toggleClipPeek() {
 }
 
 // ---------------------------------------------------------------------------
-// Copy actions
+// Scope-aware action handlers
 // ---------------------------------------------------------------------------
-function _addSelectedToBuffer(paneId) {
-    const sel = state.selected[paneId];
-    if (!sel.size) return;
 
-    const indices = Array.from(sel).sort((a, b) => a - b);
-    const text = _formatSelectionBlock(paneId, indices);
-    if (!text) return;
-
+function _addToBuffer(paneId, text, count) {
     const isFirst = _clipBuffer === "";
     _clipBuffer += (isFirst ? "" : "\n\n\n\n") + text;
-    _clipLineCount += sel.size;
-
+    _clipLineCount += count;
     _updateClipIndicator();
     _renderClipPeek();
-
-    const btn = document.getElementById("copy-add-" + paneId);
-    if (!btn) return;
-    const prev = btn.textContent;
-    btn.textContent = `Added (${_clipLineCount})`;
-    setTimeout(() => { btn.textContent = prev; _syncCopyBtn(paneId); }, 900);
 }
 
-function _copySelectedDirect(paneId) {
+function _flashButton(id, text, restoreMs = 900) {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    const prev = btn.textContent;
+    btn.textContent = text;
+    setTimeout(() => { btn.textContent = prev; _syncSelectionActions(btn.id.replace(/^.+-(?=\w+$)/, "")); }, restoreMs);
+}
+
+// ---------------------------------------------------------------------------
+// Copy — scope-aware
+// ---------------------------------------------------------------------------
+function _copy(paneId) {
+    if (state.selectionScope === "context") return _copyContext(paneId);
+    return _copyExact(paneId);
+}
+
+function _copyExact(paneId) {
     const sel = state.selected[paneId];
     if (!sel.size) return;
-
     const indices = Array.from(sel).sort((a, b) => a - b);
     const text = _formatSelectionBlock(paneId, indices);
     if (!text) return;
-
     _copyText(text).then(() => {
         const btn = document.getElementById("copy-" + paneId);
         if (!btn) return;
         const prev = btn.textContent;
         btn.textContent = "Copied";
-        setTimeout(() => { btn.textContent = prev; _syncCopyBtn(paneId); }, 900);
+        setTimeout(() => { btn.textContent = prev; _syncSelectionActions(paneId); }, 900);
     }).catch(() => {});
 }
 
-function _copyRangeRaw(paneId) {
+function _copyContext(paneId) {
     const entries = _collectRangeEntries(paneId);
     const text = _formatRangeRaw(entries);
     if (!text) return;
     _copyText(text).then(() => {
-        const btn = document.getElementById("copy-range-" + paneId);
+        const btn = document.getElementById("copy-" + paneId);
         if (!btn) return;
         const prev = btn.textContent;
         btn.textContent = "Copied";
-        setTimeout(() => { btn.textContent = prev; _syncCopyBtn(paneId); }, 900);
+        setTimeout(() => { btn.textContent = prev; _syncSelectionActions(paneId); }, 900);
     }).catch(() => {});
 }
 
-function _downloadRangeRaw(paneId) {
+// ---------------------------------------------------------------------------
+// Download raw — scope-aware
+// ---------------------------------------------------------------------------
+function _downloadRaw(paneId) {
+    if (state.selectionScope === "context") return _downloadRawContext(paneId);
+    return _downloadRawExact(paneId);
+}
+
+function _downloadRawExact(paneId) {
+    const sel = state.selected[paneId];
+    if (!sel.size) return;
+    const indices = Array.from(sel).sort((a, b) => a - b);
+    const text = _formatSelectionBlock(paneId, indices);
+    if (!text) return;
+    const label = _rangeBoundsLabelExact(paneId);
+    _downloadText(`embed-log-exact-${_safeFilePart(label)}.log`, text + "\n", "text/plain");
+}
+
+function _downloadRawContext(paneId) {
     const entries = _collectRangeEntries(paneId);
     const text = _formatRangeRaw(entries);
     if (!text) return;
-    const name = `embed-log-snippet-${_safeFilePart(_rangeBoundsLabel(entries))}.log`;
-    _downloadText(name, text + "\n", "text/plain");
+    const label = _rangeBoundsLabel(entries);
+    _downloadText(`embed-log-snippet-${_safeFilePart(label)}.log`, text + "\n", "text/plain");
 }
 
-function _downloadRangeHtml(paneId) {
-    const entries = _collectRangeEntries(paneId);
-    if (!entries.length) return;
-    const btn = document.getElementById("download-range-html-" + paneId);
-    exportHtmlSnapshot({
-        button: btn,
-        logData: _buildRangeLogData(entries),
-        filenamePrefix: `embed-log-snippet-${_safeFilePart(_rangeBoundsLabel(entries))}`,
-        title: `snippet ${_rangeBoundsLabel(entries)}`,
-        activeTab: state.activeTab,
-    });
+// ---------------------------------------------------------------------------
+// Export HTML — scope-aware (secondary action)
+// ---------------------------------------------------------------------------
+function _exportHtml(paneId) {
+    const sel = state.selected[paneId];
+    if (!sel.size) return;
+    const btn = document.getElementById("export-html-" + paneId);
+
+    if (state.selectionScope === "context") {
+        const entries = _collectRangeEntries(paneId);
+        if (!entries.length) return;
+        const label = _rangeBoundsLabel(entries);
+        exportHtmlSnapshot({
+            button: btn,
+            logData: _buildRangeLogData(entries),
+            filenamePrefix: `embed-log-snippet-${_safeFilePart(label)}`,
+            title: `snippet ${label}`,
+            activeTab: state.activeTab,
+        });
+    } else {
+        const indices = Array.from(sel).sort((a, b) => a - b);
+        const entries = indices.map(i => ({
+            paneId,
+            idx: i,
+            line: state.rawLines[paneId][i],
+        }));
+        const label = _rangeBoundsLabelExact(paneId);
+        exportHtmlSnapshot({
+            button: btn,
+            logData: _buildRangeLogData(entries),
+            filenamePrefix: `embed-log-exact-${_safeFilePart(label)}`,
+            title: `exact ${label}`,
+            activeTab: state.activeTab,
+        });
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Add to clipboard — scope-aware (secondary action)
+// ---------------------------------------------------------------------------
+function _addSelectedToBuffer(paneId) {
+    const sel = state.selected[paneId];
+    if (!sel.size) return;
+
+    let text, count;
+    if (state.selectionScope === "context") {
+        const entries = _collectRangeEntries(paneId);
+        text = _formatRangeRaw(entries);
+        count = entries.length;
+    } else {
+        const indices = Array.from(sel).sort((a, b) => a - b);
+        text = _formatSelectionBlock(paneId, indices);
+        count = sel.size;
+    }
+    if (!text) return;
+
+    _addToBuffer(paneId, text, count);
+
+    const btn = document.getElementById("clip-add-" + paneId);
+    if (!btn) return;
+    const prev = btn.textContent;
+    btn.textContent = `Added (${_clipLineCount})`;
+    setTimeout(() => { btn.textContent = prev; _syncSelectionActions(paneId); }, 900);
 }
 
 // ---------------------------------------------------------------------------
@@ -557,6 +702,9 @@ document.addEventListener("click", e => {
     const inSelectionUi = e.target.closest(".copy-actions");
     if (_isClipPeekOpen() && !inClipUi) _closeClipPeek();
 
+    // Close More dropdowns on click outside
+    if (!inSelectionUi) _closeAllMore();
+
     if (!PANES.some(id => state.selected[id]?.size > 0)) return;
     if (inClipUi || inSelectionUi) return;
     _clearAllSelections();
@@ -568,7 +716,7 @@ document.addEventListener("click", e => {
 document.addEventListener("keydown", e => {
     if ((e.ctrlKey || e.metaKey) && e.key === "c") {
         const pane = PANES.find(id => state.selected[id].size > 0);
-        if (pane) { _copySelectedDirect(pane); e.preventDefault(); }
+        if (pane) { _copyExact(pane); e.preventDefault(); }
         return;
     }
     if (e.key === "Escape") {
@@ -576,6 +724,7 @@ document.addEventListener("keydown", e => {
             _closeClipPeek();
             return;
         }
+        _closeAllMore();
         _clearAllSelections();
     }
 });

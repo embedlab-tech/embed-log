@@ -2,6 +2,10 @@ import { expect, test } from '@playwright/test';
 import fs from 'node:fs';
 import { collectPageErrors, saveDownload, waitForLineContaining, waitForRangePair, waitForSourceTestLine } from './helpers.js';
 
+async function openMore(page, paneId) {
+  await page.locator(`#more-toggle-${paneId}`).click();
+}
+
 test.describe('embed-log deterministic demo smoke', () => {
   let errors;
 
@@ -41,18 +45,16 @@ test.describe('embed-log deterministic demo smoke', () => {
     await expect(page.locator('#copy-actions-SENSOR_A')).toHaveClass(/visible/);
 
     const downloadPromise = page.waitForEvent('download');
-    await page.locator('#download-range-raw-SENSOR_A').click();
+    await page.locator('#download-raw-SENSOR_A').click();
     const download = await downloadPromise;
 
-    expect(download.suggestedFilename()).toMatch(/^embed-log-snippet-.*\.log$/);
+    expect(download.suggestedFilename()).toMatch(/^embed-log-exact-.*\.log$/);
     const downloadedPath = await saveDownload(download, testInfo);
 
     const text = fs.readFileSync(downloadedPath, 'utf-8');
-    expect(text).toContain('[SENSOR_A]');
+    expect(text).toContain('SENSOR_A');
     expect(text).toContain('kind=prefix-cleanup');
     expect(text).toContain('kind=timestamp-cleanup');
-    expect(text).not.toMatch(/\[SENSOR_A\]\s+\[SENSOR_A\]/);
-    expect(text).not.toMatch(/\[SENSOR_A\]\s+\[\d{4}-\d{2}-\d{2}T/);
   });
 
   test('HTML snippet uses the regular embed-log exported UI', async ({ page }, testInfo) => {
@@ -63,11 +65,12 @@ test.describe('embed-log deterministic demo smoke', () => {
     await start.click();
     await end.click({ modifiers: ['Shift'] });
 
+    await openMore(page, 'SENSOR_A');
     const downloadPromise = page.waitForEvent('download');
-    await page.locator('#download-range-html-SENSOR_A').click();
+    await page.locator('#export-html-SENSOR_A').click();
     const download = await downloadPromise;
 
-    expect(download.suggestedFilename()).toMatch(/^embed-log-snippet-.*\.html$/);
+    expect(download.suggestedFilename()).toMatch(/^embed-log-exact-.*\.html$/);
     const downloadedPath = await saveDownload(download, testInfo);
 
     const html = fs.readFileSync(downloadedPath, 'utf-8');

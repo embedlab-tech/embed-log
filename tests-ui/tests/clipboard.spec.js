@@ -8,6 +8,15 @@ async function readClipboard(page) {
   return page.evaluate(() => navigator.clipboard.readText());
 }
 
+async function setScope(page, paneId, scope) {
+  const btn = page.locator(`#scope-${scope}-${paneId}`);
+  await btn.click();
+}
+
+async function openMore(page, paneId) {
+  await page.locator(`#more-toggle-${paneId}`).click();
+}
+
 test.describe('clipboard UX', () => {
   let errors;
 
@@ -20,7 +29,7 @@ test.describe('clipboard UX', () => {
     expect(errors).toEqual([]);
   });
 
-  test('Copy range clipboard content matches downloaded raw file content', async ({ page }, testInfo) => {
+  test('context copy matches downloaded context raw file content', async ({ page }, testInfo) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
 
@@ -28,11 +37,14 @@ test.describe('clipboard UX', () => {
     await start.click();
     await end.click({ modifiers: ['Shift'] });
 
-    await page.locator('#copy-range-SENSOR_A').click();
+    // Switch to context scope
+    await setScope(page, 'SENSOR_A', 'context');
+
+    await page.locator('#copy-SENSOR_A').click();
     const copied = (await readClipboard(page)).trimEnd();
 
     const downloadPromise = page.waitForEvent('download');
-    await page.locator('#download-range-raw-SENSOR_A').click();
+    await page.locator('#download-raw-SENSOR_A').click();
     const download = await downloadPromise;
     const rawPath = await saveDownload(download, testInfo);
     const raw = fs.readFileSync(rawPath, 'utf-8').trimEnd();
@@ -40,7 +52,7 @@ test.describe('clipboard UX', () => {
     expect(copied).toBe(raw);
   });
 
-  test('platform shortcut copies selected range', async ({ page }) => {
+  test('platform shortcut copies exact selection', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
 
@@ -63,12 +75,14 @@ test.describe('clipboard UX', () => {
     const rangeA = await waitForRangePair(page, 'SENSOR_A', 'kind=prefix-cleanup', 'kind=timestamp-cleanup');
     await rangeA.start.click();
     await rangeA.end.click({ modifiers: ['Shift'] });
-    await page.locator('#copy-add-SENSOR_A').click();
+    await openMore(page, 'SENSOR_A');
+    await page.locator('#clip-add-SENSOR_A').click();
 
     const rangeB = await waitForRangePair(page, 'SENSOR_B', 'kind=prefix-cleanup', 'kind=timestamp-cleanup');
     await rangeB.start.click();
     await rangeB.end.click({ modifiers: ['Shift'] });
-    await page.locator('#copy-add-SENSOR_B').click();
+    await openMore(page, 'SENSOR_B');
+    await page.locator('#clip-add-SENSOR_B').click();
 
     await expect(page.locator('#clip-indicator')).toBeVisible();
     await expect(page.locator('#clip-indicator .clip-count')).toContainText(/lines/i);

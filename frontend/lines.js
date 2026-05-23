@@ -141,9 +141,9 @@ export function clearPane(paneId) {
     state.atBottom[paneId] = true;
     updateJumpBtn(paneId);
     // Hide copy-selection actions if selection.js has added them
-    document.getElementById("copy-" + paneId)?.classList.remove("visible");
-    document.getElementById("copy-add-" + paneId)?.classList.remove("visible");
     document.getElementById("copy-actions-" + paneId)?.classList.remove("visible");
+    // Close any open More dropdown for this pane
+    document.getElementById("more-dropdown-" + paneId)?.classList.remove("open");
     window.__embedLogSchedulePersist?.();
 }
 

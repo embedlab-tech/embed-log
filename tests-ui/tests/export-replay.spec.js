@@ -2,6 +2,10 @@ import { expect, test } from '@playwright/test';
 import fs from 'node:fs';
 import { collectPageErrors, openHtmlFile, saveDownload, waitForLineContaining, waitForRangePair, waitForSourceTestLine } from './helpers.js';
 
+async function openMore(page, paneId) {
+  await page.locator(`#more-toggle-${paneId}`).click();
+}
+
 test.describe('HTML export replay', () => {
   let errors;
 
@@ -21,9 +25,11 @@ test.describe('HTML export replay', () => {
     await start.click();
     await end.click({ modifiers: ['Shift'] });
 
+    await openMore(page, 'SENSOR_A');
     const downloadPromise = page.waitForEvent('download');
-    await page.locator('#download-range-html-SENSOR_A').click();
+    await page.locator('#export-html-SENSOR_A').click();
     const download = await downloadPromise;
+    expect(download.suggestedFilename()).toMatch(/^embed-log-exact-.*\.html$/);
     const htmlPath = await saveDownload(download, testInfo);
 
     const snippet = await openHtmlFile(browser, htmlPath);
