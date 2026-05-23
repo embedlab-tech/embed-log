@@ -4,47 +4,26 @@ Prioritized frontend/UI backlog distilled from current UI notes and E2E backlog.
 
 ## High priority
 
-1. Simplify selection/share UX around explicit scope
-   - revisit overlapping selection actions:
-     - `Clipboard add`
-     - `Copy`
-     - `Copy range`
-     - `Raw file`
-     - `HTML snippet`
-   - redesign around user intent instead of transport/mechanism
-   - make export scope explicit with two modes:
-     - `Exact` / selected only
-     - `With context` / selected + synchronized context
-   - default to exact selection so the UI never sends more lines than the user explicitly selected unless they opt in
-   - reduce primary actions to likely common workflows:
-     - `Copy`
-     - `Download raw`
-   - demote advanced/specialized actions to secondary UI:
-     - clipboard buffer / `Clipboard add`
-     - HTML snippet export
-   - remove or rename ambiguous actions such as bare `Copy` vs `Copy range`
-   - define clear behavior for:
-     - copying exact selected lines,
-     - copying selected + synchronized context,
-     - downloading exact raw text,
-     - downloading raw text with context,
-     - exporting exact HTML,
-     - exporting HTML with context
-   - validate against real user goals:
-     - share exact selected logs with another human,
-     - send exact selected logs to an agent app,
-     - explicitly opt into cross-pane debugging context when desired
+1. ~~Simplify selection/share UX around explicit scope~~ **Done**
+   - scope toggle (Exact / Context) with shared state across panes
+   - Copy and Download raw as primary actions
+   - Export HTML and Add to clipboard demoted to secondary menu (More ···)
+   - keyboard shortcut Ctrl/Cmd+C always copies exact (predictable)
+   - source labels (`[SENSOR_A]`) shown consistently in all output formats
 
-2. Cross-tab sync persistence
+2. ~~Cross-tab sync persistence~~ **Works — click syncs, tab switch follows. E2E coverage optional.**
    - click in one pane/tab,
    - switch tabs,
    - verify sync lands near same tick in the other tab.
 
-3. Invalid regex resilience
-   - invalid filter input must not break rendering or interaction.
+3. ~~Invalid regex resilience~~ **Done**
+   - invalid filter input does not break the UI, shows input error state
+   - previous valid filter is preserved while user fixes the regex
+   - clearing invalid input restores normal state
 
-4. Current HTML freshness
-   - repeated save/export should reflect newer log content.
+4. ~~Current HTML freshness~~ **Done**
+   - repeated Export captures more log lines on each invocation
+   - E2E test verifies second export has more `[SENSOR_A]...TEST` lines than the first
 
 5. Stronger session-rotation stale-line guard
    - verify multiple old lines are gone after rotation,
@@ -67,17 +46,17 @@ Prioritized frontend/UI backlog distilled from current UI notes and E2E backlog.
 9. Clear-cache UX verification
    - layout/filter/session cache should reset cleanly.
 
-10. UNWRAP virtual single-pane presentation mode
-   - frontend-only alternate presentation for small displays,
-   - virtually expand grouped config tabs into one pane per page/tab,
-   - preserve backend config as the canonical layout source,
-   - do not mutate persisted backend config to achieve the mode.
+10. ~~UNWRAP virtual single-pane presentation mode~~ **Done**
+    - toolbar toggle unwraps grouped tabs into one tab per pane
+    - preserves log content across toggle
+    - no "+" button in unwrap mode
+    - config (TABS/PANES) is never mutated
 
 ## Lower priority / future work
 
-10. Pane swap persistence across reload
-11. Malformed import/snapshot handling
-12. Additional frontend helper/unit tests if a dedicated harness is introduced
+11. Pane swap persistence across reload
+12. Malformed import/snapshot handling
+13. Additional frontend helper/unit tests if a dedicated harness is introduced
 
 ## Already covered by E2E suite
 
@@ -89,6 +68,9 @@ Prioritized frontend/UI backlog distilled from current UI notes and E2E backlog.
 - filter by deterministic marker
 - escape clears selection
 - clipboard workflow basics
+- scope-aware selection (Exact/Context copy, download, HTML export, clipboard add)
+- per-pane wrap toggle
+- UNWRAP toggle (per-pane tabs, log preservation, reversible)
 - backend session HTML / current HTML path
 - clean session rotation basics
 - sessions popup basics

@@ -1,5 +1,5 @@
 import { state, TABS, PANES } from './state.js';
-import { _linesSetupPane } from './lines.js';
+import { _linesSetupPane, repopulatePaneLogs } from './lines.js';
 import { _uiSetupPane, _uiSetupTxPane } from './ui.js';
 import { _selectionSetupPane } from './selection.js';
 import { renderTabBar, switchTab } from './tabs.js';
@@ -95,6 +95,91 @@ export function createDynamicTab(label, paneId) {
     }
     if (paneId === undefined) paneId = "dyn-" + TABS.length;
     createTabWithPanes(label, [paneId], { switchTo: true });
+}
+
+// ---------------------------------------------------------------------------
+// Layout rebuild — used when toggling UNWRAP mode or restoring from cache.
+// Rebuilds the entire container from TABS/PANES state without losing log data.
+// ---------------------------------------------------------------------------
+export function rebuildLayout() {
+    const container = document.getElementById("container");
+    if (!container) return;
+    const activeBefore = state.activeTab;
+    container.innerHTML = "";
+
+    if (state.unwrap) {
+        // One tab per pane, full-width, no splitters
+        PANES.forEach((paneId, idx) => {
+            const tc = document.createElement("div");
+            tc.className = "tab-content";
+            tc.id = "u-tab-content-" + idx;
+            tc.style.display = idx === activeBefore ? "flex" : "none";
+            tc.innerHTML = `\
+        <div class="pane" id="pane-${paneId}">
+            <div class="pane-header">
+                <span class="pane-name">${_escHtml(paneId)}</span>
+                <button class="pane-wrap-btn" title="Toggle word wrap in this pane">Wrap</button>
+            </div>
+            <div class="filter-bar">
+                <input class="filter-input" data-pane="${paneId}" placeholder="Filter (regex)…">
+            </div>
+            <div class="pane-body">
+                <div class="log-area" id="log-${paneId}"></div>
+                <button class="jump-btn" id="jump-${paneId}">jump to bottom</button>
+            </div>
+            <div class="input-row">
+                <input class="serial-input" id="input-${paneId}" placeholder="Serial TX — press Enter to send" autocomplete="off">
+                <button class="send-btn" data-pane="${paneId}">Send</button>
+            </div>
+        </div>`;
+            container.appendChild(tc);
+        });
+    } else {
+        // Rebuild original grouped layout from TABS
+        TABS.forEach((tab, idx) => {
+            const tc = document.createElement("div");
+            tc.className = "tab-content";
+            tc.id = "tab-content-" + idx;
+            tc.style.display = idx === activeBefore ? "flex" : "none";
+            const parts = [];
+            tab.panes.forEach((paneId, pi) => {
+                if (pi > 0) parts.push('<div class="splitter"></div>');
+                parts.push(`\
+        <div class="pane" id="pane-${paneId}">
+            <div class="pane-header">
+                <span class="pane-name">${_escHtml(paneId)}</span>
+                <button class="pane-wrap-btn" title="Toggle word wrap in this pane">Wrap</button>
+            </div>
+            <div class="filter-bar">
+                <input class="filter-input" data-pane="${paneId}" placeholder="Filter (regex)…">
+            </div>
+            <div class="pane-body">
+                <div class="log-area" id="log-${paneId}"></div>
+                <button class="jump-btn" id="jump-${paneId}">jump to bottom</button>
+            </div>
+            <div class="input-row">
+                <input class="serial-input" id="input-${paneId}" placeholder="Serial TX — press Enter to send" autocomplete="off">
+                <button class="send-btn" data-pane="${paneId}">Send</button>
+            </div>
+        </div>`);
+            });
+            tc.innerHTML = parts.join("\n");
+            container.appendChild(tc);
+        });
+    }
+
+    // Re-wire per-pane handlers and repopulate logs
+    PANES.forEach(paneId => {
+        _linesSetupPane(paneId);
+        _uiSetupPane(paneId);
+        _uiSetupTxPane(paneId);
+        _selectionSetupPane(paneId);
+    });
+    PANES.forEach(paneId => repopulatePaneLogs(paneId));
+
+    renderTabBar();
+    const targetTab = activeBefore < (state.unwrap ? PANES.length : TABS.length) ? activeBefore : 0;
+    switchTab(targetTab);
 }
 
 

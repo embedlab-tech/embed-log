@@ -106,5 +106,66 @@ test.describe('layout and time synchronization', () => {
     // SENSOR_A SHOULD have wrap
     await expect(page.locator('#log-SENSOR_A')).toHaveClass(/wrap/);
     await expect(page.locator('#pane-SENSOR_A .pane-wrap-btn')).toHaveClass(/active/);
-  });
 });
+
+});
+test('UNWRAP toggle creates one tab per pane with pane names as labels', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+  await waitForSourceTestLine(page, 'SENSOR_A');
+
+  // Before unwrap: tabs are group labels
+  await expect(page.getByRole('button', { name: 'Simulated Devices', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Other Sensor', exact: true })).toBeVisible();
+
+  // Click UNWRAP
+  await page.locator('#btn-unwrap').click();
+  await expect(page.locator('#btn-unwrap')).toHaveClass(/active/);
+
+  // Now tabs are pane names
+  await page.getByRole('button', { name: 'SENSOR_A', exact: true }).click();
+  await page.getByRole('button', { name: 'SENSOR_B', exact: true }).click();
+  await page.getByRole('button', { name: 'SENSOR_C', exact: true }).click();
+
+  // Verify no "+" button in unwrap mode
+  await expect(page.locator('#tab-bar .tab-add')).toHaveCount(0);
+});
+
+test('UNWRAP preserves log content across toggle', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+  await waitForSourceTestLine(page, 'SENSOR_A');
+
+  // Click UNWRAP — verify logs still visible
+  await page.locator('#btn-unwrap').click();
+  await expect(page.locator('#log-SENSOR_A .log-line').first()).toBeVisible();
+  await expect(page.locator('#log-SENSOR_A')).toContainText('TEST src=SENSOR_A');
+
+  // Toggle back to grouped — verify logs still visible
+  await page.locator('#btn-unwrap').click();
+  await expect(page.locator('#btn-unwrap')).not.toHaveClass(/active/);
+  await expect(page.locator('#log-SENSOR_A').first()).toBeVisible();
+  await expect(page.locator('#log-SENSOR_A')).toContainText('TEST src=SENSOR_A');
+});
+
+test('UNWRAP mode shows full-width single pane and all panes exist', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+  await waitForSourceTestLine(page, 'SENSOR_A');
+  await waitForSourceTestLine(page, 'SENSOR_B');
+
+  await page.locator('#btn-unwrap').click();
+
+  // SENSOR_A and SENSOR_B are on separate tabs now
+  await page.getByRole('button', { name: 'SENSOR_A', exact: true }).click();
+  await expect(page.locator('#pane-SENSOR_A')).toBeVisible();
+  await expect(page.locator('#log-SENSOR_A')).toContainText('TEST src=SENSOR_A');
+
+  await page.getByRole('button', { name: 'SENSOR_B', exact: true }).click();
+  await expect(page.locator('#pane-SENSOR_B')).toBeVisible();
+  await expect(page.locator('#log-SENSOR_B')).toContainText('TEST src=SENSOR_B');
+
+  // Verify no splitters in unwrap mode (single pane per tab)
+  await expect(page.locator('#tab-content-0 .splitter')).toHaveCount(0);
+});
+

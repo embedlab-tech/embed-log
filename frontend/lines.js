@@ -157,6 +157,32 @@ document.getElementById("btn-clear").addEventListener("click", () => {
     PANES.forEach(clearPane);
 });
 
+
+// Rebuild DOM for a pane from stored state — used after layout rebuild (UNWRAP toggle)
+export function repopulatePaneLogs(paneId) {
+    const logEl = document.getElementById("log-" + paneId);
+    if (!logEl) return;
+    logEl.innerHTML = "";
+    const lines = state.rawLines[paneId] || [];
+    const rx = state.filters[paneId];
+    lines.forEach((line, idx) => {
+        const div = document.createElement("div");
+        div.dataset.ts  = line.ts;
+        div.dataset.idx = idx;
+        div.className   = _lineClass(line, idx, paneId);
+        if (matchesFilter(line, rx)) {
+            div.innerHTML = buildLineHtml(line, state.showTs, rx);
+        } else {
+            div.style.display = "none";
+        }
+        div.addEventListener("click",     () => onLineClick(paneId, line.numTs, div));
+        div.addEventListener("mousedown", e  => { if (e.button === 1) e.preventDefault(); });
+        div.addEventListener("auxclick",  e  => { if (e.button === 1) onMiddleClick(paneId, line.numTs, div); });
+        logEl.appendChild(div);
+    });
+    if (state.atBottom[paneId]) logEl.scrollTop = logEl.scrollHeight;
+    updateJumpBtn(paneId);
+}
 // ---------------------------------------------------------------------------
 // Sync
 // ---------------------------------------------------------------------------

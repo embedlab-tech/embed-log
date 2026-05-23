@@ -19,6 +19,7 @@ export const state = {
     highlighted: {},
     selected:    {},
     selectionScope:  'exact', // 'exact' or 'context'
+    unwrap:        false,
 };
 
 // Initialise per-pane state for every pane in the system

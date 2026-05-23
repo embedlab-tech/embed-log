@@ -24,21 +24,22 @@ This file is intentionally kept as a working UI test notebook for future test ad
 - Backend `Current HTML` flow is covered.
 - `Clean session` rotation basics are covered.
 - Sessions popup basics are covered.
+- Scope-aware selection (Exact/Context copy, download, HTML export, clipboard add) covered.
+- Per-pane wrap toggle covered.
+- UNWRAP single-pane mode (per-pane tabs, log preservation, toggle reversible) covered.
+- Cross-tab sync works (click syncs timestamp, tab switch follows).
+- Invalid regex resilience (enter `(` — UI stays responsive, shows error state, preserves previous filter).
+- Current HTML freshness (repeated Export captures more data on each invocation).
 
 ## Remaining backlog
 
-### 1. Cross-tab synchronization
+### 1. ~~Cross-tab synchronization~~ **Works — click syncs, tab switch follows.**
 
 - Click a line in `SENSOR_A`.
 - Switch to `Other Sensor`.
 - Assert `SENSOR_C` jumps/highlights near the same tick.
 
-### 2. Regex filter resilience
-
-- Enter an invalid regex such as `(`.
-- Assert UI remains responsive.
-- Assert logs still render.
-- Clear filter and verify normal behavior returns.
+### 2. ~~Regex filter resilience~~ **Done**
 
 ### 3. Sessions metadata depth
 
@@ -47,11 +48,7 @@ This file is intentionally kept as a working UI test notebook for future test ad
 - Assert `current` tag moves correctly.
 - Assert manifest/open-html links are valid for each row.
 
-### 4. Current HTML freshness
-
-- Save HTML once and capture a known tick in output.
-- Wait for newer logs and save again.
-- Assert reopened HTML includes newer tick data.
+### 4. ~~Current HTML freshness~~ **Done**
 
 ### 5. Export during active traffic
 
@@ -95,7 +92,7 @@ This file is intentionally kept as a working UI test notebook for future test ad
 - Snippet cleanup helper tests.
 - Range merge/sort helper tests.
 
-### 12. UNWRAP virtual single-tab mode
+### 12. ~~UNWRAP virtual single-tab mode~~ **Done**
 
 - Add a virtual UI mode that bypasses the current grouped tab view.
 - Render one page/tab per configured pane while preserving backend config as the source of truth.

@@ -1,6 +1,18 @@
 import { state, TABS, PANES } from './state.js';
 import { clearPane, rerenderPane } from './lines.js';
+import { rebuildLayout } from './tabcreate.js';
 
+
+
+// ---------------------------------------------------------------------------
+// Toolbar — UNWRAP toggle
+// ---------------------------------------------------------------------------
+document.getElementById("btn-unwrap")?.addEventListener("click", () => {
+    if (PANES.length === 0) return;  // no panes loaded yet
+    state.unwrap = !state.unwrap;
+    document.getElementById("btn-unwrap")?.classList.toggle("active", state.unwrap);
+    rebuildLayout();
+});
 
 // ---------------------------------------------------------------------------
 // Settings panel — clear cached session (localStorage restore cache)
@@ -545,7 +557,9 @@ export function _uiSetupPane(id) {
                     state.filters[id] = new RegExp(val, "i");
                     input.classList.remove("invalid");
                 } catch {
-                    state.filters[id] = null;
+                    // Keep the last valid filter while showing the error —
+                    // don't clear it, so the user can fix the regex without
+                    // losing their filtering context.
                     input.classList.add("invalid");
                 }
             }

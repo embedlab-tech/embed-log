@@ -176,6 +176,7 @@ export async function exportHtmlSnapshot(options = {}) {
     <button id="btn-clear"    title="Clear all panes">Clear</button>
     <button id="btn-export"   title="Export current session as a self-contained HTML file">Export HTML</button>
     <button id="btn-download-raw" title="Download all logs as merged raw text file">Download raw</button>
+    <button id="btn-unwrap"  title="Unwrap multi-pane tabs into single-pane tabs">Unwrap</button>
     <div class="sep"></div>
     <button id="btn-theme" title="Toggle light / dark theme">\uD83C\uDF19</button>
     <div id="ws-status" style="display:none"></div>
