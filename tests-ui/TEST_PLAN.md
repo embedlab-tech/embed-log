@@ -581,14 +581,14 @@ Why:
 - [x] Shift+Click selects range
 - [x] Raw file downloads cleaned merged snippet
 - [x] HTML snippet uses regular export UI
-- [ ] Open downloaded HTML snippet and verify layout/logs
-- [ ] Live pane layout/tab layout test
-- [ ] Time synchronization between panes
+- [x] Open downloaded HTML snippet and verify layout/logs
+- [x] Live pane layout/tab layout test
+- [x] Time synchronization between panes
 
 ### Phase 2 — Export confidence
 
-- [ ] Full toolbar `Export` download
-- [ ] Open full exported HTML and repeat layout/filter/selection tests
+- [x] Full toolbar `Export` download
+- [x] Open full exported HTML and repeat layout/filter/selection tests
 - [ ] Backend `Save HTML` / `Current HTML` flow
 
 ### Phase 3 — UX details
@@ -596,7 +596,7 @@ Why:
 - [ ] Drag selection
 - [ ] Clipboard direct copy
 - [ ] Clipboard add/peek/copy-all/clear
-- [ ] Escape clears selection
+- [x] Escape clears selection
 - [ ] Cmd/Ctrl+C copies selection
 
 ### Phase 4 — Session workflows

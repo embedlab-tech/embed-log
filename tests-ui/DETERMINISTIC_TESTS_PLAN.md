@@ -447,13 +447,13 @@ Allowlist only if absolutely necessary.
 
 # Implementation order after deterministic demo exists
 
-1. Convert current smoke tests to wait for known ticks.
-2. Add layout/tab test.
-3. Add raw snippet deterministic range test.
-4. Add HTML snippet open/replay test.
-5. Add time synchronization test.
-6. Add full Export open/replay test.
-7. Add filter and keyboard tests.
+1. [x] Convert current smoke tests to wait for deterministic payloads.
+2. [x] Add layout/tab test.
+3. [x] Add raw snippet deterministic range test.
+4. [x] Add HTML snippet open/replay test.
+5. [x] Add time synchronization test.
+6. [x] Add full Export open/replay test.
+7. [x] Add filter and keyboard tests.
 8. Add session rotation tests.
 
 ## Acceptance criteria for deterministic test suite
