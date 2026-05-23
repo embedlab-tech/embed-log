@@ -1,7 +1,17 @@
 import { expect, test } from '@playwright/test';
-import { lineTick, selectedLineTicks, visiblePaneNames, waitForLineContaining, waitForSourceTestLine } from './helpers.js';
+import { collectPageErrors, lineTick, selectedLineTicks, visiblePaneNames, waitForLineContaining, waitForSourceTestLine } from './helpers.js';
 
 test.describe('layout and time synchronization', () => {
+  let errors;
+
+  test.beforeEach(async ({ page }) => {
+    errors = collectPageErrors(page);
+  });
+
+  test.afterEach(async () => {
+    expect(errors).toEqual([]);
+  });
+
   test('demo tabs and pane order match backend config', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });

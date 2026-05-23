@@ -1,69 +1,50 @@
 # embed-log
 
-`embed-log` is a lightweight log aggregation server for embedded development and CI. It collects logs from UART/UDP sources, stores them in per-session artifacts, and streams them live to a browser UI.
+`embed-log` is a configurable log aggregation server for embedded development and CI.
 
-## Features
+It reads logs from UART and UDP sources, stores them in per-session artifacts, and streams them live to a browser UI.
 
-- log sources: **UART** and **UDP**
-- live browser UI over WebSocket
-- YAML-configured UI layout: tabs and panes per source
-- per-session logs and artifacts in `logs/<session_id>/`
-- automatic session export to `session.html`
-- clean session rotation from the UI (`Clean session` button)
-- session manifest: `manifest.json`
-- optional TCP ports for inject/TX and raw RX forwarding
-- CLI for config initialization, validation, and running the app
+## Get up to speed
 
-## Installation
+Read these in order:
+- `AGENTS.md` — fast repo orientation for humans and coding agents
+- `docs/ARCHITECTURE.md` — end-to-end system flow
+- `docs/BACKEND.md` / `docs/FRONTEND.md` — subsystem details
+- `docs/TESTING.md` — test strategy and commands
 
-```bash
-git clone <repo-url>
-cd embed-log
-./install.sh
-```
+## Install
 
-After installation, the command should be available globally:
+Developer setup:
 
 ```bash
-embed-log --help
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-If your shell cannot find it, open a new terminal window or refresh your `PATH`.
+## Run with a config file
 
-## Update / reinstall
-
-To update an existing installation, get the latest repository version and run the installer again:
+Validate first:
 
 ```bash
-cd embed-log
-git pull
-./install.sh
+embed-log validate --config embed-log.yml
 ```
 
-If you do not have the repository locally anymore, clone it again and run the installer:
+Run:
 
 ```bash
-git clone <repo-url>
-cd embed-log
-./install.sh
+embed-log run --config embed-log.yml
 ```
 
-After updating, force-refresh the browser UI to avoid using cached frontend files:
+UI default:
 
-- macOS: `Cmd + Shift + R`
-- Windows/Linux: `Ctrl + Shift + R` or `Ctrl + F5`
-
-This is especially important in Firefox, where old JavaScript/CSS files may remain cached after an update.
-
-## Configuration
-
-Copy the example config and adjust the ports/sources:
-
-```bash
-cp examples/embed-log.yml my-embed-log.yml
+```text
+http://127.0.0.1:8080/
 ```
 
-Example `my-embed-log.yml`:
+## Sample config
+
+The UI layout supports 1 or 2 panes per tab. A three-source setup therefore uses two tabs below.
 
 ```yaml
 version: 1
@@ -73,7 +54,7 @@ server:
   ws_port: 8080
   app_name: embed-log
   open_browser: false
-  verbosity: quiet
+  verbose: false
 
 logs:
   dir: logs/
@@ -81,122 +62,60 @@ logs:
 baudrate: 115200
 
 sources:
-  - name: DUT_UART
+  - name: FTDI_A
     type: uart
-    port: /dev/ttyUSB0
+    port: /dev/ttyFTDI_A
     inject_port: 5001
 
-  - name: SENSOR_A
+  - name: FTDI_B
+    type: uart
+    port: /dev/ttyFTDI_B
+    inject_port: 5002
+
+  - name: PYTEST
     type: udp
     port: 6000
-    inject_port: 5002
+    inject_port: 5003
 
 tabs:
   - label: Devices
-    panes: [DUT_UART, SENSOR_A]
-```
+    panes: [FTDI_A, FTDI_B]
 
-> For UART, set the correct port for your system, e.g. `/dev/ttyUSB0`, `/dev/tty.usbserial-*`, or `COM3`.
-
-## Running
-
-Optionally validate the config first:
-
-```bash
-embed-log validate --config my-embed-log.yml
-```
-
-Start the app:
-
-```bash
-embed-log --config my-embed-log.yml
-```
-
-The UI will be available at the address configured in YAML. By default:
-
-```text
-http://127.0.0.1:8080/
+  - label: Pytest
+    panes: [PYTEST]
 ```
 
 ## Useful commands
 
 ```bash
-# generate a starter config
+# create starter config
 embed-log init --output embed-log.yml
 
-# start and open the browser automatically
-embed-log --config my-embed-log.yml --open-browser
+# validate config
+embed-log validate --config embed-log.yml
 
-# show more runtime logs in the terminal
-embed-log --config my-embed-log.yml --verbosity events
+# run app
+embed-log run --config embed-log.yml
+
+# run bundled demo
+./run_demo.sh --no-browser
 ```
 
-## Parsing exported HTML
+## Testing
 
-If you received an exported `session.html`, convert it back into a session directory first:
+Backend tests:
 
 ```bash
-embed-log parse session.html --output parsed-session
+python3 -m unittest discover -s tests -v
 ```
 
-Then use slicing on the parsed session:
+UI tests:
 
 ```bash
-embed-log slice parsed-session --last 10m
+cd tests-ui
+npm test
 ```
 
-## Slicing logs for analysis
+## More docs
 
-Use `embed-log slice` to extract smaller, timestamp-based log files from a session. If you do not pass a session directory, the newest session from `logs.dir` in the config is used.
-
-```bash
-# last 10 minutes from the newest session
-embed-log slice --config my-embed-log.yml --last 10m
-
-# last 10 minutes from a specific session
-embed-log slice logs/<session_id> --last 10m
-
-# around a specific timestamp
-embed-log slice --config my-embed-log.yml \
-  --around "2026-05-14T12:15:30+02:00" \
-  --before 2m \
-  --after 5m
-
-# context around matching lines
-embed-log slice --config my-embed-log.yml --grep "ERROR" --before 2m --after 2m
-
-# only selected sources/panes
-embed-log slice --config my-embed-log.yml --last 10m --source DUT_UART
-```
-
-By default, slice output is compact: ANSI codes are removed, full ISO timestamps are shortened to `HH:MM:SS.mmm`, and redundant per-line source tags are stripped. Use `--raw` to preserve original log lines or `--time-format full` to keep full timestamps in compact output.
-
-The command writes:
-
-- `combined.log` — selected lines from all sources, sorted by timestamp
-- `<SOURCE>.log` — selected lines per source
-- `summary.md` — slice summary for humans/agents
-- `manifest.json` — slice metadata
-- `analysis/severity.md|json` — counts and index of errors/warnings
-- `analysis/repetition.md|json` — repeated message clusters with first/last seen
-- `analysis/timeline.md|json` — derived timeline of important events
-- `analysis/incidents.md|json` — heuristic incident windows
-- `analysis/anchors.md|json` — grouped context around `--grep` matches
-
-## Clean session rotation
-
-In the live UI, use **Clean session** to close the current session and start a new empty one without restarting the server. The old session is saved/exported to `session.html`, source log files are rotated to a new session directory, and the browser view is cleared.
-
-## Output files
-
-Each run creates a session directory:
-
-```text
-logs/<session_id>/
-```
-
-Important files:
-
-- `manifest.json` — session metadata
-- `session.html` — browser-openable session export
-- `.log` files — source logs
+See `docs/README.md` for the curated documentation index.

@@ -1,7 +1,17 @@
 import { expect, test } from '@playwright/test';
-import { waitForLineContaining, waitForRangePair } from './helpers.js';
+import { collectPageErrors, waitForLineContaining, waitForRangePair } from './helpers.js';
 
 test.describe('filter and keyboard UX', () => {
+  let errors;
+
+  test.beforeEach(async ({ page }) => {
+    errors = collectPageErrors(page);
+  });
+
+  test.afterEach(async () => {
+    expect(errors).toEqual([]);
+  });
+
   test('filtering by deterministic kind shows only matching visible lines', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });

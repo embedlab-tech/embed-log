@@ -16,18 +16,26 @@ logs:
 baudrate: 115200
 
 sources:
-  - name: DUT_UART
+  - name: FTDI_A
     type: uart
-    port: /dev/ttyUSB0
+    port: /dev/ttyFTDI_A
     inject_port: 5001
 
-  - name: SENSOR_A
+  - name: FTDI_B
+    type: uart
+    port: /dev/ttyFTDI_B
+    inject_port: 5002
+
+  - name: PYTEST
     type: udp
     port: 6000
-    inject_port: 5002
+    inject_port: 5003
     # optional: mirror raw RX lines to one or more read-only TCP forward ports
     # forward_ports: [7001]
 
 tabs:
   - label: Devices
-    panes: [DUT_UART, SENSOR_A]
+    panes: [FTDI_A, FTDI_B]
+
+  - label: Pytest
+    panes: [PYTEST]

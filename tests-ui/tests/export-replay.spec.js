@@ -1,8 +1,18 @@
 import { expect, test } from '@playwright/test';
 import fs from 'node:fs';
-import { openHtmlFile, saveDownload, waitForLineContaining, waitForRangePair, waitForSourceTestLine } from './helpers.js';
+import { collectPageErrors, openHtmlFile, saveDownload, waitForLineContaining, waitForRangePair, waitForSourceTestLine } from './helpers.js';
 
 test.describe('HTML export replay', () => {
+  let errors;
+
+  test.beforeEach(async ({ page }) => {
+    errors = collectPageErrors(page);
+  });
+
+  test.afterEach(async () => {
+    expect(errors).toEqual([]);
+  });
+
   test('opens downloaded HTML snippet and replays regular pane layout', async ({ page, browser }, testInfo) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });

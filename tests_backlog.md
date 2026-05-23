@@ -1,101 +1,103 @@
 # UI/E2E tests backlog
 
-Current deterministic Playwright suite covers the main smoke/regression path and passes locally (`10 passed`).
+Current deterministic Playwright suite covers the main smoke/regression path and currently passes locally (`17 passed`).
+
+This file is intentionally kept as a working UI test notebook for future test additions.
 
 ## Implemented
 
 - Live UI connects and receives deterministic logs.
-- Shift+Click selects a range.
-- Raw snippet download cleans duplicated prefixes/timestamps.
-- HTML snippet uses the regular exported embed-log UI.
-- Downloaded HTML snippet reopens as static replay.
 - Live tab/pane layout is verified.
 - Time synchronization highlights sibling pane lines.
-- Full toolbar `Export` downloads and reopens as static replay.
-- Filter by deterministic `kind=filter-alpha` works.
+- Shift+Click selects a range.
+- Drag-select range basics are covered.
 - Escape clears selection.
+- Filter by deterministic `kind=filter-alpha` works.
+- Shared page-error guard is used in Playwright tests.
+- Raw snippet download cleans duplicated prefixes/timestamps.
+- `Copy range` clipboard content matches downloaded raw content.
+- Platform shortcut copy works.
+- Clipboard buffer add / peek / copy-all / clear flow is covered.
+- HTML snippet uses the regular exported embed-log UI.
+- Downloaded HTML snippet reopens as static replay.
+- Full toolbar `Export` downloads and reopens as static replay.
+- Backend `Current HTML` flow is covered.
+- `Clean session` rotation basics are covered.
+- Sessions popup basics are covered.
 
 ## Remaining backlog
 
-### 1. Backend session HTML flow
+### 1. Cross-tab synchronization
 
-- Test backend-generated `session.html` artifact.
-- Verify toolbar `Current HTML` opens the current session export.
-- Assert panes/logs are present in the opened artifact.
+- Click a line in `SENSOR_A`.
+- Switch to `Other Sensor`.
+- Assert `SENSOR_C` jumps/highlights near the same tick.
 
-### 2. Clipboard UX
+### 2. Regex filter resilience
 
-- `Copy range` clipboard content matches downloaded raw file content.
-- Direct clipboard copy button copies selected range.
-- Platform shortcut copy works:
-  - macOS: `Meta+C`
-  - Linux/Windows: `Control+C`
-- Clipboard buffer workflow:
-  - `Clipboard add` for one pane,
-  - add another range from a second pane,
-  - open clipboard peek,
-  - verify both selections exist,
-  - `Copy all` works,
-  - `Clear` empties buffer.
+- Enter an invalid regex such as `(`.
+- Assert UI remains responsive.
+- Assert logs still render.
+- Clear filter and verify normal behavior returns.
 
-### 3. Drag selection
+### 3. Sessions metadata depth
 
-- Drag-select a range in a pane.
-- Assert selected lines are contiguous.
-- Assert sibling panes are not selected.
-- Assert copy actions appear after drag selection.
+- Rotate session multiple times.
+- Assert newest session appears first.
+- Assert `current` tag moves correctly.
+- Assert manifest/open-html links are valid for each row.
 
-### 4. Session workflows
+### 4. Current HTML freshness
 
-- `Clean session` / session rotation:
-  - trigger clean session,
-  - confirm panes clear,
-  - wait for new session id,
-  - assert new deterministic logs arrive,
-  - assert old stale lines do not remain.
-- Sessions popup:
-  - open sessions UI,
-  - assert current session is marked,
-  - assert manifest link exists,
-  - assert open-html link exists after export is ready.
+- Save HTML once and capture a known tick in output.
+- Wait for newer logs and save again.
+- Assert reopened HTML includes newer tick data.
 
-### 5. Page error guard
+### 5. Export during active traffic
 
-Add shared Playwright helper that fails tests on unexpected frontend errors:
+- Export while deterministic stream is active.
+- Assert exported HTML opens and contains consistent logs.
 
-```js
-export function collectPageErrors(page) {
-  const errors = [];
-  page.on('pageerror', err => errors.push(String(err)));
-  page.on('console', msg => {
-    if (msg.type() === 'error') errors.push(msg.text());
-  });
-  return errors;
-}
-```
+### 6. Clipboard normalization edge cases
 
-Use in tests or `afterEach`:
+- Add overlapping ranges from the same pane.
+- Assert `Copy all` output remains deterministic.
+- Verify newline normalization and no broken range boundaries.
 
-```js
-expect(errors).toEqual([]);
-```
+### 7. Pane swap persistence
 
-Allowlist only if absolutely necessary.
+- Swap panes via hover swap UI.
+- Reload page.
+- Assert swapped pane order is restored from cache.
 
-### 6. Optional helper/unit tests
+### 8. Clear cache UX
+
+- Create non-default layout/filter state.
+- Click `Clear cache`.
+- Reload and assert default layout/state is restored.
+
+### 9. Import malformed snapshot handling
+
+- Import invalid or partial HTML snapshot.
+- Assert user-visible error.
+- Assert no corrupted UI state remains.
+
+### 10. Stronger stale-line guard on session rotation
+
+- Capture multiple unique old lines.
+- Rotate session.
+- Assert all captured old lines are absent.
+- Assert new lines arrive on all panes.
+
+### 11. Optional helper/unit tests
 
 - Timestamp parser helper tests.
 - Snippet cleanup helper tests.
 - Range merge/sort helper tests.
 
-## Suggested next implementation order
+### 12. UNWRAP virtual single-tab mode
 
-1. Add page error guard helper.
-2. Add `Copy range` vs raw file consistency test.
-3. Add platform shortcut copy test.
-4. Add clipboard buffer test.
-5. Add backend `Current HTML` / session export test.
-6. Add `Clean session` rotation test.
-7. Add sessions popup test.
-8. Add drag selection test.
-9. Add optional frontend helper/unit tests.
+- Add a virtual UI mode that bypasses the current grouped tab view.
+- Render one page/tab per configured pane while preserving backend config as the source of truth.
+- Keep the underlying config unchanged; this is a frontend-only alternate presentation.
+- Useful for small displays and narrow laptop screens.

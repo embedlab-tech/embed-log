@@ -1,8 +1,18 @@
 import { expect, test } from '@playwright/test';
 import fs from 'node:fs';
-import { saveDownload, waitForLineContaining, waitForRangePair, waitForSourceTestLine } from './helpers.js';
+import { collectPageErrors, saveDownload, waitForLineContaining, waitForRangePair, waitForSourceTestLine } from './helpers.js';
 
 test.describe('embed-log deterministic demo smoke', () => {
+  let errors;
+
+  test.beforeEach(async ({ page }) => {
+    errors = collectPageErrors(page);
+  });
+
+  test.afterEach(async () => {
+    expect(errors).toEqual([]);
+  });
+
   test('connects to backend and receives deterministic demo logs', async ({ page }) => {
     await page.goto('/');
 
