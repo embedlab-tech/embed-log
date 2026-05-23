@@ -59,6 +59,12 @@ Do not assume all panes are visible at once.
 - Reuse existing protocol and state patterns.
 - When changing exported/static HTML behavior, validate both live and replay paths.
 - Prefer deterministic `tick=...` / `kind=...` assertions in UI tests.
+- Use `confirm()` before destructive session operations in tests.
+- When managing backend server processes for testing:
+  - **Never use `pkill -f "embed-log"`, `pkill -f "run_demo"`, or `pkill -f "deterministic"`**. The `-f` flag matches the full command line and can kill the tmux/terminal session itself.
+  - Use `lsof -ti:8080 | xargs kill 2>/dev/null` to kill only what's bound to the server port.
+  - Or track the PID from a controlled `./run_demo.sh & echo $!` start and kill by PID.
+  - After killing, confirm the port is actually free: `sleep 1; lsof -ti:8080` should return nothing before restarting the server.
 
 ## Useful commands
 

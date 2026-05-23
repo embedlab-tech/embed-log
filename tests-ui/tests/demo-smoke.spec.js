@@ -52,7 +52,7 @@ test.describe('embed-log deterministic demo smoke', () => {
     const downloadedPath = await saveDownload(download, testInfo);
 
     const text = fs.readFileSync(downloadedPath, 'utf-8');
-    expect(text).toContain('SENSOR_A');
+    expect(text).toMatch(/\[SENSOR_A\]/);
     expect(text).toContain('kind=prefix-cleanup');
     expect(text).toContain('kind=timestamp-cleanup');
   });
@@ -78,6 +78,7 @@ test.describe('embed-log deterministic demo smoke', () => {
     expect(html).toContain('<div id="tab-bar"></div>');
     expect(html).toContain('var _logData =');
     expect(html).toContain('kind=prefix-cleanup');
+    expect(html).toMatch(/\[SENSOR_A\]/);
     expect(html).not.toContain('<h1>embed-log snippet</h1>');
   });
 });

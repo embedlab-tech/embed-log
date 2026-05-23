@@ -39,7 +39,7 @@ test.describe('scope-aware selection actions', () => {
     const copied = await readClipboard(page);
 
     // Should contain selected pane content
-    expect(copied).toContain('SENSOR_A');
+    expect(copied).toMatch(/\[SENSOR_A\]/);
     expect(copied).toContain('kind=prefix-cleanup');
     // Should NOT contain sibling pane content
     expect(copied).not.toContain('SENSOR_B');
@@ -106,7 +106,7 @@ test.describe('scope-aware selection actions', () => {
     const downloadedPath = await saveDownload(download, testInfo);
     const text = fs.readFileSync(downloadedPath, 'utf-8');
 
-    expect(text).toContain('SENSOR_A');
+    expect(text).toMatch(/\[SENSOR_A\]/);
     expect(text).not.toContain('SENSOR_B');
   });
 
@@ -128,7 +128,7 @@ test.describe('scope-aware selection actions', () => {
     const downloadedPath = await saveDownload(download, testInfo);
     const text = fs.readFileSync(downloadedPath, 'utf-8');
 
-    expect(text).toContain('SENSOR_A');
+    expect(text).toMatch(/\[SENSOR_B\]/);
     expect(text).toContain('SENSOR_B');
     expect(text).toMatch(/\[SENSOR_A\].*kind=prefix-cleanup/);
   });

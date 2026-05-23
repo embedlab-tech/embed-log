@@ -370,7 +370,7 @@ function _buildRangeLogData(entries) {
         if (!logData[e.paneId]) logData[e.paneId] = [];
         logData[e.paneId].push({
             ts: e.line.ts,
-            text: _snippetMessageText(e),
+            text: `[${e.paneId}] ${_snippetMessageText(e)}`,
             isTx: e.line.isTx,
         });
     });
@@ -382,7 +382,7 @@ function _formatSelectionBlock(paneId, indices) {
     return indices
         .map(i => lines[i])
         .filter(Boolean)
-        .map(_lineRaw)
+        .map(line => `${line.ts}  [${paneId}] ${_linePlain(line)}`)
         .join("\n");
 }
 
