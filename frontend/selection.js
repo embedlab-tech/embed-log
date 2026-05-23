@@ -156,6 +156,18 @@ function _applySelection(paneId) {
     _syncCopyBtn(paneId);
 }
 
+function _selectIndexRange(paneId, startIdx, endIdx) {
+    if (!Number.isFinite(startIdx) || !Number.isFinite(endIdx)) return;
+    _clearOtherSelections(paneId);
+    const lines = state.rawLines[paneId] || [];
+    const lo = Math.max(0, Math.min(startIdx, endIdx));
+    const hi = Math.min(lines.length - 1, Math.max(startIdx, endIdx));
+    const sel = new Set();
+    for (let i = lo; i <= hi; i++) sel.add(i);
+    state.selected[paneId] = sel;
+    _applySelection(paneId);
+}
+
 function _clearOtherSelections(keepPane) {
     PANES.forEach(id => {
         if (id === keepPane || !state.selected[id].size) return;
@@ -460,6 +472,7 @@ function _downloadRangeHtml(paneId) {
 // ---------------------------------------------------------------------------
 let _drag = null;          // { paneId, startIdx, startY, lineEl, active }
 let _suppressClick = false;
+let _rangeAnchor = null;   // { paneId, idx } set by a normal line click for Shift+Click range selection
 
 document.addEventListener("pointerdown", e => {
     if (e.button !== 0) return;
@@ -520,6 +533,24 @@ document.addEventListener("click", e => {
             return;
         }
         _suppressClick = false;
+    }
+
+    const clickedLine = e.target.closest(".log-line");
+    const clickedLogArea = clickedLine?.closest(".log-area");
+    if (clickedLine && clickedLogArea) {
+        const paneId = clickedLogArea.id.slice(4);
+        const idx = parseInt(clickedLine.dataset.idx, 10);
+
+        if (e.shiftKey && _rangeAnchor?.paneId === paneId && Number.isFinite(idx)) {
+            e.preventDefault();
+            e.stopPropagation();
+            _selectIndexRange(paneId, _rangeAnchor.idx, idx);
+            return;
+        }
+
+        if (!e.shiftKey && Number.isFinite(idx)) {
+            _rangeAnchor = { paneId, idx };
+        }
     }
 
     const inClipUi = e.target.closest("#clip-indicator") || e.target.closest("#clip-peek-menu");
