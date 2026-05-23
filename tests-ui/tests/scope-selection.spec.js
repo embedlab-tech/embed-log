@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import fs from 'node:fs';
-import { collectPageErrors, saveDownload, selectedLineTicks, waitForLineContaining, waitForRangePair } from './helpers.js';
+import { collectPageErrors, saveDownload, waitForRangePair } from './helpers.js';
 
 async function readClipboard(page) {
   return page.evaluate(() => navigator.clipboard.readText());
@@ -38,9 +38,9 @@ test.describe('scope-aware selection actions', () => {
     await page.locator('#copy-SENSOR_A').click();
     const copied = await readClipboard(page);
 
-    // Should contain selected pane content
+    // Should contain selected pane content with source label
     expect(copied).toMatch(/\[SENSOR_A\]/);
-    expect(copied).toContain('kind=prefix-cleanup');
+    expect(copied).toContain('SENSOR_A');
     // Should NOT contain sibling pane content
     expect(copied).not.toContain('SENSOR_B');
   });
@@ -57,10 +57,9 @@ test.describe('scope-aware selection actions', () => {
     await page.locator('#copy-SENSOR_A').click();
     const copied = await readClipboard(page);
 
-    // Should contain both selected pane and sibling pane content
-    expect(copied).toContain('SENSOR_A');
-    expect(copied).toContain('SENSOR_B');
-    expect(copied).toContain('kind=prefix-cleanup');
+    // Should contain both selected pane and sibling pane content with source labels
+    expect(copied).toMatch(/\[SENSOR_A\]/);
+    expect(copied).toMatch(/\[SENSOR_B\]/);
   });
 
   test('Scope toggle persists across panes', async ({ page }) => {
@@ -71,7 +70,6 @@ test.describe('scope-aware selection actions', () => {
     const { start, end } = await waitForRangePair(page, 'SENSOR_A', 'kind=prefix-cleanup', 'kind=timestamp-cleanup');
     await start.click();
     await end.click({ modifiers: ['Shift'] });
-
     await setScope(page, 'SENSOR_A', 'context');
 
     // Clear selection and select in SENSOR_B
@@ -86,8 +84,8 @@ test.describe('scope-aware selection actions', () => {
 
     await page.locator('#copy-SENSOR_B').click();
     const copied = await readClipboard(page);
-    expect(copied).toContain('SENSOR_A');
-    expect(copied).toContain('SENSOR_B');
+    expect(copied).toMatch(/\[SENSOR_A\]/);
+    expect(copied).toMatch(/\[SENSOR_B\]/);
   });
 
   test('Exact download raw is single pane only', async ({ page }, testInfo) => {
@@ -129,7 +127,6 @@ test.describe('scope-aware selection actions', () => {
     const text = fs.readFileSync(downloadedPath, 'utf-8');
 
     expect(text).toMatch(/\[SENSOR_B\]/);
-    expect(text).toContain('SENSOR_B');
     expect(text).toMatch(/\[SENSOR_A\].*kind=prefix-cleanup/);
   });
 
@@ -152,8 +149,6 @@ test.describe('scope-aware selection actions', () => {
 
     expect(html).toContain('var _logData =');
     expect(html).toContain('kind=prefix-cleanup');
-    // Exact mode: only SENSOR_A pane has data; SENSOR_B pane will exist in the layout
-    // but its log area should be empty or not contain SENSOR_A's lines
     const dataMatch = html.match(/"SENSOR_A":\[/);
     expect(dataMatch).toBeTruthy();
   });

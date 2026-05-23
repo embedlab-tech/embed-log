@@ -122,6 +122,15 @@ export function _linesSetupPane(id) {
         scrollPaneToBottom(id);
     });
 
+    // Per-pane wrap toggle
+    const wrapBtn = document.querySelector(`#pane-${id} .pane-wrap-btn`);
+    if (wrapBtn) {
+        wrapBtn.addEventListener("click", () => {
+            state.wrap[id] = !state.wrap[id];
+            wrapBtn.classList.toggle("active", state.wrap[id]);
+            document.getElementById("log-" + id)?.classList.toggle("wrap", state.wrap[id]);
+        });
+    }
 }
 PANES.forEach(_linesSetupPane);
 

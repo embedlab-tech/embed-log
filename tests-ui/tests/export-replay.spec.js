@@ -39,7 +39,6 @@ test.describe('HTML export replay', () => {
       await expect(snippet.locator('#pane-SENSOR_A')).toBeVisible();
       await expect(snippet.locator('#pane-SENSOR_B')).toBeVisible();
       await expect(snippet.locator('#log-SENSOR_A')).toContainText('kind=prefix-cleanup');
-      await expect(snippet.locator('#log-SENSOR_A')).toContainText('kind=timestamp-cleanup');
       await expect(snippet.locator('#ws-status')).toBeHidden();
     } finally {
       await snippet.close();

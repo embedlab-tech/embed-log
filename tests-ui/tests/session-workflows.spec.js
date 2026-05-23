@@ -37,7 +37,7 @@ test.describe('session workflows', () => {
     await waitForSourceTestLine(page, 'SENSOR_A');
     await openSettingsPanel(page);
 
-    await page.locator('#btn-sync').click();
+    await page.locator('#btn-save-to-server').click();
     const currentBtn = currentHtmlButton(page);
     await expect(currentBtn).toBeEnabled({ timeout: 20_000 });
     await expect(currentBtn).toHaveText('Current HTML', { timeout: 20_000 });
@@ -89,7 +89,7 @@ test.describe('session workflows', () => {
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
     await openSettingsPanel(page);
 
-    await page.locator('#btn-sync').click();
+    await page.locator('#btn-save-to-server').click();
     const currentBtn = currentHtmlButton(page);
     await expect(currentBtn).toBeEnabled({ timeout: 20_000 });
     await expect(currentBtn).toHaveText('Current HTML', { timeout: 20_000 });

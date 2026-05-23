@@ -275,10 +275,53 @@ button.active { background: var(--selection); border-color: var(--accent); color
 }
 #sessions-menu .session-actions a:hover { text-decoration: underline; }
 #sessions-menu .session-actions a.disabled {
+
     color: var(--ansi-0);
     pointer-events: none;
     text-decoration: none;
 }
+
+/* Download raw popup menu */
+#download-raw-menu {
+    position: fixed;
+    z-index: 1100;
+    min-width: 320px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+    display: none;
+}
+#download-raw-menu.open { display: block; }
+#download-raw-menu .download-raw-head {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    color: var(--accent);
+    font-size: 12px;
+}
+#download-raw-menu .download-raw-body {
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+#download-raw-menu .download-raw-opt {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: var(--text);
+    cursor: pointer;
+}
+#download-raw-menu .download-raw-opt:hover {
+    background: var(--selection);
+    color: var(--accent);
+}
+
 
 /* ---- Main layout ---- */
 #container {
@@ -321,6 +364,7 @@ button.active { background: var(--selection); border-color: var(--accent); color
 }
 .pane-header .pane-name { flex: 1; }
 .pane-header button { padding: 2px 6px; font-size: 11px; }
+.pane-header button.active { border-color: var(--accent); }
 
 /* Pane swap feedback animation */
 .pane.swap-anim {

@@ -33,6 +33,8 @@ export function createTabWithPanes(label, paneIds, { switchTo = true } = {}) {
         state.atBottom[paneId]    = true;
         state.highlighted[paneId] = null;
         state.selected[paneId]    = new Set();
+
+    state.wrap[paneId]        = false;
     });
 
     // ---- 2. DOM ----
@@ -49,6 +51,8 @@ export function createTabWithPanes(label, paneIds, { switchTo = true } = {}) {
         <div class="pane" id="pane-${paneId}">
             <div class="pane-header">
                 <span class="pane-name">${_escHtml(paneId)}</span>
+
+                <button class="pane-wrap-btn" title="Toggle word wrap in this pane">Wrap</button>
 
             </div>
             <div class="filter-bar">

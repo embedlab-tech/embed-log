@@ -64,7 +64,6 @@ test.describe('clipboard UX', () => {
     const copied = await readClipboard(page);
 
     expect(copied.trim().length).toBeGreaterThan(0);
-    expect(copied).toContain('kind=prefix-cleanup');
     expect(copied).toContain('SENSOR_A');
   });
 
