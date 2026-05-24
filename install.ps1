@@ -142,14 +142,19 @@ if ($localRoot -and (Test-Path (Join-Path $localRoot 'pyproject.toml')) -and (Te
 }
 
 try {
-    Invoke-Pipx install --force $installSrc 2>&1
+    Invoke-Pipx uninstall embed-log 2>&1 | Out-Null
+    if ($?) {
+        Write-Info "Removed existing embed-log installation."
+    }
+
+    Invoke-Pipx install $installSrc 2>&1
     if (-not $?) {
         Die @"
 Failed to install embed-log via pipx.
 
-  If you see version conflict errors, try:
+  If installation fails, try:
     pipx uninstall embed-log
-    pipx install --force $installSrc
+    pipx install $installSrc
 "@
     }
 } finally {
