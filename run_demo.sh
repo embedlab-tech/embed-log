@@ -5,28 +5,77 @@ cd "$(dirname "$0")"
 
 OPEN_BROWSER=true
 SERVER_PID=""
-for arg in "$@"; do
-  case "$arg" in
+PROFILE_ARG=""
+FAST_ARG=false
+TICK_MS_ARG=""
+INTERVAL_MIN_ARG=""
+INTERVAL_MAX_ARG=""
+INJECT_INTERVAL_ARG=""
+
+usage() {
+  echo "Usage: ./run_demo.sh [--no-browser|--browser] [--profile random|test] [--fast] [profile options]"
+  echo ""
+  echo "Profiles:"
+  echo "  --profile random   local interactive demo traffic"
+  echo "    --interval-min SECONDS     random profile default: 5.00"
+  echo "    --interval-max SECONDS     random profile default: 20.00"
+  echo "    --inject-interval SECONDS  random profile default: 5"
+  echo "    --fast                     use faster local random defaults: 0.10..0.30s, inject 1s"
+  echo ""
+  echo "  --profile test     deterministic demo traffic for UI tests"
+  echo "    --tick-ms MS               test profile default: 100"
+  echo "    --fast                     use faster deterministic default: tick 20ms"
+  echo ""
+  echo "Environment variable fallback:"
+  echo "  DEMO_PROFILE            random|test (default: random)"
+  echo "  DEMO_UDP_INTERVAL_MIN   random profile default: 5.00"
+  echo "  DEMO_UDP_INTERVAL_MAX   random profile default: 20.00"
+  echo "  DEMO_INJECT_INTERVAL    random profile default: 5"
+  echo "  DEMO_TEST_TICK_MS       test profile default: 100"
+  echo "  DEMO_LOG_DIR            optional log directory override"
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
     --no-browser) OPEN_BROWSER=false ;;
     --browser) OPEN_BROWSER=true ;;
+    --profile)
+      [ "$#" -ge 2 ] || { echo "ERROR: --profile requires a value"; usage; exit 1; }
+      PROFILE_ARG="$2"
+      shift
+      ;;
+    --fast) FAST_ARG=true ;;
+    --tick-ms)
+      [ "$#" -ge 2 ] || { echo "ERROR: --tick-ms requires a value"; usage; exit 1; }
+      TICK_MS_ARG="$2"
+      shift
+      ;;
+    --interval-min)
+      [ "$#" -ge 2 ] || { echo "ERROR: --interval-min requires a value"; usage; exit 1; }
+      INTERVAL_MIN_ARG="$2"
+      shift
+      ;;
+    --interval-max)
+      [ "$#" -ge 2 ] || { echo "ERROR: --interval-max requires a value"; usage; exit 1; }
+      INTERVAL_MAX_ARG="$2"
+      shift
+      ;;
+    --inject-interval)
+      [ "$#" -ge 2 ] || { echo "ERROR: --inject-interval requires a value"; usage; exit 1; }
+      INJECT_INTERVAL_ARG="$2"
+      shift
+      ;;
     -h|--help)
-      echo "Usage: ./run_demo.sh [--no-browser|--browser]"
-      echo ""
-      echo "Optional env vars for demo traffic:"
-      echo "  DEMO_PROFILE            random|test (default: random)"
-      echo "  DEMO_UDP_INTERVAL_MIN   random profile default: 5.00"
-      echo "  DEMO_UDP_INTERVAL_MAX   random profile default: 20.00"
-      echo "  DEMO_INJECT_INTERVAL    random profile default: 5"
-      echo "  DEMO_TEST_TICK_MS       test profile default: 100"
-      echo "  DEMO_LOG_DIR            optional log directory override"
+      usage
       exit 0
       ;;
     *)
-      echo "Unknown option: $arg"
-      echo "Usage: ./run_demo.sh [--no-browser|--browser]"
+      echo "Unknown option: $1"
+      usage
       exit 1
       ;;
   esac
+  shift
 done
 
 # Prefer project venv interpreter when available (pick one that actually works)
@@ -210,13 +259,44 @@ if ! kill -0 "$SERVER_PID" 2>/dev/null; then
   exit 1
 fi
 
-DEMO_PROFILE="${DEMO_PROFILE:-random}"
+DEMO_PROFILE="${PROFILE_ARG:-${DEMO_PROFILE:-random}}"
 
 case "$DEMO_PROFILE" in
   random)
-    DEMO_UDP_INTERVAL_MIN="${DEMO_UDP_INTERVAL_MIN:-5.00}"
-    DEMO_UDP_INTERVAL_MAX="${DEMO_UDP_INTERVAL_MAX:-20.00}"
-    DEMO_INJECT_INTERVAL="${DEMO_INJECT_INTERVAL:-5}"
+    [ -z "$TICK_MS_ARG" ] || {
+      echo "ERROR: --tick-ms can only be used with --profile test"
+      exit 1
+    }
+
+    if [ -n "$INTERVAL_MIN_ARG" ]; then
+      DEMO_UDP_INTERVAL_MIN="$INTERVAL_MIN_ARG"
+    elif [ -n "${DEMO_UDP_INTERVAL_MIN+x}" ]; then
+      DEMO_UDP_INTERVAL_MIN="$DEMO_UDP_INTERVAL_MIN"
+    elif [ "$FAST_ARG" = true ]; then
+      DEMO_UDP_INTERVAL_MIN="0.10"
+    else
+      DEMO_UDP_INTERVAL_MIN="5.00"
+    fi
+
+    if [ -n "$INTERVAL_MAX_ARG" ]; then
+      DEMO_UDP_INTERVAL_MAX="$INTERVAL_MAX_ARG"
+    elif [ -n "${DEMO_UDP_INTERVAL_MAX+x}" ]; then
+      DEMO_UDP_INTERVAL_MAX="$DEMO_UDP_INTERVAL_MAX"
+    elif [ "$FAST_ARG" = true ]; then
+      DEMO_UDP_INTERVAL_MAX="0.30"
+    else
+      DEMO_UDP_INTERVAL_MAX="20.00"
+    fi
+
+    if [ -n "$INJECT_INTERVAL_ARG" ]; then
+      DEMO_INJECT_INTERVAL="$INJECT_INTERVAL_ARG"
+    elif [ -n "${DEMO_INJECT_INTERVAL+x}" ]; then
+      DEMO_INJECT_INTERVAL="$DEMO_INJECT_INTERVAL"
+    elif [ "$FAST_ARG" = true ]; then
+      DEMO_INJECT_INTERVAL="1"
+    else
+      DEMO_INJECT_INTERVAL="5"
+    fi
 
     echo "Starting UDP simulator (interval ${DEMO_UDP_INTERVAL_MIN}-${DEMO_UDP_INTERVAL_MAX}s)..."
     "$PYTHON" utils/udp_log_simulator.py \
@@ -236,7 +316,28 @@ case "$DEMO_PROFILE" in
       --source demo &
     ;;
   test)
-    DEMO_TEST_TICK_MS="${DEMO_TEST_TICK_MS:-100}"
+    [ -z "$INTERVAL_MIN_ARG" ] || {
+      echo "ERROR: --interval-min can only be used with --profile random"
+      exit 1
+    }
+    [ -z "$INTERVAL_MAX_ARG" ] || {
+      echo "ERROR: --interval-max can only be used with --profile random"
+      exit 1
+    }
+    [ -z "$INJECT_INTERVAL_ARG" ] || {
+      echo "ERROR: --inject-interval can only be used with --profile random"
+      exit 1
+    }
+
+    if [ -n "$TICK_MS_ARG" ]; then
+      DEMO_TEST_TICK_MS="$TICK_MS_ARG"
+    elif [ -n "${DEMO_TEST_TICK_MS+x}" ]; then
+      DEMO_TEST_TICK_MS="$DEMO_TEST_TICK_MS"
+    elif [ "$FAST_ARG" = true ]; then
+      DEMO_TEST_TICK_MS="20"
+    else
+      DEMO_TEST_TICK_MS="100"
+    fi
     echo "Starting deterministic demo traffic (tick ${DEMO_TEST_TICK_MS}ms)..."
     "$PYTHON" utils/deterministic_demo_traffic.py \
       --udp SENSOR_A=127.0.0.1:6000 \
@@ -246,7 +347,7 @@ case "$DEMO_PROFILE" in
       --cycles 0 &
     ;;
   *)
-    echo "ERROR: invalid DEMO_PROFILE=$DEMO_PROFILE (expected random|test)"
+    echo "ERROR: invalid profile: $DEMO_PROFILE (expected random|test)"
     exit 1
     ;;
 esac

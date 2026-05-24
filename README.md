@@ -121,6 +121,12 @@ embed-log run --config embed-log.yml
 
 # run bundled demo
 ./run_demo.sh --no-browser
+
+# deterministic fast demo for local UI testing
+./run_demo.sh --profile test --fast --no-browser
+
+# faster random demo traffic for manual testing
+./run_demo.sh --profile random --fast --no-browser
 ```
 
 ## Testing
