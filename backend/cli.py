@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import sys
+import webbrowser
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -347,9 +348,38 @@ def _run_sessions(argv: list[str]) -> int:
     p_logs.add_argument("--pane", default=None, help="filter by pane name")
 
     p_export = sub.add_parser("export", parents=[shared],
-                              help="regenerate session HTML")
+                              help="export session data (HTML or merged raw log)",
+                              epilog=(
+                                  "Examples:\n"
+                                  "  sessions export <session-id>\n"
+                                  "  sessions export <session-id> --format raw\n"
+                                  "  sessions export <session-id> --format raw --after 1h\n"
+                                  "  sessions export <session-id> --format raw --first 10m\n"
+                                  "  sessions export <session-id> --format raw --last 30m\n"
+                                  "  sessions export <session-id> --format raw --pane SENSOR_A\n"
+                                  "  sessions export <session-id> --format raw --after 5m --output recent.log"
+                              ),
+                              formatter_class=argparse.RawDescriptionHelpFormatter)
     p_export.add_argument("session_id")
-    p_export.add_argument("--output", default=None, help="output path")
+    p_export.add_argument("--output", default=None,
+                          help="output file path")
+    p_export.add_argument("--format", choices=["html", "raw"], default="html",
+                          help="output format: html (default) or raw merged log")
+    p_export.add_argument("--after", default=None,
+                          help="include lines after this time (relative: 5m, 2h, 30s or ISO timestamp)")
+    p_export.add_argument("--before", default=None,
+                          help="include lines before this time (relative or ISO, default: end of data)")
+    p_export.add_argument("--first", default=None,
+                          help="include only the first N minutes/hours of the session (e.g. 10m, 1h)")
+    p_export.add_argument("--last", default=None,
+                          help="include only the last N minutes/hours of the session (e.g. 30m, 15m)")
+    p_export.add_argument("--pane", action="append", default=None, dest="panes",
+                          help="include only this pane (repeatable, default: all)")
+
+    p_open = sub.add_parser("open", parents=[shared],
+                            help="open session HTML in the default browser")
+    p_open.add_argument("session_id")
+
     args = parser.parse_args(argv)
 
     if args.command is None:
@@ -366,6 +396,8 @@ def _run_sessions(argv: list[str]) -> int:
         return _run_sessions_logs(log_dir, args)
     if args.command == "export":
         return _run_sessions_export(log_dir, args)
+    if args.command == "open":
+        return _run_sessions_open(log_dir, args)
     return 1
 
 
@@ -420,25 +452,113 @@ def _file_size_kb(file_path: Path) -> int:
         return 0
 
 
+# Timestamp parsing for log lines — matches format: [YYYY-MM-DDTHH:MM:SS.mmm+ZZ:ZZ]
+_LOG_TS_RE = re.compile(
+    r"^\[(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:[.,](\d+))?(?:Z|[+-]\d{2}:\d{2})?\]",
+)
+
+
+def _parse_log_timestamp(line: str) -> str | None:
+    """Extract leading ISO timestamp from a log line, return as sortable string."""
+    m = _LOG_TS_RE.match(line)
+    if not m:
+        return None
+    return f"{m[1]}-{m[2]}-{m[3]}T{m[4]}:{m[5]}:{m[6]}.{_ms3(m[7])}Z"
+
+
+def _ms3(frac: str | None) -> str:
+    if not frac:
+        return "000"
+    return (frac + "000")[:3]
+
+
+def _format_duration(seconds: float) -> str:
+    """Format a duration in seconds to a human-readable string."""
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes = seconds // 60
+    secs = seconds % 60
+    if minutes < 60:
+        return f"{minutes}m {secs}s"
+    hours = minutes // 60
+    mins = minutes % 60
+    return f"{hours}h {mins}m {secs}s"
+
+
+def _parse_duration(text: str) -> float | None:
+    """Parse a human-friendly duration like 5m, 2h, 30s, 1d into seconds."""
+    import re as _re
+    m = _re.match(r"^(\d+)\s*(s|sec|m|min|h|hr|d|day)s?$", text.strip(), _re.IGNORECASE)
+    if not m:
+        return None
+    value = int(m[1])
+    unit = m[2].lower()
+    multipliers = {"s": 1, "sec": 1, "m": 60, "min": 60, "h": 3600, "hr": 3600, "d": 86400, "day": 86400}
+    return value * multipliers.get(unit, 1)
+
+
 def _session_stats(session_dir: Path, manifest: dict | None) -> dict:
-    """Return enriched metrics: alias, line count, total size KB."""
+    """Return enriched metrics: alias, line count, size KB, time range, duration."""
     sid = (manifest or {}).get("session_id", session_dir.name)
     lines = 0
     size_kb = 0
+    time_start: str | None = None
+    time_end: str | None = None
+
     source_files = (manifest or {}).get("source_files", {})
+    file_list: list[Path] = []
     for path_str in source_files.values():
         fp = Path(path_str)
         if fp.is_file():
-            lines += _count_lines(fp)
-            size_kb += _file_size_kb(fp)
-    if not source_files:
-        for lf in session_dir.glob("*.log"):
-            lines += _count_lines(lf)
-            size_kb += _file_size_kb(lf)
-        for lf in session_dir.glob("*.txt"):
-            lines += _count_lines(lf)
-            size_kb += _file_size_kb(lf)
-    return {"alias": _short_alias(sid), "lines": lines, "size_kb": size_kb}
+            file_list.append(fp)
+    if not file_list:
+        file_list = sorted(session_dir.glob("*.log")) + sorted(session_dir.glob("*.txt"))
+
+    for fp in file_list:
+        lines += _count_lines(fp)
+        size_kb += _file_size_kb(fp)
+        try:
+            with fp.open("r", encoding="utf-8") as f:
+                # First non-empty line
+                first_line = None
+                last_line = None
+                for raw_line in f:
+                    stripped = raw_line.strip()
+                    if stripped and first_line is None:
+                        first_line = stripped
+                    if stripped:
+                        last_line = stripped
+                if first_line:
+                    ts = _parse_log_timestamp(first_line)
+                    if ts and (time_start is None or ts < time_start):
+                        time_start = ts
+                if last_line:
+                    ts = _parse_log_timestamp(last_line)
+                    if ts and (time_end is None or ts > time_end):
+                        time_end = ts
+        except OSError:
+            pass
+
+    duration_secs: float | None = None
+    if time_start and time_end:
+        # ISO timestamps sort lexicographically — convert to datetime for delta
+        import datetime as _dt
+        try:
+            t1 = _dt.datetime.fromisoformat(time_start.rstrip("Z"))
+            t2 = _dt.datetime.fromisoformat(time_end.rstrip("Z"))
+            duration_secs = (t2 - t1).total_seconds()
+        except ValueError:
+            pass
+
+    return {
+        "alias": _short_alias(sid),
+        "lines": lines,
+        "size_kb": size_kb,
+        "time_start": time_start or "",
+        "time_end": time_end or "",
+        "duration_secs": duration_secs,
+    }
 
 
 def _iter_sessions(log_dir: Path) -> list[dict]:
@@ -457,6 +577,9 @@ def _iter_sessions(log_dir: Path) -> list[dict]:
         manifest["_alias"] = stats["alias"]
         manifest["_lines"] = stats["lines"]
         manifest["_size_kb"] = stats["size_kb"]
+        manifest["_time_start"] = stats["time_start"]
+        manifest["_time_end"] = stats["time_end"]
+        manifest["_duration_secs"] = stats["duration_secs"]
         sessions.append(manifest)
     return sessions
 
@@ -514,11 +637,18 @@ def _run_sessions_info(log_dir: Path, args: argparse.Namespace) -> int:
     alias = _short_alias(sid)
     total_lines = 0
     total_size_kb = 0
+    duration_secs = manifest.get("_duration_secs")
+    time_start = manifest.get("_time_start", "")
+    time_end = manifest.get("_time_end", "")
 
     print(f"Session:      {sid}")
     print(f"Alias:        {alias}")
     print(f"App:          {manifest.get('app_name', '-')}")
     print(f"Started:      {manifest.get('started_at', '-')}")
+    if time_start and time_end:
+        dur = _format_duration(duration_secs) if duration_secs else "?"
+        print(f"Time range:   {time_start}  →  {time_end}")
+        print(f"Duration:     {dur}")
     print(f"Job ID:       {manifest.get('job_id', '-')}")
     print(f"Config:       {manifest.get('config_path', '-')}")
     print(f"HTML export:  {manifest.get('session_html', '-')}")
@@ -572,8 +702,6 @@ def _run_sessions_logs(log_dir: Path, args: argparse.Namespace) -> int:
 
 
 def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
-    from .session import SessionExporter
-
     sdir = _read_session_dir(log_dir, args.session_id)
     if not sdir:
         print(f"Session not found: {args.session_id}", file=sys.stderr)
@@ -585,11 +713,158 @@ def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
         return 1
 
     source_files = manifest.get("source_files", {})
-    tabs = manifest.get("tabs", [])
     if not source_files:
         print(f"No source files in manifest for session {args.session_id}", file=sys.stderr)
         return 1
 
+    # ── Raw format: merge and filter log lines ──
+    if args.format == "raw":
+        # Resolve which panes to include
+        panes: list[str] = []
+        if args.panes:
+            panes = args.panes
+        else:
+            panes = sorted(source_files.keys())
+        # Parse time filters
+        import datetime as _dt
+        after_dt: _dt.datetime | None = None
+        before_dt: _dt.datetime | None = None
+        now_local = _dt.datetime.now()
+
+        # Resolve --first / --last into after/before using session time range
+        time_start = manifest.get("_time_start", "")
+        time_end = manifest.get("_time_end", "")
+        if (args.first or args.last) and (not time_start or not time_end):
+            stats = _session_stats(sdir, manifest)
+            time_start = stats["time_start"]
+            time_end = stats["time_end"]
+        time_conflicts = []
+        if args.after:
+            time_conflicts.append("--after")
+        if args.before:
+            time_conflicts.append("--before")
+        if args.first:
+            time_conflicts.append("--first")
+        if args.last:
+            time_conflicts.append("--last")
+        if len(time_conflicts) > 2:
+            print(f"Conflicting time options: {' and '.join(time_conflicts)}", file=sys.stderr)
+            return 1
+        if args.first and args.last:
+            print("--first and --last are mutually exclusive", file=sys.stderr)
+            return 1
+
+        if args.first:
+            secs = _parse_duration(args.first)
+            if secs is None:
+                print(f"Invalid --first value: {args.first!r} (use e.g. 10m, 1h)", file=sys.stderr)
+                return 1
+            if not time_start:
+                print("Cannot use --first: session has no recorded start time", file=sys.stderr)
+                return 1
+            try:
+                after_dt = _dt.datetime.fromisoformat(time_start.rstrip("Z"))
+                before_dt = after_dt + _dt.timedelta(seconds=secs)
+            except ValueError:
+                print(f"Cannot parse session start time: {time_start}", file=sys.stderr)
+                return 1
+
+        elif args.last:
+            secs = _parse_duration(args.last)
+            if secs is None:
+                print(f"Invalid --last value: {args.last!r} (use e.g. 30m, 15m)", file=sys.stderr)
+                return 1
+            if not time_end:
+                print("Cannot use --last: session has no recorded end time", file=sys.stderr)
+                return 1
+            try:
+                before_dt = _dt.datetime.fromisoformat(time_end.rstrip("Z"))
+                after_dt = before_dt - _dt.timedelta(seconds=secs)
+            except ValueError:
+                print(f"Cannot parse session end time: {time_end}", file=sys.stderr)
+                return 1
+
+        if args.after:
+            secs = _parse_duration(args.after)
+            if secs is not None:
+                after_dt = now_local - _dt.timedelta(seconds=secs)
+            else:
+                try:
+                    after_dt = _dt.datetime.fromisoformat(args.after)
+                except ValueError:
+                    print(f"Invalid --after value: {args.after!r} (use 5m, 2h, or ISO)", file=sys.stderr)
+                    return 1
+
+        if args.before:
+            secs = _parse_duration(args.before)
+            if secs is not None:
+                before_dt = now_local - _dt.timedelta(seconds=secs) if not args.after else (
+                    after_dt + _dt.timedelta(seconds=secs) if after_dt else now_local - _dt.timedelta(seconds=secs)
+                )
+            else:
+                try:
+                    before_dt = _dt.datetime.fromisoformat(args.before)
+                except ValueError:
+                    print(f"Invalid --before value: {args.before!r} (use 5m, 2h, or ISO)", file=sys.stderr)
+                    return 1
+
+        # Collect and filter lines
+        entries: list[dict] = []
+        for pane_name in panes:
+            fp_str = source_files.get(pane_name)
+            if not fp_str:
+                print(f"Pane {pane_name!r} not found in session", file=sys.stderr)
+                return 1
+            fp = Path(fp_str)
+            if not fp.is_file():
+                print(f"Log file not found: {fp}", file=sys.stderr)
+                return 1
+            try:
+                with fp.open("r", encoding="utf-8") as f:
+                    for raw_line in f:
+                        stripped = raw_line.strip()
+                        if not stripped:
+                            continue
+                        ts_str = _parse_log_timestamp(stripped)
+                        if not ts_str:
+                            continue
+                        ts_dt = _dt.datetime.fromisoformat(ts_str.rstrip("Z"))
+                        if after_dt and ts_dt < after_dt:
+                            continue
+                        if before_dt and ts_dt > before_dt:
+                            continue
+                        entries.append({"ts": ts_str, "line": stripped, "pane": pane_name})
+            except OSError as exc:
+                print(f"Error reading {fp}: {exc}", file=sys.stderr)
+                return 1
+
+        if not entries:
+            print("No matching log entries found.", file=sys.stderr)
+            return 1
+
+        # Sort by timestamp, then by pane name for stability
+        entries.sort(key=lambda e: (e["ts"], e["pane"]))
+
+        output = Path(args.output) if args.output else sdir / "merged.log"
+        try:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            with output.open("w", encoding="utf-8") as f:
+                for entry in entries:
+                    if len(panes) > 1:
+                        f.write(f"[{entry['pane']}] {entry['line']}\n")
+                    else:
+                        f.write(entry["line"] + "\n")
+        except OSError as exc:
+            print(f"Error writing {output}: {exc}", file=sys.stderr)
+            return 1
+
+        print(f"Exported: {output}  ({len(entries)} lines)")
+        return 0
+
+    # ── HTML format (existing behavior) ──
+    from .session import SessionExporter
+
+    tabs = manifest.get("tabs", [])
     output = Path(args.output) if args.output else sdir / "session.html"
 
     exporter = SessionExporter(
@@ -602,14 +877,29 @@ def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
         print(f"Export failed for session {args.session_id}", file=sys.stderr)
         return 1
 
-    # Update manifest so the HTML column shows "yes" on next `sessions list`
-    from datetime import datetime
+    # Update manifest
+    from datetime import datetime as _dt2
     manifest["session_html"] = str(output)
     manifest["html_status"] = "ready"
-    manifest["html_updated_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+    manifest["html_updated_at"] = _dt2.now().astimezone().isoformat(timespec="seconds")
     (sdir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     print(f"Exported: {output}")
+    return 0
+def _run_sessions_open(log_dir: Path, args: argparse.Namespace) -> int:
+    sdir = _read_session_dir(log_dir, args.session_id)
+    if not sdir:
+        print(f"Session not found: {args.session_id}", file=sys.stderr)
+        return 1
+
+    html_path = sdir / "session.html"
+    if not html_path.is_file():
+        print(f"No session HTML for session {args.session_id}", file=sys.stderr)
+        print(f"Generate it with: sessions export {args.session_id}", file=sys.stderr)
+        return 1
+
+    webbrowser.open(html_path.resolve().as_uri())
+    print(f"Opened: {html_path}")
     return 0
 
 
@@ -668,6 +958,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "  sessions info <session-id>      show session details\n"
             "  sessions logs <session-id>      print session log files\n"
             "  sessions export <session-id>    regenerate session HTML\n"
+            "  sessions open <session-id>      open session HTML in browser\n"
             "\n"
             "Other:\n"
             "  merge                           merge raw log files into static HTML\n"

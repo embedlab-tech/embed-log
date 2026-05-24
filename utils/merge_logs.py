@@ -313,6 +313,7 @@ def generate_html(tab_specs: list) -> str:
     selection_js = _js("selection.js")
     themes_js    = _js("themes.js")
     tabcreate_js = _js("tabcreate.js")
+    toolbar_html = _read_asset("toolbar.html")
     export_js    = _js("export.js")
     # ws.js intentionally omitted — no WebSocket in static mode
 
@@ -384,22 +385,7 @@ def generate_html(tab_specs: list) -> str:
 </head>
 <body>
 
-<!-- ── TOOLBAR ──────────────────────────────────────────────── -->
-<div id="toolbar">
-    <span class="app-name">embed-log</span>
-    <button id="btn-wrap"     title="Toggle word wrap">Wrap</button>
-    <button id="btn-sync"     title="Generate/refresh session HTML on backend">Save HTML</button>
-    <div class="sep"></div>
-    <button id="btn-font-dec" title="Decrease font size">A-</button>
-    <button id="btn-font-inc" title="Increase font size">A+</button>
-    <div class="sep"></div>
-    <button id="btn-clear"    title="Clear all panes">Clear</button>
-    <button id="btn-export"   title="Export current tab to a self-contained HTML file">Export</button>
-    <div class="sep"></div>
-    <button id="btn-theme" title="Toggle light / dark theme">🌙</button>
-    <!-- ws-status kept for DOM compatibility; invisible in static mode -->
-    <div id="ws-status" style="display:none"></div>
-</div>
+{toolbar_html}
 
 <!-- ── TAB BAR — shown by tabs.js when there is more than one tab ── -->
 <div id="tab-bar"></div>
