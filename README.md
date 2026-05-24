@@ -12,9 +12,30 @@ Read these in order:
 - `docs/BACKEND.md` / `docs/FRONTEND.md` — subsystem details
 - `docs/TESTING.md` — test strategy and commands
 
-## Install
+## Quick install
 
-Developer setup:
+One command, no clone needed:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.sh | bash
+```
+
+Windows (PowerShell):
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.ps1'))
+```
+
+After install, `embed-log` is available globally (no venv activation needed):
+
+```bash
+embed-log init
+embed-log run --config embed-log.yml
+```
+
+### Developer setup
+
+From a cloned repository:
 
 ```bash
 python3 -m venv .venv
