@@ -118,6 +118,8 @@ class WebSocketBroadcaster:
         app.router.add_post("/api/session/rotate", self._session_rotate_handler)
         app.router.add_get("/api/sessions", self._sessions_list_handler)
         app.router.add_get("/sessions/{session_id}/{filename}", self._session_file_handler)
+        app.router.add_get("/api/stats", self._stats_handler)
+        app.router.add_get("/api/health", self._health_handler)
         app.router.add_get("/", self._index_handler)
         app.router.add_get("/{filename}", self._static_handler)
         runner = web.AppRunner(app)
@@ -214,6 +216,26 @@ class WebSocketBroadcaster:
             })
 
         return web.json_response({"sessions": sessions, "current": current})
+
+    async def _health_handler(self, request: web.Request) -> web.Response:
+        return web.json_response({"status": "ok"})
+
+    async def _stats_handler(self, request: web.Request) -> web.Response:
+        per_source = {}
+        for name, mgr in self._source_map.items():
+            per_source[name] = mgr.get_stats()
+        totals = {
+            "enqueued": sum(s["queue"]["enqueued"] for s in per_source.values()),
+            "dequeued": sum(s["queue"]["dequeued"] for s in per_source.values()),
+            "peak_depth": max((s["queue"]["peak_depth"] for s in per_source.values()), default=0),
+            "near_full_events": sum(s["queue"]["near_full_events"] for s in per_source.values()),
+        }
+        return web.json_response({
+            "sources": per_source,
+            "totals": totals,
+            "session": self._session_info.get("id"),
+            "ws_clients": len(self._clients),
+        })
 
     async def _session_file_handler(self, request: web.Request) -> web.Response:
         if self._sessions_root is None:

@@ -6,24 +6,32 @@ export const TABS  = window.TABS  ?? [];
 export const PANES = window.PANES ?? [...new Set(TABS.flatMap(t => t.panes))];
 
 export const state = {
-    wrap:        false,
     showTs:      true,
+
     fontSize:    14,
     activeTab:   0,
+    activePaneTab: 0,
     syncTs:      null,   // last-clicked numeric timestamp
     syncTabSwitch: false, // true after explicit line sync; next tab switches follow syncTs
     filters:     {},
+    wrap:        {},
     rawLines:    {},
+    renderBase:  {},
     atBottom:    {},
     highlighted: {},
     selected:    {},
+    selectionScope:  'exact', // 'exact' or 'context'
+    unwrap:        false,
 };
 
 // Initialise per-pane state for every pane in the system
 PANES.forEach(id => {
     state.filters[id]     = null;
     state.rawLines[id]    = [];
+    state.renderBase[id]  = 0;
     state.atBottom[id]    = true;
+
+    state.wrap[id]        = false;
     state.highlighted[id] = null;
     state.selected[id]    = new Set();
 });

@@ -17,10 +17,12 @@ function resetLayoutForNewSession() {
     PANES.length = 0;
 
     state.activeTab = 0;
+    state.activePaneTab = 0;
     state.syncTs = null;
     state.syncTabSwitch = false;
     state.filters = {};
     state.rawLines = {};
+    state.renderBase = {};
     state.atBottom = {};
     state.highlighted = {};
     state.selected = {};

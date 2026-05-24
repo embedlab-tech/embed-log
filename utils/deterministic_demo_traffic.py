@@ -123,6 +123,7 @@ def build_udp_lines(src: str, tick: int, seq_start: int) -> tuple[list[str], int
     seq = seq_start
     lines: list[str] = []
 
+
     lines.append(_msg(src, tick, seq, "sync", f"{src} synchronized step {tick:03d}"))
     seq += 1
 

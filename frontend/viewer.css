@@ -138,11 +138,7 @@ button.active { background: var(--selection); border-color: var(--accent); color
 .log-line.line-err { color: var(--ansi-1); font-weight: 600; }  /* red    */
 /* <inf> lines are intentionally left unstyled */
 
-/* ---- File import ---- */
-.pane-body.drag-over {
-    outline: 2px dashed var(--accent);
-    outline-offset: -4px;
-}
+
 
 /* ---- Tab bar ---- */
 #tab-bar {
@@ -279,10 +275,53 @@ button.active { background: var(--selection); border-color: var(--accent); color
 }
 #sessions-menu .session-actions a:hover { text-decoration: underline; }
 #sessions-menu .session-actions a.disabled {
+
     color: var(--ansi-0);
     pointer-events: none;
     text-decoration: none;
 }
+
+/* Download raw popup menu */
+#download-raw-menu {
+    position: fixed;
+    z-index: 1100;
+    min-width: 320px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+    display: none;
+}
+#download-raw-menu.open { display: block; }
+#download-raw-menu .download-raw-head {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    color: var(--accent);
+    font-size: 12px;
+}
+#download-raw-menu .download-raw-body {
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+#download-raw-menu .download-raw-opt {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: var(--text);
+    cursor: pointer;
+}
+#download-raw-menu .download-raw-opt:hover {
+    background: var(--selection);
+    color: var(--accent);
+}
+
 
 /* ---- Main layout ---- */
 #container {
@@ -325,6 +364,7 @@ button.active { background: var(--selection); border-color: var(--accent); color
 }
 .pane-header .pane-name { flex: 1; }
 .pane-header button { padding: 2px 6px; font-size: 11px; }
+.pane-header button.active { border-color: var(--accent); }
 
 /* Pane swap feedback animation */
 .pane.swap-anim {
@@ -495,10 +535,9 @@ button.active { background: var(--selection); border-color: var(--accent); color
     right: 8px;
     top: 8px;
     display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    max-width: min(560px, calc(100% - 16px));
-    gap: 6px;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
     z-index: 10;
     opacity: 0;
     pointer-events: none;
@@ -506,20 +545,95 @@ button.active { background: var(--selection); border-color: var(--accent); color
 }
 .copy-actions.visible { opacity: 0.95; pointer-events: auto; }
 
+/* Scope toggle row */
+.scope-row {
+    display: flex;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+}
+.scope-btn {
+    background: var(--panel);
+    color: var(--ansi-0);
+    border: none;
+    padding: 2px 10px;
+    font-size: 10px;
+    cursor: pointer;
+    transition: none;
+    opacity: 0;
+    pointer-events: none;
+}
+.scope-btn.visible { opacity: 1; pointer-events: auto; }
+.scope-btn:hover { color: var(--accent); }
+.scope-btn.active {
+    background: var(--accent);
+    color: var(--header);
+    font-weight: 600;
+}
+.scope-btn.active:hover { color: var(--header); }
+
+/* Primary action row */
+.action-row {
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+    position: relative;
+}
+
 .copy-btn {
-    position: static;
     padding: 3px 10px;
     border-radius: 6px;
     border: 1px solid var(--accent);
     color: var(--accent);
     background: var(--panel);
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.15s;
     font-size: 11px;
+    cursor: pointer;
+    transition: none;
+    white-space: nowrap;
 }
 .copy-btn.visible { opacity: 0.95; pointer-events: auto; }
 .copy-btn:hover   { opacity: 1; }
+
+/* More toggle */
+.more-toggle {
+    padding: 3px 8px;
+    letter-spacing: 1px;
+}
+
+/* More dropdown */
+.more-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    min-width: 150px;
+    padding: 4px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+    z-index: 20;
+    flex-direction: column;
+    gap: 2px;
+}
+.more-dropdown.open {
+    display: flex;
+}
+.more-dropdown .copy-btn {
+    border: none;
+    border-radius: 4px;
+    text-align: left;
+    width: 100%;
+    font-size: 11px;
+    padding: 4px 10px;
+    background: transparent;
+}
+.more-dropdown .copy-btn:hover {
+    background: var(--selection);
+}
+
 
 mark.hl {
     background: var(--ansi-3);

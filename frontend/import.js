@@ -138,4 +138,4 @@ export function _importSetupPane(id) {
         if (file) _importFile(id, file);
     });
 }
-PANES.forEach(_importSetupPane);
+

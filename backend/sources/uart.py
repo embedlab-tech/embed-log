@@ -35,18 +35,28 @@ class UartSource(LogSource):
     def _run(self, on_line, stop, name):
         while not stop.is_set():
             try:
-                with serial.serial_for_url(self.port, baudrate=self.baudrate, timeout=1) as ser:
+                with serial.serial_for_url(self.port, baudrate=self.baudrate, timeout=0.01) as ser:
                     logging.info("[%s] opened serial %s @ %d", name, self.port, self.baudrate)
                     with self._ser_lock:
                         self._ser = ser
                     try:
+                        buf = b""
                         while not stop.is_set():
-                            raw = ser.readline()
+                            raw = ser.read(65536)
                             if raw:
-                                on_line(raw.decode("utf-8", errors="replace").rstrip())
+                                buf += raw
+                                while b"\n" in buf:
+                                    raw_line, buf = buf.split(b"\n", 1)
+                                    clean = raw_line.rstrip(b"\r").decode("utf-8", errors="replace").rstrip()
+                                    if clean:
+                                        on_line(clean)
+                            else:
+                                stop.wait(0.005)
                     finally:
                         with self._ser_lock:
                             self._ser = None
+                        if buf.strip():
+                            on_line(buf.rstrip(b"\r").decode("utf-8", errors="replace").rstrip())
             except serial.SerialException as exc:
                 logging.warning("[%s] serial error: %s — retrying in 3 s", name, exc)
                 stop.wait(3)

@@ -105,7 +105,9 @@ export async function exportHtmlSnapshot(options = {}) {
             return `        <div class="pane" id="pane-${paneId}">
             <div class="pane-header">
                 <span class="pane-name">${label}</span>
-                <button class="pane-clear-btn" data-pane="${paneId}">clear</button>
+
+                <button class="pane-wrap-btn" title="Toggle word wrap in this pane">Wrap</button>
+
             </div>
             <div class="filter-bar">
                 <input class="filter-input" data-pane="${paneId}" placeholder="Filter (regex)\u2026">
@@ -171,14 +173,22 @@ export async function exportHtmlSnapshot(options = {}) {
 
 <div id="toolbar">
     <span class="app-name">embed-log</span>
-    <button id="btn-wrap"     title="Toggle word wrap">Wrap</button>
-    <button id="btn-sync"     title="Generate/refresh session HTML on backend">Save HTML</button>
-    <div class="sep"></div>
     <button id="btn-clear"    title="Clear all panes">Clear</button>
-    <button id="btn-export"   title="Export current tab to a self-contained HTML file">Export</button>
+    <button id="btn-export"   title="Export current session as a self-contained HTML file">Export HTML</button>
+    <button id="btn-download-raw" title="Download all logs as merged raw text file">Download raw</button>
+    <button id="btn-unwrap"  title="Unwrap multi-pane tabs into single-pane tabs">Unwrap</button>
     <div class="sep"></div>
     <button id="btn-theme" title="Toggle light / dark theme">\uD83C\uDF19</button>
     <div id="ws-status" style="display:none"></div>
+</div>
+
+
+<div id="download-raw-menu">
+    <div class="download-raw-head">Download raw logs</div>
+    <div class="download-raw-body">
+        <button id="btn-download-merged" class="download-raw-opt">Merged (.log) — all panes interleaved</button>
+        <button id="btn-download-split" class="download-raw-opt">Per pane (.log files) — one file per source</button>
+    </div>
 </div>
 
 <div id="tab-bar"></div>
@@ -230,3 +240,107 @@ async function exportToHtml() {
 window.__embedLogExportSnapshot = exportHtmlSnapshot;
 
 document.getElementById("btn-export")?.addEventListener("click", exportToHtml);
+
+// ---------------------------------------------------------------------------
+// Download all logs as merged raw text (one file, all panes interleaved)
+// ---------------------------------------------------------------------------
+function _lineRawFull(line) {
+    return `${line.ts}  ${line.rawText ?? ""}`;
+}
+
+function downloadRawMerged() {
+    const entries = [];
+    PANES.forEach(id => {
+        (state.rawLines[id] || []).forEach((line, idx) => {
+            entries.push({ paneId: id, idx, line });
+        });
+    });
+    entries.sort((a, b) =>
+        (a.line.numTs - b.line.numTs) || a.paneId.localeCompare(b.paneId) || (a.idx - b.idx)
+    );
+
+    const text = entries.map(e => {
+        return `[${e.line.ts}] [${e.paneId}] ${_lineRawFull(e.line)}`;
+    }).join("\n");
+
+    const now = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -1);
+    const blob = new Blob([text + "\n"], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `embed-log-merged-${now}.log`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+// ---------------------------------------------------------------------------
+// Download raw — popup menu (merged or per pane)
+// ---------------------------------------------------------------------------
+function downloadRawSplit() {
+    PANES.forEach(id => {
+        const lines = state.rawLines[id] || [];
+        if (!lines.length) return;
+        const text = lines.map(line => `${line.ts}  ${line.rawText ?? ""}`).join("\n");
+        const blob = new Blob([text + "\n"], { type: "text/plain" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${id}.log`;
+        a.click();
+        URL.revokeObjectURL(url);
+    });
+}
+
+function _toggleRawMenu() {
+    const btn = document.getElementById("btn-download-raw");
+    const menu = document.getElementById("download-raw-menu");
+    if (!menu || !btn) return;
+
+    const isOpen = menu.classList.contains("open");
+    document.querySelectorAll("#clip-peek-menu.open, #sessions-menu.open").forEach(el =>
+        el.classList.remove("open")
+    );
+
+    if (isOpen) {
+        menu.classList.remove("open");
+        return;
+    }
+
+    const rect = btn.getBoundingClientRect();
+    menu.style.left = `${Math.max(8, rect.left)}px`;
+    menu.style.top = `${rect.bottom + 6}px`;
+    menu.classList.add("open");
+}
+
+function _closeRawMenu() {
+    document.getElementById("download-raw-menu")?.classList.remove("open");
+}
+
+document.getElementById("btn-download-raw")?.addEventListener("click", e => {
+    e.stopPropagation();
+    _toggleRawMenu();
+});
+
+document.getElementById("btn-download-merged")?.addEventListener("click", e => {
+    e.stopPropagation();
+    downloadRawMerged();
+    _closeRawMenu();
+});
+
+document.getElementById("btn-download-split")?.addEventListener("click", e => {
+    e.stopPropagation();
+    downloadRawSplit();
+    _closeRawMenu();
+});
+
+document.addEventListener("click", e => {
+    const menu = document.getElementById("download-raw-menu");
+    const btn = document.getElementById("btn-download-raw");
+    if (!menu?.classList.contains("open")) return;
+    if (menu.contains(e.target) || btn?.contains(e.target)) return;
+    _closeRawMenu();
+}, true);
+
+document.addEventListener("keydown", e => {
+    if (e.key === "Escape") _closeRawMenu();
+});

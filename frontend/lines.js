@@ -1,4 +1,9 @@
 import { state, TABS, PANES } from './state.js';
+
+// Maximum DOM elements kept per pane when tailing (at bottom).
+// Older lines are removed from the DOM to prevent unbounded growth.
+// Full data is always preserved in state.rawLines for search/export.
+const MAX_RENDERED = 200;
 import { parseAnsi, tsToNum } from './ansi.js';
 
 // ---------------------------------------------------------------------------
@@ -42,12 +47,24 @@ export function matchesFilter(line, rx) {
     const plain = line.html.replace(/<[^>]+>/g, "") + " " + line.ts;
     return rx.test(plain);
 }
+function _renderBase(paneId) {
+    return state.renderBase[paneId] || 0;
+}
+
+function _setRenderBase(paneId, idx) {
+    state.renderBase[paneId] = Math.max(0, idx);
+}
+
+function _domIndexForLine(paneId, lineIdx) {
+    return lineIdx - _renderBase(paneId);
+}
 
 export function appendLine(paneId, ts, rawText, isTx) {
     const html  = parseAnsi(rawText);
     const numTs = tsToNum(ts);
     const line  = { ts, numTs, html, rawText, isTx };
     state.rawLines[paneId].push(line);
+    if (state.renderBase[paneId] == null) _setRenderBase(paneId, 0);
 
     const logEl = document.getElementById("log-" + paneId);
     const idx   = state.rawLines[paneId].length - 1;
@@ -63,10 +80,16 @@ export function appendLine(paneId, ts, rawText, isTx) {
         div.innerHTML = buildLineHtml(line, state.showTs, rx);
     }
 
-    div.addEventListener("click",     () => onLineClick(paneId, numTs, div));
-    div.addEventListener("mousedown", e  => { if (e.button === 1) e.preventDefault(); });
-    div.addEventListener("auxclick",  e  => { if (e.button === 1) onMiddleClick(paneId, numTs, div); });
+
     logEl.appendChild(div);
+
+    // Prune old DOM elements when tailing to prevent unbounded growth
+    if (state.atBottom[paneId]) {
+        while (logEl.children.length > MAX_RENDERED) {
+            logEl.removeChild(logEl.firstChild);
+            _setRenderBase(paneId, _renderBase(paneId) + 1);
+        }
+    }
 
     if (state.atBottom[paneId]) logEl.scrollTop = logEl.scrollHeight;
     updateJumpBtn(paneId);
@@ -79,9 +102,11 @@ export function rerenderPane(paneId) {
     const divs  = logEl.children;
     const rx    = state.filters[paneId];
 
-    for (let i = 0; i < lines.length; i++) {
+    const base   = _renderBase(paneId);
+    const limit  = Math.min(lines.length, base + divs.length);
+    for (let i = base; i < limit; i++) {
         const line = lines[i];
-        const div  = divs[i];
+        const div  = divs[_domIndexForLine(paneId, i)];
         if (!div) continue;
         if (!matchesFilter(line, rx)) {
             div.style.display = "none";
@@ -117,15 +142,39 @@ export function _linesSetupPane(id) {
         state.atBottom[id] = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
         updateJumpBtn(id);
     });
+    // Event delegation — replaces per-line listeners for better performance
+    logEl.addEventListener("click", e => {
+        const lineDiv = e.target.closest(".log-line");
+        if (!lineDiv) return;
+        const idx = parseInt(lineDiv.dataset.idx, 10);
+        const line = state.rawLines[id] ? state.rawLines[id][idx] : null;
+        if (!line) return;
+        onLineClick(id, line.numTs, lineDiv);
+    });
+    logEl.addEventListener("mousedown", e => { if (e.button === 1) e.preventDefault(); });
+    logEl.addEventListener("auxclick", e => {
+        if (e.button !== 1) return;
+        const lineDiv = e.target.closest(".log-line");
+        if (!lineDiv) return;
+        const idx = parseInt(lineDiv.dataset.idx, 10);
+        const line = state.rawLines[id] ? state.rawLines[id][idx] : null;
+        if (!line) return;
+        onMiddleClick(id, line.numTs, lineDiv);
+    });
     document.getElementById("jump-" + id).addEventListener("click", () => {
         state.syncTabSwitch = false;
         scrollPaneToBottom(id);
     });
-    document.querySelector(`.pane-clear-btn[data-pane="${id}"]`)
-        ?.addEventListener("click", () => {
-            window.wsSend?.({ cmd: "clear_logs", scope: "pane", id });
-            clearPane(id);
+
+    // Per-pane wrap toggle
+    const wrapBtn = document.querySelector(`#pane-${id} .pane-wrap-btn`);
+    if (wrapBtn) {
+        wrapBtn.addEventListener("click", () => {
+            state.wrap[id] = !state.wrap[id];
+            wrapBtn.classList.toggle("active", state.wrap[id]);
+            document.getElementById("log-" + id)?.classList.toggle("wrap", state.wrap[id]);
         });
+    }
 }
 PANES.forEach(_linesSetupPane);
 
@@ -136,14 +185,15 @@ PANES.forEach(_linesSetupPane);
 export function clearPane(paneId) {
     state.rawLines[paneId] = [];
     state.selected[paneId] = new Set();
+    _setRenderBase(paneId, 0);
     document.getElementById("log-" + paneId).innerHTML = "";
     highlightLine(paneId, null);
     state.atBottom[paneId] = true;
     updateJumpBtn(paneId);
     // Hide copy-selection actions if selection.js has added them
-    document.getElementById("copy-" + paneId)?.classList.remove("visible");
-    document.getElementById("copy-add-" + paneId)?.classList.remove("visible");
     document.getElementById("copy-actions-" + paneId)?.classList.remove("visible");
+    // Close any open More dropdown for this pane
+    document.getElementById("more-dropdown-" + paneId)?.classList.remove("open");
     window.__embedLogSchedulePersist?.();
 }
 
@@ -152,6 +202,36 @@ document.getElementById("btn-clear").addEventListener("click", () => {
     PANES.forEach(clearPane);
 });
 
+
+// Rebuild DOM for a pane from stored state — used after layout rebuild (UNWRAP toggle)
+export function repopulatePaneLogs(paneId) {
+    const logEl = document.getElementById("log-" + paneId);
+    if (!logEl) return;
+    logEl.innerHTML = "";
+    const lines = state.rawLines[paneId] || [];
+    const rx = state.filters[paneId];
+    const startIdx = state.atBottom[paneId] && lines.length > MAX_RENDERED
+        ? lines.length - MAX_RENDERED
+        : 0;
+    _setRenderBase(paneId, startIdx);
+
+    lines.slice(startIdx).forEach((line, offset) => {
+        const idx = startIdx + offset;
+        const div = document.createElement("div");
+        div.dataset.ts  = line.ts;
+        div.dataset.idx = idx;
+        div.className   = _lineClass(line, idx, paneId);
+        if (matchesFilter(line, rx)) {
+            div.innerHTML = buildLineHtml(line, state.showTs, rx);
+        } else {
+            div.style.display = "none";
+        }
+
+        logEl.appendChild(div);
+    });
+    if (state.atBottom[paneId]) logEl.scrollTop = logEl.scrollHeight;
+    updateJumpBtn(paneId);
+}
 // ---------------------------------------------------------------------------
 // Sync
 // ---------------------------------------------------------------------------
@@ -179,7 +259,7 @@ export function scrollPaneToTs(paneId, numTs) {
     if (lo > 0 && Math.abs(lines[lo - 1].numTs - numTs) < Math.abs(lines[lo].numTs - numTs)) lo--;
 
     const logEl = document.getElementById("log-" + paneId);
-    const div   = logEl.children[lo];
+    const div   = logEl.children[_domIndexForLine(paneId, lo)];
     if (!div) return;
 
     logEl.scrollTop = Math.max(0, div.offsetTop - Math.floor(logEl.clientHeight / 3));
@@ -238,7 +318,9 @@ export function onLineClick(paneId, numTs, div) {
 // Sync all OTHER panes in the active tab to numTs, mirroring the clicked
 // line's Y position within the viewport.
 export function syncPanes(fromId, numTs, clickedDiv) {
-    const activePanes = TABS[state.activeTab].panes;
+    if (state.unwrap) return;
+
+    const activePanes = TABS[state.activeTab]?.panes || [];
     if (activePanes.length < 2) return;
 
     const fromLogEl     = document.getElementById("log-" + fromId);
@@ -261,7 +343,7 @@ export function syncPanes(fromId, numTs, clickedDiv) {
         }
 
         const logEl     = document.getElementById("log-" + toId);
-        const targetDiv = logEl.children[lo];
+        const targetDiv = logEl.children[_domIndexForLine(toId, lo)];
         if (!targetDiv) return;
 
         logEl.scrollTop = targetDiv.offsetTop - clickedRelTop;

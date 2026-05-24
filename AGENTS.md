@@ -1,94 +1,77 @@
 # AGENTS.md
 
-Quick onboarding notes for future coding agents and humans working in `embed-log`.
+Quick onboarding notes for humans and coding agents working in `embed-log`.
 
 ## Project intent
 
-`embed-log` is a configurable log aggregation server for embedded development and CI. It ingests multiple sources (UART/UDP), merges and timestamps events, stores per-session artifacts, streams live data to a backend-configured tabs/panes UI, and supports test-driven marker/TX injection over TCP.
+`embed-log` is a configurable log aggregation server for embedded development and CI. It ingests multiple sources, timestamps and stores session artifacts, serves a backend-configured browser UI, and supports inject/TX workflows.
+
+## Read these first
+
+- `README.md` — install/run/config basics
+- `docs/BACKEND.md` — backend architecture and contracts
+- `docs/FRONTEND.md` — frontend architecture and UI behavior
+- `docs/TESTING.md` — backend + Playwright test strategy
+- `docs/README.md` — documentation index
 
 ## Architecture at a glance
 
-1. **Source readers** (`uart`, `udp`) feed lines into per-source queues.
-2. **SourceManager writer thread** serializes output order and writes to:
-   - stdout (only in verbose mode)
-   - per-session raw log files in `logs/<session_id>/`
-   - WebSocket payloads (if UI enabled)
-   - inject-port stream clients (JSON)
-   - optional forward-port clients (raw RX lines)
-3. **WebSocketBroadcaster** serves UI and pushes `rx`/`tx` events.
-4. **Session artifacts** are generated in each session directory (optionally suffixed with CI `job_id`):
+1. Source readers (`uart`, `udp`) feed lines into runtime-managed flow.
+2. Runtime writes to per-session logs and live sinks.
+3. WebSocket broadcaster sends `config` first, then log/session events.
+4. Session artifacts are generated per session:
    - `manifest.json`
-   - `session.html` (auto-export on last WS disconnect and on SIGINT/SIGTERM)
-5. **Frontend** renders tabs/panes, filters, settings, export/import, selection, splitters, refresh cache, and sessions popup.
-
-## Run locally (recommended)
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-embed-log init
-embed-log validate --config embed-log.yml
-embed-log run --config embed-log.yml
-# or: ./run_demo.sh
-```
-
-UI: usually `http://127.0.0.1:8080/` (demo script may auto-fallback to another free 808x port).
-Tip: `server.open_browser: true` (or `--open-browser`) opens the UI automatically on startup.
-Tip: `server.app_name` (or `--app-name`) customizes the top-left UI bar name.
+   - `session.html`
+5. Frontend renders tabs/panes, filtering, selection, export/import, sessions, cache.
 
 ## Key code locations
 
-- Backend core runtime: `backend/core/runtime.py`
-- Backend CLI/entry compatibility: `backend/cli.py`, `backend/server.py`
-- Slug/naming helper: `backend/core/naming.py`
-- Unit tests: `tests/` (run with `python3 -m unittest discover -s tests -v`)
-- Client APIs: `backend/log_client.py`, `backend/tx_client.py`
-- Frontend entry: `frontend/main.js`
+- Backend runtime: `backend/core/runtime.py`
+- App composition: `backend/app.py`
+- HTTP/WS server: `backend/net/ws_server.py`
+- Session management/export: `backend/session/*`
 - Frontend state/layout: `frontend/state.js`, `frontend/tabs.js`, `frontend/tabcreate.js`, `frontend/ui.js`
-- Live transport: `frontend/ws.js`
-- Rendering: `frontend/lines.js`
-- Frontend cache persistence: `frontend/persist.js`
+- Frontend transport/rendering: `frontend/ws.js`, `frontend/lines.js`, `frontend/selection.js`, `frontend/export.js`
+- Playwright tests: `tests-ui/tests/*`
 
-## Current UX features (important context)
+## Current demo/test layout
 
-- Reliable macOS-friendly splitter dragging.
-- Pane swap UI via hover popup on tab labels.
-- Visual swap pulse animation.
-- Local refresh cache of logs/layout (with toolbar "Clear cache" action).
-- Session-aware cache keys (cache scoped by backend session id).
-- Toolbar sessions UX:
-  - `Current HTML` button (open current session export)
-  - `Sessions` popup (browse/open saved sessions and manifests)
+Deterministic demo config uses:
+- `Simulated Devices` tab → `SENSOR_A`, `SENSOR_B`
+- `Other Sensor` tab → `SENSOR_C`
 
-## Change guidelines
+Do not assume all panes are visible at once.
 
-- Keep frontend as plain modules (no build tool assumptions).
-- Prefer minimal, targeted edits over rewrites.
-- Preserve protocol compatibility:
-  - WS sends `config` first, then log events.
-  - `config` now includes `session` metadata.
-  - Inject sockets accept newline-delimited JSON.
-- Keep session APIs stable unless intentionally versioned:
+## Contracts to preserve
+
+- WS protocol order: `config` first, then log events.
+- Session APIs:
   - `GET /api/session/current`
   - `GET /api/sessions`
   - `GET /sessions/<session_id>/<filename>`
-- Any new backend capability should be easy to drive from both:
-  - direct Python clients (`log_client`, `tx_client`)
-  - browser WebSocket path.
+- Inject sockets accept newline-delimited JSON.
+- Exported `session.html` must remain usable as static replay.
 
-## Suggested next backend priorities
+## Working guidelines
 
-1. Bounded queues + drop/backpressure counters.
-2. `/health` + `/stats` endpoint(s) for CI observability.
-3. Optional server-side retention/replay window.
-4. Optional auth for non-local deployments.
+- Keep frontend plain modules; no bundler assumptions.
+- Prefer targeted edits over rewrites.
+- Reuse existing protocol and state patterns.
+- When changing exported/static HTML behavior, validate both live and replay paths.
+- Prefer deterministic `tick=...` / `kind=...` assertions in UI tests.
+- Use `confirm()` before destructive session operations in tests.
+- When managing backend server processes for testing:
+  - **Never use `pkill -f "embed-log"`, `pkill -f "run_demo"`, or `pkill -f "deterministic"`**. The `-f` flag matches the full command line and can kill the tmux/terminal session itself.
+  - Use `lsof -ti:8080 | xargs kill 2>/dev/null` to kill only what's bound to the server port.
+  - Or track the PID from a controlled `./run_demo.sh & echo $!` start and kill by PID.
+  - After killing, confirm the port is actually free: `sleep 1; lsof -ti:8080` should return nothing before restarting the server.
 
-## Documentation map
+## Useful commands
 
-- `README.md` — main docs
-- `DIRECTORY_GUIDE.md` — directory explanations
-- `FRONTEND.md` — frontend details
-- `INSTALL.md` — setup
-- `MERGE.md` — offline merge utility
+```bash
+# backend tests
+python3 -m unittest discover -s tests -v
+
+# ui tests
+cd tests-ui && npm test
+```

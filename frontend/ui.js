@@ -1,14 +1,18 @@
 import { state, TABS, PANES } from './state.js';
 import { clearPane, rerenderPane } from './lines.js';
+import { rebuildLayout } from './tabcreate.js';
+
+
 
 // ---------------------------------------------------------------------------
-// Toolbar — wrap
+// Toolbar — UNWRAP toggle
 // ---------------------------------------------------------------------------
-const btnWrap = document.getElementById("btn-wrap");
-btnWrap.addEventListener("click", () => {
-    state.wrap = !state.wrap;
-    btnWrap.classList.toggle("active", state.wrap);
-    PANES.forEach(id => document.getElementById("log-" + id).classList.toggle("wrap", state.wrap));
+document.getElementById("btn-unwrap")?.addEventListener("click", () => {
+    if (PANES.length === 0) return;  // no panes loaded yet
+    const wasUnwrapped = state.unwrap;
+    state.unwrap = !state.unwrap;
+    document.getElementById("btn-unwrap")?.classList.toggle("active", state.unwrap);
+    rebuildLayout(wasUnwrapped);
 });
 
 // ---------------------------------------------------------------------------
@@ -50,16 +54,24 @@ btnWrap.addEventListener("click", () => {
     const panel = document.getElementById("settings-panel");
     if (!panel) return;
 
-    const btnSave = document.getElementById("btn-sync");
-    if (btnSave) {
-        btnSave.title = "Generate/refresh session HTML on backend";
-        btnSave.textContent = "Save HTML";
-    }
-    const btnCleanSession = document.getElementById("btn-clean-session");
-    if (btnCleanSession) {
-        btnCleanSession.title = "Save current session HTML and start a clean session";
-        btnCleanSession.textContent = "Clean session";
-    }
+    // Create panel buttons for server-side actions (formerly in toolbar)
+    const btnSave = document.createElement("button");
+    btnSave.id = "btn-save-to-server";
+    btnSave.title = "Generate/refresh session HTML on the backend server";
+    btnSave.textContent = "Save to server";
+
+    const sep1 = document.createElement("span");
+    sep1.className = "set-sep";
+    sep1.textContent = "|";
+
+    const btnCleanSession = document.createElement("button");
+    btnCleanSession.id = "btn-clean-session";
+    btnCleanSession.title = "Save current session HTML and start a clean session";
+    btnCleanSession.textContent = "Clean session";
+
+    const sep2 = document.createElement("span");
+    sep2.className = "set-sep";
+    sep2.textContent = "|";
 
     const btnCurrent = document.createElement("button");
     btnCurrent.id = "btn-current-session";
@@ -71,6 +83,10 @@ btnWrap.addEventListener("click", () => {
     btn.title = "Browse saved sessions";
     btn.textContent = "Sessions";
 
+    panel.appendChild(btnSave);
+    panel.appendChild(sep1);
+    panel.appendChild(btnCleanSession);
+    panel.appendChild(sep2);
     panel.appendChild(btnCurrent);
     panel.appendChild(btn);
 
@@ -542,7 +558,9 @@ export function _uiSetupPane(id) {
                     state.filters[id] = new RegExp(val, "i");
                     input.classList.remove("invalid");
                 } catch {
-                    state.filters[id] = null;
+                    // Keep the last valid filter while showing the error —
+                    // don't clear it, so the user can fix the regex without
+                    // losing their filtering context.
                     input.classList.add("invalid");
                 }
             }

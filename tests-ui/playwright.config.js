@@ -29,7 +29,7 @@ export default defineConfig({
     command: 'cd .. && rm -rf tests-ui/.tmp/logs && mkdir -p tests-ui/.tmp && DEMO_LOG_DIR=tests-ui/.tmp/logs DEMO_PROFILE=test DEMO_TEST_TICK_MS=100 ./run_demo.sh --no-browser',
     url: baseURL,
     timeout: 60_000,
-    reuseExistingServer: true,
+    reuseExistingServer: false,
   } : undefined,
   projects: [
     {

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+
 import queue
 import signal
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TextIO
 
 import serial
 
@@ -30,6 +32,79 @@ ANSI = {
     "bold":    "\033[1m",
     "reset":   "\033[0m",
 }
+
+class TrackedQueue:
+    """Bounded queue with throughput and saturation tracking.
+
+    Blocks on put() when full (backpressure — never drops entries).
+    Tracks enqueue/dequeue counts, peak depth, and near-full events.
+    """
+
+    __slots__ = (
+        "_queue", "_maxsize", "_near_full_pct",
+        "_enqueued", "_dequeued", "_peak_depth", "_near_full_count",
+        "_lock",
+    )
+
+    NEAR_FULL_PCT = 0.80
+
+    def __init__(self, maxsize: int = 0):
+        if maxsize <= 0:
+            maxsize = 0  # 0 = unbounded in Queue
+        self._queue: queue.Queue[Optional[LogEntry]] = queue.Queue(maxsize)
+        self._maxsize = maxsize
+        self._near_full_pct = self.NEAR_FULL_PCT
+        self._enqueued = 0
+        self._dequeued = 0
+        self._peak_depth = 0
+        self._near_full_count = 0
+        self._lock = threading.Lock()
+
+    @property
+    def maxsize(self) -> int:
+        return self._maxsize
+
+    def put(self, item: Optional[LogEntry]) -> None:
+        self._queue.put(item)
+        with self._lock:
+            self._enqueued += 1
+            depth = self._queue.qsize()
+            if depth > self._peak_depth:
+                self._peak_depth = depth
+            if self._maxsize > 0 and depth >= self._maxsize * self._near_full_pct:
+                self._near_full_count += 1
+
+    def get(self) -> Optional[LogEntry]:
+        item = self._queue.get()
+        with self._lock:
+            self._dequeued += 1
+        return item
+
+    def task_done(self) -> None:
+        self._queue.task_done()
+
+    def join(self) -> None:
+        self._queue.join()
+
+    def stats(self) -> dict:
+        with self._lock:
+            qsize = self._queue.qsize()
+            return {
+                "maxsize": self._maxsize,
+                "depth": qsize,
+                "utilization_pct": round(qsize / self._maxsize * 100, 1) if self._maxsize > 0 else 0.0,
+                "enqueued": self._enqueued,
+                "dequeued": self._dequeued,
+                "peak_depth": self._peak_depth,
+                "near_full_events": self._near_full_count,
+            }
+
+    def clear_stats(self) -> None:
+        with self._lock:
+            self._enqueued = 0
+            self._dequeued = 0
+            self._peak_depth = self._queue.qsize()
+            self._near_full_count = 0
 
 
 def _slug(value: str) -> str:
@@ -66,6 +141,7 @@ class SourceManager:
         forward_ports: Optional[list[int]] = None,
         verbose: bool = False,
         broadcaster: Optional[WebSocketBroadcaster] = None,
+        queue_maxsize: int = 0,
     ):
         self.name = name
         self.source = source
@@ -76,7 +152,8 @@ class SourceManager:
         self.verbose = verbose
         self.broadcaster = broadcaster
 
-        self._queue: queue.Queue[Optional[LogEntry]] = queue.Queue()
+        self._queue: TrackedQueue = TrackedQueue(queue_maxsize)
+        self._queue_maxsize = queue_maxsize
         self._stop = threading.Event()
         self._stream_clients: list = []
         self._clients_lock = threading.Lock()
@@ -84,6 +161,7 @@ class SourceManager:
         self._forward_lock = threading.Lock()
         self._writer_thread: Optional[threading.Thread] = None
         self._file_lock = threading.Lock()
+        self._log_fd: Optional[TextIO] = None
         self._inject_server: Optional[InjectServer] = None
         self._forward_servers: list[ForwardServer] = []
 
@@ -191,20 +269,43 @@ class SourceManager:
         return json.dumps(payload).encode("utf-8") + b"\n"
 
     def _writer_loop(self) -> None:
+        _flush_counter = 0
         while True:
             entry = self._queue.get()
             try:
                 if entry is None:
+                    with self._file_lock:
+                        if self._log_fd is not None:
+                            self._log_fd.flush()
+                            os.fsync(self._log_fd.fileno())
+                            self._log_fd.close()
+                            self._log_fd = None
                     break
+                # Log near-full warning periodically when queue is congested
+                if self._queue_maxsize > 0:
+                    stats = self._queue.stats()
+                    if stats["utilization_pct"] >= 80:
+                        if stats["near_full_events"] % 100 == 1:
+                            logging.warning(
+                                "[%s] queue congested: %d/%d (%.0f%%)  near_full=%d",
+                                self.name,
+                                stats["depth"],
+                                self._queue_maxsize,
+                                stats["utilization_pct"],
+                                stats["near_full_events"],
+                            )
                 line = self._format(entry)
                 if self.verbose:
                     print(line, flush=True)
                 with self._file_lock:
-                    log_file = self.log_file
-                    log_file.parent.mkdir(parents=True, exist_ok=True)
-                    with open(log_file, "a", encoding="utf-8") as f:
-                        f.write(line + "\n")
-                        f.flush()
+                    if self._log_fd is None:
+                        self.log_file.parent.mkdir(parents=True, exist_ok=True)
+                        self._log_fd = open(self.log_file, "a", encoding="utf-8")
+                    self._log_fd.write(line + "\n")
+                    _flush_counter += 1
+                    if _flush_counter >= 100:
+                        self._log_fd.flush()
+                        _flush_counter = 0
                 if self.broadcaster and not entry.no_ws:
                     self.broadcaster.broadcast(self._ws_payload(entry))
                 self._stream_to_clients(self._stream_payload(entry))
@@ -215,6 +316,16 @@ class SourceManager:
 
     def wait_until_flushed(self) -> None:
         self._queue.join()
+    def flush_log_file(self, *, locked: bool = False) -> None:
+        if locked:
+            if self._log_fd is not None:
+                self._log_fd.flush()
+                os.fsync(self._log_fd.fileno())
+            return
+        with self._file_lock:
+            if self._log_fd is not None:
+                self._log_fd.flush()
+                os.fsync(self._log_fd.fileno())
 
     def lock_log_file(self) -> None:
         self._file_lock.acquire()
@@ -224,13 +335,24 @@ class SourceManager:
 
     def rotate_log_file(self, log_file: str, *, locked: bool = False) -> None:
         if locked:
+            if self._log_fd is not None:
+                self._log_fd.flush()
+                os.fsync(self._log_fd.fileno())
+                self._log_fd.close()
+                self._log_fd = None
             self.log_file = Path(log_file)
             self.log_file.parent.mkdir(parents=True, exist_ok=True)
+            self._log_fd = open(self.log_file, "a", encoding="utf-8")
             return
         with self._file_lock:
+            if self._log_fd is not None:
+                self._log_fd.flush()
+                os.fsync(self._log_fd.fileno())
+                self._log_fd.close()
+                self._log_fd = None
             self.log_file = Path(log_file)
             self.log_file.parent.mkdir(parents=True, exist_ok=True)
-
+            self._log_fd = open(self.log_file, "a", encoding="utf-8")
     def add_session_marker(self, message: str, *, no_ws: bool = True) -> None:
         self._queue.put(LogEntry(datetime.now().astimezone(), "SYSTEM", message, "cyan", no_ws=no_ws))
 
@@ -296,6 +418,16 @@ class SourceManager:
         self._queue.put(LogEntry(datetime.now().astimezone(), "SYSTEM", "", "cyan", no_ws=True))
         self._queue.put(LogEntry(datetime.now().astimezone(), "SYSTEM", marker, "cyan", no_ws=True))
         self._queue.put(LogEntry(datetime.now().astimezone(), "SYSTEM", "", "cyan", no_ws=True))
+    def get_stats(self) -> dict:
+        """Return per-source queue and throughput statistics."""
+        qs = self._queue.stats()
+        return {
+            "name": self.name,
+            "queue": qs,
+            "source_type": type(self.source).__name__,
+            "inject_port": self.inject_port,
+            "forward_ports": list(self.forward_ports),
+        }
 
     def _ingest_json(self, raw: bytes) -> None:
         try:
@@ -337,6 +469,7 @@ class LogServer:
         open_browser: bool = False,
         app_name: str = "embed-log",
         theme_defaults: Optional[dict] = None,
+        queue_maxsize: int = 20000,
     ):
         self._tabs = tabs
         self._session_id = session_id
@@ -346,6 +479,7 @@ class LogServer:
         self._job_id = job_id
         self._app_name = app_name
         self._theme_defaults = theme_defaults or {}
+        self._queue_maxsize = queue_maxsize
         self._rotate_lock = threading.Lock()
 
         self._source_files = {s["name"]: str(s["log_file"]) for s in sources}
@@ -395,6 +529,7 @@ class LogServer:
                 forward_ports=s.get("forward_ports", []),
                 verbose=verbose,
                 broadcaster=broadcaster,
+                queue_maxsize=self._queue_maxsize,
             )
             for s in sources
         ]
@@ -454,10 +589,15 @@ class LogServer:
         session_dir.mkdir(parents=True, exist_ok=True)
         return session_id, session_dir
 
-    def export_session_html(self, reason: str) -> bool:
+    def export_session_html(self, reason: str, *, log_files_locked: bool = False) -> bool:
         with self._export_lock:
             if self._session_info.get("html_status") == "updating":
                 return False
+
+            for mgr in self._managers:
+                mgr.wait_until_flushed()
+            for mgr in self._managers:
+                mgr.flush_log_file(locked=log_files_locked)
 
             self._session_info.update({
                 "html_status": "updating",
@@ -518,7 +658,7 @@ class LogServer:
                     mgr.lock_log_file()
                     locked.append(mgr)
 
-                self.export_session_html(f"rotate:{reason}")
+                self.export_session_html(f"rotate:{reason}", log_files_locked=True)
 
                 session_id, session_dir = self._new_session_id_and_dir()
                 started_at = datetime.now().astimezone().isoformat(timespec="seconds")

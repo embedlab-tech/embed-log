@@ -13,16 +13,25 @@
 <div id="toolbar">
     <span class="app-name">embed-log</span>
 
-    <button id="btn-wrap"     title="Toggle word wrap">Wrap</button>
-    <button id="btn-sync"     title="Generate/refresh session HTML on backend">Save HTML</button>
-    <button id="btn-clean-session" title="Save current session and start a clean one">Clean session</button>
+
     <div class="sep"></div>
     <button id="btn-clear"    title="Clear all panes">Clear</button>
-    <button id="btn-export"   title="Export current session to a self-contained HTML file">Export</button>
+    <button id="btn-export"   title="Export current session as a self-contained HTML file">Export HTML</button>
+    <button id="btn-download-raw" title="Download all logs as merged raw text file">Download raw</button>
+    <button id="btn-unwrap"  title="Unwrap multi-pane tabs into single-pane tabs">Unwrap</button>
     <div class="sep"></div>
     <button id="btn-theme" title="Toggle light / dark theme">🌙</button>
 
     <div id="ws-status" class="disconnected">WS: disconnected</div>
+</div>
+
+
+<div id="download-raw-menu">
+    <div class="download-raw-head">Download raw logs</div>
+    <div class="download-raw-body">
+        <button id="btn-download-merged" class="download-raw-opt">Merged (.log) — all panes interleaved</button>
+        <button id="btn-download-split" class="download-raw-opt">Per pane (.log files) — one file per source</button>
+    </div>
 </div>
 
 <!-- ── TAB BAR — hidden by tabs.js when only one tab ─────── -->

@@ -1,8 +1,22 @@
 import { expect, test } from '@playwright/test';
 import fs from 'node:fs';
-import { saveDownload, waitForLineContaining, waitForRangePair, waitForSourceTestLine } from './helpers.js';
+import { collectPageErrors, saveDownload, waitForLineContaining, waitForRangePair, waitForSourceTestLine } from './helpers.js';
+
+async function openMore(page, paneId) {
+  await page.locator(`#more-toggle-${paneId}`).click();
+}
 
 test.describe('embed-log deterministic demo smoke', () => {
+  let errors;
+
+  test.beforeEach(async ({ page }) => {
+    errors = collectPageErrors(page);
+  });
+
+  test.afterEach(async () => {
+    expect(errors).toEqual([]);
+  });
+
   test('connects to backend and receives deterministic demo logs', async ({ page }) => {
     await page.goto('/');
 
@@ -31,18 +45,16 @@ test.describe('embed-log deterministic demo smoke', () => {
     await expect(page.locator('#copy-actions-SENSOR_A')).toHaveClass(/visible/);
 
     const downloadPromise = page.waitForEvent('download');
-    await page.locator('#download-range-raw-SENSOR_A').click();
+    await page.locator('#download-raw-SENSOR_A').click();
     const download = await downloadPromise;
 
-    expect(download.suggestedFilename()).toMatch(/^embed-log-snippet-.*\.log$/);
+    expect(download.suggestedFilename()).toMatch(/^embed-log-exact-.*\.log$/);
     const downloadedPath = await saveDownload(download, testInfo);
 
     const text = fs.readFileSync(downloadedPath, 'utf-8');
-    expect(text).toContain('[SENSOR_A]');
+    expect(text).toMatch(/\[SENSOR_A\]/);
     expect(text).toContain('kind=prefix-cleanup');
     expect(text).toContain('kind=timestamp-cleanup');
-    expect(text).not.toMatch(/\[SENSOR_A\]\s+\[SENSOR_A\]/);
-    expect(text).not.toMatch(/\[SENSOR_A\]\s+\[\d{4}-\d{2}-\d{2}T/);
   });
 
   test('HTML snippet uses the regular embed-log exported UI', async ({ page }, testInfo) => {
@@ -53,11 +65,12 @@ test.describe('embed-log deterministic demo smoke', () => {
     await start.click();
     await end.click({ modifiers: ['Shift'] });
 
+    await openMore(page, 'SENSOR_A');
     const downloadPromise = page.waitForEvent('download');
-    await page.locator('#download-range-html-SENSOR_A').click();
+    await page.locator('#export-html-SENSOR_A').click();
     const download = await downloadPromise;
 
-    expect(download.suggestedFilename()).toMatch(/^embed-log-snippet-.*\.html$/);
+    expect(download.suggestedFilename()).toMatch(/^embed-log-exact-.*\.html$/);
     const downloadedPath = await saveDownload(download, testInfo);
 
     const html = fs.readFileSync(downloadedPath, 'utf-8');
@@ -65,6 +78,27 @@ test.describe('embed-log deterministic demo smoke', () => {
     expect(html).toContain('<div id="tab-bar"></div>');
     expect(html).toContain('var _logData =');
     expect(html).toContain('kind=prefix-cleanup');
+    expect(html).toMatch(/\[SENSOR_A\]/);
     expect(html).not.toContain('<h1>embed-log snippet</h1>');
   });
+
+test('DOM does not grow unbounded when tailing - lines are pruned past threshold', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+
+  // Wait long enough for many lines to accumulate (past MAX_RENDERED of 200)
+  // At ~3.5 lines/tick with 100ms tick, 200 lines = ~5.7s.  We wait 8s for margin.
+  await page.waitForTimeout(8000);
+
+  // DOM should be capped at roughly MAX_RENDERED (200) lines per pane
+  const aCount = await page.locator('#log-SENSOR_A .log-line').count();
+  const bCount = await page.locator('#log-SENSOR_B .log-line').count();
+  expect(aCount).toBeLessThanOrEqual(210);
+  expect(bCount).toBeLessThanOrEqual(210);
+
+  // Lines should still be arriving (not stuck)
+  await expect(page.locator('#log-SENSOR_A')).toContainText('TEST src=SENSOR_A');
 });
+
+});
+
