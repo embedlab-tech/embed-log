@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+
 import queue
 import signal
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TextIO
 
 import serial
 
@@ -159,6 +161,7 @@ class SourceManager:
         self._forward_lock = threading.Lock()
         self._writer_thread: Optional[threading.Thread] = None
         self._file_lock = threading.Lock()
+        self._log_fd: Optional[TextIO] = None
         self._inject_server: Optional[InjectServer] = None
         self._forward_servers: list[ForwardServer] = []
 
@@ -266,10 +269,17 @@ class SourceManager:
         return json.dumps(payload).encode("utf-8") + b"\n"
 
     def _writer_loop(self) -> None:
+        _flush_counter = 0
         while True:
             entry = self._queue.get()
             try:
                 if entry is None:
+                    with self._file_lock:
+                        if self._log_fd is not None:
+                            self._log_fd.flush()
+                            os.fsync(self._log_fd.fileno())
+                            self._log_fd.close()
+                            self._log_fd = None
                     break
                 # Log near-full warning periodically when queue is congested
                 if self._queue_maxsize > 0:
@@ -288,11 +298,14 @@ class SourceManager:
                 if self.verbose:
                     print(line, flush=True)
                 with self._file_lock:
-                    log_file = self.log_file
-                    log_file.parent.mkdir(parents=True, exist_ok=True)
-                    with open(log_file, "a", encoding="utf-8") as f:
-                        f.write(line + "\n")
-                        f.flush()
+                    if self._log_fd is None:
+                        self.log_file.parent.mkdir(parents=True, exist_ok=True)
+                        self._log_fd = open(self.log_file, "a", encoding="utf-8")
+                    self._log_fd.write(line + "\n")
+                    _flush_counter += 1
+                    if _flush_counter >= 100:
+                        self._log_fd.flush()
+                        _flush_counter = 0
                 if self.broadcaster and not entry.no_ws:
                     self.broadcaster.broadcast(self._ws_payload(entry))
                 self._stream_to_clients(self._stream_payload(entry))
@@ -312,13 +325,24 @@ class SourceManager:
 
     def rotate_log_file(self, log_file: str, *, locked: bool = False) -> None:
         if locked:
+            if self._log_fd is not None:
+                self._log_fd.flush()
+                os.fsync(self._log_fd.fileno())
+                self._log_fd.close()
+                self._log_fd = None
             self.log_file = Path(log_file)
             self.log_file.parent.mkdir(parents=True, exist_ok=True)
+            self._log_fd = open(self.log_file, "a", encoding="utf-8")
             return
         with self._file_lock:
+            if self._log_fd is not None:
+                self._log_fd.flush()
+                os.fsync(self._log_fd.fileno())
+                self._log_fd.close()
+                self._log_fd = None
             self.log_file = Path(log_file)
             self.log_file.parent.mkdir(parents=True, exist_ok=True)
-
+            self._log_fd = open(self.log_file, "a", encoding="utf-8")
     def add_session_marker(self, message: str, *, no_ws: bool = True) -> None:
         self._queue.put(LogEntry(datetime.now().astimezone(), "SYSTEM", message, "cyan", no_ws=no_ws))
 
