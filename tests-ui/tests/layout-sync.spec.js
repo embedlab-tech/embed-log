@@ -185,21 +185,24 @@ test('UNWRAP preserves the currently visible pane when toggled from another tab'
   await expect(page.locator('#log-SENSOR_C .log-line.sync-highlight')).toContainText('TEST src=SENSOR_C');
 });
 
-test('pane import controls are wired after layout creation and rebuild', async ({ page }) => {
+test('pane headers keep only Wrap controls after layout creation and rebuild', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
   await waitForSourceTestLine(page, 'SENSOR_A');
 
-  await expect(page.locator('#import-btn-SENSOR_A')).toBeVisible();
-  await expect(page.locator('#pane-SENSOR_A input[type=\"file\"]')).toHaveCount(1);
+  await expect(page.locator('#pane-SENSOR_A .pane-wrap-btn')).toBeVisible();
+  await expect(page.locator('#pane-SENSOR_A .import-btn')).toHaveCount(0);
+  await expect(page.locator('#pane-SENSOR_A input[type="file"]')).toHaveCount(0);
 
   await page.locator('#btn-unwrap').click();
   await page.getByRole('button', { name: 'SENSOR_C', exact: true }).click();
-  await expect(page.locator('#import-btn-SENSOR_C')).toBeVisible();
-  await expect(page.locator('#pane-SENSOR_C input[type=\"file\"]')).toHaveCount(1);
+  await expect(page.locator('#pane-SENSOR_C .pane-wrap-btn')).toBeVisible();
+  await expect(page.locator('#pane-SENSOR_C .import-btn')).toHaveCount(0);
+  await expect(page.locator('#pane-SENSOR_C input[type="file"]')).toHaveCount(0);
 
   await page.locator('#btn-unwrap').click();
   await page.getByRole('button', { name: 'Other Sensor', exact: true }).click();
-  await expect(page.locator('#import-btn-SENSOR_C')).toBeVisible();
+  await expect(page.locator('#pane-SENSOR_C .pane-wrap-btn')).toBeVisible();
+  await expect(page.locator('#pane-SENSOR_C .import-btn')).toHaveCount(0);
 });
 

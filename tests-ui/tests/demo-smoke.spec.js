@@ -100,5 +100,30 @@ test('DOM does not grow unbounded when tailing - lines are pruned past threshold
   await expect(page.locator('#log-SENSOR_A')).toContainText('TEST src=SENSOR_A');
 });
 
+test('runtime settings panel exposes working font-size controls', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+  await waitForSourceTestLine(page, 'SENSOR_A');
+
+  await page.locator('#btn-settings').click();
+  await expect(page.locator('#settings-panel')).toHaveClass(/open/);
+  await expect(page.locator('#btn-font-dec')).toBeVisible();
+  await expect(page.locator('#btn-font-reset')).toBeVisible();
+  await expect(page.locator('#btn-font-inc')).toBeVisible();
+
+  const line = page.locator('#log-SENSOR_A .log-line').first();
+  const before = await line.evaluate(el => getComputedStyle(el).fontSize);
+
+  await page.locator('#btn-font-inc').click();
+  await expect.poll(async () => {
+    return line.evaluate(el => getComputedStyle(el).fontSize);
+  }).not.toBe(before);
+
+  await page.locator('#btn-font-reset').click();
+  await expect.poll(async () => {
+    return line.evaluate(el => getComputedStyle(el).fontSize);
+  }).toBe(before);
+});
+
 });
 

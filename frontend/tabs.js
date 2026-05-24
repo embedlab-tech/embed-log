@@ -1,6 +1,5 @@
 import { state, TABS, PANES } from './state.js';
 import { scrollPaneToBottom, scrollPaneToTs } from './lines.js';
-import { createDynamicTab } from './tabcreate.js';
 
 // ---------------------------------------------------------------------------
 // Tab bar
@@ -38,13 +37,6 @@ export function renderTabBar() {
             btn.addEventListener("click", () => switchTab(idx));
             bar.appendChild(btn);
         });
-        // "+" button
-        const addBtn = document.createElement("button");
-        addBtn.className   = "tab-btn tab-add";
-        addBtn.textContent = "+";
-        addBtn.title       = "New tab";
-        addBtn.addEventListener("click", () => createDynamicTab());
-        bar.appendChild(addBtn);
         // Ensure correct visibility
         TABS.forEach((_, idx) => {
             const el = document.getElementById("tab-content-" + idx);

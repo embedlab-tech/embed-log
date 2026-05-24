@@ -226,8 +226,10 @@ def _strip_module_syntax(src: str) -> str:
     classic <script> block in the self-contained static HTML output."""
     # Remove import statements (single-line)
     src = re.sub(r"^import\s+.*?['\"][^'\"]*['\"]\s*;?\r?\n?", "", src, flags=re.MULTILINE)
+    # Remove multi-line imports (import { ... } from '...')
+    src = re.sub(r"^import\s*\{[^}]*\}\s*from\s*['\"][^'\"]*['\"]\s*;?\s*", "", src, flags=re.MULTILINE)
     # Remove export keyword from declarations (function, class, const, let, var)
-    src = re.sub(r"^export\s+(async\s+)?(function|class|const|let|var)\b", r"\2", src, flags=re.MULTILINE)
+    src = re.sub(r"^export\s+(async\s+)?(function|class|const|let|var)\b", r"\1\2", src, flags=re.MULTILINE)
     # Remove standalone export { ... } statements
     src = re.sub(r"^export\s*\{[^}]*\}\s*(?:from\s*['\"][^'\"]*['\"])?\s*;?\r?\n?", "", src, flags=re.MULTILINE)
     return src
@@ -242,15 +244,17 @@ def _esc_script_text(src: str) -> str:
 # HTML generation
 # ---------------------------------------------------------------------------
 
-def _pane_html(pane_id: str, label: str, static: bool = True) -> str:
-    """Render one pane div. TX input row is hidden in static mode."""
+def _pane_html(pane_id: str, label: str, *, show_tx: bool = False) -> str:
+    """Render one pane div. TX input row is hidden by default (static mode)."""
     safe_label = _html.escape(label)
-    tx_style = ' style="display:none"' if static else ""
+    tx_display = '' if show_tx else ' style="display:none"'
     return f"""\
         <div class="pane" id="pane-{pane_id}">
             <div class="pane-header">
                 <span class="pane-name">{safe_label}</span>
-                <button class="pane-clear-btn" data-pane="{pane_id}">clear</button>
+
+                <button class="pane-wrap-btn" title="Toggle word wrap in this pane">Wrap</button>
+
             </div>
             <div class="filter-bar">
                 <input class="filter-input" data-pane="{pane_id}" placeholder="Filter (regex)…">
@@ -259,11 +263,12 @@ def _pane_html(pane_id: str, label: str, static: bool = True) -> str:
                 <div class="log-area" id="log-{pane_id}"></div>
                 <button class="jump-btn" id="jump-{pane_id}">jump to bottom</button>
             </div>
-            <div class="input-row"{tx_style}>
+            <div class="input-row"{tx_display}>
                 <input class="serial-input" id="input-{pane_id}" autocomplete="off">
                 <button class="send-btn" data-pane="{pane_id}">Send</button>
             </div>
         </div>"""
+
 
 
 def _tab_content_html(tab_idx: int, tab_panes: list) -> str:
@@ -272,7 +277,7 @@ def _tab_content_html(tab_idx: int, tab_panes: list) -> str:
     for i, (pane_id, label) in enumerate(tab_panes):
         if i > 0:
             parts.append('        <div class="splitter"></div>')
-        parts.append(_pane_html(pane_id, label, static=True))
+        parts.append(_pane_html(pane_id, label, show_tx=False))
     inner = "\n".join(parts)
     return (
         f'    <div class="tab-content" id="tab-content-{tab_idx}">\n'
@@ -280,6 +285,31 @@ def _tab_content_html(tab_idx: int, tab_panes: list) -> str:
         f'    </div>'
     )
 
+
+def _render_toolbar() -> str:
+    """Render toolbar HTML for static/exported mode."""
+    parts = ['<div id="toolbar">']
+    parts.append('    <span class="app-name">embed-log</span>')
+
+    # Actions present in static mode (matches JS renderToolbar with STATIC_PROFILE)
+    static_actions = [
+        ("btn-download-raw", "Download raw", "Download all logs as merged raw text file"),
+        ("btn-unwrap",       "Unwrap",       "Unwrap multi-pane tabs into single-pane tabs"),
+    ]
+    sep_done = False
+    for btn_id, label, title in static_actions:
+        if not sep_done:
+            parts.append('    <div class="sep"></div>')
+            sep_done = True
+        parts.append(f'    <button id="{btn_id}" title="{_html.escape(title)}">{label}</button>')
+
+    # Theme toggle
+    parts.append('    <div class="sep"></div>')
+    parts.append('    <button id="btn-theme" title="Toggle light / dark theme">&#x1F319;</button>')
+    # No ws-status in static mode
+
+    parts.append('</div>')
+    return '\n'.join(parts)
 
 def generate_html(tab_specs: list) -> str:
     """
@@ -301,19 +331,25 @@ def generate_html(tab_specs: list) -> str:
     def _js(filename: str) -> str:
         return _esc_script_text(_strip_module_syntax(_read_asset(filename)))
 
-    css          = _read_asset("viewer.css")
-    state_js     = _js("state.js")
-    ansi_js      = _js("ansi.js")
-    lines_js     = _js("lines.js")
-    tabs_js      = _js("tabs.js")
-    ui_js        = _js("ui.js")
-    settings_js  = _js("settings.js")
-    tsparse_js   = _js("tsparse.js")
-    import_js    = _js("import.js")
-    selection_js = _js("selection.js")
-    themes_js    = _js("themes.js")
-    tabcreate_js = _js("tabcreate.js")
-    export_js    = _js("export.js")
+    css              = _read_asset("viewer.css")
+    profile_js       = _js("profile.js")
+    render_pane_js   = _js("renderPane.js")
+    render_toolbar_js = _js("renderToolbar.js")
+    state_js         = _js("state.js")
+    themes_js        = _js("themes.js")
+    settings_js      = _js("settings.js")
+    fontsize_js      = _js("fontsize.js")
+    ansi_js          = _js("ansi.js")
+    lines_js         = _js("lines.js")
+    tabs_js          = _js("tabs.js")
+    tabcreate_js     = _js("tabcreate.js")
+    ui_js            = _js("ui.js")
+    export_js        = _js("export.js")
+    selection_js     = _js("selection.js")
+    tsparse_js       = _js("tsparse.js")
+    import_js        = _js("import.js")
+
+
     # ws.js intentionally omitted — no WebSocket in static mode
 
     # Build JS structures
@@ -340,12 +376,31 @@ def generate_html(tab_specs: list) -> str:
 
     title = _html.escape(" + ".join(tab["label"] for tab in tab_specs))
 
-    # Config script: sets window.TABS and window.PANES before state.js loads.
-    # state.js reads window.TABS ?? [] so pre-populated panes are initialised
-    # correctly when the module runs.
+    # Config script: sets window globals before state.js loads.
+    STATIC_PROFILE = {
+        "kind": "static",
+        "capabilities": {
+            "clearAll": False,
+            "downloadRaw": True,
+            "exportHtml": False,
+            "fontSize": True,
+            "paneSwap": True,
+            "persistCache": False,
+            "selectionExportHtml": True,
+            "sessionApi": False,
+            "themeToggle": True,
+            "tx": False,
+            "unwrap": True,
+            "wsStatus": False,
+            "dynamicTabs": False,
+        },
+    }
     config_js = _esc_script_text(
+        f"window.__embedLogProfile = {json.dumps(STATIC_PROFILE)};\n"
         f"window.TABS = {tabs_json};\n"
-        f"window.PANES = {panes_json};"
+        f"window.PANES = {panes_json};\n"
+        f"window.__embedLogInitialFontSize = 14;"
+
     )
 
     # Bootstrap script: runs after all other scripts to inject log data
@@ -384,21 +439,14 @@ def generate_html(tab_specs: list) -> str:
 </head>
 <body>
 
-<!-- ── TOOLBAR ──────────────────────────────────────────────── -->
-<div id="toolbar">
-    <span class="app-name">embed-log</span>
-    <button id="btn-wrap"     title="Toggle word wrap">Wrap</button>
-    <button id="btn-sync"     title="Generate/refresh session HTML on backend">Save HTML</button>
-    <div class="sep"></div>
-    <button id="btn-font-dec" title="Decrease font size">A-</button>
-    <button id="btn-font-inc" title="Increase font size">A+</button>
-    <div class="sep"></div>
-    <button id="btn-clear"    title="Clear all panes">Clear</button>
-    <button id="btn-export"   title="Export current tab to a self-contained HTML file">Export</button>
-    <div class="sep"></div>
-    <button id="btn-theme" title="Toggle light / dark theme">🌙</button>
-    <!-- ws-status kept for DOM compatibility; invisible in static mode -->
-    <div id="ws-status" style="display:none"></div>
+{_render_toolbar()}
+
+<div id="download-raw-menu">
+    <div class="download-raw-head">Download raw logs</div>
+    <div class="download-raw-body">
+        <button id="btn-download-merged" class="download-raw-opt">Merged (.log) — all panes interleaved</button>
+        <button id="btn-download-split" class="download-raw-opt">Per pane (.log files) — one file per source</button>
+    </div>
 </div>
 
 <!-- ── TAB BAR — shown by tabs.js when there is more than one tab ── -->
@@ -410,18 +458,22 @@ def generate_html(tab_specs: list) -> str:
 </div>
 
 <script>{config_js}</script>
+<script>{profile_js}</script>
+<script>{render_pane_js}</script>
+<script>{render_toolbar_js}</script>
 <script>{state_js}</script>
+<script>{themes_js}</script>
+<script>{settings_js}</script>
+<script>{fontsize_js}</script>
 <script>{ansi_js}</script>
 <script>{lines_js}</script>
 <script>{tabs_js}</script>
+<script>{tabcreate_js}</script>
 <script>{ui_js}</script>
-<script>{settings_js}</script>
+<script>{export_js}</script>
+<script>{selection_js}</script>
 <script>{tsparse_js}</script>
 <script>{import_js}</script>
-<script>{selection_js}</script>
-<script>{themes_js}</script>
-<script>{tabcreate_js}</script>
-<script>{export_js}</script>
 <script>{bootstrap_js}</script>
 </body>
 </html>

@@ -197,7 +197,7 @@ export function clearPane(paneId) {
     window.__embedLogSchedulePersist?.();
 }
 
-document.getElementById("btn-clear").addEventListener("click", () => {
+document.getElementById("btn-clear")?.addEventListener("click", () => {
     window.wsSend?.({ cmd: "clear_logs", scope: "all" });
     PANES.forEach(clearPane);
 });
