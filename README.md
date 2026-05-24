@@ -29,7 +29,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; iex ((New-Object Sys
 After install, `embed-log` is available globally (no venv activation needed):
 
 ```bash
-embed-log init
+embed-log create-config
 embed-log run --config embed-log.yml
 ```
 
@@ -121,7 +121,7 @@ tabs:
 
 ```bash
 # create starter config
-embed-log init --output embed-log.yml
+embed-log create-config --output embed-log.yml
 
 # validate config
 embed-log validate --config embed-log.yml
