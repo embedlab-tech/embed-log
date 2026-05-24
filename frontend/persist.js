@@ -35,6 +35,7 @@ function _snapshot() {
     return {
         tabs: TABS.map(t => ({ label: t.label, panes: [...t.panes] })),
         activeTab: state.activeTab,
+        fontSize: state.fontSize,
         lines,
         savedAt: Date.now(),
     };
@@ -96,6 +97,11 @@ function _restoreIfPossible() {
         }
     });
 
+    // Restore font-size from cache
+    if (typeof snap.fontSize === 'number' && snap.fontSize > 0) {
+        state.fontSize = snap.fontSize;
+    }
+    
     _restoring = false;
     _restoreDone = true;
 }

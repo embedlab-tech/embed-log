@@ -12,7 +12,11 @@
     gearBtn.id        = "btn-settings";
     gearBtn.title     = "Settings";
     gearBtn.textContent = "⚙";
-    wsStatus.before(gearBtn);   // goes just left of the WS status badge
+    if (wsStatus) {
+        wsStatus.before(gearBtn);
+    } else {
+        toolbar?.appendChild(gearBtn);
+    }
 
     // ---- Settings panel (inserted after toolbar) ----
     const panel = document.createElement("div");

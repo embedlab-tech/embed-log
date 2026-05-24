@@ -1,6 +1,7 @@
 import { state, TABS, PANES } from './state.js';
 import { appendLine, clearPane } from './lines.js';
-import { createTabWithPanes, createDynamicTab } from './tabcreate.js';
+import { createTabWithPanes } from './tabcreate.js';
+
 import { switchTab } from './tabs.js';
 
 let ws = null;
@@ -121,9 +122,10 @@ function wsConnect() {
         const { type, data, timestamp, source_id } = msg;
         if (!source_id) return;
 
-        // Unknown source_id — server has no --tab for it; create a tab on the fly.
+        // Unknown source_id — server has no --tab for it; ignore with a warning.
         if (!PANES.includes(source_id)) {
-            createDynamicTab(source_id, source_id);
+            console.warn("embed-log: dropping message for unknown source_id:", source_id);
+            return;
         }
         appendLine(source_id, timestamp || "", data || "", type === "tx");
     });

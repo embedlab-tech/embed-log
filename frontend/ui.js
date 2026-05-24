@@ -51,6 +51,8 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
 // Save HTML action is in the main toolbar (reused former Sync button).
 // ---------------------------------------------------------------------------
 (function () {
+    if (!window.__embedLogProfile?.capabilities?.sessionApi) return;
+    
     const panel = document.getElementById("settings-panel");
     if (!panel) return;
 
@@ -320,12 +322,6 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
         if (menu.classList.contains("open")) loadSessions();
     };
 
-    const backendUnavailable = window.location.protocol === "file:";
-    if (backendUnavailable && btnSave) {
-        btnSave.disabled = true;
-        btnSave.textContent = "Save N/A";
-        btnSave.title = "Unavailable in offline HTML export";
-    }
 
     refreshCurrentSession();
 })();
@@ -594,7 +590,9 @@ export function _uiSetupTxPane(id) {
     if (sendBtn) sendBtn.addEventListener("click", () => sendSerial(id));
 }
 
-PANES.forEach(_uiSetupTxPane);
+if (window.__embedLogProfile?.capabilities?.tx) {
+    PANES.forEach(_uiSetupTxPane);
+}
 
 // ---------------------------------------------------------------------------
 // Splitter drag — delegated, with pointer + mouse + touch fallback

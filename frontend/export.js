@@ -1,3 +1,9 @@
+import { STATIC_PROFILE } from './profile.js';
+import { renderPaneShell } from './renderPane.js';
+import { renderToolbar } from './renderToolbar.js';
+const STATIC_EXPORT_PROFILE =
+    typeof STATIC_PROFILE !== 'undefined' ? STATIC_PROFILE : window.__embedLogProfile;
+
 import { state, TABS, PANES } from './state.js';
 
 export async function exportHtmlSnapshot(options = {}) {
@@ -22,10 +28,12 @@ export async function exportHtmlSnapshot(options = {}) {
         // whatever the browser has cached from a previous page load.
         // ------------------------------------------------------------------
         const ASSETS = [
-            "viewer.css", "state.js", "ansi.js",   "lines.js",  "tabs.js",
-            "ui.js",      "settings.js", "tsparse.js", "import.js", "selection.js",
-            "themes.js",  "tabcreate.js", "export.js",
+            "profile.js", "renderPane.js", "renderToolbar.js", "viewer.css",
+            "state.js", "themes.js", "settings.js", "fontsize.js",
+            "ansi.js", "lines.js", "tabs.js", "tabcreate.js",
+            "ui.js", "export.js", "selection.js", "tsparse.js", "import.js",
         ];
+
 
         // _escJs: make a JS source string safe to embed inside <script>…<\/script>.
         // The HTML parser ends a script block at the first <\/script it sees
@@ -50,8 +58,9 @@ export async function exportHtmlSnapshot(options = {}) {
             const src = await r.text();
             return a.endsWith(".js") ? _escJs(_stripModuleSyntax(src)) : src;
         }));
-        const [css, stateJs, ansiJs, linesJs, tabsJs, uiJs, settingsJs,
-               tsparseJs, importJs, selectionJs, themesJs, tabcreateJs, exportJs] = texts;
+        const [profileJs, renderPaneJs, renderToolbarJs, css, stateJs, themesJs, settingsJs, fontsizeJs,
+               ansiJs, linesJs, tabsJs, tabcreateJs, uiJs, exportJs, selectionJs, tsparseJs, importJs] = texts;
+
 
         // ------------------------------------------------------------------
         // Capture current theme mode/palette and pass it to the exported file.
@@ -69,9 +78,13 @@ export async function exportHtmlSnapshot(options = {}) {
         // Config: inject TABS + PANES + initial theme state before scripts run
         // ------------------------------------------------------------------
         const configJs =
+            `window.__embedLogProfile = ${_safeJson(STATIC_EXPORT_PROFILE)};\n` +
             `window.TABS = ${_safeJson(TABS)};\n` +
             `window.PANES = ${_safeJson(PANES)};\n` +
-            `window.__embedLogInitialThemeState = ${_safeJson(themeState)};`;
+            `window.__embedLogInitialThemeState = ${_safeJson(themeState)};\n` +
+            `window.__embedLogInitialFontSize = ${state.fontSize};`;
+
+
 
         // ------------------------------------------------------------------
         // Serialize all pane data as { ts, text, isTx }.
@@ -100,27 +113,10 @@ export async function exportHtmlSnapshot(options = {}) {
         // _tab_content_html, with TX input row hidden in static mode)
         // ------------------------------------------------------------------
         function _paneHtml(paneId) {
-            const raw   = document.querySelector(`#pane-${paneId} .pane-name`)?.textContent.trim() || paneId;
-            const label = raw.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-            return `        <div class="pane" id="pane-${paneId}">
-            <div class="pane-header">
-                <span class="pane-name">${label}</span>
-
-                <button class="pane-wrap-btn" title="Toggle word wrap in this pane">Wrap</button>
-
-            </div>
-            <div class="filter-bar">
-                <input class="filter-input" data-pane="${paneId}" placeholder="Filter (regex)\u2026">
-            </div>
-            <div class="pane-body">
-                <div class="log-area" id="log-${paneId}"></div>
-                <button class="jump-btn" id="jump-${paneId}">jump to bottom</button>
-            </div>
-            <div class="input-row" style="display:none">
-                <input class="serial-input" id="input-${paneId}" autocomplete="off">
-                <button class="send-btn" data-pane="${paneId}">Send</button>
-            </div>
-        </div>`;
+            // Read the display name from the live DOM, fall back to paneId.
+            const raw = document.querySelector(`#pane-${paneId} .pane-name`)?.textContent.trim() || paneId;
+            // TX row is hidden in the static export output.
+            return renderPaneShell(paneId, raw, { showTx: false });
         }
 
         const tabContentsHtml = TABS.map((tab, i) => {
@@ -171,15 +167,8 @@ export async function exportHtmlSnapshot(options = {}) {
 </head>
 <body>
 
-                ${(() => {
-                    const tb = document.getElementById("toolbar");
-                    if (!tb) return '<div id="toolbar"><span class="app-name">embed-log</span></div>';
-                    const html = tb.outerHTML;
-                    return html.replace(
-                        /(<div\s+[^>]*id="ws-status"[^>]*)(>)/i,
-                        '$1 style="display:none"$2'
-                    );
-                })()}
+                ${renderToolbar(STATIC_EXPORT_PROFILE)}
+
 
 
 <div id="download-raw-menu">
@@ -197,18 +186,22 @@ ${tabContentsHtml}
 </div>
 
 <script>${configJs}</script>
+<script>${profileJs}</script>
+<script>${renderPaneJs}</script>
+<script>${renderToolbarJs}</script>
 <script>${stateJs}</script>
+<script>${themesJs}</script>
+<script>${settingsJs}</script>
+<script>${fontsizeJs}</script>
 <script>${ansiJs}</script>
 <script>${linesJs}</script>
 <script>${tabsJs}</script>
+<script>${tabcreateJs}</script>
 <script>${uiJs}</script>
-<script>${settingsJs}</script>
+<script>${exportJs}</script>
+<script>${selectionJs}</script>
 <script>${tsparseJs}</script>
 <script>${importJs}</script>
-<script>${selectionJs}</script>
-<script>${themesJs}</script>
-<script>${tabcreateJs}</script>
-<script>${exportJs}</script>
 <script>${bootstrapJs}</script>
 </body>
 </html>`;
@@ -238,7 +231,9 @@ async function exportToHtml() {
 
 window.__embedLogExportSnapshot = exportHtmlSnapshot;
 
-document.getElementById("btn-export")?.addEventListener("click", exportToHtml);
+if (window.__embedLogProfile?.capabilities?.exportHtml) {
+    document.getElementById("btn-export")?.addEventListener("click", exportToHtml);
+}
 
 // ---------------------------------------------------------------------------
 // Download all logs as merged raw text (one file, all panes interleaved)
