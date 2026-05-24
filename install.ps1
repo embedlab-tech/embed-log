@@ -2,22 +2,20 @@
 .SYNOPSIS
     embed-log installer for Windows (PowerShell)
 .DESCRIPTION
-    Installs embed-log globally via pipx.  Requires Python >= 3.10.
+    Installs embed-log globally via pipx. Requires Python >= 3.10.
     Run from PowerShell:
         iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.ps1'))
 #>
 
 $ErrorActionPreference = 'Stop'
 
-# ── Config ───────────────────────────────────────────────────────
-$Repo   = 'krezolekcoder/embed-log'
+$Repo = 'krezolekcoder/embed-log'
 $Branch = 'main'
 $RepoUrl = "https://github.com/$Repo.git"
-$MinPy  = [Version]'3.10'
+$MinPy = [Version]'3.10'
 
-# ── Helpers ──────────────────────────────────────────────────────
-function Write-Info  { Write-Host "embed-log $args" -ForegroundColor Cyan }
-function Write-OK   { Write-Host "  ✓ $args" -ForegroundColor Green }
+function Write-Info { Write-Host "embed-log $args" -ForegroundColor Cyan }
+function Write-OK { Write-Host "  ✓ $args" -ForegroundColor Green }
 function Write-Warn { Write-Host "  ⚠ $args" -ForegroundColor Yellow }
 function Die {
     Write-Host "`n  ✕ $args" -ForegroundColor Red
@@ -29,7 +27,15 @@ function Have-Cmd {
     return [bool](Get-Command $Cmd -ErrorAction SilentlyContinue)
 }
 
-# ── Python version check ─────────────────────────────────────────
+function Invoke-Pipx {
+    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Args)
+    if (Have-Cmd 'pipx') {
+        & pipx @Args
+    } else {
+        & $script:python -m pipx @Args
+    }
+}
+
 Write-Info "Checking Python..."
 
 $python = $null
@@ -68,8 +74,7 @@ Python $pyVerStr is too old — version $MinPy or later is required.
 
 Write-OK "Python $pyVerStr — using $python"
 
-# ── pipx ─────────────────────────────────────────────────────────
-if (-not (Have-Cmd pipx)) {
+if (-not (Have-Cmd 'pipx')) {
     Write-Info "pipx not found — installing via pip..."
     & $python -m pip install --user pipx 2>&1 | Out-Null
     if (-not $?) {
@@ -84,40 +89,73 @@ Failed to install pipx via pip.
   Then restart PowerShell and try again.
 "@
     }
+}
 
-    # Refresh PATH to include pipx
-    $env:Path = [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:Path
-    $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + $env:Path
+$userScripts = & $python -c "import os, site; print(os.path.join(site.USER_BASE, 'Scripts'))" 2>$null
+if ($userScripts) {
+    $env:Path = "$userScripts;$env:Path"
+}
+$env:Path = [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:Path
+$env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + $env:Path
 
-    if (-not (Have-Cmd pipx)) {
-        Die @'
-pipx was installed but is not in your PATH.
+& $python -m pipx ensurepath 2>&1 | Out-Null
+& $python -m pipx --version 2>$null | Out-Null
+if (-not $?) {
+    Die @"
+pipx was installed but could not be started.
 
-  Add it manually:
-    [Environment]::SetEnvironmentVariable('Path',
-      $env:Path + ';' + $env:USERPROFILE + '\.local\bin',
-      'User')
-
-  Then restart PowerShell and re-run this script.
-'@
-    }
+  Restart PowerShell and try again.
+  If that still fails, run:
+    python -m pip install --user pipx
+    python -m pipx ensurepath
+"@
 }
 
 Write-OK "pipx ready"
 
-# ── Install embed-log ────────────────────────────────────────────
-Write-Info "Installing embed-log from GitHub ($Repo)..."
+$installSrc = $null
+$tmpRoot = $null
+$localRoot = $PSScriptRoot
+if ($localRoot -and (Test-Path (Join-Path $localRoot 'pyproject.toml')) -and (Test-Path (Join-Path $localRoot 'backend'))) {
+    Write-Info "Installing from local repository at $localRoot..."
+    $installSrc = $localRoot
+} elseif (Have-Cmd 'git') {
+    Write-Info "Installing embed-log from GitHub ($Repo)..."
+    $installSrc = "git+$RepoUrl@$Branch"
+} else {
+    Write-Warn "git not found — downloading source archive instead."
+    $tmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("embed-log-" + [System.Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Force -Path $tmpRoot | Out-Null
+    $archivePath = Join-Path $tmpRoot 'embed-log.tar.gz'
+    $archiveUrl = "https://github.com/$Repo/archive/$Branch.tar.gz"
+    Write-Info "Downloading $archiveUrl..."
+    Invoke-WebRequest -Uri $archiveUrl -OutFile $archivePath
+    & $python -c "import tarfile; tarfile.open(r'''$archivePath''', 'r:gz').extractall(r'''$tmpRoot''')"
+    if (-not $?) {
+        Die "Failed to extract embed-log source archive."
+    }
+    $srcDir = Get-ChildItem -Path $tmpRoot -Directory | Select-Object -First 1
+    if (-not $srcDir) {
+        Die "Downloaded archive has unexpected structure."
+    }
+    $installSrc = $srcDir.FullName
+}
 
-$pipxArgs = @('install', '--force', "git+${RepoUrl}@${Branch}")
-& pipx @pipxArgs 2>&1
-if (-not $?) {
-    Die @"
+try {
+    Invoke-Pipx install --force $installSrc 2>&1
+    if (-not $?) {
+        Die @"
 Failed to install embed-log via pipx.
 
   If you see version conflict errors, try:
     pipx uninstall embed-log
-    pipx install "git+${RepoUrl}"
+    pipx install --force $installSrc
 "@
+    }
+} finally {
+    if ($tmpRoot -and (Test-Path $tmpRoot)) {
+        Remove-Item -Recurse -Force $tmpRoot
+    }
 }
 
 Write-OK "embed-log installed!"

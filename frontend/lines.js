@@ -47,12 +47,24 @@ export function matchesFilter(line, rx) {
     const plain = line.html.replace(/<[^>]+>/g, "") + " " + line.ts;
     return rx.test(plain);
 }
+function _renderBase(paneId) {
+    return state.renderBase[paneId] || 0;
+}
+
+function _setRenderBase(paneId, idx) {
+    state.renderBase[paneId] = Math.max(0, idx);
+}
+
+function _domIndexForLine(paneId, lineIdx) {
+    return lineIdx - _renderBase(paneId);
+}
 
 export function appendLine(paneId, ts, rawText, isTx) {
     const html  = parseAnsi(rawText);
     const numTs = tsToNum(ts);
     const line  = { ts, numTs, html, rawText, isTx };
     state.rawLines[paneId].push(line);
+    if (state.renderBase[paneId] == null) _setRenderBase(paneId, 0);
 
     const logEl = document.getElementById("log-" + paneId);
     const idx   = state.rawLines[paneId].length - 1;
@@ -75,6 +87,7 @@ export function appendLine(paneId, ts, rawText, isTx) {
     if (state.atBottom[paneId]) {
         while (logEl.children.length > MAX_RENDERED) {
             logEl.removeChild(logEl.firstChild);
+            _setRenderBase(paneId, _renderBase(paneId) + 1);
         }
     }
 
@@ -89,9 +102,11 @@ export function rerenderPane(paneId) {
     const divs  = logEl.children;
     const rx    = state.filters[paneId];
 
-    for (let i = 0; i < lines.length; i++) {
+    const base   = _renderBase(paneId);
+    const limit  = Math.min(lines.length, base + divs.length);
+    for (let i = base; i < limit; i++) {
         const line = lines[i];
-        const div  = divs[i];
+        const div  = divs[_domIndexForLine(paneId, i)];
         if (!div) continue;
         if (!matchesFilter(line, rx)) {
             div.style.display = "none";
@@ -170,6 +185,7 @@ PANES.forEach(_linesSetupPane);
 export function clearPane(paneId) {
     state.rawLines[paneId] = [];
     state.selected[paneId] = new Set();
+    _setRenderBase(paneId, 0);
     document.getElementById("log-" + paneId).innerHTML = "";
     highlightLine(paneId, null);
     state.atBottom[paneId] = true;
@@ -194,7 +210,13 @@ export function repopulatePaneLogs(paneId) {
     logEl.innerHTML = "";
     const lines = state.rawLines[paneId] || [];
     const rx = state.filters[paneId];
-    lines.forEach((line, idx) => {
+    const startIdx = state.atBottom[paneId] && lines.length > MAX_RENDERED
+        ? lines.length - MAX_RENDERED
+        : 0;
+    _setRenderBase(paneId, startIdx);
+
+    lines.slice(startIdx).forEach((line, offset) => {
+        const idx = startIdx + offset;
         const div = document.createElement("div");
         div.dataset.ts  = line.ts;
         div.dataset.idx = idx;
@@ -237,7 +259,7 @@ export function scrollPaneToTs(paneId, numTs) {
     if (lo > 0 && Math.abs(lines[lo - 1].numTs - numTs) < Math.abs(lines[lo].numTs - numTs)) lo--;
 
     const logEl = document.getElementById("log-" + paneId);
-    const div   = logEl.children[lo];
+    const div   = logEl.children[_domIndexForLine(paneId, lo)];
     if (!div) return;
 
     logEl.scrollTop = Math.max(0, div.offsetTop - Math.floor(logEl.clientHeight / 3));
@@ -296,7 +318,9 @@ export function onLineClick(paneId, numTs, div) {
 // Sync all OTHER panes in the active tab to numTs, mirroring the clicked
 // line's Y position within the viewport.
 export function syncPanes(fromId, numTs, clickedDiv) {
-    const activePanes = TABS[state.activeTab].panes;
+    if (state.unwrap) return;
+
+    const activePanes = TABS[state.activeTab]?.panes || [];
     if (activePanes.length < 2) return;
 
     const fromLogEl     = document.getElementById("log-" + fromId);
@@ -319,7 +343,7 @@ export function syncPanes(fromId, numTs, clickedDiv) {
         }
 
         const logEl     = document.getElementById("log-" + toId);
-        const targetDiv = logEl.children[lo];
+        const targetDiv = logEl.children[_domIndexForLine(toId, lo)];
         if (!targetDiv) return;
 
         logEl.scrollTop = targetDiv.offsetTop - clickedRelTop;

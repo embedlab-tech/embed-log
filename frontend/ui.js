@@ -9,9 +9,10 @@ import { rebuildLayout } from './tabcreate.js';
 // ---------------------------------------------------------------------------
 document.getElementById("btn-unwrap")?.addEventListener("click", () => {
     if (PANES.length === 0) return;  // no panes loaded yet
+    const wasUnwrapped = state.unwrap;
     state.unwrap = !state.unwrap;
     document.getElementById("btn-unwrap")?.classList.toggle("active", state.unwrap);
-    rebuildLayout();
+    rebuildLayout(wasUnwrapped);
 });
 
 // ---------------------------------------------------------------------------

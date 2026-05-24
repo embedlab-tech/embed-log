@@ -14,6 +14,7 @@
 ## Quick install (recommended)
 
 One command, no clone needed. Installs `embed-log` globally via `pipx` so it's available from any directory.
+On macOS this is typically one step. On Linux, if `pipx` is not already installed, the script prints the exact package-manager command to install it and you then rerun the installer.
 
 **macOS / Linux:**
 
@@ -46,11 +47,11 @@ The default UI is at `http://127.0.0.1:8080/`.
 The install script (`install.sh` / `install.ps1`):
 
 1. Checks for **Python 3.10+** (with clear guidance if missing)
-2. Installs **pipx** if not present (via Homebrew on macOS, system packages on Linux, or pip)
+2. Installs or bootstraps **pipx** when possible, and otherwise prints the exact package-manager command needed
 3. Runs `pipx install` to download and install `embed-log` from GitHub into an isolated environment
-4. If `git` is not available, falls back to downloading a source tarball from GitHub
+4. Falls back to downloading a source tarball from GitHub when `git` is unavailable
 
-No system-level changes, no venv activation needed. The pipx install is fully isolated and can be uninstalled with `pipx uninstall embed-log`.
+No venv activation is needed. The pipx install is isolated and can be uninstalled with `pipx uninstall embed-log`.
 
 ---
 
@@ -74,6 +75,7 @@ For development, testing, or running directly from source:
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+pip install -e .
 ```
 
 Then use:
@@ -110,7 +112,7 @@ pipx reinstall embed-log          # reinstall from current pipx cache
 pipx install --force .            # reinstall from local directory
 # or
 python3 -m build
-pipx reinstall dist/embed_log-*.whl
+pipx install --force dist/embed_log-*.whl
 ```
 
 ## Uninstall

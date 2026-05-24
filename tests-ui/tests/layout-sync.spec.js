@@ -168,4 +168,38 @@ test('UNWRAP mode shows full-width single pane and all panes exist', async ({ pa
   // Verify no splitters in unwrap mode (single pane per tab)
   await expect(page.locator('#tab-content-0 .splitter')).toHaveCount(0);
 });
+test('UNWRAP preserves the currently visible pane when toggled from another tab', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+
+  await page.getByRole('button', { name: 'Other Sensor', exact: true }).click();
+  await waitForSourceTestLine(page, 'SENSOR_C');
+  await expect.poll(async () => visiblePaneNames(page)).toEqual(['SENSOR_C']);
+
+  await page.locator('#btn-unwrap').click();
+  await expect(page.locator('#btn-unwrap')).toHaveClass(/active/);
+  await expect.poll(async () => visiblePaneNames(page)).toEqual(['SENSOR_C']);
+
+  const lineC = await waitForSourceTestLine(page, 'SENSOR_C');
+  await lineC.click();
+  await expect(page.locator('#log-SENSOR_C .log-line.sync-highlight')).toContainText('TEST src=SENSOR_C');
+});
+
+test('pane import controls are wired after layout creation and rebuild', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+  await waitForSourceTestLine(page, 'SENSOR_A');
+
+  await expect(page.locator('#import-btn-SENSOR_A')).toBeVisible();
+  await expect(page.locator('#pane-SENSOR_A input[type=\"file\"]')).toHaveCount(1);
+
+  await page.locator('#btn-unwrap').click();
+  await page.getByRole('button', { name: 'SENSOR_C', exact: true }).click();
+  await expect(page.locator('#import-btn-SENSOR_C')).toBeVisible();
+  await expect(page.locator('#pane-SENSOR_C input[type=\"file\"]')).toHaveCount(1);
+
+  await page.locator('#btn-unwrap').click();
+  await page.getByRole('button', { name: 'Other Sensor', exact: true }).click();
+  await expect(page.locator('#import-btn-SENSOR_C')).toBeVisible();
+});
 

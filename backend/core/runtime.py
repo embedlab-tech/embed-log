@@ -316,6 +316,16 @@ class SourceManager:
 
     def wait_until_flushed(self) -> None:
         self._queue.join()
+    def flush_log_file(self, *, locked: bool = False) -> None:
+        if locked:
+            if self._log_fd is not None:
+                self._log_fd.flush()
+                os.fsync(self._log_fd.fileno())
+            return
+        with self._file_lock:
+            if self._log_fd is not None:
+                self._log_fd.flush()
+                os.fsync(self._log_fd.fileno())
 
     def lock_log_file(self) -> None:
         self._file_lock.acquire()
@@ -579,10 +589,15 @@ class LogServer:
         session_dir.mkdir(parents=True, exist_ok=True)
         return session_id, session_dir
 
-    def export_session_html(self, reason: str) -> bool:
+    def export_session_html(self, reason: str, *, log_files_locked: bool = False) -> bool:
         with self._export_lock:
             if self._session_info.get("html_status") == "updating":
                 return False
+
+            for mgr in self._managers:
+                mgr.wait_until_flushed()
+            for mgr in self._managers:
+                mgr.flush_log_file(locked=log_files_locked)
 
             self._session_info.update({
                 "html_status": "updating",
@@ -643,7 +658,7 @@ class LogServer:
                     mgr.lock_log_file()
                     locked.append(mgr)
 
-                self.export_session_html(f"rotate:{reason}")
+                self.export_session_html(f"rotate:{reason}", log_files_locked=True)
 
                 session_id, session_dir = self._new_session_id_and_dir()
                 started_at = datetime.now().astimezone().isoformat(timespec="seconds")

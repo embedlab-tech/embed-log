@@ -40,26 +40,23 @@ class UartSource(LogSource):
                     with self._ser_lock:
                         self._ser = ser
                     try:
-                        buf = ""
+                        buf = b""
                         while not stop.is_set():
                             raw = ser.read(65536)
                             if raw:
-                                text = raw.decode("utf-8", errors="replace")
-                                buf += text
-                                if "\n" in buf:
-                                    lines = buf.split("\n")
-                                    buf = lines[-1]
-                                    for line in lines[:-1]:
-                                        clean = line.rstrip()
-                                        if clean:
-                                            on_line(clean)
+                                buf += raw
+                                while b"\n" in buf:
+                                    raw_line, buf = buf.split(b"\n", 1)
+                                    clean = raw_line.rstrip(b"\r").decode("utf-8", errors="replace").rstrip()
+                                    if clean:
+                                        on_line(clean)
                             else:
                                 stop.wait(0.005)
                     finally:
                         with self._ser_lock:
                             self._ser = None
                         if buf.strip():
-                            on_line(buf.rstrip())
+                            on_line(buf.rstrip(b"\r").decode("utf-8", errors="replace").rstrip())
             except serial.SerialException as exc:
                 logging.warning("[%s] serial error: %s — retrying in 3 s", name, exc)
                 stop.wait(3)
