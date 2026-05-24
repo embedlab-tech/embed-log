@@ -5,6 +5,8 @@ import hashlib
 import json
 import logging
 import re
+import shutil
+import datetime
 import sys
 import webbrowser
 from pathlib import Path
@@ -353,13 +355,17 @@ def _run_sessions(argv: list[str]) -> int:
                                   "  sessions export <session-id>\n"
                                   "  sessions export <session-id> --format raw\n"
                                   "  sessions export <session-id> --format raw --after 1h\n"
+                                  "  sessions export --missing\n"
                                   "  sessions export <session-id> --format raw --first 10m\n"
                                   "  sessions export <session-id> --format raw --last 30m\n"
                                   "  sessions export <session-id> --format raw --pane SENSOR_A\n"
                                   "  sessions export <session-id> --format raw --after 5m --output recent.log"
                               ),
                               formatter_class=argparse.RawDescriptionHelpFormatter)
-    p_export.add_argument("session_id")
+    p_export.add_argument("session_id", nargs="?", default=None,
+                           help="session ID or short alias to export")
+    p_export.add_argument("--missing", action="store_true",
+                           help="export all sessions that don't have HTML yet")
     p_export.add_argument("--output", default=None,
                           help="output file path")
     p_export.add_argument("--format", choices=["html", "raw"], default="html",
@@ -379,6 +385,27 @@ def _run_sessions(argv: list[str]) -> int:
                             help="open session HTML in the default browser")
     p_open.add_argument("session_id")
 
+    # ── delete ──
+    p_delete = sub.add_parser("delete", parents=[shared],
+                               help="delete recorded session(s)",
+                               epilog=(
+                                   "Examples:\n"
+                                   "  sessions delete <session-id>\n"
+                                   "  sessions delete <session-id> --yes\n"
+                                   "  sessions delete --older-than 7d\n"
+                                   "  sessions delete --older-than 30d --yes\n"
+                                   "  sessions delete --all\n"
+                               ),
+                               formatter_class=argparse.RawDescriptionHelpFormatter)
+    p_delete.add_argument("session_id", nargs="?", default=None,
+                           help="session ID or short alias to delete")
+    p_delete.add_argument("--older-than", default=None,
+                           help="delete sessions older than this duration (e.g. 7d, 30d, 24h)")
+    p_delete.add_argument("--all", action="store_true",
+                           help="delete all sessions")
+    p_delete.add_argument("--yes", "-y", action="store_true",
+                           help="skip confirmation prompt")
+
     args = parser.parse_args(argv)
 
     if args.command is None:
@@ -397,6 +424,8 @@ def _run_sessions(argv: list[str]) -> int:
         return _run_sessions_export(log_dir, args)
     if args.command == "open":
         return _run_sessions_open(log_dir, args)
+    if args.command == "delete":
+        return _run_sessions_delete(log_dir, args)
     return 1
 
 
@@ -701,6 +730,44 @@ def _run_sessions_logs(log_dir: Path, args: argparse.Namespace) -> int:
 
 
 def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
+    # ── --missing mode: export every session without existing HTML ──
+    if args.missing and not args.session_id:
+        if args.format != "html":
+            print("error: --missing is only supported for --format html", file=sys.stderr)
+            return 1
+        sessions = _iter_sessions(log_dir)
+        if not sessions:
+            print("No sessions found.", file=sys.stderr)
+            return 0
+        ok = fail = 0
+        for s in sessions:
+            sid = s.get("session_id")
+            if not sid:
+                continue
+            sdir = log_dir / sid
+            html_path = sdir / "session.html"
+            if html_path.is_file():
+                # Already has an export, skip
+                continue
+            # Re-invoke the single-session export path
+            sub_args = argparse.Namespace(
+                session_id=sid, output=None, format="html",
+                after=None, before=None, first=None, last=None,
+                panes=None, missing=False, json=args.json, log_dir=str(log_dir),
+            )
+            rc = _run_sessions_export(log_dir, sub_args)
+            if rc == 0:
+                ok += 1
+            else:
+                fail += 1
+        total = ok + fail
+        if fail:
+            print(f"Exported {ok}/{total} session(s), {fail} failed.")
+        else:
+            print(f"Exported {ok} session(s).")
+        return 0 if fail == 0 else 1
+
+    # ── Single-session export (existing behavior) ──
     sdir = _read_session_dir(log_dir, args.session_id)
     if not sdir:
         print(f"Session not found: {args.session_id}", file=sys.stderr)
@@ -899,6 +966,89 @@ def _run_sessions_open(log_dir: Path, args: argparse.Namespace) -> int:
 
     webbrowser.open(html_path.resolve().as_uri())
     print(f"Opened: {html_path}")
+    return 0
+
+
+def _run_sessions_delete(log_dir: Path, args: argparse.Namespace) -> int:
+    """Delete recorded session(s) by ID, age, or all."""
+    spec = bool(args.session_id)
+    older = bool(args.older_than)
+    all_ = args.all
+    modes = [spec, older, all_]
+    if modes.count(True) > 1:
+        print("error: specify one of session_id, --older-than, or --all", file=sys.stderr)
+        return 1
+    if modes.count(True) == 0:
+        print("error: specify a session ID, --older-than, or --all", file=sys.stderr)
+        return 1
+
+    # ── Delete specific session ──
+    if args.session_id:
+        sdir = _read_session_dir(log_dir, args.session_id)
+        if not sdir:
+            print(f"Session not found: {args.session_id}", file=sys.stderr)
+            return 1
+        if not args.yes:
+            ans = input(f"Delete session {sdir.name}? [y/N]: ").strip().lower()
+            if ans not in ("y", "yes"):
+                print("Aborted.")
+                return 0
+        shutil.rmtree(sdir)
+        print(f"Deleted: {sdir}")
+        return 0
+
+    # ── Gather all sessions for age-based or all deletion ──
+    sessions = _iter_sessions(log_dir)
+    if not sessions:
+        print("No sessions found.", file=sys.stderr)
+        return 0
+
+    now = datetime.datetime.now().timestamp()
+
+    if all_:
+        to_delete = sessions
+    else:  # --older-than
+        secs = _parse_duration(args.older_than)
+        if secs is None:
+            print(f"Invalid duration: {args.older_than!r} (use e.g. 7d, 30d, 24h)", file=sys.stderr)
+            return 1
+        cutoff = now - secs
+        to_delete = []
+        for s in sessions:
+            sdir = Path(s.get("_dir", ""))
+            if not sdir.is_dir():
+                continue
+            started = s.get("started_at")
+            if started:
+                try:
+                    dt = datetime.datetime.fromisoformat(started)
+                    age = dt.timestamp()
+                except (ValueError, TypeError):
+                    age = sdir.stat().st_mtime
+            else:
+                age = sdir.stat().st_mtime
+            if age < cutoff:
+                to_delete.append(s)
+
+    if not to_delete:
+        print("No sessions match the criteria.")
+        return 0
+
+    # ── Confirm ──
+    if not args.yes:
+        ans = input(f"Delete {len(to_delete)} session(s)? [y/N]: ").strip().lower()
+        if ans not in ("y", "yes"):
+            print("Aborted.")
+            return 0
+
+    count = 0
+    for s in to_delete:
+        sdir = Path(s.get("_dir", ""))
+        if sdir.is_dir():
+            shutil.rmtree(sdir)
+            count += 1
+
+    print(f"Deleted {count} session(s).")
     return 0
 
 
