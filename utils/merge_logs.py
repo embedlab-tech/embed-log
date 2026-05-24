@@ -226,8 +226,10 @@ def _strip_module_syntax(src: str) -> str:
     classic <script> block in the self-contained static HTML output."""
     # Remove import statements (single-line)
     src = re.sub(r"^import\s+.*?['\"][^'\"]*['\"]\s*;?\r?\n?", "", src, flags=re.MULTILINE)
+    # Remove multi-line imports (import { ... } from '...')
+    src = re.sub(r"^import\s*\{[^}]*\}\s*from\s*['\"][^'\"]*['\"]\s*;?\s*", "", src, flags=re.MULTILINE)
     # Remove export keyword from declarations (function, class, const, let, var)
-    src = re.sub(r"^export\s+(async\s+)?(function|class|const|let|var)\b", r"\2", src, flags=re.MULTILINE)
+    src = re.sub(r"^export\s+(async\s+)?(function|class|const|let|var)\b", r"\1\2", src, flags=re.MULTILINE)
     # Remove standalone export { ... } statements
     src = re.sub(r"^export\s*\{[^}]*\}\s*(?:from\s*['\"][^'\"]*['\"])?\s*;?\r?\n?", "", src, flags=re.MULTILINE)
     return src
@@ -438,6 +440,14 @@ def generate_html(tab_specs: list) -> str:
 <body>
 
 {_render_toolbar()}
+
+<div id="download-raw-menu">
+    <div class="download-raw-head">Download raw logs</div>
+    <div class="download-raw-body">
+        <button id="btn-download-merged" class="download-raw-opt">Merged (.log) — all panes interleaved</button>
+        <button id="btn-download-split" class="download-raw-opt">Per pane (.log files) — one file per source</button>
+    </div>
+</div>
 
 <!-- ── TAB BAR — shown by tabs.js when there is more than one tab ── -->
 <div id="tab-bar"></div>

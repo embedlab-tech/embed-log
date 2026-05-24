@@ -46,8 +46,10 @@ export async function exportHtmlSnapshot(options = {}) {
             return src
                 // Remove import statements (single-line)
                 .replace(/^import\s+.*?['"][^'"]*['"]\s*;?\r?\n?/gm, '')
+                // Remove multi-line imports (import { ... } from '...')
+                .replace(/^import\s*\{[^}]*\}\s*from\s*['"][^'"]*['"]\s*;?\s*/gm, '')
                 // Remove export keyword from declarations
-                .replace(/^export\s+(async\s+)?(function|class|const|let|var)\b/gm, '$2')
+                .replace(/^export\s+(async\s+)?(function|class|const|let|var)\b/gm, '$1$2')
                 // Remove standalone export { ... } statements
                 .replace(/^export\s*\{[^}]*\}\s*(?:from\s*['"][^'"]*['"])?\s*;?\r?\n?/gm, '');
         }
@@ -234,12 +236,32 @@ window.__embedLogExportSnapshot = exportHtmlSnapshot;
 if (window.__embedLogProfile?.capabilities?.exportHtml) {
     document.getElementById("btn-export")?.addEventListener("click", exportToHtml);
 }
+// Strip ANSI escape sequences from raw text.
+function _stripAnsi(text) {
+    return text.replace(/\x1b(?:\[[0-9;]*[A-Za-z]|\][^\x07]*\x07|[^[\]])/g, "");
+}
 
-// ---------------------------------------------------------------------------
-// Download all logs as merged raw text (one file, all panes interleaved)
-// ---------------------------------------------------------------------------
+// from raw text, producing clean plain text for download.
+// Matches _snippetMessageText in selection.js.
+function _cleanMessage(rawText) {
+    let text = _stripAnsi(rawText ?? "").trim();
+    for (let i = 0; i < 4; i++) {
+        const before = text;
+        text = text
+            // Strip ISO timestamp prefix like [2026-05-24T22:59:41.773+02:00]
+            .replace(/^\[\d{4}-\d{2}-\d{2}T[^\]]+\]\s*/, "")
+            // Strip bare short timestamp prefix like 05-24 23:05:51.109
+            .replace(/^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s*/, "")
+            // Strip source label prefix like [SENSOR_A]
+            .replace(/^\[[A-Za-z_][A-Za-z0-9_-]*\]\s*/, "")
+            .trim();
+        if (text === before) break;
+    }
+    return text;
+}
+
 function _lineRawFull(line) {
-    return `${line.ts}  ${line.rawText ?? ""}`;
+    return _cleanMessage(line.rawText);
 }
 
 function downloadRawMerged() {
@@ -274,7 +296,7 @@ function downloadRawSplit() {
     PANES.forEach(id => {
         const lines = state.rawLines[id] || [];
         if (!lines.length) return;
-        const text = lines.map(line => `${line.ts}  ${line.rawText ?? ""}`).join("\n");
+        const text = lines.map(line => `[${line.ts}] ${_cleanMessage(line.rawText)}`).join("\n");
         const blob = new Blob([text + "\n"], { type: "text/plain" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");

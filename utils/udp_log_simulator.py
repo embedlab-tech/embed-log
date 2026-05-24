@@ -160,7 +160,7 @@ def now_timestamp() -> str:
 
 
 def build_log_line(message: str) -> str:
-    return f"[{now_timestamp()}] {message}"
+    return message
 
 
 def run(args: argparse.Namespace) -> int:
