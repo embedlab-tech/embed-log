@@ -21,7 +21,6 @@ Good:
 Still problematic:
 - top-level CLI still exposes too many advanced flags
 - help text is still closer to an engineer/debugger interface than a user workflow
-- `slice` is still present even though it is not trusted
 - direct CLI source definition (`--source`, `--inject`, `--forward`, `--tab`) competes with YAML config as a second configuration model
 - advanced/internal commands are not clearly separated from normal usage
 
@@ -76,7 +75,6 @@ These are useful, but not part of the main onboarding path:
 
 ### Advanced/internal commands
 These should be hidden from the main help or placed under an advanced section:
-- `slice` (until removed)
 - direct source wiring flags
 - low-level compatibility/debug paths
 
@@ -103,7 +101,6 @@ Commands:
 
 Advanced:
   parse           parse exported HTML/session artifacts
-  slice           experimental / legacy
 ```
 
 ### Rules
@@ -152,22 +149,6 @@ Longer term, evaluate whether they are still worth keeping publicly supported.
 
 ---
 
-## slice removal plan
-
-`slic`e is not trusted and should not be part of the user-facing product.
-
-### Short term
-- remove `slice` from primary help output
-- mark it as experimental/internal if still callable
-
-### Medium term
-- remove or replace it with a simpler, trustworthy workflow
-
-### Important
-Do not design new user flows around `slice`.
-
----
-
 ## Possible new command: doctor
 
 A future `embed-log doctor` command could reduce support load.
@@ -211,14 +192,13 @@ Docs should consistently present:
 - move advanced commands/flags to secondary help sections
 
 ### Phase 2
-- hide/de-emphasize `slice`
 - refine `create-config` UX based on real usage
 - clean docs so `create-config` is the primary path everywhere
 
 ### Phase 3
 - add `doctor`
+- implement the `sessions` subcommand tree
 - decide whether direct source CLI flags remain public or become advanced-only
-- remove `slice`
 
 ---
 
@@ -230,3 +210,137 @@ The CLI is simplified when:
 - advanced/internal features no longer compete with the main path
 - docs follow the same mental model as the CLI
 - unsupported or low-trust commands are no longer presented as normal usage
+
+## Developer workflow: dev vs. installed CLI
+
+Current problem:
+- `embed-log` on PATH resolves to the pipx-installed global version
+- after editing code, running `embed-log` does not reflect local changes
+- developers must remember `python3 -m backend.server` to test local changes
+
+### Solution 1: venv overrides pipx (document and rely on PATH order)
+
+No tooling change needed. Make the developer flow explicit:
+
+```bash
+source .venv/bin/activate
+pip install -e .
+which embed-log  # should show .venv/bin/embed-log, not pipx's
+```
+
+When the venv is activated, `.venv/bin/` is prepended to PATH and takes precedence.
+This already works — developers just need to know it.
+
+Document this in README as **the** developer setup.
+
+### Solution 2: primary dev command is `python3 -m backend.server`
+
+Make this the default documented dev workflow:
+
+```bash
+python3 -m backend.server create-config
+python3 -m backend.server validate --config embed-log.yml
+python3 -m backend.server run --config embed-log.yml
+```
+
+Advantages:
+- always runs from source, never conflicts with pipx
+- no venv activation needed (though deps must be installed)
+- works in any terminal
+
+Make this the first / primary dev example in both README and INSTALL docs.
+
+### Solution 3: add `dev` subcommand (optional, lower priority)
+
+A hypothetical `embed-log dev` that detects the repo root and runs from source:
+
+```bash
+embed-log dev create-config
+```
+
+Implementation sketch:
+- looks for a repo marker (e.g. `pyproject.toml`) in parent directories
+- runs `sys.executable -m backend.server` from repo root
+- useful for quick one-offs without mental context switching
+
+### Recommendation
+
+Use **Solution 1 + Solution 2** immediately (documentation only, no code changes).
+Consider **Solution 3** only if developers continue to struggle.
+
+For the CLI help, also add a hint when run outside a venv and no config is found:
+```text
+Development mode:
+  python3 -m backend.server <command>  (runs from source, no pipx install needed)
+```
+
+## Session/log inspection commands
+
+A future `sessions` subcommand tree would allow CLI users and scripts/agents to inspect recorded session data on disk without starting the server.
+
+All commands work **without a config file** — they default to `logs/` in the current directory and accept `--log-dir` to point elsewhere.
+
+```bash
+embed-log sessions list                         # looks in logs/
+embed-log sessions list --log-dir /custom/path
+embed-log sessions list --config embed-log.yml   # reads log-dir from config
+```
+
+### Proposed command tree
+
+```
+embed-log sessions
+embed-log sessions list [--log-dir DIR] [--sort date|name] [--limit N] [--json]
+embed-log sessions info <session-id> [--log-dir DIR] [--json]
+embed-log sessions logs <session-id> [--log-dir DIR] [--pane PANE]
+embed-log sessions export <session-id> [--log-dir DIR] [--output FILE]
+```
+
+### What each does
+
+**`list`** — scans the configured log directory for session subdirectories, reads each `manifest.json`, and prints a table:
+
+```
+ID                          APP       SOURCES   HTML
+2026-05-24_10-49-04        demo      3         yes
+2026-05-24_10-45-12        prod      2         no
+```
+
+**`info`** — prints the full `manifest.json` contents in a readable format:
+
+```yaml
+session_id: 2026-05-24_10-49-04
+app_name: demo
+sources: [SENSOR_A, SENSOR_B, SENSOR_C]
+```
+
+With `--json`, raw JSON output (agent-friendly).
+
+**`logs`** — cats or tails a log file for a session. Optionally filter by pane name.
+
+```bash
+embed-log sessions logs 2026-05-24_10-49-04 --pane SENSOR_A | head -100
+```
+
+**`export`** — regenerates `session.html` for a session, optionally to a different output path.
+
+### Why this matters
+
+- Works offline (no server process)
+- Pairs well with `create-config` → `run` → `sessions list` → `sessions export` workflow
+- Enables CI pipelines and AI agents to inspect results programmatically
+- Reduces need to navigate the filesystem manually
+
+### Design constraints
+
+- Read-only commands by default (no modify/delete)
+- `--json` flag on every subcommand for machine-readable output
+- Accept the same `--log-dir` flag as `run`, defaulting to `logs/`
+- Handle partial/corrupted sessions gracefully
+
+### Implementation order
+
+1. `list`
+2. `info`
+3. `logs`
+4. `export`

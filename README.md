@@ -3,11 +3,11 @@
 `embed-log` is a configurable log aggregation server for embedded development and CI.
 
 It reads logs from UART and UDP sources, stores them in per-session artifacts, and streams them live to a browser UI.
-
 ## Get up to speed
 
 Read these in order:
 - `AGENTS.md` — fast repo orientation for humans and coding agents
+- `DEVELOPMENT.md` — working from the source tree
 - `docs/ARCHITECTURE.md` — end-to-end system flow
 - `docs/BACKEND.md` / `docs/FRONTEND.md` — subsystem details
 - `docs/TESTING.md` — test strategy and commands
@@ -45,14 +45,14 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; iex ((New-Object Sys
 
 ### Developer setup
 
-From a cloned repository:
-
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 pip install -e .
 ```
+
+See `DEVELOPMENT.md` for the full development workflow — running from source, testing, debugging.
 
 ## Run with a config file
 

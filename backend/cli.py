@@ -13,7 +13,6 @@ from serial.tools import list_ports
 from .app import DEFAULT_WS_UI, parse_source, run_app
 from .config import ConfigError, load_config
 from .parse import run_parse
-from .slice import run_slice
 from .sources import LogSource
 
 
@@ -323,83 +322,120 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="embed-log — collect UART/UDP logs and view them in a browser UI.",
         epilog=(
-            "Common workflow:\n"
-            "  embed-log create-config\n"
-            "  embed-log validate --config embed-log.yml\n"
-            "  embed-log run --config embed-log.yml\n\n"
-            "Advanced examples:\n"
-            "  embed-log slice --config embed-log.yml --last 10m\n"
+            "Quick start:\n"
+            "  embed-log run --config embed-log.yml         if you already have a config\n"
+            "  embed-log create-config                      otherwise, create one\n"
+            "\n"
+            "Commands:\n"
+            "  create-config   interactively create a config file\n"
+            "  validate        validate a config file\n"
+            "  run             start the log server from a config file\n"
+            "\n"
+            "Advanced:\n"
             "  embed-log parse session.html --output parsed-session\n"
-            "  python backend/server.py --source DEVICE_A uart:/dev/ttyUSB0 --inject DEVICE_A 5001"
+            "  embed-log --help                                   all flags"
         ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument(
+    # ── Config file ──
+    cfg_grp = parser.add_argument_group("Config file")
+    cfg_grp.add_argument(
         "--config", "-c", metavar="FILE", default=None,
-        help="YAML config file (version: 1). CLI flags override config values.",
+        help="YAML config file. CLI flags override config values.",
     )
-    parser.add_argument(
+
+    # ── Advanced run options ──
+    adv = parser.add_argument_group("Advanced run options")
+    adv.add_argument(
         "--source", nargs=2, action="append", metavar=("NAME", "TYPE"),
         dest="sources", default=[],
         help="NAME  uart:/dev/path[@baud] | udp:PORT  — repeat for multiple sources",
     )
-    parser.add_argument(
+    adv.add_argument(
         "--inject", nargs=2, action="append", metavar=("NAME", "PORT"),
         dest="injects", default=[],
         help="NAME PORT — TCP inject/stream port for a source (optional, repeat)",
     )
-    parser.add_argument(
+    adv.add_argument(
         "--forward", nargs=2, action="append", metavar=("NAME", "PORT"),
         dest="forwards", default=[],
-        help="NAME PORT — read-only TCP forward port for raw RX lines (optional, repeat)",
+        help="NAME PORT — read-only TCP forward port (optional, repeat)",
     )
-    parser.add_argument(
+    adv.add_argument(
         "--tab", nargs="+", action="append", metavar="ARG",
         dest="tabs", default=[],
-        help=(
-            "LABEL SOURCE [SOURCE] — group 1 or 2 sources into a UI tab "
-            "(repeat for multiple tabs; omit to get one tab per source)"
-        ),
+        help="LABEL SOURCE [SOURCE] — group 1–2 sources into a UI tab",
     )
-    parser.add_argument("--baudrate", metavar="BAUD", type=int, default=None,
-                        help="default baud rate for uart sources without an explicit @baud suffix")
-    parser.add_argument("--log-dir", metavar="DIR", default=None, dest="log_dir",
-                        help="directory for log files (<log-dir>/<NAME>.log)")
-    parser.add_argument("--host", metavar="HOST", default=None,
-                        help="bind host for inject ports and WebSocket UI")
-    parser.add_argument("--ws-port", metavar="PORT", type=int, default=None, dest="ws_port",
-                        help="HTTP/WebSocket port for the browser UI (0 = disabled)")
-    parser.add_argument("--ws-ui", metavar="FILE", default=None, dest="ws_ui",
-                        help="path to the UI HTML file served at GET /")
-    parser.add_argument("--app-name", metavar="NAME", default=None, dest="app_name",
-                        help="app name shown in UI top-left bar")
-    parser.add_argument("--open-browser", dest="open_browser", action="store_const", const=True, default=None,
-                        help="open default browser automatically when UI server starts")
-    parser.add_argument("--default-light-theme", dest="default_light_theme", default=None,
-                        help="default light palette key for frontend (e.g. whitesand)")
-    parser.add_argument("--default-dark-theme", dest="default_dark_theme", default=None,
-                        help="default dark palette key for frontend (e.g. one-dark)")
-    parser.add_argument("--no-open-browser", dest="open_browser", action="store_const", const=False,
-                        help="do not open browser automatically (overrides config)")
-    parser.add_argument("--job-id", metavar="ID", default=None, dest="job_id",
-                        help="optional CI/job identifier included in session/log naming")
-    parser.add_argument("--verbosity", choices=["quiet", "events", "full"], default=None,
-                        help="logging verbosity mode")
-    parser.add_argument("-v", "--verbose", action="store_const", const=True, default=None,
-                        help="shortcut for --verbosity events")
-    parser.add_argument("--verbose-full", action="store_const", const=True, default=None,
-                        help="shortcut for --verbosity full (prints every log line)")
+    adv.add_argument("--baudrate", metavar="BAUD", type=int, default=None,
+                     help="default UART baud rate")
+    adv.add_argument("--log-dir", metavar="DIR", default=None, dest="log_dir",
+                     help="log files output directory")
+    adv.add_argument("--host", metavar="HOST", default=None,
+                     help="bind address")
+
+    # ── UI options ──
+    ui = parser.add_argument_group("UI options")
+    ui.add_argument("--ws-port", metavar="PORT", type=int, default=None, dest="ws_port",
+                     help="HTTP/WebSocket port (0 = disabled)")
+    ui.add_argument("--ws-ui", metavar="FILE", default=None, dest="ws_ui",
+                     help="custom UI HTML file path")
+    ui.add_argument("--app-name", metavar="NAME", default=None, dest="app_name",
+                     help="name shown in UI top bar")
+    ui.add_argument("--open-browser", dest="open_browser", action="store_const", const=True, default=None,
+                     help="open browser on startup")
+    ui.add_argument("--no-open-browser", dest="open_browser", action="store_const", const=False,
+                     help="do not open browser (overrides config)")
+    ui.add_argument("--default-light-theme", dest="default_light_theme", default=None,
+                     help="light palette key")
+    ui.add_argument("--default-dark-theme", dest="default_dark_theme", default=None,
+                     help="dark palette key")
+
+    # ── Job / logging ──
+    misc = parser.add_argument_group("Logging and CI")
+    misc.add_argument("--verbosity", choices=["quiet", "events", "full"], default=None,
+                      help="logging verbosity mode")
+    misc.add_argument("-v", "--verbose", action="store_const", const=True, default=None,
+                      help="shortcut for --verbosity events")
+    misc.add_argument("--verbose-full", action="store_const", const=True, default=None,
+                      help="shortcut for --verbosity full")
+    misc.add_argument("--job-id", metavar="ID", default=None, dest="job_id",
+                      help="CI/job identifier for session naming")
+
     return parser
 
 
 def main(argv: Optional[list[str]] = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
 
+    # ── No arguments → show guided message ──
+    if not argv:
+        cfg_path = Path("embed-log.yml")
+        if cfg_path.exists():
+            print("Config found: embed-log.yml")
+            print("")
+            print("  embed-log validate --config embed-log.yml")
+            print("  embed-log run --config embed-log.yml")
+            print("")
+            print("  embed-log --help             all options")
+        else:
+            print("embed-log — collect UART/UDP logs with a browser UI")
+            print("")
+            print("Quick start:")
+            print("")
+            print("  embed-log run --config embed-log.yml    (if you already have a config)")
+            print("")
+            print("  embed-log create-config                 (otherwise, create one)")
+            print("")
+            print("  embed-log --help                        all options")
+            print("")
+            print("Development (run from source):")
+            print("  python3 -m backend.server <command>")
+        return 0
+
     if argv and argv[0] in {"init", "create-config"}:
         return _run_create_config(argv[1:])
     if argv and argv[0] == "validate":
         return _run_validate(argv[1:])
-    if argv and argv[0] == "slice":
-        return run_slice(argv[1:])
     if argv and argv[0] == "parse":
         return run_parse(argv[1:])
     if argv and argv[0] == "run":
