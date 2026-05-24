@@ -15,6 +15,7 @@ set -euo pipefail
 # Config
 # ─────────────────────────────────────────────────────────────────
 
+INSTALL_TMPDIR=""
 REPO="krezolekcoder/embed-log"
 BRANCH="main"
 REPO_URL="https://github.com/${REPO}.git"
@@ -200,18 +201,18 @@ else
     PIPX_SRC="git+${REPO_URL}@${BRANCH}"
   else
     print_warn "git not found — downloading source archive instead."
-    TMPDIR="$(mktemp -d)"
+    INSTALL_TMPDIR="$(mktemp -d)"
     ARCHIVE_URL="https://github.com/${REPO}/archive/${BRANCH}.tar.gz"
     print_info "Downloading ${ARCHIVE_URL}..."
-    curl -fsSL "$ARCHIVE_URL" | tar xz -C "$TMPDIR" || die "\
+    curl -fsSL "$ARCHIVE_URL" | tar xz -C "$INSTALL_TMPDIR" || die "\
 Failed to download embed-log source from GitHub.
 
   Check your internet connection and try again."
 
     # GitHub archives extract to <repo>-<branch>/
-    EXTRACTED="$(cd "$TMPDIR" && ls -d embed-log-* 2>/dev/null | head -1)"
+    EXTRACTED="$(cd "$INSTALL_TMPDIR" && ls -d embed-log-* 2>/dev/null | head -1)"
     [ -n "$EXTRACTED" ] || die "Downloaded archive has unexpected structure."
-    PIPX_SRC="${TMPDIR}/${EXTRACTED}"
+    PIPX_SRC="${INSTALL_TMPDIR}/${EXTRACTED}"
   fi
 fi
 
@@ -225,9 +226,9 @@ Failed to install embed-log via pipx.
     pipx uninstall embed-log
     pipx install ${PIPX_SRC}"
 
-# Clean up temp dir if we used one
-if [ -n "${TMPDIR:-}" ] && [ -d "$TMPDIR" ]; then
-  rm -rf "$TMPDIR"
+# Clean up temp dir if we created one
+if [ -n "$INSTALL_TMPDIR" ] && [ -d "$INSTALL_TMPDIR" ]; then
+  rm -rf "$INSTALL_TMPDIR"
 fi
 
 # ─────────────────────────────────────────────────────────────────
