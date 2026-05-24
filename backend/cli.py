@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import logging
 import re
 import sys
@@ -316,6 +318,336 @@ def _run_validate(argv: list[str]) -> int:
     print(f"  forwards: {len(cfg.get('forwards', []))}")
     print(f"  tabs: {len(cfg.get('tabs', []))}")
     return 0
+def _run_sessions(argv: list[str]) -> int:
+    # Shared arguments that each subcommand inherits
+    shared = argparse.ArgumentParser(add_help=False)
+    shared.add_argument("--log-dir", default="logs/",
+                        help="log directory (default: logs/)")
+    shared.add_argument("--json", action="store_true",
+                        help="machine-readable JSON output")
+
+    parser = argparse.ArgumentParser(
+        prog="embed-log sessions",
+        description="Inspect recorded sessions from disk.",
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    p_list = sub.add_parser("list", parents=[shared],
+                            help="list recorded sessions")
+    p_list.add_argument("--sort", choices=["date", "name"], default="date")
+    p_list.add_argument("--limit", type=int, default=None)
+
+    p_info = sub.add_parser("info", parents=[shared],
+                            help="show session details")
+    p_info.add_argument("session_id")
+
+    p_logs = sub.add_parser("logs", parents=[shared],
+                            help="print session log files")
+    p_logs.add_argument("session_id")
+    p_logs.add_argument("--pane", default=None, help="filter by pane name")
+
+    p_export = sub.add_parser("export", parents=[shared],
+                              help="regenerate session HTML")
+    p_export.add_argument("session_id")
+    p_export.add_argument("--output", default=None, help="output path")
+    args = parser.parse_args(argv)
+
+    if args.command is None:
+        parser.print_help()
+        return 0
+
+    log_dir = Path(args.log_dir) if hasattr(args, "log_dir") else Path("logs/")
+
+    if args.command == "list":
+        return _run_sessions_list(log_dir, args)
+    if args.command == "info":
+        return _run_sessions_info(log_dir, args)
+    if args.command == "logs":
+        return _run_sessions_logs(log_dir, args)
+    if args.command == "export":
+        return _run_sessions_export(log_dir, args)
+    return 1
+
+
+def _read_session_dir(log_dir: Path, session_id: str) -> Path | None:
+    full_id = _resolve_session_id(log_dir, session_id)
+    if full_id is None:
+        return None
+    sdir = log_dir / full_id
+    if not sdir.is_dir():
+        return None
+    return sdir
+
+
+def _read_manifest(session_dir: Path) -> dict | None:
+    mf = session_dir / "manifest.json"
+    if not mf.is_file():
+        return None
+    try:
+        return json.loads(mf.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _short_alias(session_id: str) -> str:
+    return hashlib.sha256(session_id.encode()).hexdigest()[:4]
+
+
+def _resolve_session_id(log_dir: Path, session_id: str) -> str | None:
+    """Return the full session ID matching the given ID or short alias."""
+    if (log_dir / session_id).is_dir():
+        return session_id
+    if not log_dir.is_dir():
+        return None
+    for child in sorted(log_dir.iterdir()):
+        if child.is_dir() and _short_alias(child.name) == session_id:
+            return child.name
+    return None
+
+
+def _count_lines(file_path: Path) -> int:
+    try:
+        with file_path.open("rb") as f:
+            return sum(1 for _ in f)
+    except OSError:
+        return 0
+
+
+def _file_size_kb(file_path: Path) -> int:
+    try:
+        return file_path.stat().st_size // 1024
+    except OSError:
+        return 0
+
+
+def _session_stats(session_dir: Path, manifest: dict | None) -> dict:
+    """Return enriched metrics: alias, line count, total size KB."""
+    sid = (manifest or {}).get("session_id", session_dir.name)
+    lines = 0
+    size_kb = 0
+    source_files = (manifest or {}).get("source_files", {})
+    for path_str in source_files.values():
+        fp = Path(path_str)
+        if fp.is_file():
+            lines += _count_lines(fp)
+            size_kb += _file_size_kb(fp)
+    if not source_files:
+        for lf in session_dir.glob("*.log"):
+            lines += _count_lines(lf)
+            size_kb += _file_size_kb(lf)
+        for lf in session_dir.glob("*.txt"):
+            lines += _count_lines(lf)
+            size_kb += _file_size_kb(lf)
+    return {"alias": _short_alias(sid), "lines": lines, "size_kb": size_kb}
+
+
+def _iter_sessions(log_dir: Path) -> list[dict]:
+    if not log_dir.is_dir():
+        return []
+    sessions = []
+    for child in sorted(log_dir.iterdir()):
+        if not child.is_dir():
+            continue
+        manifest = _read_manifest(child)
+        if manifest:
+            manifest["_dir"] = str(child)
+        else:
+            manifest = {"_dir": str(child)}
+        stats = _session_stats(child, manifest)
+        manifest["_alias"] = stats["alias"]
+        manifest["_lines"] = stats["lines"]
+        manifest["_size_kb"] = stats["size_kb"]
+        sessions.append(manifest)
+    return sessions
+
+
+def _format_session_row(m: dict) -> str:
+    alias = m.get("_alias", m.get("session_id", "?")[:4])
+    sid = m.get("session_id", m.get("_dir", "?"))
+    app = m.get("app_name", "-")
+    lines = m.get("_lines", 0)
+    size_kb = m.get("_size_kb", 0)
+    html = "yes" if m.get("session_html") else "-"
+    return f"{alias:<6s}  {sid:<40s}  {app:<16s}  {lines:<6d}  {size_kb:<4d}KB  {html}"
+
+
+def _run_sessions_list(log_dir: Path, args: argparse.Namespace) -> int:
+    sessions = _iter_sessions(log_dir)
+    if args.sort == "name":
+        sessions.sort(key=lambda m: m.get("session_id", ""))
+    if args.limit is not None and args.limit > 0:
+        sessions = sessions[: args.limit]
+
+    if args.json:
+        print(json.dumps(sessions, indent=2, default=str))
+        return 0
+
+    if not sessions:
+        print(f"No sessions found in {log_dir}")
+        return 0
+
+    print(f"{'ALIAS':<6s}  {'ID':<40s}  {'APP':<16s}  {'LINES':<6s}  {'SIZE':<6s}  {'HTML'}")
+    print("-" * 90)
+    for m in sessions:
+        print(_format_session_row(m))
+    return 0
+
+
+def _run_sessions_info(log_dir: Path, args: argparse.Namespace) -> int:
+    sdir = _read_session_dir(log_dir, args.session_id)
+    if not sdir:
+        print(f"Session not found: {args.session_id}", file=sys.stderr)
+        return 1
+
+    manifest = _read_manifest(sdir)
+    if not manifest:
+        print(f"No manifest found for session {args.session_id}", file=sys.stderr)
+        print(f"Directory: {sdir}")
+        return 1
+
+    if args.json:
+        print(json.dumps(manifest, indent=2, default=str))
+        return 0
+
+    # Human-readable format
+    sid = manifest.get("session_id", "?")
+    alias = _short_alias(sid)
+    total_lines = 0
+    total_size_kb = 0
+
+    print(f"Session:      {sid}")
+    print(f"Alias:        {alias}")
+    print(f"App:          {manifest.get('app_name', '-')}")
+    print(f"Started:      {manifest.get('started_at', '-')}")
+    print(f"Job ID:       {manifest.get('job_id', '-')}")
+    print(f"Config:       {manifest.get('config_path', '-')}")
+    print(f"HTML export:  {manifest.get('session_html', '-')}")
+    print(f"HTML status:  {manifest.get('html_status', '-')}")
+    print(f"Sources:")
+    for name, path in sorted(manifest.get("source_files", {}).items()):
+        fp = Path(path)
+        lines = _count_lines(fp)
+        skb = _file_size_kb(fp)
+        total_lines += lines
+        total_size_kb += skb
+        sizestr = f"{skb}KB" if skb else "?"
+        print(f"  {name:<20s}  {lines:<6d} lines  {sizestr:<8s}  {path}")
+    print(f"           {'─' * 50}")
+    print(f"  {'Total':<20s}  {total_lines:<6d} lines  {total_size_kb:<4d}KB")
+    print(f"Tabs:")
+    for tab in manifest.get("tabs", []):
+        panes = ", ".join(tab.get("panes", []))
+        print(f"  {tab.get('label', '?')}:  {panes}")
+    return 0
+
+
+def _run_sessions_logs(log_dir: Path, args: argparse.Namespace) -> int:
+    sdir = _read_session_dir(log_dir, args.session_id)
+    if not sdir:
+        print(f"Session not found: {args.session_id}", file=sys.stderr)
+        return 1
+
+    manifest = _read_manifest(sdir)
+    source_files = manifest.get("source_files", {}) if manifest else {}
+    log_files = list(sdir.glob("*.log")) + list(sdir.glob("*.txt"))
+
+    if args.pane:
+        specific = source_files.get(args.pane)
+        if specific:
+            log_files = [Path(specific)]
+        else:
+            matched = [f for f in log_files if args.pane in f.name]
+            if not matched:
+                print(f"No log files matching pane {args.pane!r}", file=sys.stderr)
+                return 1
+            log_files = matched
+
+    for lf in sorted(log_files):
+        try:
+            sys.stdout.write(lf.read_text(encoding="utf-8"))
+        except OSError as exc:
+            print(f"Error reading {lf}: {exc}", file=sys.stderr)
+            return 1
+    return 0
+
+
+def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
+    from .session import SessionExporter
+
+    sdir = _read_session_dir(log_dir, args.session_id)
+    if not sdir:
+        print(f"Session not found: {args.session_id}", file=sys.stderr)
+        return 1
+
+    manifest = _read_manifest(sdir)
+    if not manifest:
+        print(f"No manifest found for session {args.session_id}", file=sys.stderr)
+        return 1
+
+    source_files = manifest.get("source_files", {})
+    tabs = manifest.get("tabs", [])
+    if not source_files:
+        print(f"No source files in manifest for session {args.session_id}", file=sys.stderr)
+        return 1
+
+    output = Path(args.output) if args.output else sdir / "session.html"
+
+    exporter = SessionExporter(
+        session_html_path=output,
+        source_files=source_files,
+        tabs=tabs,
+    )
+    ok = exporter.export_html("sessions_export")
+    if not ok:
+        print(f"Export failed for session {args.session_id}", file=sys.stderr)
+        return 1
+
+    # Update manifest so the HTML column shows "yes" on next `sessions list`
+    from datetime import datetime
+    manifest["session_html"] = str(output)
+    manifest["html_status"] = "ready"
+    manifest["html_updated_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
+    (sdir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    print(f"Exported: {output}")
+    return 0
+
+
+def _run_merge(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="embed-log merge",
+        description="Merge raw log files into a standalone static HTML file.",
+    )
+    parser.add_argument(
+        "--tab", nargs="+", action="append", metavar="ARG", required=True,
+        help="TAB_LABEL PANE_LABEL FILE [PANE_LABEL FILE] — repeat for multiple tabs",
+    )
+    parser.add_argument("--output", default="merged.html",
+                        help="output HTML file path (default: merged.html)")
+    args = parser.parse_args(argv)
+
+    import subprocess
+    merge_script = Path(__file__).resolve().parents[1] / "utils" / "merge_logs.py"
+    if not merge_script.is_file():
+        print(f"Merge script not found at {merge_script}", file=sys.stderr)
+        return 1
+
+    output_path = Path(args.output)
+    cmd = [sys.executable, str(merge_script)]
+    for tab_entry in args.tab:
+        cmd.append("--tab")
+        cmd.extend(tab_entry)
+    cmd.extend(["--output", str(output_path)])
+    try:
+        proc = subprocess.run(cmd)
+    except OSError as exc:
+        print(f"Failed to run merge script: {exc}", file=sys.stderr)
+        return 1
+    if proc.returncode != 0:
+        print(f"Merge failed (exit code {proc.returncode})", file=sys.stderr)
+        return 1
+    print(f"Merged: {output_path}")
+    return 0
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -330,6 +662,16 @@ def _build_parser() -> argparse.ArgumentParser:
             "  create-config   interactively create a config file\n"
             "  validate        validate a config file\n"
             "  run             start the log server from a config file\n"
+            "\n"
+            "Sessions:\n"
+            "  sessions list                   list recorded sessions\n"
+            "  sessions info <session-id>      show session details\n"
+            "  sessions logs <session-id>      print session log files\n"
+            "  sessions export <session-id>    regenerate session HTML\n"
+            "\n"
+            "Other:\n"
+            "  merge                           merge raw log files into static HTML\n"
+            "\n"
             "\n"
             "Advanced:\n"
             "  embed-log parse session.html --output parsed-session\n"
@@ -436,6 +778,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         return _run_create_config(argv[1:])
     if argv and argv[0] == "validate":
         return _run_validate(argv[1:])
+    if argv and argv[0] == "sessions":
+        return _run_sessions(argv[1:])
+    if argv and argv[0] == "merge":
+        return _run_merge(argv[1:])
     if argv and argv[0] == "parse":
         return run_parse(argv[1:])
     if argv and argv[0] == "run":
