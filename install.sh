@@ -216,13 +216,17 @@ Failed to download embed-log source from GitHub.
   fi
 fi
 
-# Handle reinstall / upgrade
-INSTALL_CMD=(pipx install --force "$PIPX_SRC")
+# Replace an existing pipx install cleanly before reinstalling.
+if pipx uninstall embed-log >/dev/null 2>&1; then
+  print_info "Removed existing embed-log installation."
+fi
+
+INSTALL_CMD=(pipx install "$PIPX_SRC")
 print_info "Running: ${INSTALL_CMD[*]}"
 "${INSTALL_CMD[@]}" || die "\
 Failed to install embed-log via pipx.
 
-  If you see version conflict errors, try:
+  If installation fails, try:
     pipx uninstall embed-log
     pipx install ${PIPX_SRC}"
 

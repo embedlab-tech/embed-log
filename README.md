@@ -33,6 +33,16 @@ embed-log init
 embed-log run --config embed-log.yml
 ```
 
+Uninstall:
+```bash
+curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/uninstall.sh | bash
+```
+
+Windows (PowerShell):
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/krezolekcoder/embed-log/main/uninstall.ps1'))
+```
+
 ### Developer setup
 
 From a cloned repository:
