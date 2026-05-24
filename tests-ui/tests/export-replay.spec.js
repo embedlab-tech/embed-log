@@ -75,6 +75,51 @@ test.describe('HTML export replay', () => {
     }
   });
 
+  test('exported full snapshot keeps only offline toolbar actions and supports unwrap/font controls', async ({ page, browser }, testInfo) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await waitForSourceTestLine(page, 'SENSOR_A');
+    await waitForSourceTestLine(page, 'SENSOR_B');
+
+    const downloadPromise = page.waitForEvent('download');
+    await page.locator('#btn-export').click();
+    const download = await downloadPromise;
+    const htmlPath = await saveDownload(download, testInfo);
+
+    const exported = await openHtmlFile(browser, htmlPath);
+    try {
+      await expect(exported.locator('#btn-clear')).toHaveCount(0);
+      await expect(exported.locator('#btn-export')).toHaveCount(0);
+      await expect(exported.locator('#ws-status')).toHaveCount(0);
+
+      await expect(exported.locator('#btn-download-raw')).toBeVisible();
+      await expect(exported.locator('#btn-unwrap')).toBeVisible();
+      await expect(exported.locator('#btn-theme')).toBeVisible();
+      await expect(exported.locator('#btn-settings')).toBeVisible();
+
+      await exported.locator('#btn-unwrap').click();
+      await expect(exported.locator('#btn-unwrap')).toHaveClass(/active/);
+      await exported.getByRole('button', { name: 'SENSOR_A', exact: true }).click();
+      await exported.getByRole('button', { name: 'SENSOR_B', exact: true }).click();
+      await exported.getByRole('button', { name: 'SENSOR_C', exact: true }).click();
+
+      await exported.locator('#btn-settings').click();
+      await expect(exported.locator('#settings-panel')).toHaveClass(/open/);
+      await expect(exported.locator('#btn-font-dec')).toBeVisible();
+      await expect(exported.locator('#btn-font-reset')).toBeVisible();
+      await expect(exported.locator('#btn-font-inc')).toBeVisible();
+
+      const line = exported.locator('#log-SENSOR_A .log-line').first();
+      const before = await line.evaluate(el => getComputedStyle(el).fontSize);
+      await exported.locator('#btn-font-inc').click();
+      await expect.poll(async () => {
+        return line.evaluate(el => getComputedStyle(el).fontSize);
+      }).not.toBe(before);
+    } finally {
+      await exported.close();
+    }
+  });
+
 test('repeated Export captures newer log content that arrived after first export', async ({ page }, testInfo) => {
   await page.goto('/');
   await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
