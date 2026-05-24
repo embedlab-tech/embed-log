@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+import argparse
 
 import yaml
 
@@ -66,7 +67,10 @@ class CreateConfigWizardTests(unittest.TestCase):
             detected = [Port('/dev/cu.usbmodem1101', 'USB Modem')]
 
             with patch('backend.cli.list_ports.comports', return_value=detected):
-                rc = cli._run_create_config([], input_fn=lambda _prompt: next(answers))
+                rc = cli._run_create_config(
+                    argparse.Namespace(output=str(out), force=True),
+                    input_fn=lambda _prompt: next(answers)
+                )
 
             self.assertEqual(rc, 0)
             cfg = yaml.safe_load(out.read_text(encoding='utf-8'))

@@ -189,22 +189,14 @@ def _build_wizard_yaml(config: dict) -> str:
     return yaml.safe_dump(config, sort_keys=False, allow_unicode=True)
 
 
-def _run_create_config(argv: list[str], *, input_fn: Callable[[str], str] = input) -> int:
-    parser = argparse.ArgumentParser(
-        prog="embed-log create-config",
-        description="Interactively create an embed-log YAML config.",
-    )
-    parser.add_argument("--output", "-o", default="embed-log.yml", help="output config path")
-    parser.add_argument("--force", action="store_true", help="overwrite if file already exists")
-    args = parser.parse_args(argv)
-
+def _run_create_config(args: argparse.Namespace, *, input_fn: Callable[[str], str] = input) -> int:
     print("embed-log config wizard")
     print("Press Enter to accept defaults.")
     print("")
-
     output_path = Path(_prompt("Config file path", default=args.output, input_fn=input_fn))
     if output_path.exists() and not args.force:
-        parser.error(f"file already exists: {output_path}. Use --force to overwrite.")
+        print(f"file already exists: {output_path}. Use --force to overwrite.", file=sys.stderr)
+        return 1
 
     app_name = _prompt("App name", default="embed-log", input_fn=input_fn)
     open_browser = _prompt_yes_no("Open browser automatically on startup?", default=False, input_fn=input_fn)
@@ -299,19 +291,26 @@ def _run_create_config(argv: list[str], *, input_fn: Callable[[str], str] = inpu
     return 0
 
 
-def _run_validate(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(
-        prog="embed-log validate",
-        description="Validate an embed-log YAML config.",
-    )
-    parser.add_argument("--config", "-c", default="embed-log.yml", help="config file path")
-    args = parser.parse_args(argv)
-
+def _run_validate(args: argparse.Namespace) -> int:
     try:
         cfg = load_config(args.config)
     except ConfigError as exc:
-        print(f"Config INVALID: {exc}", file=sys.stderr)
+        if args.json:
+            print(json.dumps({"ok": False, "error": str(exc), "config": args.config}))
+        else:
+            print(f"Config INVALID: {exc}", file=sys.stderr)
         return 2
+
+    if args.json:
+        print(json.dumps({
+            "ok": True,
+            "config": args.config,
+            "sources": len(cfg.get("sources", [])),
+            "injects": len(cfg.get("injects", [])),
+            "forwards": len(cfg.get("forwards", [])),
+            "tabs": len(cfg.get("tabs", [])),
+        }))
+        return 0
 
     print("Config OK")
     print(f"  sources: {len(cfg.get('sources', []))}")
@@ -903,20 +902,9 @@ def _run_sessions_open(log_dir: Path, args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_merge(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(
-        prog="embed-log merge",
-        description="Merge raw log files into a standalone static HTML file.",
-    )
-    parser.add_argument(
-        "--tab", nargs="+", action="append", metavar="ARG", required=True,
-        help="TAB_LABEL PANE_LABEL FILE [PANE_LABEL FILE] — repeat for multiple tabs",
-    )
-    parser.add_argument("--output", default="merged.html",
-                        help="output HTML file path (default: merged.html)")
-    args = parser.parse_args(argv)
-
+def _run_merge(args: argparse.Namespace) -> int:
     import subprocess
+
     merge_script = Path(__file__).resolve().parents[1] / "utils" / "merge_logs.py"
     if not merge_script.is_file():
         print(f"Merge script not found at {merge_script}", file=sys.stderr)
@@ -944,149 +932,190 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="embed-log — collect UART/UDP logs and view them in a browser UI.",
         epilog=(
-            "Quick start:\n"
-            "  embed-log run --config embed-log.yml         if you already have a config\n"
-            "  embed-log create-config                      otherwise, create one\n"
+            "Common workflow:\n"
+            "  embed-log create-config\n"
+            "  embed-log validate --config embed-log.yml\n"
+            "  embed-log run --config embed-log.yml\n"
+            "  embed-log sessions list\n"
             "\n"
-            "Commands:\n"
-            "  create-config   interactively create a config file\n"
-            "  validate        validate a config file\n"
-            "  run             start the log server from a config file\n"
-            "\n"
-            "Sessions:\n"
-            "  sessions list                   list recorded sessions\n"
-            "  sessions info <session-id>      show session details\n"
-            "  sessions logs <session-id>      print session log files\n"
-            "  sessions export <session-id>    regenerate session HTML\n"
-            "  sessions open <session-id>      open session HTML in browser\n"
-            "\n"
-            "Other:\n"
-            "  merge                           merge raw log files into static HTML\n"
-            "\n"
-            "\n"
-            "Advanced:\n"
-            "  embed-log parse session.html --output parsed-session\n"
-            "  embed-log --help                                   all flags"
+            "Use `embed-log <command> --help` for examples and detailed options."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    # ── Config file ──
-    cfg_grp = parser.add_argument_group("Config file")
-    cfg_grp.add_argument(
-        "--config", "-c", metavar="FILE", default=None,
-        help="YAML config file. CLI flags override config values.",
-    )
+    sub = parser.add_subparsers(dest="command", metavar="COMMAND")
 
-    # ── Advanced run options ──
-    adv = parser.add_argument_group("Advanced run options")
-    adv.add_argument(
-        "--source", nargs=2, action="append", metavar=("NAME", "TYPE"),
-        dest="sources", default=[],
-        help="NAME  uart:/dev/path[@baud] | udp:PORT  — repeat for multiple sources",
+    # ── create-config ──
+    p = sub.add_parser(
+        "create-config",
+        help="interactively create a config file",
+        description="Interactively create an embed-log YAML config.",
+        epilog=(
+            "Examples:\n"
+            "  embed-log create-config\n"
+            "  embed-log create-config --force\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    adv.add_argument(
-        "--inject", nargs=2, action="append", metavar=("NAME", "PORT"),
-        dest="injects", default=[],
-        help="NAME PORT — TCP inject/stream port for a source (optional, repeat)",
-    )
-    adv.add_argument(
-        "--forward", nargs=2, action="append", metavar=("NAME", "PORT"),
-        dest="forwards", default=[],
-        help="NAME PORT — read-only TCP forward port (optional, repeat)",
-    )
-    adv.add_argument(
-        "--tab", nargs="+", action="append", metavar="ARG",
-        dest="tabs", default=[],
-        help="LABEL SOURCE [SOURCE] — group 1–2 sources into a UI tab",
-    )
-    adv.add_argument("--baudrate", metavar="BAUD", type=int, default=None,
-                     help="default UART baud rate")
-    adv.add_argument("--log-dir", metavar="DIR", default=None, dest="log_dir",
-                     help="log files output directory")
-    adv.add_argument("--host", metavar="HOST", default=None,
-                     help="bind address")
+    p.add_argument("--output", "-o", default="embed-log.yml",
+                   help="output config path (default: embed-log.yml)")
+    p.add_argument("--force", action="store_true",
+                   help="overwrite if file already exists")
 
-    # ── UI options ──
-    ui = parser.add_argument_group("UI options")
-    ui.add_argument("--ws-port", metavar="PORT", type=int, default=None, dest="ws_port",
-                     help="HTTP/WebSocket port (0 = disabled)")
-    ui.add_argument("--ws-ui", metavar="FILE", default=None, dest="ws_ui",
-                     help="custom UI HTML file path")
-    ui.add_argument("--app-name", metavar="NAME", default=None, dest="app_name",
-                     help="name shown in UI top bar")
-    ui.add_argument("--open-browser", dest="open_browser", action="store_const", const=True, default=None,
-                     help="open browser on startup")
-    ui.add_argument("--no-open-browser", dest="open_browser", action="store_const", const=False,
-                     help="do not open browser (overrides config)")
-    ui.add_argument("--default-light-theme", dest="default_light_theme", default=None,
-                     help="light palette key")
-    ui.add_argument("--default-dark-theme", dest="default_dark_theme", default=None,
-                     help="dark palette key")
+    # ── validate ──
+    p = sub.add_parser(
+        "validate",
+        help="validate a config file",
+        description="Validate an embed-log YAML config file.",
+        epilog=(
+            "Examples:\n"
+            "  embed-log validate --config embed-log.yml\n"
+            "  embed-log validate --json\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("--config", "-c", default="embed-log.yml",
+                   help="config file path (default: embed-log.yml)")
+    p.add_argument("--json", action="store_true",
+                   help="machine-readable JSON output")
 
-    # ── Job / logging ──
-    misc = parser.add_argument_group("Logging and CI")
-    misc.add_argument("--verbosity", choices=["quiet", "events", "full"], default=None,
-                      help="logging verbosity mode")
-    misc.add_argument("-v", "--verbose", action="store_const", const=True, default=None,
-                      help="shortcut for --verbosity events")
-    misc.add_argument("--verbose-full", action="store_const", const=True, default=None,
-                      help="shortcut for --verbosity full")
-    misc.add_argument("--job-id", metavar="ID", default=None, dest="job_id",
-                      help="CI/job identifier for session naming")
+    # ── run ──
+    p = sub.add_parser(
+        "run",
+        help="start the log server from a config",
+        description=(
+            "Start the embed-log server from a config file or advanced inline flags.\n"
+            "\n"
+            "Common:\n"
+            "  embed-log run --config embed-log.yml\n"
+            "  embed-log run --config demo.yml --open-browser\n"
+            "\n"
+            "Advanced (inline sources, no config file):\n"
+            "  embed-log run --source SENSOR_A uart:/dev/cu.usbmodem101@115200"
+            " --tab Devices SENSOR_A"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("--config", "-c", metavar="FILE", default=None,
+                   help="YAML config file. CLI flags override config values.")
+    p.add_argument("--source", nargs=2, action="append", metavar=("NAME", "TYPE"),
+                   dest="sources", default=[],
+                   help="NAME uart:/dev/path[@baud] | udp:PORT (repeatable)")
+    p.add_argument("--inject", nargs=2, action="append", metavar=("NAME", "PORT"),
+                   dest="injects", default=[],
+                   help="NAME PORT — TCP inject/stream port (repeatable)")
+    p.add_argument("--forward", nargs=2, action="append", metavar=("NAME", "PORT"),
+                   dest="forwards", default=[],
+                   help="NAME PORT — read-only TCP forward port (repeatable)")
+    p.add_argument("--tab", nargs="+", action="append", metavar="ARG",
+                   dest="tabs", default=[],
+                   help="LABEL SOURCE [SOURCE] — group 1-2 sources into a UI tab")
+    p.add_argument("--baudrate", metavar="BAUD", type=int, default=None,
+                   help="default UART baud rate")
+    p.add_argument("--log-dir", metavar="DIR", default=None, dest="log_dir",
+                   help="log files output directory")
+    p.add_argument("--host", metavar="HOST", default=None,
+                   help="bind address")
+    p.add_argument("--ws-port", metavar="PORT", type=int, default=None, dest="ws_port",
+                   help="HTTP/WebSocket port (0 = disabled)")
+    p.add_argument("--ws-ui", metavar="FILE", default=None, dest="ws_ui",
+                   help="custom UI HTML file path")
+    p.add_argument("--app-name", metavar="NAME", default=None, dest="app_name",
+                   help="name shown in UI top bar")
+    p.add_argument("--open-browser", dest="open_browser", action="store_const",
+                   const=True, default=None, help="open browser on startup")
+    p.add_argument("--no-open-browser", dest="open_browser", action="store_const",
+                   const=False, help="do not open browser (overrides config)")
+    p.add_argument("--default-light-theme", dest="default_light_theme", default=None,
+                   help="light palette key")
+    p.add_argument("--default-dark-theme", dest="default_dark_theme", default=None,
+                   help="dark palette key")
+    p.add_argument("--verbosity", choices=["quiet", "events", "full"], default=None,
+                   help="logging verbosity mode")
+    p.add_argument("-v", "--verbose", action="store_const", const=True, default=None,
+                   help="shortcut for --verbosity events")
+    p.add_argument("--verbose-full", action="store_const", const=True, default=None,
+                   help="shortcut for --verbosity full")
+    p.add_argument("--job-id", metavar="ID", default=None, dest="job_id",
+                   help="CI/job identifier for session naming")
+
+    # ── merge ──
+    p = sub.add_parser(
+        "merge",
+        help="merge raw logs into static HTML",
+        description="Merge raw log files into a standalone static HTML file.",
+        epilog=(
+            "Examples:\n"
+            '  embed-log merge --tab "My Tab" SENSOR_A sensor.log\n'
+            '  embed-log merge --tab "My Tab" SENSOR_A sensor.log --output merged.html\n'
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("--tab", nargs="+", action="append", metavar="ARG", required=True,
+                   help="TAB_LABEL PANE_LABEL FILE [PANE_LABEL FILE] (repeatable)")
+    p.add_argument("--output", default="merged.html",
+                   help="output HTML file path (default: merged.html)")
+
+    # ── parse ──
+    p = sub.add_parser(
+        "parse",
+        help="parse exported HTML back into raw logs",
+        description=(
+            "Parse an exported embed-log session.html back into raw"
+            " session log files."
+        ),
+        epilog=(
+            "Examples:\n"
+            "  embed-log parse session.html\n"
+            "  embed-log parse session.html --output my-session\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("html", help="embed-log session.html file")
+    p.add_argument("--output", "-o", default=None,
+                   help="output session directory")
+
+    # ── doctor ──
+    p = sub.add_parser(
+        "doctor",
+        help="diagnose common issues",
+        description="Check environment, dependencies, and config for common issues.",
+        epilog=(
+            "Examples:\n"
+            "  embed-log doctor\n"
+            "  embed-log doctor --config embed-log.yml\n"
+            "  embed-log doctor --json\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("--config", "-c", default=None,
+                   help="config file to check")
+    p.add_argument("--json", action="store_true",
+                   help="machine-readable JSON output")
+
+    # ── ports ──
+    p = sub.add_parser(
+        "ports",
+        help="list detected serial ports",
+        description="List detected serial ports on the system.",
+        epilog=(
+            "Examples:\n"
+            "  embed-log ports\n"
+            "  embed-log ports --json\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("--json", action="store_true",
+                   help="machine-readable JSON output")
 
     return parser
-
-
-def main(argv: Optional[list[str]] = None) -> int:
-    argv = list(sys.argv[1:] if argv is None else argv)
-
-    # ── No arguments → show guided message ──
-    if not argv:
-        cfg_path = Path("embed-log.yml")
-        if cfg_path.exists():
-            print("Config found: embed-log.yml")
-            print("")
-            print("  embed-log validate --config embed-log.yml")
-            print("  embed-log run --config embed-log.yml")
-            print("")
-            print("  embed-log --help             all options")
-        else:
-            print("embed-log — collect UART/UDP logs with a browser UI")
-            print("")
-            print("Quick start:")
-            print("")
-            print("  embed-log run --config embed-log.yml    (if you already have a config)")
-            print("")
-            print("  embed-log create-config                 (otherwise, create one)")
-            print("")
-            print("  embed-log --help                        all options")
-            print("")
-            print("Development (run from source):")
-            print("  python3 -m backend.server <command>")
-        return 0
-
-    if argv and argv[0] in {"init", "create-config"}:
-        return _run_create_config(argv[1:])
-    if argv and argv[0] == "validate":
-        return _run_validate(argv[1:])
-    if argv and argv[0] == "sessions":
-        return _run_sessions(argv[1:])
-    if argv and argv[0] == "merge":
-        return _run_merge(argv[1:])
-    if argv and argv[0] == "parse":
-        return run_parse(argv[1:])
-    if argv and argv[0] == "run":
-        argv = argv[1:]
-
-    parser = _build_parser()
-    args = parser.parse_args(argv)
-
+def _run_run(args: argparse.Namespace) -> int:
     cfg = {}
     if args.config:
         try:
             cfg = load_config(args.config)
         except ConfigError as exc:
-            parser.error(f"config error: {exc}")
+            print(f"config error: {exc}", file=sys.stderr)
+            return 1
 
     source_specs = args.sources if args.sources else cfg.get("sources", [])
     inject_specs = args.injects if args.injects else cfg.get("injects", [])
@@ -1126,49 +1155,59 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
 
     if not source_specs:
-        parser.error("no sources configured. Use embed-log create-config, --source ..., or --config FILE.")
+        print("no sources configured. Use embed-log create-config, --source ..., or --config FILE.", file=sys.stderr)
+        return 1
 
     source_names: list[str] = []
     source_objects: dict[str, LogSource] = {}
     for name, spec in source_specs:
         if name in source_objects:
-            parser.error(f"duplicate --source name: {name!r}")
+            print(f"duplicate --source name: {name!r}", file=sys.stderr)
+            return 1
         try:
             source_objects[name] = parse_source(name, spec, baudrate)
         except ValueError as exc:
-            parser.error(str(exc))
+            print(str(exc), file=sys.stderr)
+            return 1
         source_names.append(name)
 
     inject_ports: dict[str, int] = {}
     for name, port_value in inject_specs:
         if name not in source_objects:
-            parser.error(f"--inject {name!r}: no --source with that name")
+            print(f"--inject {name!r}: no --source with that name", file=sys.stderr)
+            return 1
         try:
             inject_ports[name] = int(port_value)
         except ValueError:
-            parser.error(f"--inject {name!r}: port must be an integer, got {port_value!r}")
+            print(f"--inject {name!r}: port must be an integer, got {port_value!r}", file=sys.stderr)
+            return 1
 
     forward_ports: dict[str, list[int]] = {}
     for name, port_value in forward_specs:
         if name not in source_objects:
-            parser.error(f"--forward {name!r}: no --source with that name")
+            print(f"--forward {name!r}: no --source with that name", file=sys.stderr)
+            return 1
         try:
             port = int(port_value)
         except ValueError:
-            parser.error(f"--forward {name!r}: port must be an integer, got {port_value!r}")
+            print(f"--forward {name!r}: port must be an integer, got {port_value!r}", file=sys.stderr)
+            return 1
         forward_ports.setdefault(name, []).append(port)
 
     tabs: list[dict] = []
     for tab_entry in tab_specs:
         if len(tab_entry) < 2:
-            parser.error(f"--tab requires at least LABEL SOURCE, got: {tab_entry}")
+            print(f"--tab requires at least LABEL SOURCE, got: {tab_entry}", file=sys.stderr)
+            return 1
         if len(tab_entry) > 3:
-            parser.error(f"--tab takes at most 2 sources per tab, got: {tab_entry}")
+            print(f"--tab takes at most 2 sources per tab, got: {tab_entry}", file=sys.stderr)
+            return 1
         label = tab_entry[0]
         panes = tab_entry[1:]
         for pane in panes:
             if pane not in source_objects:
-                parser.error(f"--tab {label!r}: unknown source {pane!r}")
+                print(f"--tab {label!r}: unknown source {pane!r}", file=sys.stderr)
+                return 1
         tabs.append({"label": label, "panes": panes})
 
     return run_app(
@@ -1190,6 +1229,159 @@ def main(argv: Optional[list[str]] = None) -> int:
         default_dark_theme=default_dark_theme,
         queue_maxsize=queue_maxsize,
     )
+
+
+def _run_doctor(args: argparse.Namespace) -> int:
+    checks: list[dict] = []
+    ok = True
+
+    # Python/runtime
+    import sys as _sys
+    checks.append(("python", f"{_sys.version_info.major}.{_sys.version_info.minor}.{_sys.version_info.micro}"))
+
+    # Config
+    cfg_path = Path(args.config) if args.config else Path("embed-log.yml")
+    if cfg_path.is_file():
+        try:
+            cfg = load_config(str(cfg_path))
+            checks.append(("config", str(cfg_path)))
+            # Sources
+            srcs = cfg.get("sources", [])
+            names = [s.get("name") for s in srcs]
+            if len(names) != len(set(names)):
+                checks.append(("source-names", "DUPLICATE"))
+                ok = False
+            # Ports
+            for s in srcs:
+                if s.get("type") == "udp":
+                    try:
+                        int(s["port"])
+                    except (ValueError, KeyError):
+                        checks.append(("udp-port", f"INVALID: {s.get('port')}"))
+                        ok = False
+            checks.append(("sources", f"{len(srcs)} configured"))
+            # Tabs
+            tabs = cfg.get("tabs", [])
+            for t in tabs:
+                for p in t.get("panes", []):
+                    if p not in names:
+                        checks.append(("tab-refs", f"unknown source {p!r} in tab {t.get('label')!r}"))
+                        ok = False
+            checks.append(("tabs", f"{len(tabs)} configured"))
+            # Log dir
+            log_dir = Path(cfg.get("logs", {}).get("dir", "logs/"))
+            checks.append(("log-dir", str(log_dir) if log_dir.is_dir() else "NOT_FOUND"))
+            # Frontend assets
+            ui_path = cfg.get("server", {}).get("ws_ui", "")
+            if ui_path:
+                checks.append(("ui-assets", "present" if Path(ui_path).is_file() else "MISSING"))
+        except ConfigError as exc:
+            checks.append(("config", f"PARSE_ERROR: {exc}"))
+            ok = False
+    else:
+        checks.append(("config", "NOT_FOUND (optional)"))
+
+    # Serial ports
+    ports = _detected_serial_ports()
+    checks.append(("serial-ports", f"{len(ports)} detected"))
+
+    if args.json:
+        print(json.dumps({"ok": ok, "checks": [{"check": c[0], "status": c[1]} for c in checks]}))
+    else:
+        print("embed-log doctor")
+        print("")
+        for name, status in checks:
+            icon = "OK" if "NOT_FOUND" not in status and "MISSING" not in status and "INVALID" not in status and "DUPLICATE" not in status and "PARSE_ERROR" not in status else "!!"
+            print(f"  [{icon}] {name}: {status}")
+        print("")
+        print("All checks passed." if ok else "Some checks failed.")
+
+    return 0 if ok else 1
+
+
+def _run_ports(args: argparse.Namespace) -> int:
+    ports = _detected_serial_ports()
+    if args.json:
+        print(json.dumps(ports))
+    else:
+        if not ports:
+            print("No serial ports detected.")
+            return 0
+        for p in ports:
+            suffix = f"  ({p['label']})" if p["label"] and p["label"] != "n/a" else ""
+            print(f"{p['device']}{suffix}")
+    return 0
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+
+    # ── No arguments → show guided message ──
+    if not argv:
+        cfg_path = Path("embed-log.yml")
+        if cfg_path.exists():
+            print("Config found: embed-log.yml")
+            print("")
+            print("  embed-log validate --config embed-log.yml")
+            print("  embed-log run --config embed-log.yml")
+            print("")
+            print("  embed-log --help             all options")
+        else:
+            print("embed-log — collect UART/UDP logs with a browser UI")
+            print("")
+            print("Quick start:")
+            print("")
+            print("  embed-log run --config embed-log.yml    (if you already have a config)")
+            print("")
+            print("  embed-log create-config                 (otherwise, create one)")
+            print("")
+            print("  embed-log --help                        all options")
+            print("")
+            print("Development (run from source):")
+            print("  python3 -m backend.server <command>")
+        return 0
+
+    # ── sessions uses its own internal sub-sub-parsers ──
+    if argv[0] == "sessions":
+        return _run_sessions(argv[1:])
+
+    # ── Help requested ──
+    if argv[0] in {"-h", "--help"}:
+        parser = _build_parser()
+        parser.print_help()
+        return 0
+
+    # ── Backward compat: bare flags → run subcommand ──
+    if argv[0].startswith("-"):
+        # Bare flags → run subcommand
+        parser = _build_parser()
+        run_argv = ["run"] + argv
+        args = parser.parse_args(run_argv)
+        return _run_run(args)
+
+    # ── Parse with subparser tree ──
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+
+    # Dispatch based on parsed subcommand
+    if args.command == "create-config":
+        return _run_create_config(args)
+    if args.command == "validate":
+        return _run_validate(args)
+    if args.command == "run":
+        return _run_run(args)
+    if args.command == "merge":
+        return _run_merge(args)
+    if args.command == "parse":
+        return run_parse(argv[1:])  # keep old parse signature
+    if args.command == "doctor":
+        return _run_doctor(args)
+    if args.command == "ports":
+        return _run_ports(args)
+
+    # Should not reach here
+    parser.print_help()
+    return 0
 
 
 if __name__ == "__main__":
