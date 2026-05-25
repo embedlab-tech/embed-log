@@ -1,4 +1,4 @@
-import { state, PANES } from './state.js';
+import { state, PANES, paneLabel, unwrapPaneLabel } from './state.js';
 import { onLineClick } from './lines.js';
 import { exportHtmlSnapshot } from './export.js';
 
@@ -100,12 +100,27 @@ export function _selectionSetupPane(id) {
     const scopeContext = document.createElement("button");
     scopeContext.className = "scope-btn";
     scopeContext.id = "scope-context-" + id;
-    scopeContext.textContent = "Context";
+    scopeContext.textContent = "All";
     scopeContext.title = "Selected lines + synchronized lines from all panes";
     scopeContext.addEventListener("click", e => { e.stopPropagation(); _setScope(id, "context"); });
 
+    const scopeSel = document.createElement("button");
+    scopeSel.className = "scope-btn";
+    scopeSel.id = "scope-context-selected-" + id;
+    scopeSel.textContent = "Sel…";
+    scopeSel.title = "Selected lines + only chosen panes";
+    scopeSel.addEventListener("click", e => { e.stopPropagation(); _setScope(id, "context-selected"); });
+
     scopeRow.appendChild(scopeExact);
     scopeRow.appendChild(scopeContext);
+    scopeRow.appendChild(scopeSel);
+
+    // Pane selector (lazily rebuilt when scope becomes context-selected)
+    const paneSelector = document.createElement("div");
+    paneSelector.className = "pane-selector";
+    paneSelector.id = "pane-selector-" + id;
+    paneSelector.style.display = "none";
+
 
     // Primary action row
     const actionRow = document.createElement("div");
@@ -157,9 +172,32 @@ export function _selectionSetupPane(id) {
     actionRow.appendChild(moreDropdown);
 
     wrap.appendChild(scopeRow);
+    wrap.appendChild(paneSelector);
     wrap.appendChild(actionRow);
     body.appendChild(wrap);
 }
+
+function _rebuildPaneSelector(paneId) {
+    const container = document.getElementById('pane-selector-' + paneId);
+    if (!container) return;
+    container.innerHTML = '';
+    PANES.forEach(id => {
+        const label = document.createElement('label');
+        label.className = 'pane-checkbox';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.dataset.pane = id;
+        cb.checked = state.contextPanes[id] !== false;
+        cb.addEventListener('change', e => {
+            e.stopPropagation();
+            state.contextPanes[id] = cb.checked;
+        });
+        label.appendChild(cb);
+        label.appendChild(document.createTextNode(' ' + unwrapPaneLabel(id)));
+        container.appendChild(label);
+    });
+}
+
 PANES.forEach(_selectionSetupPane);
 
 // ---------------------------------------------------------------------------
@@ -169,11 +207,22 @@ function _stripHtml(str) { return str.replace(/<[^>]+>/g, ""); }
 
 function _setScope(paneId, scope) {
     state.selectionScope = scope;
+    if (scope === 'context-selected' && Object.keys(state.contextPanes).length === 0) {
+        PANES.forEach(id => { state.contextPanes[id] = true; });
+    }
     PANES.forEach(id => {
-        const eBtn = document.getElementById("scope-exact-" + id);
-        const cBtn = document.getElementById("scope-context-" + id);
-        if (eBtn) eBtn.classList.toggle("active", scope === "exact");
-        if (cBtn) cBtn.classList.toggle("active", scope === "context");
+        ['exact', 'context', 'context-selected'].forEach(s => {
+            const btn = document.getElementById(`scope-${s}-${id}`);
+            if (btn) btn.classList.toggle('active', scope === s);
+        });
+        const ps = document.getElementById('pane-selector-' + id);
+        if (!ps) return;
+        if (scope === 'context-selected') {
+            _rebuildPaneSelector(id);
+            ps.style.display = '';
+        } else {
+            ps.style.display = 'none';
+        }
     });
     _syncSelectionActions(paneId);
 }
@@ -309,7 +358,10 @@ function _collectRangeEntries(paneId) {
     const range = _selectionRange(paneId);
     if (!range) return [];
     const entries = [];
-    PANES.forEach(id => {
+    const targetPanes = state.selectionScope === 'context-selected'
+        ? PANES.filter(id => state.contextPanes[id])
+        : PANES;
+    targetPanes.forEach(id => {
         (state.rawLines[id] || []).forEach((line, idx) => {
             const n = line?.numTs;
             if (Number.isFinite(n) && n >= range.from && n <= range.to) {
@@ -489,7 +541,7 @@ function _flashButton(id, text, restoreMs = 900) {
 // Copy — scope-aware
 // ---------------------------------------------------------------------------
 function _copy(paneId) {
-    if (state.selectionScope === "context") return _copyContext(paneId);
+    if (state.selectionScope !== "exact") return _copyContext(paneId);
     return _copyExact(paneId);
 }
 
@@ -525,7 +577,7 @@ function _copyContext(paneId) {
 // Download raw — scope-aware
 // ---------------------------------------------------------------------------
 function _downloadRaw(paneId) {
-    if (state.selectionScope === "context") return _downloadRawContext(paneId);
+    if (state.selectionScope !== "exact") return _downloadRawContext(paneId);
     return _downloadRawExact(paneId);
 }
 
@@ -537,6 +589,7 @@ function _downloadRawExact(paneId) {
     if (!text) return;
     const label = _rangeBoundsLabelExact(paneId);
     _downloadText(`embed-log-exact-${_safeFilePart(label)}.log`, text + "\n", "text/plain");
+    _saveSnippetToServer(text, [paneId], 'exact', label);
 }
 
 function _downloadRawContext(paneId) {
@@ -545,6 +598,17 @@ function _downloadRawContext(paneId) {
     if (!text) return;
     const label = _rangeBoundsLabel(entries);
     _downloadText(`embed-log-snippet-${_safeFilePart(label)}.log`, text + "\n", "text/plain");
+    const panes = [...new Set(entries.map(e => e.paneId))];
+    _saveSnippetToServer(text, panes, state.selectionScope, label);
+}
+
+function _saveSnippetToServer(text, panes, scope, label) {
+    if (!window.__embedLogProfile?.capabilities?.sessionApi) return;
+    fetch('/api/session/snippet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, panes, scope, label }),
+    }).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------
@@ -555,7 +619,7 @@ function _exportHtml(paneId) {
     if (!sel.size) return;
     const btn = document.getElementById("export-html-" + paneId);
 
-    if (state.selectionScope === "context") {
+    if (state.selectionScope !== "exact") {
         const entries = _collectRangeEntries(paneId);
         if (!entries.length) return;
         const label = _rangeBoundsLabel(entries);
@@ -592,7 +656,7 @@ function _addSelectedToBuffer(paneId) {
     if (!sel.size) return;
 
     let text, count;
-    if (state.selectionScope === "context") {
+    if (state.selectionScope !== "exact") {
         const entries = _collectRangeEntries(paneId);
         text = _formatRangeRaw(entries);
         count = entries.length;

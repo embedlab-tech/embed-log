@@ -101,6 +101,7 @@ Always sent first.
 {
   "type": "config",
   "tabs": [{ "label": "Devices", "panes": ["FTDI_A", "FTDI_B"] }],
+  "pane_labels": { "FTDI_A": "DUT", "FTDI_B": "AUX" },
   "session": { "id": "...", "html_status": "pending" },
   "app_name": "embed-log",
   "theme_defaults": {}
@@ -109,6 +110,7 @@ Always sent first.
 
 Semantics:
 - `tabs` is authoritative for UI layout.
+- `pane_labels` is optional display metadata; pane ids remain the stable technical keys used by commands and DOM ids.
 - `session` seeds session/export UI state.
 - frontend must not assume panes before this message arrives.
 

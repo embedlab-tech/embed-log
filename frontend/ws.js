@@ -1,4 +1,4 @@
-import { state, TABS, PANES } from './state.js';
+import { state, TABS, PANES, PANE_LABELS } from './state.js';
 import { appendLine, clearPane } from './lines.js';
 import { createTabWithPanes } from './tabcreate.js';
 
@@ -23,10 +23,10 @@ function resetLayoutForNewSession() {
     state.syncTabSwitch = false;
     state.filters = {};
     state.rawLines = {};
-    state.renderBase = {};
     state.atBottom = {};
     state.highlighted = {};
     state.selected = {};
+    Object.keys(PANE_LABELS).forEach(key => delete PANE_LABELS[key]);
 }
 
 function wsSetStatus(cls, text) {
@@ -88,9 +88,12 @@ function wsConnect() {
                 ...msg.session,
                 type: "session_html_status",
             });
+            const paneLabels = msg.pane_labels && typeof msg.pane_labels === "object" ? msg.pane_labels : {};
+            Object.keys(PANE_LABELS).forEach(key => delete PANE_LABELS[key]);
+            Object.assign(PANE_LABELS, paneLabels);
             if (TABS.length === 0 && msg.tabs && msg.tabs.length > 0) {
                 msg.tabs.forEach(tab =>
-                    createTabWithPanes(tab.label, tab.panes, { switchTo: false })
+                    createTabWithPanes(tab.label, tab.panes, { switchTo: false, paneLabels: tab.pane_labels || paneLabels })
                 );
                 switchTab(0);
             }

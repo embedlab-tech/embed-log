@@ -19,6 +19,7 @@ class SessionManagerTests(unittest.TestCase):
                 session_dir=session_dir,
                 tabs=[{"label": "T", "panes": ["A"]}],
                 source_files=source_files,
+                source_labels={"A": "READER"},
                 started_at="2026-01-01T00:00:00+00:00",
                 config_path="embed-log.yml",
                 job_id="CI-1",
@@ -57,6 +58,7 @@ class SessionExporterTests(unittest.TestCase):
                 session_html_path=html_out,
                 source_files={"A": str(td_path / "A.log")},
                 tabs=[{"label": "Tab", "panes": ["A"]}],
+                source_labels={"A": "READER"},
                 merge_script=merge_script,
                 python_executable="python3",
             )
@@ -71,6 +73,7 @@ class SessionExporterTests(unittest.TestCase):
             self.assertTrue(ok)
             args = run_mock.call_args[0][0]
             self.assertIn("--tab", args)
+            self.assertIn("A=READER", args)
             self.assertIn("--output", args)
 
     def test_export_failure_nonzero(self):
@@ -83,6 +86,7 @@ class SessionExporterTests(unittest.TestCase):
                 session_html_path=td_path / "session.html",
                 source_files={"A": str(td_path / "A.log")},
                 tabs=[{"label": "Tab", "panes": ["A"]}],
+                source_labels={"A": "READER"},
                 merge_script=merge_script,
                 python_executable="python3",
             )
@@ -96,6 +100,79 @@ class SessionExporterTests(unittest.TestCase):
 
             self.assertFalse(ok)
 
+
+class SessionSnippetTests(unittest.TestCase):
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.session_dir = Path(self.td.name) / "session"
+        self.session_dir.mkdir(parents=True, exist_ok=True)
+        self.mgr = SessionManager(
+            session_id="session",
+            session_dir=self.session_dir,
+            tabs=[{"label": "T", "panes": ["A", "B"]}],
+            source_files={"A": str(self.session_dir / "A.log"), "B": str(self.session_dir / "B.log")},
+            source_labels={"A": "READER", "B": "CONTROLLER"},
+            started_at="2026-01-01T00:00:00+00:00",
+            config_path=None,
+            job_id=None,
+            app_name="test",
+        )
+
+    def tearDown(self):
+        self.td.cleanup()
+
+    def test_save_snippet_creates_file_and_manifest_entry(self):
+        path = self.mgr.save_snippet(
+            "line one\nline two\n",
+            panes=["A"],
+            scope="exact",
+            label="alpha",
+        )
+        self.assertIsNotNone(path)
+        self.assertIn("/sessions/session/snippets/", path)
+
+        snippets_dir = self.session_dir / "snippets"
+        self.assertTrue(snippets_dir.is_dir())
+        files = list(snippets_dir.iterdir())
+        self.assertEqual(len(files), 1)
+        self.assertEqual(files[0].read_text(encoding="utf-8"), "line one\nline two\n\n")
+
+        manifest = json.loads((self.session_dir / "manifest.json").read_text(encoding="utf-8"))
+        self.assertIn("snippets", manifest)
+        self.assertEqual(len(manifest["snippets"]), 1)
+        entry = manifest["snippets"][0]
+        self.assertEqual(entry["scope"], "exact")
+        self.assertEqual(entry["panes"], ["A"])
+        self.assertEqual(entry["line_count"], 3)
+        self.assertIn("saved_at", entry)
+
+    def test_save_snippet_empty_text_returns_none(self):
+        result = self.mgr.save_snippet("   ", panes=["A"], scope="exact")
+        self.assertIsNone(result)
+        self.assertFalse((self.session_dir / "snippets").exists())
+
+    def test_save_snippet_enforces_limit(self):
+        from backend.session.manager import MAX_SNIPPETS
+        for i in range(MAX_SNIPPETS):
+            self.mgr.save_snippet(f"line {i}\n", panes=["A"], scope="exact", label=f"s{i}")
+        result = self.mgr.save_snippet("overflow\n", panes=["A"], scope="exact")
+        self.assertIsNone(result)
+
+        snippets_dir = self.session_dir / "snippets"
+        files = list(snippets_dir.iterdir())
+        self.assertEqual(len(files), MAX_SNIPPETS)
+
+    def test_save_snippet_context_scope_includes_panes(self):
+        path = self.mgr.save_snippet(
+            "[A] ctx line\n[B] ctx line\n",
+            panes=["A", "B"],
+            scope="context-selected",
+        )
+        self.assertIsNotNone(path)
+        manifest = json.loads((self.session_dir / "manifest.json").read_text(encoding="utf-8"))
+        entry = manifest["snippets"][0]
+        self.assertEqual(entry["scope"], "context-selected")
+        self.assertEqual(entry["panes"], ["A", "B"])
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,4 +1,4 @@
-import { state, TABS, PANES } from './state.js';
+import { state, TABS, PANES, paneLabel } from './state.js';
 import { clearPane, rerenderPane } from './lines.js';
 import { rebuildLayout } from './tabcreate.js';
 
@@ -450,7 +450,7 @@ function _buildSwapTargetOptions(select, fromPaneId) {
         const tabLabel = loc ? TABS[loc.tabIdx].label : "?";
         const opt = document.createElement("option");
         opt.value = otherId;
-        opt.textContent = `${otherId} · ${tabLabel}`;
+        opt.textContent = `${paneLabel(otherId)} · ${tabLabel}`;
         select.appendChild(opt);
     });
 }
@@ -497,7 +497,7 @@ function _buildSwapTargetOptions(select, fromPaneId) {
 
             const name = document.createElement("span");
             name.className = "tab-swap-pane-name";
-            name.textContent = paneId;
+            name.textContent = paneLabel(paneId);
 
             const select = document.createElement("select");
             select.className = "tab-swap-select";

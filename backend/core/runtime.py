@@ -469,6 +469,7 @@ class LogServer:
         open_browser: bool = False,
         app_name: str = "embed-log",
         theme_defaults: Optional[dict] = None,
+        source_labels: Optional[dict[str, str]] = None,
         queue_maxsize: int = 20000,
     ):
         self._tabs = tabs
@@ -479,6 +480,7 @@ class LogServer:
         self._job_id = job_id
         self._app_name = app_name
         self._theme_defaults = theme_defaults or {}
+        self._source_labels = source_labels or {s["name"]: s.get("label", s["name"]) for s in sources}
         self._queue_maxsize = queue_maxsize
         self._rotate_lock = threading.Lock()
 
@@ -488,6 +490,7 @@ class LogServer:
             session_dir=self._session_dir,
             tabs=self._tabs,
             source_files=self._source_files,
+            source_labels=self._source_labels,
             started_at=self._started_at,
             config_path=config_path,
             job_id=self._job_id,
@@ -497,6 +500,7 @@ class LogServer:
             session_html_path=self._session.html_path,
             source_files=self._source_files,
             tabs=self._tabs,
+            source_labels=self._source_labels,
         )
         self._session_info = self._session.build_session_info()
         self._export_lock = threading.Lock()
@@ -513,9 +517,11 @@ class LogServer:
                 on_all_clients_disconnected=lambda: self.export_session_html("last_ws_disconnect"),
                 on_export_session_html=lambda: self.export_session_html("manual_ui"),
                 on_rotate_session=lambda: self.rotate_session("manual_ui"),
+                on_save_snippet=lambda text, panes, scope, label: self._session.save_snippet(text, panes=panes, scope=scope, label=label),
                 open_browser=open_browser,
                 app_name=app_name,
                 theme_defaults=self._theme_defaults,
+                source_labels=self._source_labels,
             )
 
         self._broadcaster = broadcaster
@@ -679,6 +685,7 @@ class LogServer:
                 session_dir=self._session_dir,
                 tabs=self._tabs,
                 source_files=self._source_files,
+                source_labels=self._source_labels,
                 started_at=self._started_at,
                 config_path=self._session.config_path if hasattr(self._session, "config_path") else None,
                 job_id=self._job_id,
@@ -688,6 +695,7 @@ class LogServer:
                 session_html_path=self._session.html_path,
                 source_files=self._source_files,
                 tabs=self._tabs,
+                source_labels=self._source_labels,
             )
             self._session_info = self._session.build_session_info()
             self._session.write_manifest(

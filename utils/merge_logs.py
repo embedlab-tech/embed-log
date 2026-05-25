@@ -19,9 +19,9 @@ Usage:
                        "Device B" logs/DEVICE_B.log \\
         --tab "PYTEST" "Pytest"             logs/pytest.log
 
-Each --tab takes:   TAB_LABEL  PANE_LABEL FILE  [PANE_LABEL FILE]
+Each --tab takes:   TAB_LABEL  PANE_SPEC FILE  [PANE_SPEC FILE]
   TAB_LABEL  — label shown on the tab button
-  PANE_LABEL — display name shown in the pane header (also used as the pane ID)
+  PANE_SPEC  — either PANE_LABEL or PANE_ID=PANE_LABEL
   FILE       — path to the log file
 Up to 2 panes per tab.
 
@@ -135,7 +135,11 @@ def _parse_line(raw: str):
     return None
 
 
-def _strip_embedlog_prefixes(text: str, pane_label: str | None = None) -> str:
+def _strip_embedlog_prefixes(
+    text: str,
+    pane_id: str | None = None,
+    pane_label: str | None = None,
+) -> str:
     """Remove metadata prefixes added by embed-log's file writer.
 
     The live UI renders only the payload from WebSocket messages. Session HTML
@@ -143,10 +147,15 @@ def _strip_embedlog_prefixes(text: str, pane_label: str | None = None) -> str:
     prefixes such as [CONTROLLER][SERIAL] or [SYSTEM]. Strip those so saved
     session HTML looks like the live UI.
     """
-    if pane_label:
-        variants = {pane_label, pane_label.replace("-", "_"), pane_label.replace("_", "-")}
-        for variant in variants:
-            text = re.sub(r"^\s*\[" + re.escape(variant) + r"\]\s*", "", text, flags=re.I)
+    variants = set()
+    for value in (pane_id, pane_label):
+        if not value:
+            continue
+        variants.add(value)
+        variants.add(value.replace("-", "_"))
+        variants.add(value.replace("_", "-"))
+    for variant in variants:
+        text = re.sub(r"^\s*\[" + re.escape(variant) + r"\]\s*", "", text, flags=re.I)
 
     # Remove only redundant transport/source-type metadata that can be inferred
     # from the pane/session config. Event prefixes such as [TX::UI], [SYSTEM],
@@ -155,7 +164,11 @@ def _strip_embedlog_prefixes(text: str, pane_label: str | None = None) -> str:
     return text
 
 
-def parse_log_file(path: str, pane_label: str | None = None) -> list:
+def parse_log_file(
+    path: str,
+    pane_id: str | None = None,
+    pane_label: str | None = None,
+) -> list:
     """
     Read a .log file and return a list of line dicts:
         { "ts": "MM-DD HH:MM:SS.mmm", "text": str, "isTx": bool }
@@ -192,7 +205,7 @@ def parse_log_file(path: str, pane_label: str | None = None) -> list:
                     # Keep only message payload in exported HTML — the leading
                     # system timestamp is already rendered by the viewer from
                     # `ts`, so keeping raw line would duplicate it.
-                    pending_text = _strip_embedlog_prefixes(parsed[1], pane_label)
+                    pending_text = _strip_embedlog_prefixes(parsed[1], pane_id, pane_label)
                 elif pending_ts is not None and raw.strip():
                     # Continuation line — append to current entry
                     pending_text += " " + raw.strip()
@@ -323,7 +336,7 @@ def generate_html(tab_specs: list) -> str:
     log_data: dict[str, list] = {}
     for tab in tab_specs:
         for pane_id, pane_label, file_path in tab["panes"]:
-            entries = parse_log_file(file_path, pane_label)
+            entries = parse_log_file(file_path, pane_id, pane_label)
             log_data[pane_id] = entries
             print(f"  [{tab['label']}] {pane_label!r}: {len(entries)} lines  ({file_path})")
 
@@ -367,6 +380,7 @@ def generate_html(tab_specs: list) -> str:
                 all_pane_ids.append(pane_id)
                 seen.add(pane_id)
     panes_json = json.dumps(all_pane_ids, ensure_ascii=False)
+    pane_labels_json = json.dumps({pane_id: pane_label for tab in tab_specs for pane_id, pane_label, _ in tab["panes"]}, ensure_ascii=False)
 
     # Build container HTML
     tab_contents = "\n".join(
@@ -399,6 +413,7 @@ def generate_html(tab_specs: list) -> str:
         f"window.__embedLogProfile = {json.dumps(STATIC_PROFILE)};\n"
         f"window.TABS = {tabs_json};\n"
         f"window.PANES = {panes_json};\n"
+        f"window.PANE_LABELS = {pane_labels_json};\n"
         f"window.__embedLogInitialFontSize = 14;"
 
     )
@@ -507,7 +522,23 @@ def _parse_tab_arg(args: list) -> dict:
         raise argparse.ArgumentTypeError(
             f"At most 2 panes per tab, got {len(rest) // 2} in --tab {tab_label!r}"
         )
-    panes = [(_slug(rest[i]), rest[i], rest[i + 1]) for i in range(0, len(rest), 2)]
+
+    panes = []
+    for i in range(0, len(rest), 2):
+        pane_spec = rest[i]
+        file_path = rest[i + 1]
+        if "=" in pane_spec:
+            pane_id, pane_label = pane_spec.split("=", 1)
+            pane_id = pane_id.strip()
+            pane_label = pane_label.strip()
+            if not pane_id or not pane_label:
+                raise argparse.ArgumentTypeError(
+                    f"Invalid pane spec {pane_spec!r}; use PANE_LABEL or PANE_ID=PANE_LABEL"
+                )
+        else:
+            pane_label = pane_spec
+            pane_id = _slug(pane_label)
+        panes.append((pane_id, pane_label, file_path))
     return {"label": tab_label, "panes": panes}
 
 

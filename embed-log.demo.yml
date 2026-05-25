@@ -14,23 +14,26 @@ logs:
 
 sources:
   - name: SENSOR_A
+    label: READER
     type: udp
     port: 6000
     inject_port: 5001
 
   - name: SENSOR_B
+    label: CONTROLLER
     type: udp
     port: 6001
     inject_port: 5002
 
   - name: SENSOR_C
+    label: READER
     type: udp
     port: 6002
     inject_port: 5003
 
 tabs:
-  - label: Simulated Devices
+  - label: DevA
     panes: [SENSOR_A, SENSOR_B]
 
-  - label: Other Sensor
+  - label: DevB
     panes: [SENSOR_C]

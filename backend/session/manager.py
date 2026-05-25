@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+MAX_SNIPPETS = 50
+
 
 
 class SessionManager:
@@ -14,6 +16,7 @@ class SessionManager:
         session_dir: str | Path,
         tabs: list,
         source_files: dict[str, str],
+        source_labels: dict[str, str],
         started_at: str,
         config_path: Optional[str],
         job_id: Optional[str],
@@ -23,6 +26,7 @@ class SessionManager:
         self.session_dir = Path(session_dir)
         self.tabs = tabs
         self.source_files = source_files
+        self.source_labels = source_labels
         self.started_at = started_at
         self.config_path = config_path
         self.job_id = job_id
@@ -30,6 +34,7 @@ class SessionManager:
 
         self.manifest_path = self.session_dir / "manifest.json"
         self.html_path = self.session_dir / "session.html"
+        self.snippets_dir = self.session_dir / "snippets"
 
     def build_session_info(self) -> dict:
         html_ready = self.html_path.is_file()
@@ -53,8 +58,9 @@ class SessionManager:
             "html_error": None,
             "api": "/api/session/current",
             "tabs": self.tabs,
+            "pane_labels": self.source_labels,
             "sources": [
-                {"name": name, "log": f"/sessions/{self.session_id}/{Path(path).name}"}
+                {"name": name, "label": self.source_labels.get(name, name), "log": f"/sessions/{self.session_id}/{Path(path).name}"}
                 for name, path in self.source_files.items()
             ],
         }
@@ -76,6 +82,7 @@ class SessionManager:
             "job_id": self.job_id,
             "config_path": self.config_path,
             "tabs": self.tabs,
+            "pane_labels": self.source_labels,
             "source_files": self.source_files,
             "session_html": str(self.html_path) if exported_html else None,
             "last_export_reason": reason if exported_html else None,
@@ -83,4 +90,59 @@ class SessionManager:
             "html_updated_at": html_updated_at,
             "html_error": html_error,
         }
+        self.manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    def save_snippet(
+        self,
+        text: str,
+        *,
+        panes: list[str],
+        scope: str,
+        label: str = "",
+    ) -> Optional[str]:
+        """Save a snippet to the session's snippets/ directory.
+        Returns the relative URL path, or None if limit exceeded or text empty.
+        """
+        if not text.strip():
+            return None
+
+        manifest = self._read_manifest()
+        snippets = manifest.get("snippets", [])
+        if len(snippets) >= MAX_SNIPPETS:
+            return None
+
+        self.snippets_dir.mkdir(parents=True, exist_ok=True)
+
+        now = datetime.now(timezone.utc)
+        ts = now.strftime("%Y-%m-%d_%H-%M-%S")
+        label_part = label or scope
+        safe_label = "".join(c if c.isalnum() or c in "-_." else "_" for c in label_part)
+        filename = f"{ts}-{safe_label}.log"
+        filepath = self.snippets_dir / filename
+
+        filepath.write_text(text + "\n", encoding="utf-8")
+
+        snippet_entry = {
+            "file": f"snippets/{filename}",
+            "label": label or scope,
+            "scope": scope,
+            "panes": panes,
+            "line_count": text.count("\n") + 1,
+            "saved_at": now.isoformat(timespec="seconds"),
+        }
+        snippets.append(snippet_entry)
+        manifest["snippets"] = snippets
+        self._write_manifest(manifest)
+
+        return f"/sessions/{self.session_id}/snippets/{filename}"
+
+    def _read_manifest(self) -> dict:
+        if self.manifest_path.is_file():
+            try:
+                return json.loads(self.manifest_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                pass
+        return {}
+
+    def _write_manifest(self, manifest: dict) -> None:
         self.manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")

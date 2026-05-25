@@ -573,6 +573,31 @@ button.active { background: var(--selection); border-color: var(--accent); color
 }
 .scope-btn.active:hover { color: var(--header); }
 
+/* Pane selector (context-selected scope) */
+.pane-selector {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 6px;
+    margin-top: 4px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 11px;
+}
+.pane-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    color: var(--ansi-0);
+    white-space: nowrap;
+}
+.pane-checkbox input[type="checkbox"] {
+    margin: 0;
+    cursor: pointer;
+}
+
 /* Primary action row */
 .action-row {
     display: flex;

@@ -75,6 +75,7 @@ def load_config(path: str | Path) -> dict:
     sources_raw = _require_list(sources_raw, "sources")
 
     source_names: set[str] = set()
+    source_labels: dict[str, str] = {}
     sources: list[tuple[str, str]] = []
     injects: list[tuple[str, int]] = []
     forwards: list[tuple[str, int]] = []
@@ -98,6 +99,9 @@ def load_config(path: str | Path) -> dict:
             raise ConfigError(f"sources[{i}].type unsupported: {src_type!r} (use 'uart' or 'udp')")
 
         sources.append((name, spec))
+        label = src.get("label")
+        source_labels[name] = _require_str(label, f"sources[{i}].label") if label is not None else name
+
 
         inject_port = src.get("inject_port")
         if inject_port is not None:
@@ -137,6 +141,7 @@ def load_config(path: str | Path) -> dict:
 
     out = {
         "sources": sources,
+        "source_labels": source_labels,
         "injects": injects,
         "forwards": forwards,
         "tabs": tabs,

@@ -68,7 +68,7 @@ test.describe('HTML export replay', () => {
       await expect(exported.locator('#pane-SENSOR_A')).toBeVisible();
       await expect(exported.locator('#pane-SENSOR_B')).toBeVisible();
       await expect(exported.locator('#log-SENSOR_A')).toContainText('kind=filter-alpha');
-      await exported.getByRole('button', { name: 'Other Sensor', exact: true }).click();
+      await exported.getByRole('button', { name: 'DevB', exact: true }).click();
       await expect(exported.locator('#pane-SENSOR_C')).toBeVisible();
     } finally {
       await exported.close();
@@ -99,9 +99,10 @@ test.describe('HTML export replay', () => {
 
       await exported.locator('#btn-unwrap').click();
       await expect(exported.locator('#btn-unwrap')).toHaveClass(/active/);
-      await exported.getByRole('button', { name: 'SENSOR_A', exact: true }).click();
-      await exported.getByRole('button', { name: 'SENSOR_B', exact: true }).click();
-      await exported.getByRole('button', { name: 'SENSOR_C', exact: true }).click();
+      await expect(exported.locator('#tab-bar .tab-btn')).toHaveText(['READER-DevA', 'CONTROLLER-DevA', 'READER-DevB']);
+      await exported.locator('#tab-bar .tab-btn').nth(0).click();
+      await exported.locator('#tab-bar .tab-btn').nth(1).click();
+      await exported.locator('#tab-bar .tab-btn').nth(2).click();
 
       await exported.locator('#btn-settings').click();
       await expect(exported.locator('#settings-panel')).toHaveClass(/open/);

@@ -146,8 +146,8 @@ Layout is config-driven.
 - Exported HTML reuses the same logical tab/pane model.
 
 Current deterministic demo layout:
-- `Simulated Devices` → `SENSOR_A`, `SENSOR_B`
-- `Other Sensor` → `SENSOR_C`
+- `DevA` → `SENSOR_A`, `SENSOR_B`
+- `DevB` → `SENSOR_C`
 
 ## Important invariants
 
