@@ -589,6 +589,7 @@ function _downloadRawExact(paneId) {
     if (!text) return;
     const label = _rangeBoundsLabelExact(paneId);
     _downloadText(`embed-log-exact-${_safeFilePart(label)}.log`, text + "\n", "text/plain");
+    _saveSnippetToServer(text, [paneId], 'exact', label);
 }
 
 function _downloadRawContext(paneId) {
@@ -597,6 +598,17 @@ function _downloadRawContext(paneId) {
     if (!text) return;
     const label = _rangeBoundsLabel(entries);
     _downloadText(`embed-log-snippet-${_safeFilePart(label)}.log`, text + "\n", "text/plain");
+    const panes = [...new Set(entries.map(e => e.paneId))];
+    _saveSnippetToServer(text, panes, state.selectionScope, label);
+}
+
+function _saveSnippetToServer(text, panes, scope, label) {
+    if (!window.__embedLogProfile?.capabilities?.sessionApi) return;
+    fetch('/api/session/snippet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, panes, scope, label }),
+    }).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------

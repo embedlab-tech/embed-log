@@ -35,6 +35,7 @@ class WebSocketBroadcaster:
         on_all_clients_disconnected: Optional[Callable[[], None]] = None,
         on_export_session_html: Optional[Callable[[], bool]] = None,
         on_rotate_session: Optional[Callable[[], dict]] = None,
+        on_save_snippet: Optional[Callable[[str, list[str], str], Optional[str]]] = None,
         open_browser: bool = False,
         app_name: str = "embed-log",
         theme_defaults: Optional[dict] = None,
@@ -52,6 +53,7 @@ class WebSocketBroadcaster:
         self._on_all_clients_disconnected = on_all_clients_disconnected
         self._on_export_session_html = on_export_session_html
         self._on_rotate_session = on_rotate_session
+        self._on_save_snippet = on_save_snippet
         self._no_clients_handle = None
         self._thread: Optional[threading.Thread] = None
         self._started = threading.Event()
@@ -119,6 +121,7 @@ class WebSocketBroadcaster:
         app.router.add_post("/api/session/export", self._session_export_handler)
         app.router.add_post("/api/session/rotate", self._session_rotate_handler)
         app.router.add_get("/api/sessions", self._sessions_list_handler)
+        app.router.add_post("/api/session/snippet", self._snippet_handler)
         app.router.add_get("/sessions/{session_id}/{filename}", self._session_file_handler)
         app.router.add_get("/api/stats", self._stats_handler)
         app.router.add_get("/api/health", self._health_handler)
@@ -174,6 +177,31 @@ class WebSocketBroadcaster:
             logging.exception("session rotation failed")
             return web.json_response({"ok": False, "error": str(exc)}, status=500)
         return web.json_response({"ok": True, **result})
+
+    async def _snippet_handler(self, request: web.Request) -> web.Response:
+        logging.info("API /api/session/snippet from %s", request.remote)
+        if self._on_save_snippet is None:
+            return web.json_response({"ok": False, "error": "snippet saving unavailable"}, status=503)
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+
+        text = body.get("text", "")
+        panes = body.get("panes", [])
+        scope = body.get("scope", "exact")
+        label = body.get("label", "")
+
+        if not text.strip():
+            return web.json_response({"ok": False, "error": "empty text"}, status=400)
+
+        result = await asyncio.to_thread(
+            self._on_save_snippet, text, panes, scope, label
+        )
+        if result is None:
+            return web.json_response({"ok": False, "error": "snippet limit exceeded or save failed"}, status=409)
+
+        return web.json_response({"ok": True, "path": result})
 
     async def _sessions_list_handler(self, request: web.Request) -> web.Response:
         logging.info("API /api/sessions from %s", request.remote)

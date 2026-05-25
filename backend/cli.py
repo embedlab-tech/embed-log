@@ -331,7 +331,19 @@ def _run_sessions(argv: list[str]) -> int:
 
     parser = argparse.ArgumentParser(
         prog="embed-log sessions",
-        description="Inspect recorded sessions from disk.",
+        description=(
+            "Inspect and manage recorded sessions.\n"
+            "\n"
+            "Common workflows:\n"
+            "  sessions list                       list all sessions\n"
+            "  sessions info <session-id>           session details\n"
+            "  sessions export <session-id>         export HTML for one session\n"
+            "  sessions export --missing            export HTML for all sessions without it\n"
+            "  sessions snippet list <session-id>   list saved selection snippets\n"
+            "  sessions snippet show <session-id>   show the most recent snippet\n"
+            "  sessions delete --all                delete all sessions\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sub = parser.add_subparsers(dest="command")
 
@@ -407,6 +419,41 @@ def _run_sessions(argv: list[str]) -> int:
     p_delete.add_argument("--yes", "-y", action="store_true",
                            help="skip confirmation prompt")
 
+    # ── snippet ──
+    p_snippet = sub.add_parser("snippet", parents=[shared],
+                                help="manage selection snippets for a session",
+                                epilog=(
+                                    "Examples:\n"
+                                    "  sessions snippet list <session-id>\n"
+                                    "  sessions snippet show <session-id>\n"
+                                    "  sessions snippet show <session-id> --index 2\n"
+                                    "  sessions snippet show <session-id> <snippet-file>\n"
+                                    "  sessions snippet delete <session-id> --all\n"
+                                    "  sessions snippet delete <session-id> --index 2\n"
+                                ),
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p_snip_sub = p_snippet.add_subparsers(dest="snippet_cmd")
+
+    p_snip_list = p_snip_sub.add_parser("list", parents=[shared], help="list all snippets for a session")
+    p_snip_list.add_argument("session_id")
+
+    p_snip_show = p_snip_sub.add_parser("show", parents=[shared], help="print snippet content to stdout")
+    p_snip_show.add_argument("session_id")
+    p_snip_show.add_argument("snippet_id", nargs="?", default=None,
+                              help="snippet filename or prefix (default: use --last)")
+    p_snip_show.add_argument("--last", action="store_true",
+                              help="show the most recent snippet")
+    p_snip_show.add_argument("--index", type=int, default=None,
+                              help="snippet index (1-based, from list)")
+
+    p_snip_delete = p_snip_sub.add_parser("delete", parents=[shared], help="delete snippet(s)")
+    p_snip_delete.add_argument("session_id")
+    p_snip_delete.add_argument("--index", type=int, default=None,
+                                help="delete by index (1-based, from list)")
+    p_snip_delete.add_argument("--all", action="store_true",
+                                help="delete all snippets for this session")
+
+
     args = parser.parse_args(argv)
 
     if args.command is None:
@@ -427,6 +474,8 @@ def _run_sessions(argv: list[str]) -> int:
         return _run_sessions_open(log_dir, args)
     if args.command == "delete":
         return _run_sessions_delete(log_dir, args)
+    if args.command == "snippet":
+        return _run_sessions_snippet(log_dir, args)
     return 1
 
 
@@ -974,6 +1023,106 @@ def _run_sessions_open(log_dir: Path, args: argparse.Namespace) -> int:
     webbrowser.open(html_path.resolve().as_uri())
     print(f"Opened: {html_path}")
     return 0
+
+def _run_sessions_snippet(log_dir: Path, args: argparse.Namespace) -> int:
+    if not hasattr(args, "snippet_cmd") or not args.snippet_cmd:
+        print("error: specify a snippet command: list, show, or delete", file=sys.stderr)
+        return 1
+
+    sdir = _read_session_dir(log_dir, args.session_id)
+    if not sdir:
+        print(f"Session not found: {args.session_id}", file=sys.stderr)
+        return 1
+
+    manifest = _read_manifest(sdir)
+    snippets = (manifest or {}).get("snippets", [])
+    if not snippets:
+        print("No snippets found for this session.", file=sys.stderr)
+        return 0
+
+    if args.snippet_cmd == "list":
+        print(f"Snippets for session {args.session_id}:")
+        print()
+        for i, s in enumerate(snippets, 1):
+            saved = s.get("saved_at", "?")
+            label = s.get("label", "?")
+            scope = s.get("scope", "?")
+            panes = ",".join(s.get("panes", []))
+            lines = s.get("line_count", "?")
+            print(f"  {i}. {s['file']}")
+            print(f"       saved: {saved}  scope: {scope}  panes: {panes}  lines: {lines}")
+        if args.json:
+            import json as _json
+            print()
+            print(_json.dumps(snippets, indent=2))
+        return 0
+
+    idx = None
+    if args.snippet_cmd == "show":
+        if args.snippet_id:
+            matches = [i for i, s in enumerate(snippets) if s["file"].endswith(args.snippet_id) or args.snippet_id in s["file"]]
+            if len(matches) == 0:
+                print(f"No snippet matching {args.snippet_id!r}", file=sys.stderr)
+                return 1
+            if len(matches) > 1:
+                print(f"Multiple snippets match {args.snippet_id!r}, use --index to pick:", file=sys.stderr)
+                for m in matches:
+                    print(f"  {m+1}. {snippets[m]['file']}", file=sys.stderr)
+                return 1
+            idx = matches[0]
+        elif args.index is not None:
+            if args.index < 1 or args.index > len(snippets):
+                print(f"Index {args.index} out of range (1-{len(snippets)})", file=sys.stderr)
+                return 1
+            idx = args.index - 1
+        else:
+            idx = len(snippets) - 1
+
+        s = snippets[idx]
+        spath = sdir / s["file"]
+        if not spath.is_file():
+            print(f"Snippet file not found: {spath}", file=sys.stderr)
+            return 1
+        print(f"# {s['file']}")
+        print(f"# scope: {s.get('scope', '?')}  panes: {','.join(s.get('panes', []))}")
+        print(f"# saved: {s.get('saved_at', '?')}  lines: {s.get('line_count', '?')}")
+        print()
+        sys.stdout.write(spath.read_text(encoding="utf-8"))
+        return 0
+
+    if args.snippet_cmd == "delete":
+        if args.all:
+            snippets_dir = sdir / "snippets"
+            if snippets_dir.is_dir():
+                import shutil
+                shutil.rmtree(snippets_dir)
+            manifest["snippets"] = []
+            mf_path = sdir / "manifest.json"
+            mf_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+            print(f"Deleted all {len(snippets)} snippet(s) from {args.session_id}.")
+            return 0
+
+        if args.index is not None:
+            if args.index < 1 or args.index > len(snippets):
+                print(f"Index {args.index} out of range (1-{len(snippets)})", file=sys.stderr)
+                return 1
+            idx = args.index - 1
+            s = snippets[idx]
+            spath = sdir / s["file"]
+            if spath.is_file():
+                spath.unlink()
+            del snippets[idx]
+            manifest["snippets"] = snippets
+            mf_path = sdir / "manifest.json"
+            mf_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+            print(f"Deleted snippet {idx+1}: {s['file']}")
+            return 0
+
+        print("error: specify --index N or --all to delete", file=sys.stderr)
+        return 1
+
+    print(f"error: unknown snippet command {args.snippet_cmd!r}", file=sys.stderr)
+    return 1
 
 
 def _run_sessions_delete(log_dir: Path, args: argparse.Namespace) -> int:
