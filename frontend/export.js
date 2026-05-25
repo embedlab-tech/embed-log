@@ -4,7 +4,7 @@ import { renderToolbar } from './renderToolbar.js';
 const STATIC_EXPORT_PROFILE =
     typeof STATIC_PROFILE !== 'undefined' ? STATIC_PROFILE : window.__embedLogProfile;
 
-import { state, TABS, PANES } from './state.js';
+import { state, TABS, PANES, PANE_LABELS } from './state.js';
 
 export async function exportHtmlSnapshot(options = {}) {
     const btn = options.button === undefined ? document.getElementById("btn-export") : options.button;
@@ -83,6 +83,7 @@ export async function exportHtmlSnapshot(options = {}) {
             `window.__embedLogProfile = ${_safeJson(STATIC_EXPORT_PROFILE)};\n` +
             `window.TABS = ${_safeJson(TABS)};\n` +
             `window.PANES = ${_safeJson(PANES)};\n` +
+            `window.PANE_LABELS = ${_safeJson(PANE_LABELS)};\n` +
             `window.__embedLogInitialThemeState = ${_safeJson(themeState)};\n` +
             `window.__embedLogInitialFontSize = ${state.fontSize};`;
 

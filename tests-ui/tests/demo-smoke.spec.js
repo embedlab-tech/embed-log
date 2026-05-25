@@ -37,11 +37,14 @@ test.describe('embed-log deterministic demo smoke', () => {
     await expect(page.locator('#pane-SENSOR_A')).toBeVisible();
     await expect(page.locator('#pane-SENSOR_B')).toBeVisible();
     await expect(page.locator('#pane-SENSOR_C')).toBeAttached();
+    await expect(page.locator('#pane-SENSOR_A .pane-name')).toHaveText('READER');
+    await expect(page.locator('#pane-SENSOR_B .pane-name')).toHaveText('CONTROLLER');
 
     await waitForSourceTestLine(page, 'SENSOR_A');
     await waitForSourceTestLine(page, 'SENSOR_B');
 
     await page.getByRole('button', { name: 'Other Sensor', exact: true }).click();
+    await expect(page.locator('#pane-SENSOR_C .pane-name')).toHaveText('READER');
     await waitForSourceTestLine(page, 'SENSOR_C');
   });
 

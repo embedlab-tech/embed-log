@@ -60,8 +60,8 @@ test.describe('session workflows', () => {
     await expect(exported.getByRole('button', { name: 'Simulated Devices', exact: true })).toBeVisible();
     await expect(exported.getByRole('button', { name: 'Other Sensor', exact: true })).toBeVisible();
     await exported.getByRole('button', { name: 'Simulated Devices', exact: true }).click();
-    await expect(exported.locator('.pane-name', { hasText: 'SENSOR_A' })).toBeVisible();
-    await expect(exported.locator('.pane-name', { hasText: 'SENSOR_B' })).toBeVisible();
+    await expect(exported.locator('.pane-name', { hasText: 'READER' }).first()).toBeVisible();
+    await expect(exported.locator('.pane-name', { hasText: 'CONTROLLER' })).toBeVisible();
     await expect(exported.locator('.log-area', { hasText: 'TEST src=SENSOR_A' }).first()).toBeVisible();
     await exported.close();
   });

@@ -932,12 +932,18 @@ def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
     from .session import SessionExporter
 
     tabs = manifest.get("tabs", [])
+    source_labels = manifest.get("pane_labels") or {
+        entry.get("name"): entry.get("label", entry.get("name"))
+        for entry in manifest.get("sources", [])
+        if isinstance(entry, dict) and entry.get("name")
+    }
     output = Path(args.output) if args.output else sdir / "session.html"
 
     exporter = SessionExporter(
         session_html_path=output,
         source_files=source_files,
         tabs=tabs,
+        source_labels=source_labels,
     )
     ok = exporter.export_html("sessions_export")
     if not ok:
@@ -1294,6 +1300,8 @@ def _run_run(args: argparse.Namespace) -> int:
     inject_specs = args.injects if args.injects else cfg.get("injects", [])
     forward_specs = args.forwards if args.forwards else cfg.get("forwards", [])
     tab_specs = args.tabs if args.tabs else cfg.get("tabs", [])
+    source_labels = cfg.get("source_labels", {}) if (args.config and not args.sources) else {}
+
 
     baudrate = args.baudrate if args.baudrate is not None else cfg.get("baudrate", 115200)
     logs_root = Path(args.log_dir if args.log_dir is not None else cfg.get("log_dir", "logs/"))
@@ -1377,16 +1385,19 @@ def _run_run(args: argparse.Namespace) -> int:
             return 1
         label = tab_entry[0]
         panes = tab_entry[1:]
+        pane_labels: dict[str, str] = {}
         for pane in panes:
             if pane not in source_objects:
                 print(f"--tab {label!r}: unknown source {pane!r}", file=sys.stderr)
                 return 1
-        tabs.append({"label": label, "panes": panes})
+            pane_labels[pane] = source_labels.get(pane, pane)
+        tabs.append({"label": label, "panes": panes, "pane_labels": pane_labels})
 
     return run_app(
         source_names=source_names,
         source_objects=source_objects,
         inject_ports=inject_ports,
+        source_labels=source_labels,
         forward_ports=forward_ports,
         tabs=tabs,
         logs_root=logs_root,

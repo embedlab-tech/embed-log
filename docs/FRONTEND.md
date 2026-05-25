@@ -47,6 +47,7 @@ It is intentionally simple:
 ## Important runtime assumptions
 
 - Tabs and panes come from backend `config.tabs`.
+- Pane ids remain unique technical keys; visible pane names may now come from backend `config.pane_labels`.
 - Live runtime appends every received line into the pane DOM; the on-screen log must match the full live/exported history.
 - Live UI and exported HTML reuse the same general UI model.
 - Not all panes are visible at once; current demo has multiple tabs.
@@ -55,10 +56,10 @@ It is intentionally simple:
 ## Demo layout used by tests
 
 - `Simulated Devices`:
-  - `SENSOR_A`
-  - `SENSOR_B`
+  - `SENSOR_A` rendered as `READER`
+  - `SENSOR_B` rendered as `CONTROLLER`
 - `Other Sensor`:
-  - `SENSOR_C`
+  - `SENSOR_C` rendered as `READER`
 
 This matters for assertions: a test that expects all three panes to be visible at once is wrong.
 

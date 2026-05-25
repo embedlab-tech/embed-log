@@ -38,6 +38,7 @@ class WebSocketBroadcaster:
         open_browser: bool = False,
         app_name: str = "embed-log",
         theme_defaults: Optional[dict] = None,
+        source_labels: Optional[dict[str, str]] = None,
     ):
         self._html_path = Path(html_path)
         self._host = host
@@ -59,6 +60,7 @@ class WebSocketBroadcaster:
         self._open_browser = open_browser
         self._app_name = app_name
         self._theme_defaults = theme_defaults or {}
+        self._source_labels = source_labels or {}
 
     def register_source(self, name: str, mgr) -> None:
         self._source_map[name] = mgr
@@ -261,6 +263,7 @@ class WebSocketBroadcaster:
         await ws.send_str(json.dumps({
             "type": "config",
             "tabs": self._tabs,
+            "pane_labels": self._source_labels,
             "session": self._session_info,
             "app_name": self._app_name,
             "theme_defaults": self._theme_defaults,

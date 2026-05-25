@@ -14,6 +14,7 @@ class SessionManager:
         session_dir: str | Path,
         tabs: list,
         source_files: dict[str, str],
+        source_labels: dict[str, str],
         started_at: str,
         config_path: Optional[str],
         job_id: Optional[str],
@@ -23,6 +24,7 @@ class SessionManager:
         self.session_dir = Path(session_dir)
         self.tabs = tabs
         self.source_files = source_files
+        self.source_labels = source_labels
         self.started_at = started_at
         self.config_path = config_path
         self.job_id = job_id
@@ -53,8 +55,9 @@ class SessionManager:
             "html_error": None,
             "api": "/api/session/current",
             "tabs": self.tabs,
+            "pane_labels": self.source_labels,
             "sources": [
-                {"name": name, "log": f"/sessions/{self.session_id}/{Path(path).name}"}
+                {"name": name, "label": self.source_labels.get(name, name), "log": f"/sessions/{self.session_id}/{Path(path).name}"}
                 for name, path in self.source_files.items()
             ],
         }
@@ -76,6 +79,7 @@ class SessionManager:
             "job_id": self.job_id,
             "config_path": self.config_path,
             "tabs": self.tabs,
+            "pane_labels": self.source_labels,
             "source_files": self.source_files,
             "session_html": str(self.html_path) if exported_html else None,
             "last_export_reason": reason if exported_html else None,

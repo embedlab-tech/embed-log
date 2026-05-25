@@ -4,6 +4,10 @@
 // window.PANES before this module runs so the per-pane state is pre-seeded.
 export const TABS  = window.TABS  ?? [];
 export const PANES = window.PANES ?? [...new Set(TABS.flatMap(t => t.panes))];
+export const PANE_LABELS = window.PANE_LABELS ?? {};
+export function paneLabel(paneId) {
+    return PANE_LABELS[paneId] || paneId;
+}
 
 export const state = {
     showTs:      true,

@@ -19,11 +19,11 @@ test.describe('layout and time synchronization', () => {
     await expect(page.getByRole('button', { name: 'Simulated Devices', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Other Sensor', exact: true })).toBeVisible();
 
-    await expect.poll(async () => visiblePaneNames(page)).toEqual(['SENSOR_A', 'SENSOR_B']);
+    await expect.poll(async () => visiblePaneNames(page)).toEqual(['READER', 'CONTROLLER']);
     await expect(page.locator('#tab-content-0 .splitter')).toHaveCount(1);
 
     await page.getByRole('button', { name: 'Other Sensor', exact: true }).click();
-    await expect.poll(async () => visiblePaneNames(page)).toEqual(['SENSOR_C']);
+    await expect.poll(async () => visiblePaneNames(page)).toEqual(['READER']);
     await expect(page.locator('#tab-content-1 .splitter')).toHaveCount(0);
   });
 
@@ -123,9 +123,10 @@ test('UNWRAP toggle creates one tab per pane with pane names as labels', async (
   await expect(page.locator('#btn-unwrap')).toHaveClass(/active/);
 
   // Now tabs are pane names
-  await page.getByRole('button', { name: 'SENSOR_A', exact: true }).click();
-  await page.getByRole('button', { name: 'SENSOR_B', exact: true }).click();
-  await page.getByRole('button', { name: 'SENSOR_C', exact: true }).click();
+  await expect(page.locator('#tab-bar .tab-btn')).toHaveText(['READER', 'CONTROLLER', 'READER']);
+  await page.locator('#tab-bar .tab-btn').nth(0).click();
+  await page.locator('#tab-bar .tab-btn').nth(1).click();
+  await page.locator('#tab-bar .tab-btn').nth(2).click();
 
   // Verify no "+" button in unwrap mode
   await expect(page.locator('#tab-bar .tab-add')).toHaveCount(0);
@@ -157,11 +158,11 @@ test('UNWRAP mode shows full-width single pane and all panes exist', async ({ pa
   await page.locator('#btn-unwrap').click();
 
   // SENSOR_A and SENSOR_B are on separate tabs now
-  await page.getByRole('button', { name: 'SENSOR_A', exact: true }).click();
+  await page.locator('#tab-bar .tab-btn').nth(0).click();
   await expect(page.locator('#pane-SENSOR_A')).toBeVisible();
   await expect(page.locator('#log-SENSOR_A')).toContainText('TEST src=SENSOR_A');
 
-  await page.getByRole('button', { name: 'SENSOR_B', exact: true }).click();
+  await page.locator('#tab-bar .tab-btn').nth(1).click();
   await expect(page.locator('#pane-SENSOR_B')).toBeVisible();
   await expect(page.locator('#log-SENSOR_B')).toContainText('TEST src=SENSOR_B');
 
@@ -174,11 +175,11 @@ test('UNWRAP preserves the currently visible pane when toggled from another tab'
 
   await page.getByRole('button', { name: 'Other Sensor', exact: true }).click();
   await waitForSourceTestLine(page, 'SENSOR_C');
-  await expect.poll(async () => visiblePaneNames(page)).toEqual(['SENSOR_C']);
+  await expect.poll(async () => visiblePaneNames(page)).toEqual(['READER']);
 
   await page.locator('#btn-unwrap').click();
   await expect(page.locator('#btn-unwrap')).toHaveClass(/active/);
-  await expect.poll(async () => visiblePaneNames(page)).toEqual(['SENSOR_C']);
+  await expect.poll(async () => visiblePaneNames(page)).toEqual(['READER']);
 
   const lineC = await waitForSourceTestLine(page, 'SENSOR_C');
   await lineC.click();
@@ -195,7 +196,7 @@ test('pane headers keep only Wrap controls after layout creation and rebuild', a
   await expect(page.locator('#pane-SENSOR_A input[type="file"]')).toHaveCount(0);
 
   await page.locator('#btn-unwrap').click();
-  await page.getByRole('button', { name: 'SENSOR_C', exact: true }).click();
+  await page.locator('#tab-bar .tab-btn').nth(2).click();
   await expect(page.locator('#pane-SENSOR_C .pane-wrap-btn')).toBeVisible();
   await expect(page.locator('#pane-SENSOR_C .import-btn')).toHaveCount(0);
   await expect(page.locator('#pane-SENSOR_C input[type="file"]')).toHaveCount(0);

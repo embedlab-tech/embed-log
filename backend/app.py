@@ -49,6 +49,7 @@ def run_app(
     source_names: list[str],
     source_objects: dict[str, LogSource],
     inject_ports: dict[str, int],
+    source_labels: dict[str, str],
     forward_ports: dict[str, list[int]],
     tabs: list[dict],
     logs_root: Path,
@@ -90,6 +91,7 @@ def run_app(
             "name": name,
             "source": source_objects[name],
             "inject_port": inject_ports.get(name),
+            "label": source_labels.get(name, name),
             "forward_ports": forward_ports.get(name, []),
             "log_file": str(session_dir / log_name),
         })
@@ -114,6 +116,7 @@ def run_app(
             "light": default_light_theme,
             "dark": default_dark_theme,
         },
+        source_labels=source_labels,
         queue_maxsize=queue_maxsize,
     ).run_forever()
     return 0

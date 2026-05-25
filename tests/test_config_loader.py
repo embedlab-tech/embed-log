@@ -22,11 +22,13 @@ logs:
 baudrate: 115200
 sources:
   - name: UART_A
+    label: READER
     type: uart
     port: /dev/ttyUSB0
     inject_port: 5001
     forward_ports: [7001, 7002]
   - name: UDP_A
+    label: CONTROLLER
     type: udp
     port: 6000
 tabs:
@@ -50,6 +52,7 @@ tabs:
         self.assertEqual(len(cfg["injects"]), 1)
         self.assertEqual(len(cfg["forwards"]), 2)
         self.assertEqual(len(cfg["tabs"]), 1)
+        self.assertEqual(cfg["source_labels"], {"UART_A": "READER", "UDP_A": "CONTROLLER"})
 
     def test_invalid_verbosity_fails(self):
         cfg_text = """

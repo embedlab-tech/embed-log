@@ -19,6 +19,7 @@ class SessionManagerTests(unittest.TestCase):
                 session_dir=session_dir,
                 tabs=[{"label": "T", "panes": ["A"]}],
                 source_files=source_files,
+                source_labels={"A": "READER"},
                 started_at="2026-01-01T00:00:00+00:00",
                 config_path="embed-log.yml",
                 job_id="CI-1",
@@ -57,6 +58,7 @@ class SessionExporterTests(unittest.TestCase):
                 session_html_path=html_out,
                 source_files={"A": str(td_path / "A.log")},
                 tabs=[{"label": "Tab", "panes": ["A"]}],
+                source_labels={"A": "READER"},
                 merge_script=merge_script,
                 python_executable="python3",
             )
@@ -71,6 +73,7 @@ class SessionExporterTests(unittest.TestCase):
             self.assertTrue(ok)
             args = run_mock.call_args[0][0]
             self.assertIn("--tab", args)
+            self.assertIn("A=READER", args)
             self.assertIn("--output", args)
 
     def test_export_failure_nonzero(self):
@@ -83,6 +86,7 @@ class SessionExporterTests(unittest.TestCase):
                 session_html_path=td_path / "session.html",
                 source_files={"A": str(td_path / "A.log")},
                 tabs=[{"label": "Tab", "panes": ["A"]}],
+                source_labels={"A": "READER"},
                 merge_script=merge_script,
                 python_executable="python3",
             )

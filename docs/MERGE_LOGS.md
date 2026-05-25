@@ -46,8 +46,8 @@ Defines one tab. Repeat for multiple tabs.
 
 ```
 TAB_LABEL   Label shown on the tab button, e.g. "UART" or "PYTEST"
-PANE_LABEL  Display name shown in the pane header
-FILE        Path to the .log file
+PANE_SPEC   Either `PANE_LABEL` or `PANE_ID=PANE_LABEL`
+FILE        Path to the log file
 ```
 
 Each tab holds **1 or 2 panes**. Two panes are shown side-by-side with a
@@ -58,7 +58,7 @@ draggable splitter between them.
 | Single pane | `--tab "PYTEST" "Pytest" logs/pytest.log` |
 | Two panes | `--tab "UART" "Device A" device-a.log "Device B" device-b.log` |
 
-Pane labels must be unique across all tabs (they are used as HTML element IDs).
+If display labels repeat across tabs, use explicit pane ids, e.g. `--tab "A" "reader_a=READER" a.log --tab "B" "reader_b=READER" b.log`.
 
 ### `--output`
 

@@ -1,4 +1,4 @@
-import { state, TABS, PANES } from './state.js';
+import { state, TABS, PANES, paneLabel } from './state.js';
 
 import { _linesSetupPane, repopulatePaneLogs } from './lines.js';
 import { _uiSetupPane, _uiSetupTxPane } from './ui.js';
@@ -15,11 +15,11 @@ import { renderPaneShell } from './renderPane.js';
 // ---------------------------------------------------------------------------
 
 
-export function createTabWithPanes(label, paneIds, { switchTo = true } = {}) {
+export function createTabWithPanes(label, paneIds, { switchTo = true, paneLabels = {} } = {}) {
     const tabIdx = TABS.length;
 
     // ---- 1. State ----
-    TABS.push({ id: "tab-" + tabIdx, label, panes: paneIds });
+    TABS.push({ id: "tab-" + tabIdx, label, panes: paneIds, paneLabels: { ...paneLabels } });
     paneIds.forEach(paneId => {
         if (PANES.includes(paneId)) return;   // already registered
         PANES.push(paneId);
@@ -42,7 +42,7 @@ export function createTabWithPanes(label, paneIds, { switchTo = true } = {}) {
     const parts = [];
     paneIds.forEach((paneId, i) => {
         if (i > 0) parts.push('<div class="splitter"></div>');
-        parts.push(renderPaneShell(paneId, paneId, { showTx: true }));
+        parts.push(renderPaneShell(paneId, paneLabel(paneId), { showTx: true }));
     });
     tc.innerHTML = parts.join("\n");
     container.appendChild(tc);
@@ -85,7 +85,7 @@ export function rebuildLayout(previousUnwrap = state.unwrap) {
             tc.className = "tab-content";
             tc.id = "u-tab-content-" + idx;
             tc.style.display = idx === activePaneBefore ? "flex" : "none";
-            tc.innerHTML = renderPaneShell(paneId, paneId, { showTx: true });
+            tc.innerHTML = renderPaneShell(paneId, paneLabel(paneId), { showTx: true });
 
             container.appendChild(tc);
         });
@@ -104,7 +104,7 @@ export function rebuildLayout(previousUnwrap = state.unwrap) {
             const parts = [];
             tab.panes.forEach((paneId, pi) => {
                 if (pi > 0) parts.push('<div class="splitter"></div>');
-                parts.push(renderPaneShell(paneId, paneId, { showTx: true }));
+                parts.push(renderPaneShell(paneId, paneLabel(paneId), { showTx: true }));
 
             });
             tc.innerHTML = parts.join("\n");

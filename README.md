@@ -95,16 +95,19 @@ baudrate: 115200
 
 sources:
   - name: FTDI_A
+    label: DUT
     type: uart
     port: /dev/ttyFTDI_A
     inject_port: 5001
 
   - name: FTDI_B
+    label: AUX
     type: uart
     port: /dev/ttyFTDI_B
     inject_port: 5002
 
   - name: PYTEST
+    label: PYTEST
     type: udp
     port: 6000
     inject_port: 5003

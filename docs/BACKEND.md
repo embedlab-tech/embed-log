@@ -51,6 +51,7 @@ Main responsibilities:
 ## Contracts the frontend depends on
 
 - `config` must be sent before log events.
+- `config.pane_labels` maps technical pane ids to the labels the UI should render; if omitted, frontend falls back to the pane ids.
 - `config.tabs` is authoritative for visible tabs/panes.
 - `config.session` contains current session metadata.
 - `GET /api/session/current`

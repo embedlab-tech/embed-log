@@ -1,4 +1,4 @@
-import { state, TABS, PANES } from './state.js';
+import { state, TABS, PANES, paneLabel } from './state.js';
 import { scrollPaneToBottom, scrollPaneToTs } from './lines.js';
 
 // ---------------------------------------------------------------------------
@@ -17,7 +17,7 @@ export function renderTabBar() {
         PANES.forEach((paneId, idx) => {
             const btn = document.createElement("button");
             btn.className = "tab-btn" + (idx === activeIdx ? " active" : "");
-            btn.textContent = paneId;
+            btn.textContent = paneLabel(paneId);
             btn.dataset.tabIdx = String(idx);
             btn.addEventListener("click", () => switchTab(idx));
             bar.appendChild(btn);
