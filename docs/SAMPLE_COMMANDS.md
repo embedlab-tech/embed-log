@@ -12,8 +12,8 @@ python3 backend/server.py \
   --inject SENSOR_A 5001 \
   --inject SENSOR_B 5002 \
   --inject SENSOR_C 5003 \
-  --tab "Simulated Devices" SENSOR_A SENSOR_B \
-  --tab "Other Sensor" SENSOR_C \
+  --tab "DevA" SENSOR_A SENSOR_B \
+  --tab "DevB" SENSOR_C \
   --host 127.0.0.1 \
   --ws-port 8080 \
   --ws-ui frontend/index.html \

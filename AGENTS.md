@@ -37,8 +37,8 @@ Quick onboarding notes for humans and coding agents working in `embed-log`.
 ## Current demo/test layout
 
 Deterministic demo config uses:
-- `Simulated Devices` tab → `SENSOR_A` (`READER`), `SENSOR_B` (`CONTROLLER`)
-- `Other Sensor` tab → `SENSOR_C` (`READER`)
+- `DevA` tab → `SENSOR_A` (`READER`), `SENSOR_B` (`CONTROLLER`)
+- `DevB` tab → `SENSOR_C` (`READER`)
 
 Do not assume all panes are visible at once.
 

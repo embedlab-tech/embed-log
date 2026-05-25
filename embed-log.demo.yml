@@ -32,8 +32,8 @@ sources:
     inject_port: 5003
 
 tabs:
-  - label: Simulated Devices
+  - label: DevA
     panes: [SENSOR_A, SENSOR_B]
 
-  - label: Other Sensor
+  - label: DevB
     panes: [SENSOR_C]

@@ -9,6 +9,13 @@ export function paneLabel(paneId) {
     return PANE_LABELS[paneId] || paneId;
 }
 
+export function unwrapPaneLabel(paneId) {
+    const base = paneLabel(paneId);
+    const tab = TABS.find(t => t.panes.includes(paneId));
+    if (!tab) return base;
+    return base + '-' + tab.label;
+}
+
 export const state = {
     showTs:      true,
 
@@ -23,7 +30,8 @@ export const state = {
     atBottom:    {},
     highlighted: {},
     selected:    {},
-    selectionScope:  'exact', // 'exact' or 'context'
+    selectionScope:  'exact', // 'exact', 'context', or 'context-selected'
+    contextPanes:    {},       // paneId → bool; only used when selectionScope === 'context-selected'
     unwrap:        false,
 };
 

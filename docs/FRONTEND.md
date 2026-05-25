@@ -55,10 +55,10 @@ It is intentionally simple:
 
 ## Demo layout used by tests
 
-- `Simulated Devices`:
+- `DevA`:
   - `SENSOR_A` rendered as `READER`
   - `SENSOR_B` rendered as `CONTROLLER`
-- `Other Sensor`:
+- `DevB`:
   - `SENSOR_C` rendered as `READER`
 
 This matters for assertions: a test that expects all three panes to be visible at once is wrong.

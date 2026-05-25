@@ -170,5 +170,116 @@ test.describe('scope-aware selection actions', () => {
     const body = page.locator('#clip-peek-menu .clip-peek-body');
     await expect(body).toContainText('SENSOR_A');
     await expect(body).toContainText('SENSOR_B');
+});
+
+  test('Sel… mode copy with one pane unchecked excludes that pane', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+
+    const { start, end } = await waitForRangePair(page, 'SENSOR_A', 'kind=prefix-cleanup', 'kind=timestamp-cleanup');
+    await start.click();
+    await end.click({ modifiers: ['Shift'] });
+
+    await setScope(page, 'SENSOR_A', 'context-selected');
+    // Uncheck SENSOR_B in pane selector
+    await page.locator('#pane-selector-SENSOR_A input[data-pane="SENSOR_B"]').click();
+
+    await page.locator('#copy-SENSOR_A').click();
+    const copied = await readClipboard(page);
+
+    expect(copied).toMatch(/\[SENSOR_A\]/);
+    expect(copied).not.toContain('SENSOR_B');
+  });
+
+  test('Sel… mode copy includes all panes when none unchecked', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+
+    const { start, end } = await waitForRangePair(page, 'SENSOR_A', 'kind=prefix-cleanup', 'kind=timestamp-cleanup');
+    await start.click();
+    await end.click({ modifiers: ['Shift'] });
+
+    await setScope(page, 'SENSOR_A', 'context-selected');
+    // All panes checked by default — same as All mode
+    await page.locator('#copy-SENSOR_A').click();
+    const copied = await readClipboard(page);
+
+    expect(copied).toMatch(/\[SENSOR_A\]/);
+    expect(copied).toMatch(/\[SENSOR_B\]/);
+  });
+
+  test('Sel… mode download raw respects unchecked panes', async ({ page }, testInfo) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+
+    const { start, end } = await waitForRangePair(page, 'SENSOR_A', 'kind=prefix-cleanup', 'kind=timestamp-cleanup');
+    await start.click();
+    await end.click({ modifiers: ['Shift'] });
+
+    await setScope(page, 'SENSOR_A', 'context-selected');
+    // Uncheck SENSOR_C (labeled READER-DevB) — should not appear in output
+    await page.locator('#pane-selector-SENSOR_A input[data-pane="SENSOR_C"]').click();
+
+    const downloadPromise = page.waitForEvent('download');
+    await page.locator('#download-raw-SENSOR_A').click();
+    const download = await downloadPromise;
+
+    expect(download.suggestedFilename()).toMatch(/^embed-log-snippet-.*\.log$/);
+    const downloadedPath = await saveDownload(download, testInfo);
+    const text = fs.readFileSync(downloadedPath, 'utf-8');
+
+    expect(text).toMatch(/\[SENSOR_A\]/);
+    expect(text).not.toContain('SENSOR_C');
+  });
+
+  test('Sel… mode unchecked panes persist across scope toggle', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+
+    // Select SENSOR_A, switch to Sel…, uncheck SENSOR_B
+    const { start, end } = await waitForRangePair(page, 'SENSOR_A', 'kind=prefix-cleanup', 'kind=timestamp-cleanup');
+    await start.click();
+    await end.click({ modifiers: ['Shift'] });
+    await setScope(page, 'SENSOR_A', 'context-selected');
+    await page.locator('#pane-selector-SENSOR_A input[data-pane="SENSOR_B"]').click();
+
+    // Switch to All — should include all panes
+    await setScope(page, 'SENSOR_A', 'context');
+    await page.locator('#copy-SENSOR_A').click();
+    const copiedAll = await readClipboard(page);
+    expect(copiedAll).toMatch(/\[SENSOR_A\]/);
+    expect(copiedAll).toMatch(/\[SENSOR_B\]/);
+
+    // Switch back to Sel… — unchecked panes should persist
+    await page.locator('#scope-context-selected-SENSOR_A').click();
+    await page.locator('#copy-SENSOR_A').click();
+    const copiedSel = await readClipboard(page);
+    expect(copiedSel).toMatch(/\[SENSOR_A\]/);
+    expect(copiedSel).not.toContain('SENSOR_B');
+  });
+
+  test('Sel… pane selector shows all panes with correct labels', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+
+    const { start, end } = await waitForRangePair(page, 'SENSOR_A', 'kind=prefix-cleanup', 'kind=timestamp-cleanup');
+    await start.click();
+    await end.click({ modifiers: ['Shift'] });
+
+    await setScope(page, 'SENSOR_A', 'context-selected');
+
+    // Pane selector should be visible
+    await expect(page.locator('#pane-selector-SENSOR_A')).toBeVisible();
+    // All panes should have checkboxes with unwrap-style labels
+    const checkboxes = page.locator('#pane-selector-SENSOR_A .pane-checkbox input[type="checkbox"]');
+    await expect(checkboxes).toHaveCount(3);
+    // Each checkbox should have a pane data attribute
+    await expect(checkboxes.nth(0)).toHaveAttribute('data-pane', 'SENSOR_A');
+    await expect(checkboxes.nth(1)).toHaveAttribute('data-pane', 'SENSOR_B');
+    await expect(checkboxes.nth(2)).toHaveAttribute('data-pane', 'SENSOR_C');
+    // All checked by default
+    await expect(checkboxes.nth(0)).toBeChecked();
+    await expect(checkboxes.nth(1)).toBeChecked();
+    await expect(checkboxes.nth(2)).toBeChecked();
   });
 });

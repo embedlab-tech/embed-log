@@ -1,4 +1,4 @@
-import { state, TABS, PANES, paneLabel } from './state.js';
+import { state, TABS, PANES, paneLabel, unwrapPaneLabel } from './state.js';
 
 import { _linesSetupPane, repopulatePaneLogs } from './lines.js';
 import { _uiSetupPane, _uiSetupTxPane } from './ui.js';
@@ -85,7 +85,7 @@ export function rebuildLayout(previousUnwrap = state.unwrap) {
             tc.className = "tab-content";
             tc.id = "u-tab-content-" + idx;
             tc.style.display = idx === activePaneBefore ? "flex" : "none";
-            tc.innerHTML = renderPaneShell(paneId, paneLabel(paneId), { showTx: true });
+            tc.innerHTML = renderPaneShell(paneId, unwrapPaneLabel(paneId), { showTx: true });
 
             container.appendChild(tc);
         });

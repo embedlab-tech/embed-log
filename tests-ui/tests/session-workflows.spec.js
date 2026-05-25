@@ -57,9 +57,9 @@ test.describe('session workflows', () => {
 
     const exported = await browser.newPage();
     await exported.goto(`http://127.0.0.1:8080${openedUrl}`);
-    await expect(exported.getByRole('button', { name: 'Simulated Devices', exact: true })).toBeVisible();
-    await expect(exported.getByRole('button', { name: 'Other Sensor', exact: true })).toBeVisible();
-    await exported.getByRole('button', { name: 'Simulated Devices', exact: true }).click();
+    await expect(exported.getByRole('button', { name: 'DevA', exact: true })).toBeVisible();
+    await expect(exported.getByRole('button', { name: 'DevB', exact: true })).toBeVisible();
+    await exported.getByRole('button', { name: 'DevA', exact: true }).click();
     await expect(exported.locator('.pane-name', { hasText: 'READER' }).first()).toBeVisible();
     await expect(exported.locator('.pane-name', { hasText: 'CONTROLLER' })).toBeVisible();
     await expect(exported.locator('.log-area', { hasText: 'TEST src=SENSOR_A' }).first()).toBeVisible();

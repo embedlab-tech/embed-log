@@ -43,7 +43,7 @@ test.describe('embed-log deterministic demo smoke', () => {
     await waitForSourceTestLine(page, 'SENSOR_A');
     await waitForSourceTestLine(page, 'SENSOR_B');
 
-    await page.getByRole('button', { name: 'Other Sensor', exact: true }).click();
+    await page.getByRole('button', { name: 'DevB', exact: true }).click();
     await expect(page.locator('#pane-SENSOR_C .pane-name')).toHaveText('READER');
     await waitForSourceTestLine(page, 'SENSOR_C');
   });
