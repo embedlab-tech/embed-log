@@ -66,6 +66,7 @@ Common helper patterns:
 
 - backend-driven tab/pane layout
 - live WS connection and rendering
+- live rendering keeps the full pane history visible while logs stream
 - selection and clipboard flows
 - snippet export and replay
 - full export replay

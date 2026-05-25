@@ -1,10 +1,23 @@
 import { expect, test } from '@playwright/test';
 import fs from 'node:fs';
+import dgram from 'node:dgram';
 import { collectPageErrors, saveDownload, waitForLineContaining, waitForRangePair, waitForSourceTestLine } from './helpers.js';
 
 async function openMore(page, paneId) {
   await page.locator(`#more-toggle-${paneId}`).click();
 }
+async function sendUdpBurst(port, prefix, count = 220) {
+  const socket = dgram.createSocket('udp4');
+  const payload = Array.from({ length: count }, (_, i) => `${prefix}-${String(i).padStart(3, '0')}`).join('\n') + '\n';
+  await new Promise((resolve, reject) => {
+    socket.send(Buffer.from(payload, 'utf-8'), port, '127.0.0.1', err => {
+      socket.close();
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+}
+
 
 test.describe('embed-log deterministic demo smoke', () => {
   let errors;
@@ -82,22 +95,29 @@ test.describe('embed-log deterministic demo smoke', () => {
     expect(html).not.toContain('<h1>embed-log snippet</h1>');
   });
 
-test('DOM does not grow unbounded when tailing - lines are pruned past threshold', async ({ page }) => {
+test('live DOM keeps full pane history while tailing', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+  await waitForSourceTestLine(page, 'SENSOR_A');
+  await waitForSourceTestLine(page, 'SENSOR_B');
 
-  // Wait long enough for many lines to accumulate (past MAX_RENDERED of 200)
-  // At ~3.5 lines/tick with 100ms tick, 200 lines = ~5.7s.  We wait 8s for margin.
-  await page.waitForTimeout(8000);
+  const firstA = (await page.locator('#log-SENSOR_A .log-line').first().textContent())?.trim();
+  const firstB = (await page.locator('#log-SENSOR_B .log-line').first().textContent())?.trim();
+  expect(firstA).toBeTruthy();
+  expect(firstB).toBeTruthy();
 
-  // DOM should be capped at roughly MAX_RENDERED (200) lines per pane
-  const aCount = await page.locator('#log-SENSOR_A .log-line').count();
-  const bCount = await page.locator('#log-SENSOR_B .log-line').count();
-  expect(aCount).toBeLessThanOrEqual(210);
-  expect(bCount).toBeLessThanOrEqual(210);
+  await Promise.all([
+    sendUdpBurst(6000, 'burst-a'),
+    sendUdpBurst(6001, 'burst-b'),
+  ]);
 
-  // Lines should still be arriving (not stuck)
-  await expect(page.locator('#log-SENSOR_A')).toContainText('TEST src=SENSOR_A');
+  await expect.poll(async () => page.locator('#log-SENSOR_A .log-line').count()).toBeGreaterThan(200);
+  await expect.poll(async () => page.locator('#log-SENSOR_B .log-line').count()).toBeGreaterThan(200);
+
+  await expect(page.locator('#log-SENSOR_A')).toContainText(firstA);
+  await expect(page.locator('#log-SENSOR_A')).toContainText('burst-a-219');
+  await expect(page.locator('#log-SENSOR_B')).toContainText(firstB);
+  await expect(page.locator('#log-SENSOR_B')).toContainText('burst-b-219');
 });
 
 test('runtime settings panel exposes working font-size controls', async ({ page }) => {

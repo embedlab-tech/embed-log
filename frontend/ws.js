@@ -23,7 +23,6 @@ function resetLayoutForNewSession() {
     state.syncTabSwitch = false;
     state.filters = {};
     state.rawLines = {};
-    state.renderBase = {};
     state.atBottom = {};
     state.highlighted = {};
     state.selected = {};
