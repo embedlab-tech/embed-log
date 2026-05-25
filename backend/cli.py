@@ -16,6 +16,7 @@ import yaml
 from serial.tools import list_ports
 
 from .app import DEFAULT_WS_UI, parse_source, run_app
+from .file_tail_udp import parse_udp_target, run_tail_file
 from .config import ConfigError, load_config
 from .parse import run_parse
 from .sources import LogSource
@@ -1224,6 +1225,28 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--output", "-o", default=None,
                    help="output session directory")
 
+    # ── tail-file ──
+    p = sub.add_parser(
+        "tail-file",
+        help="tail a file and forward lines to UDP",
+        description="Tail a file and forward each appended line to a UDP port.",
+        epilog=(
+            "Examples:\n"
+            "  embed-log tail-file app.log 127.0.0.1:6000\n"
+            "  embed-log tail-file app.log 127.0.0.1:6000 --from-start\n"
+            "  embed-log tail-file C:\\logs\\service.log 127.0.0.1:6000 --poll-interval 0.5\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("path", help="file to tail")
+    p.add_argument("target", type=parse_udp_target, help="UDP target as HOST:PORT")
+    p.add_argument("--from-start", action="store_true",
+                   help="read the existing file contents first instead of starting at EOF")
+    p.add_argument("--poll-interval", type=float, default=0.2,
+                   help="seconds between file polls (default: 0.2)")
+    p.add_argument("--encoding", default="utf-8",
+                   help="file encoding (default: utf-8)")
+
     # ── doctor ──
     p = sub.add_parser(
         "doctor",
@@ -1524,6 +1547,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         return _run_merge(args)
     if args.command == "parse":
         return run_parse(argv[1:])  # keep old parse signature
+    if args.command == "tail-file":
+        return run_tail_file(args)
     if args.command == "doctor":
         return _run_doctor(args)
     if args.command == "ports":
