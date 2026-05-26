@@ -1656,8 +1656,76 @@ def _run_doctor(args: argparse.Namespace) -> int:
 
 def _run_update(args: argparse.Namespace) -> int:
     """Update embed-log to the latest version via pipx."""
-    import shutil
     import subprocess
+
+    try:
+        from ._version import __version__ as current_version
+    except ImportError:
+        current_version = "0.1.0"
+
+    def _cache_dir() -> Path:
+        return Path.home() / ".cache" / "embed-log" / "src"
+
+    def _is_managed_cache_spec(spec: str | None) -> bool:
+        if not spec or spec.startswith("git+"):
+            return False
+        try:
+            return Path(spec).expanduser().resolve(strict=False) == _cache_dir().resolve(strict=False)
+        except OSError:
+            return False
+
+    def _refresh_cached_source(cache_dir: Path) -> str | None:
+        if not shutil.which("git"):
+            print("git is required but not found.")
+            print("")
+            print("  Install git and try again, or re-run the install script:")
+            print("    curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.sh | bash")
+            return None
+
+        print("Fetching latest source from GitHub...")
+
+        if cache_dir.exists():
+            shutil.rmtree(str(cache_dir))
+        cache_dir.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            subprocess.run(
+                [
+                    "git",
+                    "clone",
+                    "--depth=1",
+                    "-b",
+                    "main",
+                    "https://github.com/krezolekcoder/embed-log.git",
+                    str(cache_dir),
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=60,
+            )
+        except subprocess.CalledProcessError as exc:
+            print(f"Failed to fetch source: {exc.stderr or 'clone failed'}")
+            return None
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            print(f"Failed to fetch source: {exc}")
+            return None
+
+        sha_result = subprocess.run(
+            ["git", "-C", str(cache_dir), "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        sha = sha_result.stdout.strip() or "unknown"
+
+        version_file = cache_dir / "backend" / "_version.py"
+        version_file.write_text(
+            "# Auto-generated. Install scripts populate __commit__ before pipx install.\n"
+            f'__version__ = "{current_version}"\n'
+            f'__commit__ = "{sha}"\n'
+        )
+        return sha
 
     pipx = shutil.which("pipx")
     if not pipx:
@@ -1671,35 +1739,117 @@ def _run_update(args: argparse.Namespace) -> int:
         print("    python3 -m pipx ensurepath")
         return 1
 
-    # Check if embed-log is installed via pipx
+    import json as _json
     try:
-        result = subprocess.run(
+        list_result = subprocess.run(
             [pipx, "list", "--json"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:
         print(f"Failed to query pipx: {exc}")
         return 1
 
+    install_spec = None
     installed = False
-    if result.returncode == 0 and result.stdout:
-        import json as _json
+    if list_result.returncode == 0 and list_result.stdout:
         try:
-            data = _json.loads(result.stdout)
-            # pipx list --json returns {"venvs": {"embed-log": {...}}}
-            if "embed-log" in data.get("venvs", {}):
+            data = _json.loads(list_result.stdout)
+            venv_info = data.get("venvs", {}).get("embed-log")
+            if venv_info:
                 installed = True
-        except (_json.JSONDecodeError, TypeError):
+                install_spec = (
+                    venv_info.get("metadata", {})
+                    .get("main_package", {})
+                    .get("package_or_url")
+                )
+        except (_json.JSONDecodeError, TypeError, AttributeError):
             pass
 
     if not installed:
         print("embed-log is not managed by pipx.")
         print("")
-        print("  To update, re-run the install script:")
+        print("  To install, re-run the install script:")
         print("    curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.sh | bash")
         return 1
 
-    # Run the upgrade
+    cache_dir = _cache_dir()
+    managed_cache_spec = _is_managed_cache_spec(install_spec)
+    stale_local_spec = bool(
+        install_spec
+        and not install_spec.startswith("git+")
+        and not Path(install_spec).expanduser().is_dir()
+    )
+
+    if managed_cache_spec:
+        sha = _refresh_cached_source(cache_dir)
+        if sha is None:
+            return 1
+        print("Reinstalling embed-log...")
+        try:
+            result = subprocess.run(
+                [pipx, "reinstall", "embed-log"],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            print(f"Update failed: {exc}")
+            return 1
+        if result.returncode != 0:
+            print(result.stdout)
+            print(result.stderr)
+            print(f"Update failed (exit code {result.returncode}).")
+            return 1
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+        print(f"embed-log {current_version} ({sha})")
+        return 0
+
+    if stale_local_spec:
+        print(f"Install source '{install_spec}' is no longer available.")
+        sha = _refresh_cached_source(cache_dir)
+        if sha is None:
+            return 1
+        print("Recovering embed-log installation...")
+        try:
+            uninstall_result = subprocess.run(
+                [pipx, "uninstall", "embed-log"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            print(f"Update failed: {exc}")
+            return 1
+        if uninstall_result.returncode != 0:
+            print(uninstall_result.stdout)
+            print(uninstall_result.stderr)
+            print(f"Update failed (exit code {uninstall_result.returncode}).")
+            return 1
+        try:
+            install_result = subprocess.run(
+                [pipx, "install", str(cache_dir)],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            print(f"Update failed: {exc}")
+            return 1
+        if install_result.returncode != 0:
+            print(install_result.stdout)
+            print(install_result.stderr)
+            print(f"Update failed (exit code {install_result.returncode}).")
+            return 1
+        print(install_result.stdout)
+        if install_result.stderr:
+            print(install_result.stderr)
+        print(f"embed-log {current_version} ({sha})")
+        return 0
+
     cmd = [pipx, "upgrade", "embed-log"]
     if args.force:
         cmd.append("--force")
@@ -1721,12 +1871,11 @@ def _run_update(args: argparse.Namespace) -> int:
     if result.stderr:
         print(result.stderr)
 
-    # Print updated version
     try:
-        from ._version import __version__, __commit__
+        from ._version import __commit__
     except ImportError:
-        __version__, __commit__ = "0.1.0", "unknown"
-    print(f"embed-log {__version__} ({__commit__})")
+        __commit__ = "unknown"
+    print(f"embed-log {current_version} ({__commit__})")
     return 0
 
 def _run_ports(args: argparse.Namespace) -> int:
