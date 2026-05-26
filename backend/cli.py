@@ -1435,6 +1435,21 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true",
                    help="machine-readable JSON output")
 
+    # ── update ──
+    p = sub.add_parser(
+        "update",
+        help="update embed-log to the latest version",
+        description="Update embed-log to the latest version via pipx.",
+        epilog=(
+            "Examples:\n"
+            "  embed-log update\n"
+            "  embed-log update --force\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("--force", action="store_true",
+                   help="force reinstall even if up to date")
+
     return parser
 def _run_run(args: argparse.Namespace) -> int:
     cfg = {}
@@ -1568,6 +1583,13 @@ def _run_doctor(args: argparse.Namespace) -> int:
     checks: list[dict] = []
     ok = True
 
+    # Version
+    try:
+        from ._version import __version__, __commit__
+    except ImportError:
+        __version__, __commit__ = "0.1.0", "unknown"
+    checks.append(("version", f"embed-log {__version__} ({__commit__})"))
+
     # Python/runtime
     import sys as _sys
     checks.append(("python", f"{_sys.version_info.major}.{_sys.version_info.minor}.{_sys.version_info.micro}"))
@@ -1632,6 +1654,81 @@ def _run_doctor(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def _run_update(args: argparse.Namespace) -> int:
+    """Update embed-log to the latest version via pipx."""
+    import shutil
+    import subprocess
+
+    pipx = shutil.which("pipx")
+    if not pipx:
+        print("pipx not found.")
+        print("")
+        print("  To update, re-run the install script:")
+        print("    curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.sh | bash")
+        print("")
+        print("  Or install pipx first:")
+        print("    python3 -m pip install --user pipx")
+        print("    python3 -m pipx ensurepath")
+        return 1
+
+    # Check if embed-log is installed via pipx
+    try:
+        result = subprocess.run(
+            [pipx, "list", "--json"],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        print(f"Failed to query pipx: {exc}")
+        return 1
+
+    installed = False
+    if result.returncode == 0 and result.stdout:
+        import json as _json
+        try:
+            data = _json.loads(result.stdout)
+            # pipx list --json returns {"venvs": {"embed-log": {...}}}
+            if "embed-log" in data.get("venvs", {}):
+                installed = True
+        except (_json.JSONDecodeError, TypeError):
+            pass
+
+    if not installed:
+        print("embed-log is not managed by pipx.")
+        print("")
+        print("  To update, re-run the install script:")
+        print("    curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.sh | bash")
+        return 1
+
+    # Run the upgrade
+    cmd = [pipx, "upgrade", "embed-log"]
+    if args.force:
+        cmd.append("--force")
+
+    print(f"Running: {' '.join(cmd)}")
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        print(f"Update failed: {exc}")
+        return 1
+
+    if result.returncode != 0:
+        print(result.stdout)
+        print(result.stderr)
+        print(f"Update failed (exit code {result.returncode}).")
+        return 1
+
+    print(result.stdout)
+    if result.stderr:
+        print(result.stderr)
+
+    # Print updated version
+    try:
+        from ._version import __version__, __commit__
+    except ImportError:
+        __version__, __commit__ = "0.1.0", "unknown"
+    print(f"embed-log {__version__} ({__commit__})")
+    return 0
+
 def _run_ports(args: argparse.Namespace) -> int:
     ports = _detected_serial_ports()
     if args.json:
@@ -1677,6 +1774,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     # ── sessions uses its own internal sub-sub-parsers ──
     if argv[0] == "sessions":
         return _run_sessions(argv[1:])
+    # ── Version requested ──
+    if argv[0] in {"--version", "-V"}:
+        try:
+            from ._version import __version__, __commit__
+        except ImportError:
+            __version__, __commit__ = "0.1.0", "unknown"
+        print(f"embed-log {__version__} ({__commit__})")
+        return 0
 
     # ── Help requested ──
     if argv[0] in {"-h", "--help"}:
@@ -1713,6 +1818,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         return _run_doctor(args)
     if args.command == "ports":
         return _run_ports(args)
+    if args.command == "update":
+        return _run_update(args)
 
     # Should not reach here
     parser.print_help()

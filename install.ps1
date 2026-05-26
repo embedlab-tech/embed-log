@@ -36,6 +36,18 @@ function Invoke-Pipx {
     }
 }
 
+function Write-VersionFile {
+    param([string]$Dir, [string]$Commit)
+    $versionFile = Join-Path $Dir 'backend\_version.py'
+    @"
+# Auto-generated. Do not edit manually.
+# Install scripts populate __commit__ before pipx install.
+__version__ = "0.1.0"
+__commit__ = "$Commit"
+"@ | Set-Content -Path $versionFile -Encoding UTF8
+}
+
+
 Write-Info "Checking Python..."
 
 $python = $null
@@ -119,9 +131,26 @@ $localRoot = $PSScriptRoot
 if ($localRoot -and (Test-Path (Join-Path $localRoot 'pyproject.toml')) -and (Test-Path (Join-Path $localRoot 'backend'))) {
     Write-Info "Installing from local repository at $localRoot..."
     $installSrc = $localRoot
+    # Capture commit SHA if inside a git repo
+    if (Have-Cmd 'git') {
+        $sha = & git -C $localRoot rev-parse --short HEAD 2>$null
+        if ($sha) {
+            Write-VersionFile -Dir $localRoot -Commit $sha
+        }
+    }
 } elseif (Have-Cmd 'git') {
     Write-Info "Installing embed-log from GitHub ($Repo)..."
-    $installSrc = "git+$RepoUrl@$Branch"
+    $tmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("embed-log-" + [System.Guid]::NewGuid().ToString('N'))
+    $cloneDir = Join-Path $tmpRoot 'embed-log'
+    & git clone --depth=1 -b $Branch $RepoUrl $cloneDir 2>&1 | Out-Null
+    if (-not $?) {
+        Die "Failed to clone embed-log repository."
+    }
+    $installSrc = $cloneDir
+    $sha = & git -C $cloneDir rev-parse --short HEAD 2>$null
+    if ($sha) {
+        Write-VersionFile -Dir $cloneDir -Commit $sha
+    }
 } else {
     Write-Warn "git not found — downloading source archive instead."
     $tmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("embed-log-" + [System.Guid]::NewGuid().ToString('N'))
@@ -139,6 +168,7 @@ if ($localRoot -and (Test-Path (Join-Path $localRoot 'pyproject.toml')) -and (Te
         Die "Downloaded archive has unexpected structure."
     }
     $installSrc = $srcDir.FullName
+    Write-VersionFile -Dir $srcDir.FullName -Commit 'archive'
 }
 
 try {

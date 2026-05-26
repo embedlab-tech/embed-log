@@ -36,6 +36,16 @@ die() {
   exit 1
 }
 
+_write_version() {
+  local dir="$1" sha="$2"
+  cat > "$dir/backend/_version.py" <<VERSION_EOF
+# Auto-generated. Do not edit manually.
+# Install scripts populate __commit__ before pipx install.
+__version__ = "0.1.0"
+__commit__ = "$sha"
+VERSION_EOF
+}
+
 # ─────────────────────────────────────────────────────────────────
 # Python version check
 # ─────────────────────────────────────────────────────────────────
@@ -195,10 +205,26 @@ fi
 if [ -n "$INSTALL_SRC" ]; then
   print_info "Installing from local repository at ${INSTALL_SRC}..."
   PIPX_SRC="$INSTALL_SRC"
+  _commit=""
+  if have_cmd git && git -C "$INSTALL_SRC" rev-parse --git-dir >/dev/null 2>&1; then
+    _commit="$(git -C "$INSTALL_SRC" rev-parse --short HEAD 2>/dev/null || true)"
+  fi
+  if [ -n "$_commit" ]; then
+    _write_version "$PIPX_SRC" "$_commit"
+  fi
 else
   print_info "Fetching embed-log from GitHub (${REPO})..."
   if have_cmd git; then
-    PIPX_SRC="git+${REPO_URL}@${BRANCH}"
+    INSTALL_TMPDIR="$(mktemp -d)"
+    git clone --depth=1 -b "$BRANCH" "$REPO_URL" "$INSTALL_TMPDIR/embed-log" || die "\
+Failed to clone embed-log repository.
+
+  Check your internet connection and try again."
+    PIPX_SRC="$INSTALL_TMPDIR/embed-log"
+    _commit="$(git -C "$PIPX_SRC" rev-parse --short HEAD 2>/dev/null || true)"
+    if [ -n "$_commit" ]; then
+      _write_version "$PIPX_SRC" "$_commit"
+    fi
   else
     print_warn "git not found — downloading source archive instead."
     INSTALL_TMPDIR="$(mktemp -d)"
@@ -213,8 +239,10 @@ Failed to download embed-log source from GitHub.
     EXTRACTED="$(cd "$INSTALL_TMPDIR" && ls -d embed-log-* 2>/dev/null | head -1)"
     [ -n "$EXTRACTED" ] || die "Downloaded archive has unexpected structure."
     PIPX_SRC="${INSTALL_TMPDIR}/${EXTRACTED}"
+    _write_version "$PIPX_SRC" "archive"
   fi
 fi
+
 
 # Replace an existing pipx install cleanly before reinstalling.
 if pipx uninstall embed-log >/dev/null 2>&1; then
