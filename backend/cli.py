@@ -20,6 +20,43 @@ from .file_tail_udp import parse_udp_target, run_tail_file
 from .config import ConfigError, load_config
 from .parse import run_parse
 from .sources import LogSource
+def _display_source_label(source_kind: str, ref_type: str, ref: str, local_path: str) -> str:
+    if source_kind == "local":
+        return f"local:{local_path or '?'}"
+    if source_kind == "unknown":
+        return "unknown"
+    return f"{ref_type}:{ref}"
+
+
+def _display_source_status(source_kind: str, ref_type: str, ref: str, local_path: str) -> str:
+    if source_kind == "local":
+        return f"local {local_path or '?'}"
+    if source_kind == "unknown":
+        return "unknown"
+    return f"{ref_type} {ref}"
+
+
+def _load_install_identity() -> tuple[str, str, str, str, str, str]:
+    try:
+        from ._version import __version__, __commit__
+    except ImportError:
+        __version__, __commit__ = "1.0.1", "unknown"
+    try:
+        from ._install_source import (
+            __local_path__ as local_path,
+            __ref__ as ref,
+            __ref_type__ as ref_type,
+            __source_kind__ as source_kind,
+        )
+    except ImportError:
+        source_kind, ref_type, ref, local_path = "unknown", "branch", "main", ""
+    return __version__, __commit__, source_kind, ref_type, ref, local_path
+
+
+def _display_version_line() -> str:
+    version, commit, source_kind, ref_type, ref, local_path = _load_install_identity()
+    source_label = _display_source_label(source_kind, ref_type, ref, local_path)
+    return f"embed-log {version} ({source_label}, {commit})"
 
 
 def _default_init_yaml() -> str:
@@ -1939,12 +1976,10 @@ def _run_version(args: argparse.Namespace) -> int:
     checks: list[dict] = []
     ok = True
 
-    # Version
-    try:
-        from ._version import __version__, __commit__
-    except ImportError:
-        __version__, __commit__ = "1.0.1", "unknown"
-    checks.append(("version", f"embed-log {__version__} ({__commit__})"))
+    version, commit, source_kind, ref_type, ref, local_path = _load_install_identity()
+    checks.append(("version", version))
+    checks.append(("source", _display_source_status(source_kind, ref_type, ref, local_path)))
+    checks.append(("commit", commit))
 
     # Python/runtime
     import sys as _sys
@@ -2327,11 +2362,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         return _run_sessions(argv[1:])
     # ── Version requested ──
     if argv[0] in {"--version", "-V"}:
-        try:
-            from ._version import __version__, __commit__
-        except ImportError:
-            __version__, __commit__ = "1.0.1", "unknown"
-        print(f"embed-log {__version__} ({__commit__})")
+        print(_display_version_line())
         return 0
 
     # ── Help requested ──
