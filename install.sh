@@ -45,7 +45,7 @@ _write_version() {
   cat > "$dir/backend/_version.py" <<VERSION_EOF
 # Auto-generated. Do not edit manually.
 # Install scripts populate __commit__ before pipx install.
-__version__ = "0.1.0"
+__version__ = "1.0.1"
 __commit__ = "$sha"
 VERSION_EOF
 }
@@ -106,6 +106,25 @@ Python ${PY_VER} is too old — version ${MIN_PY} or later is required.
   Upgrade Python on your system and try again."
 
 print_ok "Python ${PY_VER} — using $PY"
+_resolve_requested_ref() {
+  case "$INSTALL_REF_TYPE" in
+    release)
+      [ "$INSTALL_REF" = "latest" ] || {
+        echo "$INSTALL_REF"
+        return 0
+      }
+      have_cmd curl || die "curl is required to resolve the latest release."
+      curl -fsSL "https://api.github.com/repos/${OVERRIDE_REPO}/releases/latest" | \
+        "$PY" -c 'import json,sys; data=json.load(sys.stdin); tag=data.get("tag_name"); sys.exit(1) if not tag else None; print(tag)'
+      ;;
+    *)
+      echo "$INSTALL_REF"
+      ;;
+  esac
+}
+RESOLVED_INSTALL_REF="$(_resolve_requested_ref)" || die "Failed to resolve install ref."
+print_ok "Install ref ${INSTALL_REF_TYPE}:${INSTALL_REF} -> ${RESOLVED_INSTALL_REF}"
+
 
 # ─────────────────────────────────────────────────────────────────
 # pipx
@@ -236,11 +255,12 @@ else
     mkdir -p "$CACHE_BASE"
     git init "$CACHE_SRC" >/dev/null 2>&1 || die "Failed to prepare embed-log cache directory."
     git -C "$CACHE_SRC" remote add origin "$OVERRIDE_REPO_URL" >/dev/null 2>&1 || die "Failed to configure embed-log repository origin."
-    git -C "$CACHE_SRC" fetch --depth=1 origin "$INSTALL_REF" >/dev/null 2>&1 || die "\
-Failed to fetch embed-log ref '${INSTALL_REF}'.
+    git -C "$CACHE_SRC" fetch --depth=1 origin "$RESOLVED_INSTALL_REF" >/dev/null 2>&1 || die "\
+Failed to fetch embed-log ref '${RESOLVED_INSTALL_REF}'.
 
   Check that the ref exists and try again."
-    git -C "$CACHE_SRC" checkout --detach FETCH_HEAD >/dev/null 2>&1 || die "Failed to checkout embed-log ref '${INSTALL_REF}'."
+    git -C "$CACHE_SRC" checkout --detach FETCH_HEAD >/dev/null 2>&1 || die "Failed to checkout embed-log ref '${RESOLVED_INSTALL_REF}'."
+
     PIPX_SRC="$CACHE_SRC"
     _commit="$(git -C "$PIPX_SRC" rev-parse --short HEAD 2>/dev/null || true)"
     if [ -n "$_commit" ]; then
@@ -250,7 +270,7 @@ Failed to fetch embed-log ref '${INSTALL_REF}'.
   else
     print_warn "git not found — downloading source archive instead."
     INSTALL_TMPDIR="$(mktemp -d)"
-    ARCHIVE_URL="https://github.com/${OVERRIDE_REPO}/archive/${INSTALL_REF}.tar.gz"
+    ARCHIVE_URL="https://github.com/${OVERRIDE_REPO}/archive/${RESOLVED_INSTALL_REF}.tar.gz"
     print_info "Downloading ${ARCHIVE_URL}..."
     curl -fsSL "$ARCHIVE_URL" | tar xz -C "$INSTALL_TMPDIR" || die "\
 Failed to download embed-log source from GitHub.

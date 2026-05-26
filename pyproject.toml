@@ -1,6 +1,6 @@
 [project]
 name = "embed-log"
-version = "0.1.0"
+version = "1.0.1"
 description = "Serial log server for embedded device CI with live browser UI"
 requires-python = ">=3.10"
 dependencies = [
