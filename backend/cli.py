@@ -1751,8 +1751,9 @@ def _build_parser() -> argparse.ArgumentParser:
         epilog=(
             "Examples:\n"
             "  embed-log update\n"
+            "  embed-log update --release\n"
             "  embed-log update --branch main\n"
-            "  embed-log update --tag v0.1.0\n"
+            "  embed-log update --tag v1.0.1\n"
             "  embed-log update --ref abc1234\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1763,6 +1764,8 @@ def _build_parser() -> argparse.ArgumentParser:
     source.add_argument("--branch", help="update from a specific branch")
     source.add_argument("--tag", help="update from a specific tag")
     source.add_argument("--ref", help="update from a specific commit or git ref")
+    source.add_argument("--release", action="store_true",
+                        help="update to the latest GitHub release tag")
 
     return parser
 
@@ -1937,7 +1940,7 @@ def _run_doctor(args: argparse.Namespace) -> int:
     try:
         from ._version import __version__, __commit__
     except ImportError:
-        __version__, __commit__ = "0.1.0", "unknown"
+        __version__, __commit__ = "1.0.1", "unknown"
     checks.append(("version", f"embed-log {__version__} ({__commit__})"))
 
     # Python/runtime
@@ -2044,7 +2047,7 @@ def _run_update(args: argparse.Namespace) -> int:
     try:
         from ._version import __version__ as current_version
     except ImportError:
-        current_version = "0.1.0"
+        current_version = "1.0.1"
 
     try:
         from ._install_source import (
@@ -2109,6 +2112,15 @@ def _run_update(args: argparse.Namespace) -> int:
             if idx != -1:
                 return cleaned[idx + len(marker):]
         return default_repo
+    def _resolve_release_ref(repo: str) -> str:
+        url = f"https://api.github.com/repos/{repo}/releases/latest"
+        with urllib.request.urlopen(url, timeout=30) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        tag = data.get("tag_name")
+        if not tag:
+            raise OSError("latest release tag not found")
+        return tag
+
 
     def _download_installer(repo: str, ref: str, script_name: str) -> Path:
         url = f"https://raw.githubusercontent.com/{repo}/{ref}/{script_name}"
@@ -2192,6 +2204,11 @@ def _run_update(args: argparse.Namespace) -> int:
         ref_type = "commit"
         ref = args.ref
         has_override = True
+    elif args.release:
+        ref_type = "release"
+        ref = "latest"
+        has_override = True
+
 
     local_root = None
     if not has_override:
@@ -2201,7 +2218,8 @@ def _run_update(args: argparse.Namespace) -> int:
                 print(f"Local install source is unavailable: {source_local_path}")
                 print("")
                 print("  Re-run the installer from that repository, or choose an explicit remote ref:")
-                print("    embed-log update --branch main")
+                print("    embed-log update --release")
+
                 return 1
         else:
             local_root = _local_installer_root(install_spec)
@@ -2227,14 +2245,23 @@ def _run_update(args: argparse.Namespace) -> int:
 
     script_name = "install.ps1" if sys.platform.startswith("win") else "install.sh"
     repo_slug = _repo_slug(repo, repo_url)
+    download_ref = ref
+    if ref_type == "release":
+        try:
+            download_ref = _resolve_release_ref(repo_slug)
+        except OSError as exc:
+            print(f"Failed to resolve latest release: {exc}")
+            return 1
+
     try:
-        installer_path = _download_installer(repo_slug, ref, script_name)
+        installer_path = _download_installer(repo_slug, download_ref, script_name)
+
     except OSError as exc:
         print(f"Failed to download installer: {exc}")
         return 1
 
     try:
-        print(f"Running installer from {repo_slug}@{ref_type}:{ref}")
+        print(f"Running installer from {repo_slug}@{ref_type}:{ref if ref_type != 'release' else download_ref}")
         rc = _run_installer(installer_path, env=env)
     finally:
         installer_path.unlink(missing_ok=True)
@@ -2299,7 +2326,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         try:
             from ._version import __version__, __commit__
         except ImportError:
-            __version__, __commit__ = "0.1.0", "unknown"
+            __version__, __commit__ = "1.0.1", "unknown"
         print(f"embed-log {__version__} ({__commit__})")
         return 0
 

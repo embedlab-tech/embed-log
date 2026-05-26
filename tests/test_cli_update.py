@@ -71,7 +71,7 @@ class UpdateCommandTests(unittest.TestCase):
                  patch("subprocess.run", side_effect=fake_run):
                 buf = io.StringIO()
                 with redirect_stdout(buf):
-                    rc = cli._run_update(_ns(force=False, branch=None, tag=None, ref=None))
+                    rc = cli._run_update(_ns(force=False, branch=None, tag=None, ref=None, release=False))
 
             self.assertEqual(rc, 0)
             self.assertIn("Running installer from local source:", buf.getvalue())
@@ -101,7 +101,7 @@ class UpdateCommandTests(unittest.TestCase):
              patch("subprocess.run", side_effect=fake_run):
             buf = io.StringIO()
             with redirect_stdout(buf):
-                rc = cli._run_update(_ns(force=False, branch="feature/demo", tag=None, ref=None))
+                rc = cli._run_update(_ns(force=False, branch="feature/demo", tag=None, ref=None, release=False))
 
         self.assertEqual(rc, 0)
         self.assertIn("Running installer from krezolekcoder/embed-log@branch:feature/demo", buf.getvalue())
@@ -121,12 +121,53 @@ class UpdateCommandTests(unittest.TestCase):
              patch("subprocess.run", return_value=CompletedProcess(["/opt/pipx", "list", "--json"], 0, _pipx_list_json(missing), "")):
             buf = io.StringIO()
             with redirect_stdout(buf):
-                rc = cli._run_update(_ns(force=False, branch=None, tag=None, ref=None))
+                rc = cli._run_update(_ns(force=False, branch=None, tag=None, ref=None, release=False))
 
         self.assertEqual(rc, 1)
         self.assertIn("Local install source is unavailable", buf.getvalue())
-        self.assertIn("embed-log update --branch main", buf.getvalue())
+        self.assertIn("embed-log update --release", buf.getvalue())
 
+    def test_release_override_resolves_latest_tag_before_download(self):
+        calls = []
+        seen_env = {}
+        responses = [
+            _Response(b'{"tag_name":"v1.0.0"}'),
+            _Response(b"#!/usr/bin/env bash\n"),
+        ]
+
+        def fake_run(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            if cmd == ["/opt/pipx", "list", "--json"]:
+                return CompletedProcess(cmd, 0, _pipx_list_json("git+https://github.com/krezolekcoder/embed-log.git@main"), "")
+            if cmd[0] == "/bin/bash":
+                seen_env.update(kwargs["env"])
+                return CompletedProcess(cmd, 0, "", "")
+            raise AssertionError(f"Unexpected command: {cmd}")
+
+        def fake_urlopen(url, timeout=30):
+            self.assertIn(url, [
+                "https://api.github.com/repos/krezolekcoder/embed-log/releases/latest",
+                "https://raw.githubusercontent.com/krezolekcoder/embed-log/v1.0.0/install.sh",
+            ])
+            return responses.pop(0)
+
+        with patch.object(install_source, "__source_kind__", "git"), \
+             patch.object(install_source, "__local_path__", ""), \
+             patch.object(install_source, "__repo__", "krezolekcoder/embed-log"), \
+             patch.object(install_source, "__repo_url__", "https://github.com/krezolekcoder/embed-log.git"), \
+             patch.object(install_source, "__ref_type__", "branch"), \
+             patch.object(install_source, "__ref__", "main"), \
+             patch("backend.cli.shutil.which", side_effect=lambda name: {"pipx": "/opt/pipx", "bash": "/bin/bash"}.get(name)), \
+             patch("urllib.request.urlopen", side_effect=fake_urlopen), \
+             patch("subprocess.run", side_effect=fake_run):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = cli._run_update(_ns(force=False, branch=None, tag=None, ref=None, release=True))
+
+        self.assertEqual(rc, 0)
+        self.assertIn("Running installer from krezolekcoder/embed-log@release:v1.0.0", buf.getvalue())
+        self.assertEqual(seen_env["EMBED_LOG_REF_TYPE"], "release")
+        self.assertEqual(seen_env["EMBED_LOG_REF"], "latest")
 
 if __name__ == "__main__":
     unittest.main()

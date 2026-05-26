@@ -46,7 +46,7 @@ function Write-VersionFile {
     @"
 # Auto-generated. Do not edit manually.
 # Install scripts populate __commit__ before pipx install.
-__version__ = "0.1.0"
+__version__ = "1.0.1"
 __commit__ = "$Commit"
 "@ | Set-Content -Path $versionFile -Encoding UTF8
 }
@@ -111,6 +111,20 @@ Python $pyVerStr is too old — version $MinPy or later is required.
 }
 
 Write-OK "Python $pyVerStr — using $python"
+function Resolve-RequestedRef {
+    if ($InstallRefType -ne 'release') {
+        return $InstallRef
+    }
+    if ($InstallRef -ne 'latest') {
+        return $InstallRef
+    }
+    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$OverrideRepo/releases/latest"
+    if (-not $release.tag_name) {
+        Die "Failed to resolve latest release tag."
+    }
+    return $release.tag_name
+}
+
 
 if (-not (Have-Cmd 'pipx')) {
     Write-Info "pipx not found — installing via pip..."
@@ -150,6 +164,8 @@ pipx was installed but could not be started.
 }
 
 Write-OK "pipx ready"
+$ResolvedInstallRef = Resolve-RequestedRef
+Write-OK "Install ref $InstallRefType`:$InstallRef -> $ResolvedInstallRef"
 
 $installSrc = $null
 $tmpRoot = $null
@@ -183,13 +199,13 @@ if ($localRoot -and (Test-Path (Join-Path $localRoot 'pyproject.toml')) -and (Te
     if (-not $?) {
         Die "Failed to configure embed-log repository origin."
     }
-    & git -C $cacheRoot fetch --depth=1 origin $InstallRef 2>&1 | Out-Null
+    & git -C $cacheRoot fetch --depth=1 origin $ResolvedInstallRef 2>&1 | Out-Null
     if (-not $?) {
-        Die "Failed to fetch embed-log ref '$InstallRef'."
+        Die "Failed to fetch embed-log ref '$ResolvedInstallRef'."
     }
     & git -C $cacheRoot checkout --detach FETCH_HEAD 2>&1 | Out-Null
     if (-not $?) {
-        Die "Failed to checkout embed-log ref '$InstallRef'."
+        Die "Failed to checkout embed-log ref '$ResolvedInstallRef'."
     }
     $installSrc = $cacheRoot
     $sha = & git -C $cacheRoot rev-parse --short HEAD 2>$null
@@ -202,7 +218,7 @@ if ($localRoot -and (Test-Path (Join-Path $localRoot 'pyproject.toml')) -and (Te
     $tmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("embed-log-" + [System.Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Force -Path $tmpRoot | Out-Null
     $archivePath = Join-Path $tmpRoot 'embed-log.tar.gz'
-    $archiveUrl = "https://github.com/$OverrideRepo/archive/$InstallRef.tar.gz"
+    $archiveUrl = "https://github.com/$OverrideRepo/archive/$ResolvedInstallRef.tar.gz"
     Write-Info "Downloading $archiveUrl..."
     Invoke-WebRequest -Uri $archiveUrl -OutFile $archivePath
     & $python -c "import tarfile; tarfile.open(r'''$archivePath''', 'r:gz').extractall(r'''$tmpRoot''')"
