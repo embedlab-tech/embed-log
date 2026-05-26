@@ -13,6 +13,10 @@ $Repo = 'krezolekcoder/embed-log'
 $Branch = 'main'
 $RepoUrl = "https://github.com/$Repo.git"
 $MinPy = [Version]'3.10'
+$InstallRefType = if ($env:EMBED_LOG_REF_TYPE) { $env:EMBED_LOG_REF_TYPE } else { 'branch' }
+$InstallRef = if ($env:EMBED_LOG_REF) { $env:EMBED_LOG_REF } else { $Branch }
+$OverrideRepo = if ($env:EMBED_LOG_REPO) { $env:EMBED_LOG_REPO } else { $Repo }
+$OverrideRepoUrl = if ($env:EMBED_LOG_REPO_URL) { $env:EMBED_LOG_REPO_URL } else { "https://github.com/$OverrideRepo.git" }
 
 function Write-Info { Write-Host "embed-log $args" -ForegroundColor Cyan }
 function Write-OK { Write-Host "  ✓ $args" -ForegroundColor Green }
@@ -46,6 +50,28 @@ __version__ = "0.1.0"
 __commit__ = "$Commit"
 "@ | Set-Content -Path $versionFile -Encoding UTF8
 }
+function Write-InstallSourceFile {
+    param(
+        [string]$Dir,
+        [string]$SourceKind,
+        [string]$Repo,
+        [string]$RepoUrl,
+        [string]$RefType,
+        [string]$Ref,
+        [string]$LocalPath
+    )
+    $sourceFile = Join-Path $Dir 'backend\_install_source.py'
+    @"
+# Auto-generated. Install scripts populate these before pipx install.
+__source_kind__ = "$SourceKind"
+__repo__ = "$Repo"
+__repo_url__ = "$RepoUrl"
+__ref_type__ = "$RefType"
+__ref__ = "$Ref"
+__local_path__ = "$LocalPath"
+"@ | Set-Content -Path $sourceFile -Encoding UTF8
+}
+
 
 
 Write-Info "Checking Python..."
@@ -131,15 +157,15 @@ $localRoot = $PSScriptRoot
 if ($localRoot -and (Test-Path (Join-Path $localRoot 'pyproject.toml')) -and (Test-Path (Join-Path $localRoot 'backend'))) {
     Write-Info "Installing from local repository at $localRoot..."
     $installSrc = $localRoot
-    # Capture commit SHA if inside a git repo
     if (Have-Cmd 'git') {
         $sha = & git -C $localRoot rev-parse --short HEAD 2>$null
         if ($sha) {
             Write-VersionFile -Dir $localRoot -Commit $sha
         }
     }
+    Write-InstallSourceFile -Dir $localRoot -SourceKind 'local' -Repo $OverrideRepo -RepoUrl $OverrideRepoUrl -RefType $InstallRefType -Ref $InstallRef -LocalPath $localRoot
 } elseif (Have-Cmd 'git') {
-    Write-Info "Installing embed-log from GitHub ($Repo)..."
+    Write-Info "Installing embed-log from GitHub ($OverrideRepo)..."
     if (-not $env:USERPROFILE) {
         Die "USERPROFILE is not set."
     }
@@ -149,21 +175,34 @@ if ($localRoot -and (Test-Path (Join-Path $localRoot 'pyproject.toml')) -and (Te
     if (Test-Path $cacheRoot) {
         Remove-Item -Recurse -Force $cacheRoot
     }
-    & git clone --depth=1 -b $Branch $RepoUrl $cacheRoot 2>&1 | Out-Null
+    & git init $cacheRoot 2>&1 | Out-Null
     if (-not $?) {
-        Die "Failed to clone embed-log repository."
+        Die "Failed to prepare embed-log cache directory."
+    }
+    & git -C $cacheRoot remote add origin $OverrideRepoUrl 2>&1 | Out-Null
+    if (-not $?) {
+        Die "Failed to configure embed-log repository origin."
+    }
+    & git -C $cacheRoot fetch --depth=1 origin $InstallRef 2>&1 | Out-Null
+    if (-not $?) {
+        Die "Failed to fetch embed-log ref '$InstallRef'."
+    }
+    & git -C $cacheRoot checkout --detach FETCH_HEAD 2>&1 | Out-Null
+    if (-not $?) {
+        Die "Failed to checkout embed-log ref '$InstallRef'."
     }
     $installSrc = $cacheRoot
     $sha = & git -C $cacheRoot rev-parse --short HEAD 2>$null
     if ($sha) {
         Write-VersionFile -Dir $cacheRoot -Commit $sha
     }
+    Write-InstallSourceFile -Dir $cacheRoot -SourceKind 'git' -Repo $OverrideRepo -RepoUrl $OverrideRepoUrl -RefType $InstallRefType -Ref $InstallRef -LocalPath ''
 } else {
     Write-Warn "git not found — downloading source archive instead."
     $tmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("embed-log-" + [System.Guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Force -Path $tmpRoot | Out-Null
     $archivePath = Join-Path $tmpRoot 'embed-log.tar.gz'
-    $archiveUrl = "https://github.com/$Repo/archive/$Branch.tar.gz"
+    $archiveUrl = "https://github.com/$OverrideRepo/archive/$InstallRef.tar.gz"
     Write-Info "Downloading $archiveUrl..."
     Invoke-WebRequest -Uri $archiveUrl -OutFile $archivePath
     & $python -c "import tarfile; tarfile.open(r'''$archivePath''', 'r:gz').extractall(r'''$tmpRoot''')"
@@ -176,6 +215,7 @@ if ($localRoot -and (Test-Path (Join-Path $localRoot 'pyproject.toml')) -and (Te
     }
     $installSrc = $srcDir.FullName
     Write-VersionFile -Dir $srcDir.FullName -Commit 'archive'
+    Write-InstallSourceFile -Dir $srcDir.FullName -SourceKind 'archive' -Repo $OverrideRepo -RepoUrl $OverrideRepoUrl -RefType $InstallRefType -Ref $InstallRef -LocalPath ''
 }
 
 try {

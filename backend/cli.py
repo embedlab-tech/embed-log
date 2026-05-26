@@ -141,7 +141,9 @@ def _detected_serial_ports() -> list[dict[str, str]]:
         if not device:
             continue
         desc = (info.description or "").strip()
-        if device.startswith("/dev/tty.") and "/dev/cu." + device.split("/dev/tty.", 1)[1] not in {p["device"] for p in ports}:
+        if device.startswith("/dev/tty.") and "/dev/cu." + device.split("/dev/tty.", 1)[
+            1
+        ] not in {p["device"] for p in ports}:
             continue
         ports.append({"device": device, "label": desc})
 
@@ -170,15 +172,24 @@ def _choose_uart_port(
 ) -> str:
     ports = _detected_serial_ports()
     if not ports:
-        return _prompt("No serial ports detected. Enter serial port path manually", input_fn=input_fn)
+        return _prompt(
+            "No serial ports detected. Enter serial port path manually",
+            input_fn=input_fn,
+        )
 
     print("Detected serial ports:")
     for idx, port in enumerate(ports, start=1):
-        suffix = f"  ({port['label']})" if port["label"] and port["label"] != "n/a" else ""
+        suffix = (
+            f"  ({port['label']})" if port["label"] and port["label"] != "n/a" else ""
+        )
         print(f"  {idx}) {port['device']}{suffix}")
 
     while True:
-        choice = _prompt("Choose serial port number or type a manual path", default="1", input_fn=input_fn)
+        choice = _prompt(
+            "Choose serial port number or type a manual path",
+            default="1",
+            input_fn=input_fn,
+        )
         if choice.isdigit():
             index = int(choice)
             if 1 <= index <= len(ports):
@@ -192,17 +203,26 @@ def _build_wizard_yaml(config: dict) -> str:
     return yaml.safe_dump(config, sort_keys=False, allow_unicode=True)
 
 
-def _run_create_config(args: argparse.Namespace, *, input_fn: Callable[[str], str] = input) -> int:
+def _run_create_config(
+    args: argparse.Namespace, *, input_fn: Callable[[str], str] = input
+) -> int:
     print("embed-log config wizard")
     print("Press Enter to accept defaults.")
     print("")
-    output_path = Path(_prompt("Config file path", default=args.output, input_fn=input_fn))
+    output_path = Path(
+        _prompt("Config file path", default=args.output, input_fn=input_fn)
+    )
     if output_path.exists() and not args.force:
-        print(f"file already exists: {output_path}. Use --force to overwrite.", file=sys.stderr)
+        print(
+            f"file already exists: {output_path}. Use --force to overwrite.",
+            file=sys.stderr,
+        )
         return 1
 
     app_name = _prompt("App name", default="embed-log", input_fn=input_fn)
-    open_browser = _prompt_yes_no("Open browser automatically on startup?", default=False, input_fn=input_fn)
+    open_browser = _prompt_yes_no(
+        "Open browser automatically on startup?", default=False, input_fn=input_fn
+    )
     logs_dir = _prompt("Log directory", default="logs/", input_fn=input_fn)
     tab_count = _prompt_int("How many tabs?", default=1, minimum=1, input_fn=input_fn)
 
@@ -215,18 +235,32 @@ def _run_create_config(args: argparse.Namespace, *, input_fn: Callable[[str], st
     for tab_index in range(tab_count):
         tab_default = f"Tab {tab_index + 1}"
         while True:
-            tab_label = _prompt(f"Tab {tab_index + 1} label", default=tab_default, input_fn=input_fn).strip()
+            tab_label = _prompt(
+                f"Tab {tab_index + 1} label", default=tab_default, input_fn=input_fn
+            ).strip()
             if tab_label:
                 break
             print("Tab label cannot be empty.")
 
-        pane_count = _prompt_int(f"How many panes in \"{tab_label}\"?", default=1, minimum=1, maximum=2, input_fn=input_fn)
+        pane_count = _prompt_int(
+            f'How many panes in "{tab_label}"?',
+            default=1,
+            minimum=1,
+            maximum=2,
+            input_fn=input_fn,
+        )
         pane_names: list[str] = []
 
         for pane_index in range(pane_count):
-            fallback_name = _slug_name(f"{tab_label}_{pane_index + 1}", f"SOURCE_{len(sources) + 1}")
+            fallback_name = _slug_name(
+                f"{tab_label}_{pane_index + 1}", f"SOURCE_{len(sources) + 1}"
+            )
             while True:
-                source_name = _prompt(f"Pane {pane_index + 1} source name", default=fallback_name, input_fn=input_fn).strip()
+                source_name = _prompt(
+                    f"Pane {pane_index + 1} source name",
+                    default=fallback_name,
+                    input_fn=input_fn,
+                ).strip()
                 source_name = _slug_name(source_name, fallback_name)
                 if source_name in used_names:
                     print(f"Source name {source_name!r} is already used.")
@@ -235,7 +269,15 @@ def _run_create_config(args: argparse.Namespace, *, input_fn: Callable[[str], st
                 break
 
             while True:
-                source_type = _prompt(f"Source type for {source_name}", default="uart", input_fn=input_fn).strip().lower()
+                source_type = (
+                    _prompt(
+                        f"Source type for {source_name}",
+                        default="uart",
+                        input_fn=input_fn,
+                    )
+                    .strip()
+                    .lower()
+                )
                 if source_type in {"uart", "udp"}:
                     break
                 print("Source type must be uart or udp.")
@@ -252,13 +294,24 @@ def _run_create_config(args: argparse.Namespace, *, input_fn: Callable[[str], st
                         continue
                     used_uart_ports.add(port)
                     break
-                baudrate = _prompt_int(f"Baudrate for {source_name}", default=115200, minimum=1, input_fn=input_fn)
+                baudrate = _prompt_int(
+                    f"Baudrate for {source_name}",
+                    default=115200,
+                    minimum=1,
+                    input_fn=input_fn,
+                )
                 source_cfg["port"] = port
                 source_cfg["baudrate"] = baudrate
             else:
                 while True:
                     udp_default = 6000 + len(used_udp_ports)
-                    udp_port = _prompt_int(f"UDP port for {source_name}", default=udp_default, minimum=1, maximum=65535, input_fn=input_fn)
+                    udp_port = _prompt_int(
+                        f"UDP port for {source_name}",
+                        default=udp_default,
+                        minimum=1,
+                        maximum=65535,
+                        input_fn=input_fn,
+                    )
                     if udp_port in used_udp_ports:
                         print(f"UDP port {udp_port} is already used.")
                         continue
@@ -305,14 +358,18 @@ def _run_validate(args: argparse.Namespace) -> int:
         return 2
 
     if args.json:
-        print(json.dumps({
-            "ok": True,
-            "config": args.config,
-            "sources": len(cfg.get("sources", [])),
-            "injects": len(cfg.get("injects", [])),
-            "forwards": len(cfg.get("forwards", [])),
-            "tabs": len(cfg.get("tabs", [])),
-        }))
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "config": args.config,
+                    "sources": len(cfg.get("sources", [])),
+                    "injects": len(cfg.get("injects", [])),
+                    "forwards": len(cfg.get("forwards", [])),
+                    "tabs": len(cfg.get("tabs", [])),
+                }
+            )
+        )
         return 0
 
     print("Config OK")
@@ -321,13 +378,17 @@ def _run_validate(args: argparse.Namespace) -> int:
     print(f"  forwards: {len(cfg.get('forwards', []))}")
     print(f"  tabs: {len(cfg.get('tabs', []))}")
     return 0
+
+
 def _run_sessions(argv: list[str]) -> int:
     # Shared arguments that each subcommand inherits
     shared = argparse.ArgumentParser(add_help=False)
-    shared.add_argument("--log-dir", default="logs/",
-                        help="log directory (default: logs/)")
-    shared.add_argument("--json", action="store_true",
-                        help="machine-readable JSON output")
+    shared.add_argument(
+        "--log-dir", default="logs/", help="log directory (default: logs/)"
+    )
+    shared.add_argument(
+        "--json", action="store_true", help="machine-readable JSON output"
+    )
 
     parser = argparse.ArgumentParser(
         prog="embed-log sessions",
@@ -340,119 +401,173 @@ def _run_sessions(argv: list[str]) -> int:
             "  sessions export <session-id>         export HTML for one session\n"
             "  sessions export --missing            export HTML for all sessions without it\n"
             "  sessions snippet list <session-id>   list saved selection snippets\n"
-            "  sessions snippet show <session-id>   show the most recent snippet\n"
+            "  sessions snippet show <session-id>   show the most recent snippet \n"
             "  sessions delete --all                delete all sessions\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sub = parser.add_subparsers(dest="command")
 
-    p_list = sub.add_parser("list", parents=[shared],
-                            help="list recorded sessions")
+    p_list = sub.add_parser("list", parents=[shared], help="list recorded sessions")
     p_list.add_argument("--sort", choices=["date", "name"], default="date")
     p_list.add_argument("--limit", type=int, default=None)
 
-    p_info = sub.add_parser("info", parents=[shared],
-                            help="show session details")
+    p_info = sub.add_parser("info", parents=[shared], help="show session details")
     p_info.add_argument("session_id")
 
-    p_logs = sub.add_parser("logs", parents=[shared],
-                            help="print session log files")
+    p_logs = sub.add_parser("logs", parents=[shared], help="print session log files")
     p_logs.add_argument("session_id")
     p_logs.add_argument("--pane", default=None, help="filter by pane name")
 
-    p_export = sub.add_parser("export", parents=[shared],
-                              help="export session data (HTML or merged raw log)",
-                              epilog=(
-                                  "Examples:\n"
-                                  "  sessions export <session-id>\n"
-                                  "  sessions export <session-id> --format raw\n"
-                                  "  sessions export <session-id> --format raw --after 1h\n"
-                                  "  sessions export --missing\n"
-                                  "  sessions export <session-id> --format raw --first 10m\n"
-                                  "  sessions export <session-id> --format raw --last 30m\n"
-                                  "  sessions export <session-id> --format raw --pane SENSOR_A\n"
-                                  "  sessions export <session-id> --format raw --after 5m --output recent.log"
-                              ),
-                              formatter_class=argparse.RawDescriptionHelpFormatter)
-    p_export.add_argument("session_id", nargs="?", default=None,
-                           help="session ID or short alias to export")
-    p_export.add_argument("--missing", action="store_true",
-                           help="export all sessions that don't have HTML yet")
-    p_export.add_argument("--output", default=None,
-                          help="output file path")
-    p_export.add_argument("--format", choices=["html", "raw"], default="html",
-                          help="output format: html (default) or raw merged log")
-    p_export.add_argument("--after", default=None,
-                          help="include lines after this time (relative: 5m, 2h, 30s or ISO timestamp)")
-    p_export.add_argument("--before", default=None,
-                          help="include lines before this time (relative or ISO, default: end of data)")
-    p_export.add_argument("--first", default=None,
-                          help="include only the first N minutes/hours of the session (e.g. 10m, 1h)")
-    p_export.add_argument("--last", default=None,
-                          help="include only the last N minutes/hours of the session (e.g. 30m, 15m)")
-    p_export.add_argument("--pane", action="append", default=None, dest="panes",
-                          help="include only this pane (repeatable, default: all)")
+    p_export = sub.add_parser(
+        "export",
+        parents=[shared],
+        help="export session data (HTML or merged raw log)",
+        epilog=(
+            "Examples:\n"
+            "  sessions export <session-id>\n"
+            "  sessions export <session-id> --format raw\n"
+            "  sessions export <session-id> --format raw --after 1h\n"
+            "  sessions export --missing\n"
+            "  sessions export <session-id> --format raw --first 10m\n"
+            "  sessions export <session-id> --format raw --last 30m\n"
+            "  sessions export <session-id> --format raw --pane SENSOR_A\n"
+            "  sessions export <session-id> --format raw --after 5m --output recent.log"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_export.add_argument(
+        "session_id",
+        nargs="?",
+        default=None,
+        help="session ID or short alias to export",
+    )
+    p_export.add_argument(
+        "--missing",
+        action="store_true",
+        help="export all sessions that don't have HTML yet",
+    )
+    p_export.add_argument("--output", default=None, help="output file path")
+    p_export.add_argument(
+        "--format",
+        choices=["html", "raw"],
+        default="html",
+        help="output format: html (default) or raw merged log",
+    )
+    p_export.add_argument(
+        "--after",
+        default=None,
+        help="include lines after this time (relative: 5m, 2h, 30s or ISO timestamp)",
+    )
+    p_export.add_argument(
+        "--before",
+        default=None,
+        help="include lines before this time (relative or ISO, default: end of data)",
+    )
+    p_export.add_argument(
+        "--first",
+        default=None,
+        help="include only the first N minutes/hours of the session (e.g. 10m, 1h)",
+    )
+    p_export.add_argument(
+        "--last",
+        default=None,
+        help="include only the last N minutes/hours of the session (e.g. 30m, 15m)",
+    )
+    p_export.add_argument(
+        "--pane",
+        action="append",
+        default=None,
+        dest="panes",
+        help="include only this pane (repeatable, default: all)",
+    )
 
-    p_open = sub.add_parser("open", parents=[shared],
-                            help="open session HTML in the default browser")
+    p_open = sub.add_parser(
+        "open", parents=[shared], help="open session HTML in the default browser"
+    )
     p_open.add_argument("session_id")
 
     # ── delete ──
-    p_delete = sub.add_parser("delete", parents=[shared],
-                               help="delete recorded session(s)",
-                               epilog=(
-                                   "Examples:\n"
-                                   "  sessions delete <session-id>\n"
-                                   "  sessions delete <session-id> --yes\n"
-                                   "  sessions delete --older-than 7d\n"
-                                   "  sessions delete --older-than 30d --yes\n"
-                                   "  sessions delete --all\n"
-                               ),
-                               formatter_class=argparse.RawDescriptionHelpFormatter)
-    p_delete.add_argument("session_id", nargs="?", default=None,
-                           help="session ID or short alias to delete")
-    p_delete.add_argument("--older-than", default=None,
-                           help="delete sessions older than this duration (e.g. 7d, 30d, 24h)")
-    p_delete.add_argument("--all", action="store_true",
-                           help="delete all sessions")
-    p_delete.add_argument("--yes", "-y", action="store_true",
-                           help="skip confirmation prompt")
+    p_delete = sub.add_parser(
+        "delete",
+        parents=[shared],
+        help="delete recorded session(s)",
+        epilog=(
+            "Examples:\n"
+            "  sessions delete <session-id>\n"
+            "  sessions delete <session-id> --yes\n"
+            "  sessions delete --older-than 7d\n"
+            "  sessions delete --older-than 30d --yes\n"
+            "  sessions delete --all\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_delete.add_argument(
+        "session_id",
+        nargs="?",
+        default=None,
+        help="session ID or short alias to delete",
+    )
+    p_delete.add_argument(
+        "--older-than",
+        default=None,
+        help="delete sessions older than this duration (e.g. 7d, 30d, 24h)",
+    )
+    p_delete.add_argument("--all", action="store_true", help="delete all sessions")
+    p_delete.add_argument(
+        "--yes", "-y", action="store_true", help="skip confirmation prompt"
+    )
 
     # ── snippet ──
-    p_snippet = sub.add_parser("snippet", parents=[shared],
-                                help="manage selection snippets for a session",
-                                epilog=(
-                                    "Examples:\n"
-                                    "  sessions snippet list <session-id>\n"
-                                    "  sessions snippet show <session-id>\n"
-                                    "  sessions snippet show <session-id> --index 2\n"
-                                    "  sessions snippet show <session-id> <snippet-file>\n"
-                                    "  sessions snippet delete <session-id> --all\n"
-                                    "  sessions snippet delete <session-id> --index 2\n"
-                                ),
-                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p_snippet = sub.add_parser(
+        "snippet",
+        parents=[shared],
+        help="manage selection snippets for a session",
+        epilog=(
+            "Examples:\n"
+            "  sessions snippet list <session-id>\n"
+            "  sessions snippet show <session-id>\n"
+            "  sessions snippet show <session-id> --index 2\n"
+            "  sessions snippet show <session-id> <snippet-file>\n"
+            "  sessions snippet delete <session-id> --all\n"
+            "  sessions snippet delete <session-id> --index 2\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     p_snip_sub = p_snippet.add_subparsers(dest="snippet_cmd")
 
-    p_snip_list = p_snip_sub.add_parser("list", parents=[shared], help="list all snippets for a session")
+    p_snip_list = p_snip_sub.add_parser(
+        "list", parents=[shared], help="list all snippets for a session"
+    )
     p_snip_list.add_argument("session_id")
 
-    p_snip_show = p_snip_sub.add_parser("show", parents=[shared], help="print snippet content to stdout")
+    p_snip_show = p_snip_sub.add_parser(
+        "show", parents=[shared], help="print snippet content to stdout"
+    )
     p_snip_show.add_argument("session_id")
-    p_snip_show.add_argument("snippet_id", nargs="?", default=None,
-                              help="snippet filename or prefix (default: use --last)")
-    p_snip_show.add_argument("--last", action="store_true",
-                              help="show the most recent snippet")
-    p_snip_show.add_argument("--index", type=int, default=None,
-                              help="snippet index (1-based, from list)")
+    p_snip_show.add_argument(
+        "snippet_id",
+        nargs="?",
+        default=None,
+        help="snippet filename or prefix (default: use --last)",
+    )
+    p_snip_show.add_argument(
+        "--last", action="store_true", help="show the most recent snippet"
+    )
+    p_snip_show.add_argument(
+        "--index", type=int, default=None, help="snippet index (1-based, from list)"
+    )
 
-    p_snip_delete = p_snip_sub.add_parser("delete", parents=[shared], help="delete snippet(s)")
+    p_snip_delete = p_snip_sub.add_parser(
+        "delete", parents=[shared], help="delete snippet(s)"
+    )
     p_snip_delete.add_argument("session_id")
-    p_snip_delete.add_argument("--index", type=int, default=None,
-                                help="delete by index (1-based, from list)")
-    p_snip_delete.add_argument("--all", action="store_true",
-                                help="delete all snippets for this session")
-
+    p_snip_delete.add_argument(
+        "--index", type=int, default=None, help="delete by index (1-based, from list)"
+    )
+    p_snip_delete.add_argument(
+        "--all", action="store_true", help="delete all snippets for this session"
+    )
 
     args = parser.parse_args(argv)
 
@@ -567,12 +682,22 @@ def _format_duration(seconds: float) -> str:
 def _parse_duration(text: str) -> float | None:
     """Parse a human-friendly duration like 5m, 2h, 30s, 1d into seconds."""
     import re as _re
+
     m = _re.match(r"^(\d+)\s*(s|sec|m|min|h|hr|d|day)s?$", text.strip(), _re.IGNORECASE)
     if not m:
         return None
     value = int(m[1])
     unit = m[2].lower()
-    multipliers = {"s": 1, "sec": 1, "m": 60, "min": 60, "h": 3600, "hr": 3600, "d": 86400, "day": 86400}
+    multipliers = {
+        "s": 1,
+        "sec": 1,
+        "m": 60,
+        "min": 60,
+        "h": 3600,
+        "hr": 3600,
+        "d": 86400,
+        "day": 86400,
+    }
     return value * multipliers.get(unit, 1)
 
 
@@ -591,7 +716,9 @@ def _session_stats(session_dir: Path, manifest: dict | None) -> dict:
         if fp.is_file():
             file_list.append(fp)
     if not file_list:
-        file_list = sorted(session_dir.glob("*.log")) + sorted(session_dir.glob("*.txt"))
+        file_list = sorted(session_dir.glob("*.log")) + sorted(
+            session_dir.glob("*.txt")
+        )
 
     for fp in file_list:
         lines += _count_lines(fp)
@@ -622,6 +749,7 @@ def _session_stats(session_dir: Path, manifest: dict | None) -> dict:
     if time_start and time_end:
         # ISO timestamps sort lexicographically — convert to datetime for delta
         import datetime as _dt
+
         try:
             t1 = _dt.datetime.fromisoformat(time_start.rstrip("Z"))
             t2 = _dt.datetime.fromisoformat(time_end.rstrip("Z"))
@@ -687,7 +815,9 @@ def _run_sessions_list(log_dir: Path, args: argparse.Namespace) -> int:
         print(f"No sessions found in {log_dir}")
         return 0
 
-    print(f"{'ALIAS':<6s}  {'ID':<40s}  {'APP':<16s}  {'LINES':<6s}  {'SIZE':<6s}  {'HTML'}")
+    print(
+        f"{'ALIAS':<6s}  {'ID':<40s}  {'APP':<16s}  {'LINES':<6s}  {'SIZE':<6s}  {'HTML'}"
+    )
     print("-" * 90)
     for m in sessions:
         print(_format_session_row(m))
@@ -783,7 +913,9 @@ def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
     # ── --missing mode: export every session without existing HTML ──
     if args.missing and not args.session_id:
         if args.format != "html":
-            print("error: --missing is only supported for --format html", file=sys.stderr)
+            print(
+                "error: --missing is only supported for --format html", file=sys.stderr
+            )
             return 1
         sessions = _iter_sessions(log_dir)
         if not sessions:
@@ -801,9 +933,17 @@ def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
                 continue
             # Re-invoke the single-session export path
             sub_args = argparse.Namespace(
-                session_id=sid, output=None, format="html",
-                after=None, before=None, first=None, last=None,
-                panes=None, missing=False, json=args.json, log_dir=str(log_dir),
+                session_id=sid,
+                output=None,
+                format="html",
+                after=None,
+                before=None,
+                first=None,
+                last=None,
+                panes=None,
+                missing=False,
+                json=args.json,
+                log_dir=str(log_dir),
             )
             rc = _run_sessions_export(log_dir, sub_args)
             if rc == 0:
@@ -830,7 +970,10 @@ def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
 
     source_files = manifest.get("source_files", {})
     if not source_files:
-        print(f"No source files in manifest for session {args.session_id}", file=sys.stderr)
+        print(
+            f"No source files in manifest for session {args.session_id}",
+            file=sys.stderr,
+        )
         return 1
 
     # ── Raw format: merge and filter log lines ──
@@ -843,6 +986,7 @@ def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
             panes = sorted(source_files.keys())
         # Parse time filters
         import datetime as _dt
+
         after_dt: _dt.datetime | None = None
         before_dt: _dt.datetime | None = None
         now_local = _dt.datetime.now()
@@ -864,7 +1008,10 @@ def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
         if args.last:
             time_conflicts.append("--last")
         if len(time_conflicts) > 2:
-            print(f"Conflicting time options: {' and '.join(time_conflicts)}", file=sys.stderr)
+            print(
+                f"Conflicting time options: {' and '.join(time_conflicts)}",
+                file=sys.stderr,
+            )
             return 1
         if args.first and args.last:
             print("--first and --last are mutually exclusive", file=sys.stderr)
@@ -873,10 +1020,16 @@ def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
         if args.first:
             secs = _parse_duration(args.first)
             if secs is None:
-                print(f"Invalid --first value: {args.first!r} (use e.g. 10m, 1h)", file=sys.stderr)
+                print(
+                    f"Invalid --first value: {args.first!r} (use e.g. 10m, 1h)",
+                    file=sys.stderr,
+                )
                 return 1
             if not time_start:
-                print("Cannot use --first: session has no recorded start time", file=sys.stderr)
+                print(
+                    "Cannot use --first: session has no recorded start time",
+                    file=sys.stderr,
+                )
                 return 1
             try:
                 after_dt = _dt.datetime.fromisoformat(time_start.rstrip("Z"))
@@ -888,10 +1041,16 @@ def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
         elif args.last:
             secs = _parse_duration(args.last)
             if secs is None:
-                print(f"Invalid --last value: {args.last!r} (use e.g. 30m, 15m)", file=sys.stderr)
+                print(
+                    f"Invalid --last value: {args.last!r} (use e.g. 30m, 15m)",
+                    file=sys.stderr,
+                )
                 return 1
             if not time_end:
-                print("Cannot use --last: session has no recorded end time", file=sys.stderr)
+                print(
+                    "Cannot use --last: session has no recorded end time",
+                    file=sys.stderr,
+                )
                 return 1
             try:
                 before_dt = _dt.datetime.fromisoformat(time_end.rstrip("Z"))
@@ -908,20 +1067,32 @@ def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
                 try:
                     after_dt = _dt.datetime.fromisoformat(args.after)
                 except ValueError:
-                    print(f"Invalid --after value: {args.after!r} (use 5m, 2h, or ISO)", file=sys.stderr)
+                    print(
+                        f"Invalid --after value: {args.after!r} (use 5m, 2h, or ISO)",
+                        file=sys.stderr,
+                    )
                     return 1
 
         if args.before:
             secs = _parse_duration(args.before)
             if secs is not None:
-                before_dt = now_local - _dt.timedelta(seconds=secs) if not args.after else (
-                    after_dt + _dt.timedelta(seconds=secs) if after_dt else now_local - _dt.timedelta(seconds=secs)
+                before_dt = (
+                    now_local - _dt.timedelta(seconds=secs)
+                    if not args.after
+                    else (
+                        after_dt + _dt.timedelta(seconds=secs)
+                        if after_dt
+                        else now_local - _dt.timedelta(seconds=secs)
+                    )
                 )
             else:
                 try:
                     before_dt = _dt.datetime.fromisoformat(args.before)
                 except ValueError:
-                    print(f"Invalid --before value: {args.before!r} (use 5m, 2h, or ISO)", file=sys.stderr)
+                    print(
+                        f"Invalid --before value: {args.before!r} (use 5m, 2h, or ISO)",
+                        file=sys.stderr,
+                    )
                     return 1
 
         # Collect and filter lines
@@ -949,7 +1120,9 @@ def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
                             continue
                         if before_dt and ts_dt > before_dt:
                             continue
-                        entries.append({"ts": ts_str, "line": stripped, "pane": pane_name})
+                        entries.append(
+                            {"ts": ts_str, "line": stripped, "pane": pane_name}
+                        )
             except OSError as exc:
                 print(f"Error reading {fp}: {exc}", file=sys.stderr)
                 return 1
@@ -1001,13 +1174,18 @@ def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
 
     # Update manifest
     from datetime import datetime as _dt2
+
     manifest["session_html"] = str(output)
     manifest["html_status"] = "ready"
     manifest["html_updated_at"] = _dt2.now().astimezone().isoformat(timespec="seconds")
-    (sdir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    (sdir / "manifest.json").write_text(
+        json.dumps(manifest, indent=2), encoding="utf-8"
+    )
 
     print(f"Exported: {output}")
     return 0
+
+
 def _run_sessions_open(log_dir: Path, args: argparse.Namespace) -> int:
     sdir = _read_session_dir(log_dir, args.session_id)
     if not sdir:
@@ -1024,9 +1202,12 @@ def _run_sessions_open(log_dir: Path, args: argparse.Namespace) -> int:
     print(f"Opened: {html_path}")
     return 0
 
+
 def _run_sessions_snippet(log_dir: Path, args: argparse.Namespace) -> int:
     if not hasattr(args, "snippet_cmd") or not args.snippet_cmd:
-        print("error: specify a snippet command: list, show, or delete", file=sys.stderr)
+        print(
+            "error: specify a snippet command: list, show, or delete", file=sys.stderr
+        )
         return 1
 
     sdir = _read_session_dir(log_dir, args.session_id)
@@ -1050,9 +1231,12 @@ def _run_sessions_snippet(log_dir: Path, args: argparse.Namespace) -> int:
             panes = ",".join(s.get("panes", []))
             lines = s.get("line_count", "?")
             print(f"  {i}. {s['file']}")
-            print(f"       saved: {saved}  scope: {scope}  panes: {panes}  lines: {lines}")
+            print(
+                f"       saved: {saved}  scope: {scope}  panes: {panes}  lines: {lines}"
+            )
         if args.json:
             import json as _json
+
             print()
             print(_json.dumps(snippets, indent=2))
         return 0
@@ -1060,19 +1244,29 @@ def _run_sessions_snippet(log_dir: Path, args: argparse.Namespace) -> int:
     idx = None
     if args.snippet_cmd == "show":
         if args.snippet_id:
-            matches = [i for i, s in enumerate(snippets) if s["file"].endswith(args.snippet_id) or args.snippet_id in s["file"]]
+            matches = [
+                i
+                for i, s in enumerate(snippets)
+                if s["file"].endswith(args.snippet_id) or args.snippet_id in s["file"]
+            ]
             if len(matches) == 0:
                 print(f"No snippet matching {args.snippet_id!r}", file=sys.stderr)
                 return 1
             if len(matches) > 1:
-                print(f"Multiple snippets match {args.snippet_id!r}, use --index to pick:", file=sys.stderr)
+                print(
+                    f"Multiple snippets match {args.snippet_id!r}, use --index to pick:",
+                    file=sys.stderr,
+                )
                 for m in matches:
-                    print(f"  {m+1}. {snippets[m]['file']}", file=sys.stderr)
+                    print(f"  {m + 1}. {snippets[m]['file']}", file=sys.stderr)
                 return 1
             idx = matches[0]
         elif args.index is not None:
             if args.index < 1 or args.index > len(snippets):
-                print(f"Index {args.index} out of range (1-{len(snippets)})", file=sys.stderr)
+                print(
+                    f"Index {args.index} out of range (1-{len(snippets)})",
+                    file=sys.stderr,
+                )
                 return 1
             idx = args.index - 1
         else:
@@ -1095,6 +1289,7 @@ def _run_sessions_snippet(log_dir: Path, args: argparse.Namespace) -> int:
             snippets_dir = sdir / "snippets"
             if snippets_dir.is_dir():
                 import shutil
+
                 shutil.rmtree(snippets_dir)
             manifest["snippets"] = []
             mf_path = sdir / "manifest.json"
@@ -1104,7 +1299,10 @@ def _run_sessions_snippet(log_dir: Path, args: argparse.Namespace) -> int:
 
         if args.index is not None:
             if args.index < 1 or args.index > len(snippets):
-                print(f"Index {args.index} out of range (1-{len(snippets)})", file=sys.stderr)
+                print(
+                    f"Index {args.index} out of range (1-{len(snippets)})",
+                    file=sys.stderr,
+                )
                 return 1
             idx = args.index - 1
             s = snippets[idx]
@@ -1115,7 +1313,7 @@ def _run_sessions_snippet(log_dir: Path, args: argparse.Namespace) -> int:
             manifest["snippets"] = snippets
             mf_path = sdir / "manifest.json"
             mf_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-            print(f"Deleted snippet {idx+1}: {s['file']}")
+            print(f"Deleted snippet {idx + 1}: {s['file']}")
             return 0
 
         print("error: specify --index N or --all to delete", file=sys.stderr)
@@ -1132,7 +1330,9 @@ def _run_sessions_delete(log_dir: Path, args: argparse.Namespace) -> int:
     all_ = args.all
     modes = [spec, older, all_]
     if modes.count(True) > 1:
-        print("error: specify one of session_id, --older-than, or --all", file=sys.stderr)
+        print(
+            "error: specify one of session_id, --older-than, or --all", file=sys.stderr
+        )
         return 1
     if modes.count(True) == 0:
         print("error: specify a session ID, --older-than, or --all", file=sys.stderr)
@@ -1166,7 +1366,10 @@ def _run_sessions_delete(log_dir: Path, args: argparse.Namespace) -> int:
     else:  # --older-than
         secs = _parse_duration(args.older_than)
         if secs is None:
-            print(f"Invalid duration: {args.older_than!r} (use e.g. 7d, 30d, 24h)", file=sys.stderr)
+            print(
+                f"Invalid duration: {args.older_than!r} (use e.g. 7d, 30d, 24h)",
+                file=sys.stderr,
+            )
             return 1
         cutoff = now - secs
         to_delete = []
@@ -1256,16 +1459,19 @@ def _build_parser() -> argparse.ArgumentParser:
         help="interactively create a config file",
         description="Interactively create an embed-log YAML config.",
         epilog=(
-            "Examples:\n"
-            "  embed-log create-config\n"
-            "  embed-log create-config --force\n"
+            "Examples:\n  embed-log create-config\n  embed-log create-config --force\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--output", "-o", default="embed-log.yml",
-                   help="output config path (default: embed-log.yml)")
-    p.add_argument("--force", action="store_true",
-                   help="overwrite if file already exists")
+    p.add_argument(
+        "--output",
+        "-o",
+        default="embed-log.yml",
+        help="output config path (default: embed-log.yml)",
+    )
+    p.add_argument(
+        "--force", action="store_true", help="overwrite if file already exists"
+    )
 
     # ── validate ──
     p = sub.add_parser(
@@ -1279,10 +1485,13 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--config", "-c", default="embed-log.yml",
-                   help="config file path (default: embed-log.yml)")
-    p.add_argument("--json", action="store_true",
-                   help="machine-readable JSON output")
+    p.add_argument(
+        "--config",
+        "-c",
+        default="embed-log.yml",
+        help="config file path (default: embed-log.yml)",
+    )
+    p.add_argument("--json", action="store_true", help="machine-readable JSON output")
 
     # ── run ──
     p = sub.add_parser(
@@ -1301,48 +1510,141 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--config", "-c", metavar="FILE", default=None,
-                   help="YAML config file. CLI flags override config values.")
-    p.add_argument("--source", nargs=2, action="append", metavar=("NAME", "TYPE"),
-                   dest="sources", default=[],
-                   help="NAME uart:/dev/path[@baud] | udp:PORT (repeatable)")
-    p.add_argument("--inject", nargs=2, action="append", metavar=("NAME", "PORT"),
-                   dest="injects", default=[],
-                   help="NAME PORT — TCP inject/stream port (repeatable)")
-    p.add_argument("--forward", nargs=2, action="append", metavar=("NAME", "PORT"),
-                   dest="forwards", default=[],
-                   help="NAME PORT — read-only TCP forward port (repeatable)")
-    p.add_argument("--tab", nargs="+", action="append", metavar="ARG",
-                   dest="tabs", default=[],
-                   help="LABEL SOURCE [SOURCE] — group 1-2 sources into a UI tab")
-    p.add_argument("--baudrate", metavar="BAUD", type=int, default=None,
-                   help="default UART baud rate")
-    p.add_argument("--log-dir", metavar="DIR", default=None, dest="log_dir",
-                   help="log files output directory")
-    p.add_argument("--host", metavar="HOST", default=None,
-                   help="bind address")
-    p.add_argument("--ws-port", metavar="PORT", type=int, default=None, dest="ws_port",
-                   help="HTTP/WebSocket port (0 = disabled)")
-    p.add_argument("--ws-ui", metavar="FILE", default=None, dest="ws_ui",
-                   help="custom UI HTML file path")
-    p.add_argument("--app-name", metavar="NAME", default=None, dest="app_name",
-                   help="name shown in UI top bar")
-    p.add_argument("--open-browser", dest="open_browser", action="store_const",
-                   const=True, default=None, help="open browser on startup")
-    p.add_argument("--no-open-browser", dest="open_browser", action="store_const",
-                   const=False, help="do not open browser (overrides config)")
-    p.add_argument("--default-light-theme", dest="default_light_theme", default=None,
-                   help="light palette key")
-    p.add_argument("--default-dark-theme", dest="default_dark_theme", default=None,
-                   help="dark palette key")
-    p.add_argument("--verbosity", choices=["quiet", "events", "full"], default=None,
-                   help="logging verbosity mode")
-    p.add_argument("-v", "--verbose", action="store_const", const=True, default=None,
-                   help="shortcut for --verbosity events")
-    p.add_argument("--verbose-full", action="store_const", const=True, default=None,
-                   help="shortcut for --verbosity full")
-    p.add_argument("--job-id", metavar="ID", default=None, dest="job_id",
-                   help="CI/job identifier for session naming")
+    p.add_argument(
+        "--config",
+        "-c",
+        metavar="FILE",
+        default=None,
+        help="YAML config file. CLI flags override config values.",
+    )
+    p.add_argument(
+        "--source",
+        nargs=2,
+        action="append",
+        metavar=("NAME", "TYPE"),
+        dest="sources",
+        default=[],
+        help="NAME uart:/dev/path[@baud] | udp:PORT (repeatable)",
+    )
+    p.add_argument(
+        "--inject",
+        nargs=2,
+        action="append",
+        metavar=("NAME", "PORT"),
+        dest="injects",
+        default=[],
+        help="NAME PORT — TCP inject/stream port (repeatable)",
+    )
+    p.add_argument(
+        "--forward",
+        nargs=2,
+        action="append",
+        metavar=("NAME", "PORT"),
+        dest="forwards",
+        default=[],
+        help="NAME PORT — read-only TCP forward port (repeatable)",
+    )
+    p.add_argument(
+        "--tab",
+        nargs="+",
+        action="append",
+        metavar="ARG",
+        dest="tabs",
+        default=[],
+        help="LABEL SOURCE [SOURCE] — group 1-2 sources into a UI tab",
+    )
+    p.add_argument(
+        "--baudrate",
+        metavar="BAUD",
+        type=int,
+        default=None,
+        help="default UART baud rate",
+    )
+    p.add_argument(
+        "--log-dir",
+        metavar="DIR",
+        default=None,
+        dest="log_dir",
+        help="log files output directory",
+    )
+    p.add_argument("--host", metavar="HOST", default=None, help="bind address")
+    p.add_argument(
+        "--ws-port",
+        metavar="PORT",
+        type=int,
+        default=None,
+        dest="ws_port",
+        help="HTTP/WebSocket port (0 = disabled)",
+    )
+    p.add_argument(
+        "--ws-ui",
+        metavar="FILE",
+        default=None,
+        dest="ws_ui",
+        help="custom UI HTML file path",
+    )
+    p.add_argument(
+        "--app-name",
+        metavar="NAME",
+        default=None,
+        dest="app_name",
+        help="name shown in UI top bar",
+    )
+    p.add_argument(
+        "--open-browser",
+        dest="open_browser",
+        action="store_const",
+        const=True,
+        default=None,
+        help="open browser on startup",
+    )
+    p.add_argument(
+        "--no-open-browser",
+        dest="open_browser",
+        action="store_const",
+        const=False,
+        help="do not open browser (overrides config)",
+    )
+    p.add_argument(
+        "--default-light-theme",
+        dest="default_light_theme",
+        default=None,
+        help="light palette key",
+    )
+    p.add_argument(
+        "--default-dark-theme",
+        dest="default_dark_theme",
+        default=None,
+        help="dark palette key",
+    )
+    p.add_argument(
+        "--verbosity",
+        choices=["quiet", "events", "full"],
+        default=None,
+        help="logging verbosity mode",
+    )
+    p.add_argument(
+        "-v",
+        "--verbose",
+        action="store_const",
+        const=True,
+        default=None,
+        help="shortcut for --verbosity events",
+    )
+    p.add_argument(
+        "--verbose-full",
+        action="store_const",
+        const=True,
+        default=None,
+        help="shortcut for --verbosity full",
+    )
+    p.add_argument(
+        "--job-id",
+        metavar="ID",
+        default=None,
+        dest="job_id",
+        help="CI/job identifier for session naming",
+    )
 
     # ── merge ──
     p = sub.add_parser(
@@ -1356,18 +1658,26 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--tab", nargs="+", action="append", metavar="ARG", required=True,
-                   help="TAB_LABEL PANE_LABEL FILE [PANE_LABEL FILE] (repeatable)")
-    p.add_argument("--output", default="merged.html",
-                   help="output HTML file path (default: merged.html)")
+    p.add_argument(
+        "--tab",
+        nargs="+",
+        action="append",
+        metavar="ARG",
+        required=True,
+        help="TAB_LABEL PANE_LABEL FILE [PANE_LABEL FILE] (repeatable)",
+    )
+    p.add_argument(
+        "--output",
+        default="merged.html",
+        help="output HTML file path (default: merged.html)",
+    )
 
     # ── parse ──
     p = sub.add_parser(
         "parse",
         help="parse exported HTML back into raw logs",
         description=(
-            "Parse an exported embed-log session.html back into raw"
-            " session log files."
+            "Parse an exported embed-log session.html back into raw session log files."
         ),
         epilog=(
             "Examples:\n"
@@ -1377,8 +1687,7 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("html", help="embed-log session.html file")
-    p.add_argument("--output", "-o", default=None,
-                   help="output session directory")
+    p.add_argument("--output", "-o", default=None, help="output session directory")
 
     # ── tail-file ──
     p = sub.add_parser(
@@ -1395,12 +1704,18 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("path", help="file to tail")
     p.add_argument("target", type=parse_udp_target, help="UDP target as HOST:PORT")
-    p.add_argument("--from-start", action="store_true",
-                   help="read the existing file contents first instead of starting at EOF")
-    p.add_argument("--poll-interval", type=float, default=0.2,
-                   help="seconds between file polls (default: 0.2)")
-    p.add_argument("--encoding", default="utf-8",
-                   help="file encoding (default: utf-8)")
+    p.add_argument(
+        "--from-start",
+        action="store_true",
+        help="read the existing file contents first instead of starting at EOF",
+    )
+    p.add_argument(
+        "--poll-interval",
+        type=float,
+        default=0.2,
+        help="seconds between file polls (default: 0.2)",
+    )
+    p.add_argument("--encoding", default="utf-8", help="file encoding (default: utf-8)")
 
     # ── doctor ──
     p = sub.add_parser(
@@ -1415,42 +1730,43 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--config", "-c", default=None,
-                   help="config file to check")
-    p.add_argument("--json", action="store_true",
-                   help="machine-readable JSON output")
+    p.add_argument("--config", "-c", default=None, help="config file to check")
+    p.add_argument("--json", action="store_true", help="machine-readable JSON output")
 
     # ── ports ──
     p = sub.add_parser(
         "ports",
         help="list detected serial ports",
         description="List detected serial ports on the system.",
-        epilog=(
-            "Examples:\n"
-            "  embed-log ports\n"
-            "  embed-log ports --json\n"
-        ),
+        epilog=("Examples:\n  embed-log ports\n  embed-log ports --json\n"),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--json", action="store_true",
-                   help="machine-readable JSON output")
+    p.add_argument("--json", action="store_true", help="machine-readable JSON output")
 
     # ── update ──
     p = sub.add_parser(
         "update",
-        help="update embed-log to the latest version",
-        description="Update embed-log to the latest version via pipx.",
+        help="update embed-log from its recorded install source",
+        description="Update embed-log by re-running the appropriate installer.",
         epilog=(
             "Examples:\n"
             "  embed-log update\n"
-            "  embed-log update --force\n"
+            "  embed-log update --branch main\n"
+            "  embed-log update --tag v0.1.0\n"
+            "  embed-log update --ref abc1234\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("--force", action="store_true",
-                   help="force reinstall even if up to date")
+                   help="force the underlying installer path when supported")
+    source = p.add_mutually_exclusive_group()
+    source.add_argument("--branch", help="update from a specific branch")
+    source.add_argument("--tag", help="update from a specific tag")
+    source.add_argument("--ref", help="update from a specific commit or git ref")
 
     return parser
+
+
 def _run_run(args: argparse.Namespace) -> int:
     cfg = {}
     if args.config:
@@ -1464,15 +1780,22 @@ def _run_run(args: argparse.Namespace) -> int:
     inject_specs = args.injects if args.injects else cfg.get("injects", [])
     forward_specs = args.forwards if args.forwards else cfg.get("forwards", [])
     tab_specs = args.tabs if args.tabs else cfg.get("tabs", [])
-    source_labels = cfg.get("source_labels", {}) if (args.config and not args.sources) else {}
+    source_labels = (
+        cfg.get("source_labels", {}) if (args.config and not args.sources) else {}
+    )
 
-
-    baudrate = args.baudrate if args.baudrate is not None else cfg.get("baudrate", 115200)
-    logs_root = Path(args.log_dir if args.log_dir is not None else cfg.get("log_dir", "logs/"))
+    baudrate = (
+        args.baudrate if args.baudrate is not None else cfg.get("baudrate", 115200)
+    )
+    logs_root = Path(
+        args.log_dir if args.log_dir is not None else cfg.get("log_dir", "logs/")
+    )
     host = args.host if args.host is not None else cfg.get("host", "127.0.0.1")
     ws_port = args.ws_port if args.ws_port is not None else cfg.get("ws_port", 8080)
     ws_ui = args.ws_ui if args.ws_ui is not None else cfg.get("ws_ui", DEFAULT_WS_UI)
-    app_name = args.app_name if args.app_name is not None else cfg.get("app_name", "embed-log")
+    app_name = (
+        args.app_name if args.app_name is not None else cfg.get("app_name", "embed-log")
+    )
     cfg_verbosity = cfg.get("verbosity")
     cfg_legacy_verbose = bool(cfg.get("verbose", False))
     if args.verbosity is not None:
@@ -1487,10 +1810,22 @@ def _run_run(args: argparse.Namespace) -> int:
         verbosity = "full" if cfg_legacy_verbose else "quiet"
 
     full_verbose = verbosity == "full"
-    open_browser = args.open_browser if args.open_browser is not None else cfg.get("open_browser", False)
+    open_browser = (
+        args.open_browser
+        if args.open_browser is not None
+        else cfg.get("open_browser", False)
+    )
     job_id = args.job_id if args.job_id is not None else cfg.get("job_id", None)
-    default_light_theme = args.default_light_theme if args.default_light_theme is not None else cfg.get("default_light_theme")
-    default_dark_theme = args.default_dark_theme if args.default_dark_theme is not None else cfg.get("default_dark_theme")
+    default_light_theme = (
+        args.default_light_theme
+        if args.default_light_theme is not None
+        else cfg.get("default_light_theme")
+    )
+    default_dark_theme = (
+        args.default_dark_theme
+        if args.default_dark_theme is not None
+        else cfg.get("default_dark_theme")
+    )
     queue_maxsize = cfg.get("queue_size", 20000) if args.config else 20000
 
     logging.basicConfig(
@@ -1500,7 +1835,10 @@ def _run_run(args: argparse.Namespace) -> int:
     )
 
     if not source_specs:
-        print("no sources configured. Use embed-log create-config, --source ..., or --config FILE.", file=sys.stderr)
+        print(
+            "no sources configured. Use embed-log create-config, --source ..., or --config FILE.",
+            file=sys.stderr,
+        )
         return 1
 
     source_names: list[str] = []
@@ -1524,7 +1862,10 @@ def _run_run(args: argparse.Namespace) -> int:
         try:
             inject_ports[name] = int(port_value)
         except ValueError:
-            print(f"--inject {name!r}: port must be an integer, got {port_value!r}", file=sys.stderr)
+            print(
+                f"--inject {name!r}: port must be an integer, got {port_value!r}",
+                file=sys.stderr,
+            )
             return 1
 
     forward_ports: dict[str, list[int]] = {}
@@ -1535,17 +1876,26 @@ def _run_run(args: argparse.Namespace) -> int:
         try:
             port = int(port_value)
         except ValueError:
-            print(f"--forward {name!r}: port must be an integer, got {port_value!r}", file=sys.stderr)
+            print(
+                f"--forward {name!r}: port must be an integer, got {port_value!r}",
+                file=sys.stderr,
+            )
             return 1
         forward_ports.setdefault(name, []).append(port)
 
     tabs: list[dict] = []
     for tab_entry in tab_specs:
         if len(tab_entry) < 2:
-            print(f"--tab requires at least LABEL SOURCE, got: {tab_entry}", file=sys.stderr)
+            print(
+                f"--tab requires at least LABEL SOURCE, got: {tab_entry}",
+                file=sys.stderr,
+            )
             return 1
         if len(tab_entry) > 3:
-            print(f"--tab takes at most 2 sources per tab, got: {tab_entry}", file=sys.stderr)
+            print(
+                f"--tab takes at most 2 sources per tab, got: {tab_entry}",
+                file=sys.stderr,
+            )
             return 1
         label = tab_entry[0]
         panes = tab_entry[1:]
@@ -1592,7 +1942,13 @@ def _run_doctor(args: argparse.Namespace) -> int:
 
     # Python/runtime
     import sys as _sys
-    checks.append(("python", f"{_sys.version_info.major}.{_sys.version_info.minor}.{_sys.version_info.micro}"))
+
+    checks.append(
+        (
+            "python",
+            f"{_sys.version_info.major}.{_sys.version_info.minor}.{_sys.version_info.micro}",
+        )
+    )
 
     # Config
     cfg_path = Path(args.config) if args.config else Path("embed-log.yml")
@@ -1620,16 +1976,25 @@ def _run_doctor(args: argparse.Namespace) -> int:
             for t in tabs:
                 for p in t.get("panes", []):
                     if p not in names:
-                        checks.append(("tab-refs", f"unknown source {p!r} in tab {t.get('label')!r}"))
+                        checks.append(
+                            (
+                                "tab-refs",
+                                f"unknown source {p!r} in tab {t.get('label')!r}",
+                            )
+                        )
                         ok = False
             checks.append(("tabs", f"{len(tabs)} configured"))
             # Log dir
             log_dir = Path(cfg.get("logs", {}).get("dir", "logs/"))
-            checks.append(("log-dir", str(log_dir) if log_dir.is_dir() else "NOT_FOUND"))
+            checks.append(
+                ("log-dir", str(log_dir) if log_dir.is_dir() else "NOT_FOUND")
+            )
             # Frontend assets
             ui_path = cfg.get("server", {}).get("ws_ui", "")
             if ui_path:
-                checks.append(("ui-assets", "present" if Path(ui_path).is_file() else "MISSING"))
+                checks.append(
+                    ("ui-assets", "present" if Path(ui_path).is_file() else "MISSING")
+                )
         except ConfigError as exc:
             checks.append(("config", f"PARSE_ERROR: {exc}"))
             ok = False
@@ -1641,12 +2006,24 @@ def _run_doctor(args: argparse.Namespace) -> int:
     checks.append(("serial-ports", f"{len(ports)} detected"))
 
     if args.json:
-        print(json.dumps({"ok": ok, "checks": [{"check": c[0], "status": c[1]} for c in checks]}))
+        print(
+            json.dumps(
+                {"ok": ok, "checks": [{"check": c[0], "status": c[1]} for c in checks]}
+            )
+        )
     else:
         print("embed-log doctor")
         print("")
         for name, status in checks:
-            icon = "OK" if "NOT_FOUND" not in status and "MISSING" not in status and "INVALID" not in status and "DUPLICATE" not in status and "PARSE_ERROR" not in status else "!!"
+            icon = (
+                "OK"
+                if "NOT_FOUND" not in status
+                and "MISSING" not in status
+                and "INVALID" not in status
+                and "DUPLICATE" not in status
+                and "PARSE_ERROR" not in status
+                else "!!"
+            )
             print(f"  [{icon}] {name}: {status}")
         print("")
         print("All checks passed." if ok else "Some checks failed.")
@@ -1655,77 +2032,133 @@ def _run_doctor(args: argparse.Namespace) -> int:
 
 
 def _run_update(args: argparse.Namespace) -> int:
-    """Update embed-log to the latest version via pipx."""
+    """Update embed-log by re-running the appropriate installer."""
+    import os
     import subprocess
+    import tempfile
+    import urllib.request
+
+    default_repo = "krezolekcoder/embed-log"
+    default_repo_url = f"https://github.com/{default_repo}.git"
 
     try:
         from ._version import __version__ as current_version
     except ImportError:
         current_version = "0.1.0"
 
-    def _cache_dir() -> Path:
-        return Path.home() / ".cache" / "embed-log" / "src"
+    try:
+        from ._install_source import (
+            __local_path__ as source_local_path,
+            __ref__ as source_ref,
+            __ref_type__ as source_ref_type,
+            __repo__ as source_repo,
+            __repo_url__ as source_repo_url,
+            __source_kind__ as source_kind,
+        )
+    except ImportError:
+        source_kind = "unknown"
+        source_repo = default_repo
+        source_repo_url = default_repo_url
+        source_ref_type = "branch"
+        source_ref = "main"
+        source_local_path = ""
 
-    def _is_managed_cache_spec(spec: str | None) -> bool:
-        if not spec or spec.startswith("git+"):
-            return False
+    def _parse_pipx_install_spec(pipx_path: str) -> str | None:
         try:
-            return Path(spec).expanduser().resolve(strict=False) == _cache_dir().resolve(strict=False)
-        except OSError:
-            return False
-
-    def _refresh_cached_source(cache_dir: Path) -> str | None:
-        if not shutil.which("git"):
-            print("git is required but not found.")
-            print("")
-            print("  Install git and try again, or re-run the install script:")
-            print("    curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.sh | bash")
-            return None
-
-        print("Fetching latest source from GitHub...")
-
-        if cache_dir.exists():
-            shutil.rmtree(str(cache_dir))
-        cache_dir.parent.mkdir(parents=True, exist_ok=True)
-
-        try:
-            subprocess.run(
-                [
-                    "git",
-                    "clone",
-                    "--depth=1",
-                    "-b",
-                    "main",
-                    "https://github.com/krezolekcoder/embed-log.git",
-                    str(cache_dir),
-                ],
+            result = subprocess.run(
+                [pipx_path, "list", "--json"],
                 capture_output=True,
                 text=True,
-                check=True,
-                timeout=60,
+                timeout=30,
             )
-        except subprocess.CalledProcessError as exc:
-            print(f"Failed to fetch source: {exc.stderr or 'clone failed'}")
+        except (subprocess.TimeoutExpired, OSError):
             return None
+        if result.returncode != 0 or not result.stdout:
+            return None
+        try:
+            data = json.loads(result.stdout)
+            return (
+                data.get("venvs", {})
+                .get("embed-log", {})
+                .get("metadata", {})
+                .get("main_package", {})
+                .get("package_or_url")
+            )
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            return None
+
+    def _local_installer_root(candidate: str | None) -> Path | None:
+        if not candidate:
+            return None
+        root = Path(candidate).expanduser()
+        if not root.is_dir():
+            return None
+        if (root / "install.sh").is_file() and (root / "install.ps1").is_file():
+            return root
+        return None
+
+    def _repo_slug(repo: str | None, repo_url: str | None) -> str:
+        if repo and "/" in repo:
+            return repo
+        if repo_url:
+            cleaned = repo_url.rstrip("/")
+            if cleaned.endswith(".git"):
+                cleaned = cleaned[:-4]
+            marker = "github.com/"
+            idx = cleaned.find(marker)
+            if idx != -1:
+                return cleaned[idx + len(marker):]
+        return default_repo
+
+    def _download_installer(repo: str, ref: str, script_name: str) -> Path:
+        url = f"https://raw.githubusercontent.com/{repo}/{ref}/{script_name}"
+        with urllib.request.urlopen(url, timeout=30) as response:
+            content = response.read()
+        fd, tmp_name = tempfile.mkstemp(
+            prefix="embed-log-installer-",
+            suffix=".ps1" if script_name.endswith(".ps1") else ".sh",
+        )
+        os.close(fd)
+        tmp_path = Path(tmp_name)
+        tmp_path.write_bytes(content)
+        return tmp_path
+
+    def _run_installer(script_path: Path, *, env: dict[str, str]) -> int:
+        if sys.platform.startswith("win"):
+            shell = shutil.which("powershell") or shutil.which("pwsh")
+            if not shell:
+                print("PowerShell not found.")
+                return 1
+            cmd = [shell, "-ExecutionPolicy", "Bypass", "-File", str(script_path)]
+        else:
+            shell = shutil.which("bash")
+            if not shell:
+                print("bash not found.")
+                return 1
+            cmd = [shell, str(script_path)]
+        try:
+            result = subprocess.run(cmd, env=env, timeout=300)
         except (subprocess.TimeoutExpired, OSError) as exc:
-            print(f"Failed to fetch source: {exc}")
-            return None
+            print(f"Update failed: {exc}")
+            return 1
+        return result.returncode
+    def _print_installed_version() -> None:
+        app = shutil.which("embed-log")
+        if app:
+            try:
+                result = subprocess.run(
+                    [app, "--version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    print(result.stdout.strip())
+                    return
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+        print(f"embed-log {current_version} (unknown)")
 
-        sha_result = subprocess.run(
-            ["git", "-C", str(cache_dir), "rev-parse", "--short", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        sha = sha_result.stdout.strip() or "unknown"
-
-        version_file = cache_dir / "backend" / "_version.py"
-        version_file.write_text(
-            "# Auto-generated. Install scripts populate __commit__ before pipx install.\n"
-            f'__version__ = "{current_version}"\n'
-            f'__commit__ = "{sha}"\n'
-        )
-        return sha
 
     pipx = shutil.which("pipx")
     if not pipx:
@@ -1739,144 +2172,80 @@ def _run_update(args: argparse.Namespace) -> int:
         print("    python3 -m pipx ensurepath")
         return 1
 
-    import json as _json
-    try:
-        list_result = subprocess.run(
-            [pipx, "list", "--json"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        print(f"Failed to query pipx: {exc}")
-        return 1
+    install_spec = _parse_pipx_install_spec(pipx)
 
-    install_spec = None
-    installed = False
-    if list_result.returncode == 0 and list_result.stdout:
-        try:
-            data = _json.loads(list_result.stdout)
-            venv_info = data.get("venvs", {}).get("embed-log")
-            if venv_info:
-                installed = True
-                install_spec = (
-                    venv_info.get("metadata", {})
-                    .get("main_package", {})
-                    .get("package_or_url")
-                )
-        except (_json.JSONDecodeError, TypeError, AttributeError):
-            pass
+    repo = source_repo or default_repo
+    repo_url = source_repo_url or default_repo_url
+    ref_type = source_ref_type or "branch"
+    ref = source_ref or "main"
 
-    if not installed:
-        print("embed-log is not managed by pipx.")
-        print("")
-        print("  To install, re-run the install script:")
-        print("    curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.sh | bash")
-        return 1
+    has_override = False
+    if args.branch:
+        ref_type = "branch"
+        ref = args.branch
+        has_override = True
+    elif args.tag:
+        ref_type = "tag"
+        ref = args.tag
+        has_override = True
+    elif args.ref:
+        ref_type = "commit"
+        ref = args.ref
+        has_override = True
 
-    cache_dir = _cache_dir()
-    managed_cache_spec = _is_managed_cache_spec(install_spec)
-    stale_local_spec = bool(
-        install_spec
-        and not install_spec.startswith("git+")
-        and not Path(install_spec).expanduser().is_dir()
-    )
+    local_root = None
+    if not has_override:
+        if source_kind == "local":
+            local_root = _local_installer_root(source_local_path)
+            if local_root is None:
+                print(f"Local install source is unavailable: {source_local_path}")
+                print("")
+                print("  Re-run the installer from that repository, or choose an explicit remote ref:")
+                print("    embed-log update --branch main")
+                return 1
+        else:
+            local_root = _local_installer_root(install_spec)
 
-    if managed_cache_spec:
-        sha = _refresh_cached_source(cache_dir)
-        if sha is None:
-            return 1
-        print("Reinstalling embed-log...")
-        try:
-            result = subprocess.run(
-                [pipx, "reinstall", "embed-log"],
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-        except (subprocess.TimeoutExpired, OSError) as exc:
-            print(f"Update failed: {exc}")
-            return 1
-        if result.returncode != 0:
-            print(result.stdout)
-            print(result.stderr)
-            print(f"Update failed (exit code {result.returncode}).")
-            return 1
-        print(result.stdout)
-        if result.stderr:
-            print(result.stderr)
-        print(f"embed-log {current_version} ({sha})")
-        return 0
-
-    if stale_local_spec:
-        print(f"Install source '{install_spec}' is no longer available.")
-        sha = _refresh_cached_source(cache_dir)
-        if sha is None:
-            return 1
-        print("Recovering embed-log installation...")
-        try:
-            uninstall_result = subprocess.run(
-                [pipx, "uninstall", "embed-log"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-        except (subprocess.TimeoutExpired, OSError) as exc:
-            print(f"Update failed: {exc}")
-            return 1
-        if uninstall_result.returncode != 0:
-            print(uninstall_result.stdout)
-            print(uninstall_result.stderr)
-            print(f"Update failed (exit code {uninstall_result.returncode}).")
-            return 1
-        try:
-            install_result = subprocess.run(
-                [pipx, "install", str(cache_dir)],
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-        except (subprocess.TimeoutExpired, OSError) as exc:
-            print(f"Update failed: {exc}")
-            return 1
-        if install_result.returncode != 0:
-            print(install_result.stdout)
-            print(install_result.stderr)
-            print(f"Update failed (exit code {install_result.returncode}).")
-            return 1
-        print(install_result.stdout)
-        if install_result.stderr:
-            print(install_result.stderr)
-        print(f"embed-log {current_version} ({sha})")
-        return 0
-
-    cmd = [pipx, "upgrade", "embed-log"]
+    env = os.environ.copy()
+    env["EMBED_LOG_REPO"] = _repo_slug(repo, repo_url)
+    env["EMBED_LOG_REPO_URL"] = repo_url
+    env["EMBED_LOG_REF_TYPE"] = ref_type
+    env["EMBED_LOG_REF"] = ref
     if args.force:
-        cmd.append("--force")
+        env["EMBED_LOG_FORCE"] = "1"
 
-    print(f"Running: {' '.join(cmd)}")
+    if local_root is not None:
+        print(f"Running installer from local source: {local_root}")
+        script_name = "install.ps1" if sys.platform.startswith("win") else "install.sh"
+        rc = _run_installer(local_root / script_name, env=env)
+        if rc != 0:
+            print(f"Update failed (exit code {rc}).")
+            return rc
+        _print_installed_version()
+
+        return 0
+
+    script_name = "install.ps1" if sys.platform.startswith("win") else "install.sh"
+    repo_slug = _repo_slug(repo, repo_url)
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        print(f"Update failed: {exc}")
+        installer_path = _download_installer(repo_slug, ref, script_name)
+    except OSError as exc:
+        print(f"Failed to download installer: {exc}")
         return 1
 
-    if result.returncode != 0:
-        print(result.stdout)
-        print(result.stderr)
-        print(f"Update failed (exit code {result.returncode}).")
-        return 1
-
-    print(result.stdout)
-    if result.stderr:
-        print(result.stderr)
-
     try:
-        from ._version import __commit__
-    except ImportError:
-        __commit__ = "unknown"
-    print(f"embed-log {current_version} ({__commit__})")
+        print(f"Running installer from {repo_slug}@{ref_type}:{ref}")
+        rc = _run_installer(installer_path, env=env)
+    finally:
+        installer_path.unlink(missing_ok=True)
+
+    if rc != 0:
+        print(f"Update failed (exit code {rc}).")
+        return rc
+
+    _print_installed_version()
     return 0
+
 
 def _run_ports(args: argparse.Namespace) -> int:
     ports = _detected_serial_ports()
@@ -1910,7 +2279,9 @@ def main(argv: Optional[list[str]] = None) -> int:
             print("")
             print("Quick start:")
             print("")
-            print("  embed-log run --config embed-log.yml    (if you already have a config)")
+            print(
+                "  embed-log run --config embed-log.yml    (if you already have a config)"
+            )
             print("")
             print("  embed-log create-config                 (otherwise, create one)")
             print("")

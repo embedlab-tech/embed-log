@@ -8,6 +8,7 @@ from subprocess import CompletedProcess
 from unittest.mock import patch
 
 from backend import cli
+from backend import _install_source as install_source
 
 
 def _ns(**kw):
@@ -28,104 +29,103 @@ def _pipx_list_json(spec: str) -> str:
     })
 
 
+class _Response:
+    def __init__(self, data: bytes):
+        self._data = data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def read(self):
+        return self._data
+
+
 class UpdateCommandTests(unittest.TestCase):
-    def test_managed_cache_spec_refreshes_and_reinstalls(self):
+    def test_local_source_runs_local_installer(self):
         with tempfile.TemporaryDirectory() as td:
-            home = Path(td)
-            cache_dir = home / ".cache" / "embed-log" / "src"
-            spec = str(cache_dir)
+            repo = Path(td) / "repo"
+            repo.mkdir()
+            (repo / "install.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+            (repo / "install.ps1").write_text("", encoding="utf-8")
+
             calls = []
 
             def fake_run(cmd, **kwargs):
-                calls.append(cmd)
+                calls.append((cmd, kwargs))
                 if cmd == ["/opt/pipx", "list", "--json"]:
-                    return CompletedProcess(cmd, 0, _pipx_list_json(spec), "")
-                if cmd[:5] == ["git", "clone", "--depth=1", "-b", "main"]:
-                    (cache_dir / "backend").mkdir(parents=True, exist_ok=True)
+                    return CompletedProcess(cmd, 0, _pipx_list_json(str(repo)), "")
+                if cmd == ["/bin/bash", str(repo / "install.sh")]:
                     return CompletedProcess(cmd, 0, "", "")
-                if cmd == ["git", "-C", str(cache_dir), "rev-parse", "--short", "HEAD"]:
-                    return CompletedProcess(cmd, 0, "abc123\n", "")
-                if cmd == ["/opt/pipx", "reinstall", "embed-log"]:
-                    return CompletedProcess(cmd, 0, "reinstalled\n", "")
                 raise AssertionError(f"Unexpected command: {cmd}")
 
-            with patch.object(cli.Path, "home", return_value=home), \
-                 patch("backend.cli.shutil.which", side_effect=lambda name: {"pipx": "/opt/pipx", "git": "/usr/bin/git"}.get(name)), \
+            with patch.object(install_source, "__source_kind__", "local"), \
+                 patch.object(install_source, "__local_path__", str(repo)), \
+                 patch.object(install_source, "__repo__", "krezolekcoder/embed-log"), \
+                 patch.object(install_source, "__repo_url__", "https://github.com/krezolekcoder/embed-log.git"), \
+                 patch.object(install_source, "__ref_type__", "branch"), \
+                 patch.object(install_source, "__ref__", "main"), \
+                 patch("backend.cli.shutil.which", side_effect=lambda name: {"pipx": "/opt/pipx", "bash": "/bin/bash"}.get(name)), \
                  patch("subprocess.run", side_effect=fake_run):
                 buf = io.StringIO()
                 with redirect_stdout(buf):
-                    rc = cli._run_update(_ns(force=False))
+                    rc = cli._run_update(_ns(force=False, branch=None, tag=None, ref=None))
 
             self.assertEqual(rc, 0)
-            self.assertIn(["/opt/pipx", "reinstall", "embed-log"], calls)
-            self.assertNotIn(["/opt/pipx", "uninstall", "embed-log"], calls)
-            self.assertEqual((cache_dir / "backend" / "_version.py").read_text(encoding="utf-8"), (
-                "# Auto-generated. Install scripts populate __commit__ before pipx install.\n"
-                '__version__ = "0.1.0"\n'
-                '__commit__ = "abc123"\n'
-            ))
-            self.assertIn("embed-log 0.1.0 (abc123)", buf.getvalue())
+            self.assertIn("Running installer from local source:", buf.getvalue())
+            self.assertEqual(calls[1][0], ["/bin/bash", str(repo / "install.sh")])
 
-    def test_stale_local_spec_recovers_via_cache_install(self):
-        with tempfile.TemporaryDirectory() as td:
-            home = Path(td)
-            cache_dir = home / ".cache" / "embed-log" / "src"
-            stale_spec = str(home / "missing" / "embed-log")
-            calls = []
-
-            def fake_run(cmd, **kwargs):
-                calls.append(cmd)
-                if cmd == ["/opt/pipx", "list", "--json"]:
-                    return CompletedProcess(cmd, 0, _pipx_list_json(stale_spec), "")
-                if cmd[:5] == ["git", "clone", "--depth=1", "-b", "main"]:
-                    (cache_dir / "backend").mkdir(parents=True, exist_ok=True)
-                    return CompletedProcess(cmd, 0, "", "")
-                if cmd == ["git", "-C", str(cache_dir), "rev-parse", "--short", "HEAD"]:
-                    return CompletedProcess(cmd, 0, "deadbee\n", "")
-                if cmd == ["/opt/pipx", "uninstall", "embed-log"]:
-                    return CompletedProcess(cmd, 0, "removed\n", "")
-                if cmd == ["/opt/pipx", "install", str(cache_dir)]:
-                    return CompletedProcess(cmd, 0, "installed\n", "")
-                raise AssertionError(f"Unexpected command: {cmd}")
-
-            with patch.object(cli.Path, "home", return_value=home), \
-                 patch("backend.cli.shutil.which", side_effect=lambda name: {"pipx": "/opt/pipx", "git": "/usr/bin/git"}.get(name)), \
-                 patch("subprocess.run", side_effect=fake_run):
-                buf = io.StringIO()
-                with redirect_stdout(buf):
-                    rc = cli._run_update(_ns(force=False))
-
-            self.assertEqual(rc, 0)
-            self.assertIn(["/opt/pipx", "uninstall", "embed-log"], calls)
-            self.assertIn(["/opt/pipx", "install", str(cache_dir)], calls)
-            self.assertNotIn(["/opt/pipx", "reinstall", "embed-log"], calls)
-            self.assertIn("Install source '" + stale_spec + "' is no longer available.", buf.getvalue())
-            self.assertIn("embed-log 0.1.0 (deadbee)", buf.getvalue())
-
-    def test_git_spec_uses_plain_pipx_upgrade(self):
-        spec = "git+https://github.com/krezolekcoder/embed-log.git@main"
+    def test_remote_override_downloads_and_runs_installer(self):
         calls = []
+        seen_env = {}
 
         def fake_run(cmd, **kwargs):
-            calls.append(cmd)
+            calls.append((cmd, kwargs))
             if cmd == ["/opt/pipx", "list", "--json"]:
-                return CompletedProcess(cmd, 0, _pipx_list_json(spec), "")
-            if cmd == ["/opt/pipx", "upgrade", "embed-log", "--force"]:
-                return CompletedProcess(cmd, 0, "upgraded\n", "")
+                return CompletedProcess(cmd, 0, _pipx_list_json("git+https://github.com/krezolekcoder/embed-log.git@main"), "")
+            if cmd[0] == "/bin/bash":
+                seen_env.update(kwargs["env"])
+                return CompletedProcess(cmd, 0, "", "")
             raise AssertionError(f"Unexpected command: {cmd}")
 
-        with patch("backend.cli.shutil.which", side_effect=lambda name: {"pipx": "/opt/pipx"}.get(name)), \
+        with patch.object(install_source, "__source_kind__", "git"), \
+             patch.object(install_source, "__local_path__", ""), \
+             patch.object(install_source, "__repo__", "krezolekcoder/embed-log"), \
+             patch.object(install_source, "__repo_url__", "https://github.com/krezolekcoder/embed-log.git"), \
+             patch.object(install_source, "__ref_type__", "branch"), \
+             patch.object(install_source, "__ref__", "main"), \
+             patch("backend.cli.shutil.which", side_effect=lambda name: {"pipx": "/opt/pipx", "bash": "/bin/bash"}.get(name)), \
+             patch("urllib.request.urlopen", return_value=_Response(b"#!/usr/bin/env bash\n")), \
              patch("subprocess.run", side_effect=fake_run):
             buf = io.StringIO()
             with redirect_stdout(buf):
-                rc = cli._run_update(_ns(force=True))
+                rc = cli._run_update(_ns(force=False, branch="feature/demo", tag=None, ref=None))
 
         self.assertEqual(rc, 0)
-        self.assertEqual(calls, [
-            ["/opt/pipx", "list", "--json"],
-            ["/opt/pipx", "upgrade", "embed-log", "--force"],
-        ])
-        self.assertIn("Running: /opt/pipx upgrade embed-log --force", buf.getvalue())
+        self.assertIn("Running installer from krezolekcoder/embed-log@branch:feature/demo", buf.getvalue())
+        self.assertEqual(seen_env["EMBED_LOG_REF_TYPE"], "branch")
+        self.assertEqual(seen_env["EMBED_LOG_REF"], "feature/demo")
+        self.assertEqual(seen_env["EMBED_LOG_REPO"], "krezolekcoder/embed-log")
+
+    def test_missing_local_source_requires_explicit_remote_ref(self):
+        missing = "/tmp/no-such-embed-log-source"
+        with patch.object(install_source, "__source_kind__", "local"), \
+             patch.object(install_source, "__local_path__", missing), \
+             patch.object(install_source, "__repo__", "krezolekcoder/embed-log"), \
+             patch.object(install_source, "__repo_url__", "https://github.com/krezolekcoder/embed-log.git"), \
+             patch.object(install_source, "__ref_type__", "branch"), \
+             patch.object(install_source, "__ref__", "main"), \
+             patch("backend.cli.shutil.which", side_effect=lambda name: {"pipx": "/opt/pipx", "bash": "/bin/bash"}.get(name)), \
+             patch("subprocess.run", return_value=CompletedProcess(["/opt/pipx", "list", "--json"], 0, _pipx_list_json(missing), "")):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = cli._run_update(_ns(force=False, branch=None, tag=None, ref=None))
+
+        self.assertEqual(rc, 1)
+        self.assertIn("Local install source is unavailable", buf.getvalue())
+        self.assertIn("embed-log update --branch main", buf.getvalue())
 
 
 if __name__ == "__main__":
