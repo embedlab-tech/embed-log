@@ -1717,21 +1717,23 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--encoding", default="utf-8", help="file encoding (default: utf-8)")
 
-    # ── doctor ──
+    # ── version ──
     p = sub.add_parser(
-        "doctor",
-        help="diagnose common issues",
-        description="Check environment, dependencies, and config for common issues.",
+        "version",
+        aliases=["doctor"],
+        help="show version and environment information",
+        description="Show version, environment, and config information.",
         epilog=(
             "Examples:\n"
-            "  embed-log doctor\n"
-            "  embed-log doctor --config embed-log.yml\n"
-            "  embed-log doctor --json\n"
+            "  embed-log version\n"
+            "  embed-log version --config embed-log.yml\n"
+            "  embed-log version --json\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--config", "-c", default=None, help="config file to check")
+    p.add_argument("--config", "-c", default=None, help="config file to inspect")
     p.add_argument("--json", action="store_true", help="machine-readable JSON output")
+
 
     # ── ports ──
     p = sub.add_parser(
@@ -1932,7 +1934,8 @@ def _run_run(args: argparse.Namespace) -> int:
     )
 
 
-def _run_doctor(args: argparse.Namespace) -> int:
+def _run_version(args: argparse.Namespace) -> int:
+
     checks: list[dict] = []
     ok = True
 
@@ -2015,7 +2018,8 @@ def _run_doctor(args: argparse.Namespace) -> int:
             )
         )
     else:
-        print("embed-log doctor")
+        print("embed-log version")
+
         print("")
         for name, status in checks:
             icon = (
@@ -2361,8 +2365,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         return run_parse(argv[1:])  # keep old parse signature
     if args.command == "tail-file":
         return run_tail_file(args)
-    if args.command == "doctor":
-        return _run_doctor(args)
+    if args.command in {"version", "doctor"}:
+        return _run_version(args)
     if args.command == "ports":
         return _run_ports(args)
     if args.command == "update":
