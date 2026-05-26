@@ -140,16 +140,23 @@ if ($localRoot -and (Test-Path (Join-Path $localRoot 'pyproject.toml')) -and (Te
     }
 } elseif (Have-Cmd 'git') {
     Write-Info "Installing embed-log from GitHub ($Repo)..."
-    $tmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("embed-log-" + [System.Guid]::NewGuid().ToString('N'))
-    $cloneDir = Join-Path $tmpRoot 'embed-log'
-    & git clone --depth=1 -b $Branch $RepoUrl $cloneDir 2>&1 | Out-Null
+    if (-not $env:USERPROFILE) {
+        Die "USERPROFILE is not set."
+    }
+    $cacheBase = Join-Path $env:USERPROFILE '.cache\embed-log'
+    $cacheRoot = Join-Path $cacheBase 'src'
+    $null = New-Item -ItemType Directory -Force -Path $cacheBase
+    if (Test-Path $cacheRoot) {
+        Remove-Item -Recurse -Force $cacheRoot
+    }
+    & git clone --depth=1 -b $Branch $RepoUrl $cacheRoot 2>&1 | Out-Null
     if (-not $?) {
         Die "Failed to clone embed-log repository."
     }
-    $installSrc = $cloneDir
-    $sha = & git -C $cloneDir rev-parse --short HEAD 2>$null
+    $installSrc = $cacheRoot
+    $sha = & git -C $cacheRoot rev-parse --short HEAD 2>$null
     if ($sha) {
-        Write-VersionFile -Dir $cloneDir -Commit $sha
+        Write-VersionFile -Dir $cacheRoot -Commit $sha
     }
 } else {
     Write-Warn "git not found — downloading source archive instead."

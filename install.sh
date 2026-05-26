@@ -215,12 +215,16 @@ if [ -n "$INSTALL_SRC" ]; then
 else
   print_info "Fetching embed-log from GitHub (${REPO})..."
   if have_cmd git; then
-    INSTALL_TMPDIR="$(mktemp -d)"
-    git clone --depth=1 -b "$BRANCH" "$REPO_URL" "$INSTALL_TMPDIR/embed-log" || die "\
+    [ -n "${HOME:-}" ] || die "HOME is not set."
+    CACHE_BASE="$HOME/.cache/embed-log"
+    CACHE_SRC="$CACHE_BASE/src"
+    [ -e "$CACHE_SRC" ] && rm -rf "$CACHE_SRC"
+    mkdir -p "$CACHE_BASE"
+    git clone --depth=1 -b "$BRANCH" "$REPO_URL" "$CACHE_SRC" || die "\
 Failed to clone embed-log repository.
 
   Check your internet connection and try again."
-    PIPX_SRC="$INSTALL_TMPDIR/embed-log"
+    PIPX_SRC="$CACHE_SRC"
     _commit="$(git -C "$PIPX_SRC" rev-parse --short HEAD 2>/dev/null || true)"
     if [ -n "$_commit" ]; then
       _write_version "$PIPX_SRC" "$_commit"
