@@ -20,6 +20,10 @@ REPO="krezolekcoder/embed-log"
 BRANCH="main"
 REPO_URL="https://github.com/${REPO}.git"
 MIN_PY="3.10"
+INSTALL_REF_TYPE="${EMBED_LOG_REF_TYPE:-branch}"
+INSTALL_REF="${EMBED_LOG_REF:-$BRANCH}"
+OVERRIDE_REPO="${EMBED_LOG_REPO:-$REPO}"
+OVERRIDE_REPO_URL="${EMBED_LOG_REPO_URL:-https://github.com/${OVERRIDE_REPO}.git}"
 INSTALLER_VERSION="1.0.0"
 
 # ─────────────────────────────────────────────────────────────────
@@ -45,6 +49,19 @@ __version__ = "0.1.0"
 __commit__ = "$sha"
 VERSION_EOF
 }
+_write_install_source() {
+  local dir="$1" source_kind="$2" repo="$3" repo_url="$4" ref_type="$5" ref="$6" local_path="$7"
+  cat > "$dir/backend/_install_source.py" <<SOURCE_EOF
+# Auto-generated. Install scripts populate these before pipx install.
+__source_kind__ = "$source_kind"
+__repo__ = "$repo"
+__repo_url__ = "$repo_url"
+__ref_type__ = "$ref_type"
+__ref__ = "$ref"
+__local_path__ = "$local_path"
+SOURCE_EOF
+}
+
 
 # ─────────────────────────────────────────────────────────────────
 # Python version check
@@ -197,10 +214,6 @@ if [ -n "${BASH_SOURCE[0]:-}" ]; then
   fi
 fi
 
-# Also check current directory (covers `cd repo && ./install.sh`)
-if [ -z "$INSTALL_SRC" ] && [ -f pyproject.toml ] && [ -d backend ]; then
-  INSTALL_SRC="$(pwd)"
-fi
 
 if [ -n "$INSTALL_SRC" ]; then
   print_info "Installing from local repository at ${INSTALL_SRC}..."
@@ -212,38 +225,43 @@ if [ -n "$INSTALL_SRC" ]; then
   if [ -n "$_commit" ]; then
     _write_version "$PIPX_SRC" "$_commit"
   fi
+  _write_install_source "$PIPX_SRC" "local" "$OVERRIDE_REPO" "$OVERRIDE_REPO_URL" "$INSTALL_REF_TYPE" "$INSTALL_REF" "$INSTALL_SRC"
 else
-  print_info "Fetching embed-log from GitHub (${REPO})..."
+  print_info "Fetching embed-log from GitHub (${OVERRIDE_REPO})..."
   if have_cmd git; then
     [ -n "${HOME:-}" ] || die "HOME is not set."
     CACHE_BASE="$HOME/.cache/embed-log"
     CACHE_SRC="$CACHE_BASE/src"
     [ -e "$CACHE_SRC" ] && rm -rf "$CACHE_SRC"
     mkdir -p "$CACHE_BASE"
-    git clone --depth=1 -b "$BRANCH" "$REPO_URL" "$CACHE_SRC" || die "\
-Failed to clone embed-log repository.
+    git init "$CACHE_SRC" >/dev/null 2>&1 || die "Failed to prepare embed-log cache directory."
+    git -C "$CACHE_SRC" remote add origin "$OVERRIDE_REPO_URL" >/dev/null 2>&1 || die "Failed to configure embed-log repository origin."
+    git -C "$CACHE_SRC" fetch --depth=1 origin "$INSTALL_REF" >/dev/null 2>&1 || die "\
+Failed to fetch embed-log ref '${INSTALL_REF}'.
 
-  Check your internet connection and try again."
+  Check that the ref exists and try again."
+    git -C "$CACHE_SRC" checkout --detach FETCH_HEAD >/dev/null 2>&1 || die "Failed to checkout embed-log ref '${INSTALL_REF}'."
     PIPX_SRC="$CACHE_SRC"
     _commit="$(git -C "$PIPX_SRC" rev-parse --short HEAD 2>/dev/null || true)"
     if [ -n "$_commit" ]; then
       _write_version "$PIPX_SRC" "$_commit"
     fi
+    _write_install_source "$PIPX_SRC" "git" "$OVERRIDE_REPO" "$OVERRIDE_REPO_URL" "$INSTALL_REF_TYPE" "$INSTALL_REF" ""
   else
     print_warn "git not found — downloading source archive instead."
     INSTALL_TMPDIR="$(mktemp -d)"
-    ARCHIVE_URL="https://github.com/${REPO}/archive/${BRANCH}.tar.gz"
+    ARCHIVE_URL="https://github.com/${OVERRIDE_REPO}/archive/${INSTALL_REF}.tar.gz"
     print_info "Downloading ${ARCHIVE_URL}..."
     curl -fsSL "$ARCHIVE_URL" | tar xz -C "$INSTALL_TMPDIR" || die "\
 Failed to download embed-log source from GitHub.
 
   Check your internet connection and try again."
 
-    # GitHub archives extract to <repo>-<branch>/
-    EXTRACTED="$(cd "$INSTALL_TMPDIR" && ls -d embed-log-* 2>/dev/null | head -1)"
+    EXTRACTED="$(cd "$INSTALL_TMPDIR" && ls -d * 2>/dev/null | head -1)"
     [ -n "$EXTRACTED" ] || die "Downloaded archive has unexpected structure."
     PIPX_SRC="${INSTALL_TMPDIR}/${EXTRACTED}"
     _write_version "$PIPX_SRC" "archive"
+    _write_install_source "$PIPX_SRC" "archive" "$OVERRIDE_REPO" "$OVERRIDE_REPO_URL" "$INSTALL_REF_TYPE" "$INSTALL_REF" ""
   fi
 fi
 
