@@ -18,18 +18,18 @@ test.describe('timestamp mode toggle', () => {
     await waitForSourceTestLine(page, 'SENSOR_A');
 
     const firstTs = page.locator('#log-SENSOR_A .log-line .ts').first();
-    await expect(firstTs).toHaveText(/\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}/);
+    await expect(firstTs).toHaveText(/^T\+\d+:\d{2}:\d{2}\.\d{3}$/);
 
     await page.locator('#btn-settings').click();
     await expect(page.locator('#settings-panel')).toHaveClass(/open/);
+    await expect(page.locator('#btn-timestamp-mode')).toHaveText('Relative');
+
+    await page.locator('#btn-timestamp-mode').click();
     await expect(page.locator('#btn-timestamp-mode')).toHaveText('Absolute');
+    await expect(firstTs).toHaveText(/\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}/);
 
     await page.locator('#btn-timestamp-mode').click();
     await expect(page.locator('#btn-timestamp-mode')).toHaveText('Relative');
     await expect(firstTs).toHaveText(/^T\+\d+:\d{2}:\d{2}\.\d{3}$/);
-
-    await page.locator('#btn-timestamp-mode').click();
-    await expect(page.locator('#btn-timestamp-mode')).toHaveText('Absolute');
-    await expect(firstTs).toHaveText(/\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}/);
   });
 });

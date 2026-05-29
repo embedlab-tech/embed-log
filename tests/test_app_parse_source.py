@@ -1,6 +1,6 @@
 import unittest
 
-from backend.app import parse_source
+from backend.app import parse_source, parse_source_config
 from backend.sources import UartSource, UdpSource
 
 
@@ -27,6 +27,9 @@ class ParseSourceTests(unittest.TestCase):
         self.assertIsInstance(src, UdpSource)
         self.assertEqual(src.port, 6000)
 
+    def test_cli_source_config_defaults_to_text_parser(self):
+        cfg = parse_source_config("DUT", "uart:/dev/ttyUSB0", 115200)
+        self.assertEqual(cfg["parser"], {"type": "text"})
     def test_invalid_spec_raises(self):
         with self.assertRaises(ValueError):
             parse_source("DUT", "bad-spec", 115200)

@@ -15,7 +15,7 @@ from typing import Callable, Optional
 import yaml
 from serial.tools import list_ports
 
-from .app import DEFAULT_WS_UI, parse_source, run_app
+from .app import DEFAULT_WS_UI, build_source, parse_source, run_app
 from .file_tail_udp import parse_udp_target, run_tail_file
 from .config import ConfigError, load_config
 from .parse import run_parse
@@ -1920,16 +1920,29 @@ def _run_run(args: argparse.Namespace) -> int:
 
     source_names: list[str] = []
     source_objects: dict[str, LogSource] = {}
-    for name, spec in source_specs:
-        if name in source_objects:
-            print(f"duplicate --source name: {name!r}", file=sys.stderr)
-            return 1
-        try:
-            source_objects[name] = parse_source(name, spec, baudrate)
-        except ValueError as exc:
-            print(str(exc), file=sys.stderr)
-            return 1
-        source_names.append(name)
+    if args.sources:
+        for name, spec in source_specs:
+            if name in source_objects:
+                print(f"duplicate --source name: {name!r}", file=sys.stderr)
+                return 1
+            try:
+                source_objects[name] = parse_source(name, spec, baudrate)
+            except ValueError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
+            source_names.append(name)
+    else:
+        for source_config in source_specs:
+            name = source_config["name"]
+            if name in source_objects:
+                print(f"duplicate source name: {name!r}", file=sys.stderr)
+                return 1
+            try:
+                source_objects[name] = build_source(source_config)
+            except ValueError as exc:
+                print(f"source {name!r}: {exc}", file=sys.stderr)
+                return 1
+            source_names.append(name)
 
     inject_ports: dict[str, int] = {}
     for name, port_value in inject_specs:

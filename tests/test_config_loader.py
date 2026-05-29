@@ -55,6 +55,8 @@ tabs:
         self.assertEqual(len(cfg["forwards"]), 2)
         self.assertEqual(len(cfg["tabs"]), 1)
         self.assertEqual(cfg["source_labels"], {"UART_A": "READER", "UDP_A": "CONTROLLER"})
+        self.assertEqual(cfg["sources"][0]["parser"], {"type": "text"})
+        self.assertEqual(cfg["sources"][1]["parser"], {"type": "text"})
 
     def test_invalid_verbosity_fails(self):
         cfg_text = """
@@ -105,6 +107,38 @@ sources:
             with self.assertRaises(ConfigError):
                 load_config(p)
 
+    def test_explicit_text_parser_is_accepted(self):
+        cfg_text = """
+version: 1
+sources:
+  - name: A
+    type: uart
+    port: /dev/ttyUSB0
+    parser:
+      type: text
+""".strip()
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "cfg.yml"
+            p.write_text(cfg_text, encoding="utf-8")
+            cfg = load_config(p)
+
+        self.assertEqual(cfg["sources"][0]["parser"], {"type": "text"})
+
+    def test_unsupported_parser_type_fails(self):
+        cfg_text = """
+version: 1
+sources:
+  - name: A
+    type: uart
+    port: /dev/ttyUSB0
+    parser:
+      type: command
+""".strip()
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "cfg.yml"
+            p.write_text(cfg_text, encoding="utf-8")
+            with self.assertRaises(ConfigError):
+                load_config(p)
 
 if __name__ == "__main__":
     unittest.main()
