@@ -209,6 +209,26 @@ export function _linesSetupPane(id) {
             document.getElementById("log-" + id)?.classList.toggle("wrap", state.wrap[id]);
         });
     }
+
+    // Per-pane raw download
+    const dlBtn = document.querySelector(`#pane-${id} .pane-download-btn`);
+    if (dlBtn) {
+        dlBtn.addEventListener("click", () => {
+            const lines = state.rawLines[id] || [];
+            if (!lines.length) return;
+            const text = lines.map(line => {
+                const clean = (line.rawText ?? "").replace(/\x1b(?:\[[0-9;]*[A-Za-z]|\][^\x07]*\x07|[^[\]])/g, "").trim();
+                return `[${line.ts}] ${clean}`;
+            }).join("\n");
+            const blob = new Blob([text + "\n"], { type: "text/plain" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `${id}.log`;
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+    }
 }
 PANES.forEach(_linesSetupPane);
 

@@ -708,6 +708,8 @@ function _addSelectedToBuffer(paneId) {
 let _drag = null;          // { paneId, startIdx, startY, lineEl, active }
 let _suppressClick = false;
 let _rangeAnchor = null;   // { paneId, idx } set by a normal line click for Shift+Click range selection
+let _altSelection = false; // true during an Alt-native-text-select drag
+
 
 document.addEventListener("pointerdown", e => {
     if (e.button !== 0) return;
@@ -715,6 +717,8 @@ document.addEventListener("pointerdown", e => {
     if (!line) return;
     const logArea = line.closest(".log-area");
     if (!logArea) return;
+    if (e.altKey) { _altSelection = true; return; }
+
 
     _drag = {
         paneId: logArea.id.slice(4),
@@ -758,7 +762,14 @@ document.addEventListener("pointermove", e => {
     _applySelection(_drag.paneId);
 });
 
-document.addEventListener("pointerup", () => { _drag = null; });
+document.addEventListener("pointerup", () => {
+    if (_altSelection) {
+        _altSelection = false;
+        const text = window.getSelection()?.toString();
+        if (text) navigator.clipboard.writeText(text).catch(() => {});
+    }
+    _drag = null;
+});
 
 document.addEventListener("click", e => {
     if (_suppressClick) {
@@ -772,7 +783,7 @@ document.addEventListener("click", e => {
 
     const clickedLine = e.target.closest(".log-line");
     const clickedLogArea = clickedLine?.closest(".log-area");
-    if (clickedLine && clickedLogArea) {
+    if (clickedLine && clickedLogArea && !e.altKey) {
         const paneId = clickedLogArea.id.slice(4);
         const idx = parseInt(clickedLine.dataset.idx, 10);
 
@@ -806,7 +817,17 @@ document.addEventListener("click", e => {
 document.addEventListener("keydown", e => {
     if ((e.ctrlKey || e.metaKey) && e.key === "c") {
         const pane = PANES.find(id => state.selected[id].size > 0);
-        if (pane) { _copyExact(pane); e.preventDefault(); }
+        if (pane) { _copyExact(pane); e.preventDefault(); return; }
+        // No explicit selection — fall back to the sync-highlighted line.
+        const hlPane = PANES.find(id => state.highlighted[id]);
+        if (hlPane) {
+            const div = state.highlighted[hlPane];
+            const idx = parseInt(div?.dataset.idx, 10);
+            if (Number.isFinite(idx)) {
+                const text = _formatSelectionBlock(hlPane, [idx]);
+                if (text) { _copyText(text); e.preventDefault(); return; }
+            }
+        }
         return;
     }
     if (e.key === "Escape") {
@@ -818,3 +839,13 @@ document.addEventListener("keydown", e => {
         _clearAllSelections();
     }
 });
+// ── Alt key: hold to enable native text selection on log lines ──
+document.addEventListener("keydown", e => {
+    if (e.key === "Alt" && !e.ctrlKey && !e.metaKey) {
+        document.body.classList.add("alt-held");
+    }
+});
+document.addEventListener("keyup", e => {
+    if (e.key === "Alt") document.body.classList.remove("alt-held");
+});
+window.addEventListener("blur", () => document.body.classList.remove("alt-held"));

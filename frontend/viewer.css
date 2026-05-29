@@ -427,6 +427,10 @@ button.active { background: var(--selection); border-color: var(--accent); color
     padding: 0 10px;
     min-height: 1.55em;
     cursor: pointer;
+    user-select: none;
+}
+body.alt-held .log-line {
+    user-select: text;
 }
 .log-line:hover  { background: var(--selection); }
 .log-line.tx-line { opacity: 0.8; }

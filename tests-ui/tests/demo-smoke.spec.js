@@ -69,6 +69,22 @@ test.describe('embed-log deterministic demo smoke', () => {
     expect(externalRequests).toEqual([]);
   });
 
+  test('per-pane download button triggers raw .log download', async ({ page }, testInfo) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await waitForSourceTestLine(page, 'SENSOR_A');
+
+    const downloadPromise = page.waitForEvent('download');
+    await page.locator('#pane-SENSOR_A .pane-download-btn').click();
+    const download = await downloadPromise;
+
+    expect(download.suggestedFilename()).toBe('SENSOR_A.log');
+    const saved = await saveDownload(download, testInfo);
+    const text = fs.readFileSync(saved, 'utf-8');
+    expect(text).toContain('TEST src=SENSOR_A');
+    expect(text).toContain('kind=sync');
+  });
+
   test('shift-click selects a deterministic range and raw snippet downloads cleaned merged text', async ({ page }, testInfo) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
