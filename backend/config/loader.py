@@ -47,7 +47,7 @@ def _load_parser_config(value: Any, field: str) -> dict:
         return {"type": "text"}
 
     parser = _require_dict(value, field)
-    parser_type = _require_choice(parser.get("type"), f"{field}.type", {"text"})
+    parser_type = _require_choice(parser.get("type"), f"{field}.type", {"text", "cbor-datagram"})
     extra_fields = sorted(key for key in parser if key != "type")
     if extra_fields:
         raise ConfigError(f"{field}.{extra_fields[0]} unsupported for parser type {parser_type!r}")
@@ -99,6 +99,11 @@ def load_config(path: str | Path) -> dict:
 
         src_type = _require_str(src.get("type"), f"sources[{i}].type").lower()
         parser = _load_parser_config(src.get("parser"), f"sources[{i}].parser")
+        if parser["type"] == "cbor-datagram" and src_type != "udp":
+            raise ConfigError(
+                f"sources[{i}].parser.type 'cbor-datagram' is only valid for UDP sources "
+                f"(got source type {src_type!r})"
+            )
         source_config = {"name": name, "type": src_type, "parser": parser}
 
         if src_type == "uart":

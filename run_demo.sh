@@ -202,7 +202,8 @@ _is_demo_traffic_cmd() {
     *"utils/deterministic_demo_traffic.py"*)
       [[ "$cmd" == *"127.0.0.1:6000"* ]] || \
       [[ "$cmd" == *"127.0.0.1:6001"* ]] || \
-      [[ "$cmd" == *"127.0.0.1:6002"* ]]
+      [[ "$cmd" == *"127.0.0.1:6002"* ]] || \
+      [[ "$cmd" == *"127.0.0.1:6003"* ]]
       ;;
     *"utils/inject_log_demo.py"*)
       [[ "$cmd" == *" 5001"* ]] || \
@@ -265,7 +266,7 @@ _reap_stale_demo_traffic
 for p in 5001 5002 5003; do
   _free_port_if_stale tcp "$p" || exit 1
 done
-for p in 6000 6001 6002; do
+for p in 6000 6001 6002 6003; do
   _free_port_if_stale udp "$p" || exit 1
 done
 
@@ -352,6 +353,12 @@ case "$DEMO_PROFILE" in
       --interval "$DEMO_INJECT_INTERVAL" \
       --duration 0 \
       --source demo &
+    echo "Starting CBOR demo traffic (tick 500ms)..."
+    "$PYTHON" utils/deterministic_demo_traffic.py \
+      --cbor \
+      --udp SENSOR_CBOR=127.0.0.1:6003 \
+      --tick-ms 500 \
+      --cycles 0 &
     ;;
   test)
     [ -z "$INTERVAL_MIN_ARG" ] || {
@@ -381,6 +388,12 @@ case "$DEMO_PROFILE" in
       --udp SENSOR_A=127.0.0.1:6000 \
       --udp SENSOR_B=127.0.0.1:6001 \
       --udp SENSOR_C=127.0.0.1:6002 \
+      --tick-ms "$DEMO_TEST_TICK_MS" \
+      --cycles 0 &
+    echo "Starting CBOR deterministic demo traffic (tick ${DEMO_TEST_TICK_MS}ms)..."
+    "$PYTHON" utils/deterministic_demo_traffic.py \
+      --cbor \
+      --udp SENSOR_CBOR=127.0.0.1:6003 \
       --tick-ms "$DEMO_TEST_TICK_MS" \
       --cycles 0 &
     ;;

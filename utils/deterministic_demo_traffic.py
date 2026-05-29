@@ -16,6 +16,17 @@ Example:
         --inject SENSOR_C=127.0.0.1:5003 \
         --tick-ms 100 \
         --cycles 0
+
+When --cbor is given, datagrams are encoded as CBOR maps instead of text
+lines.  Each CBOR map is sent as one datagram and can be consumed by a
+UDP source with parser type ``cbor-datagram``.
+
+Example:
+    python utils/deterministic_demo_traffic.py \\
+        --cbor \\
+        --udp SENSOR_A=127.0.0.1:6000 \\
+        --tick-ms 500 \\
+        --cycles 5
 """
 
 from __future__ import annotations
@@ -29,6 +40,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+import cbor2
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -103,6 +116,11 @@ def parse_args() -> argparse.Namespace:
         default=30.0,
         help="Inject client connection timeout in seconds (default: 30).",
     )
+    parser.add_argument(
+        "--cbor",
+        action="store_true",
+        help="Encode datagrams as CBOR maps instead of text lines.",
+    )
     return parser.parse_args()
 
 
@@ -156,6 +174,88 @@ def build_udp_lines(src: str, tick: int, seq_start: int) -> tuple[list[str], int
     return lines, seq
 
 
+def build_cbor_records(src: str, tick: int, seq_start: int) -> tuple[list[dict], int]:
+    """Return deterministic CBOR-encodable records for one source/tick.
+
+    Each record is a dict that, when encoded as CBOR and decoded by
+    CborDatagramParser, produces a line containing the same semantic
+    tokens that UI tests assert on (e.g. ``kind=filter-alpha``, ``tick=11``).
+    """
+    seq = seq_start
+    records: list[dict] = []
+
+    records.append({
+        "src": src,
+        "tick": tick,
+        "seq": seq,
+        "kind": "sync",
+        "msg": f"{src} synchronized step {tick:03d}",
+    })
+    seq += 1
+
+    if tick % 5 == 0:
+        records.append({
+            "src": src,
+            "tick": tick,
+            "seq": seq,
+            "kind": "warning",
+            "msg": f"{src} warning at tick {tick:03d}",
+        })
+        seq += 1
+
+    if tick % 7 == 0:
+        records.append({
+            "src": src,
+            "tick": tick,
+            "seq": seq,
+            "kind": "error",
+            "msg": f"{src} error at tick {tick:03d}",
+        })
+        seq += 1
+
+    if tick % 9 == 0:
+        records.append({
+            "src": src,
+            "tick": tick,
+            "seq": seq,
+            "kind": "prefix-cleanup",
+            "msg": "duplicated source prefix",
+        })
+        seq += 1
+
+    if tick % 11 == 0:
+        records.append({
+            "src": src,
+            "tick": tick,
+            "seq": seq,
+            "kind": "timestamp-cleanup",
+            "msg": "duplicated timestamp prefix",
+        })
+        seq += 1
+
+    if tick % 13 == 0:
+        records.append({
+            "src": src,
+            "tick": tick,
+            "seq": seq,
+            "kind": "filter-alpha",
+            "msg": "alpha filter target",
+        })
+        seq += 1
+
+    if tick % 17 == 0:
+        records.append({
+            "src": src,
+            "tick": tick,
+            "seq": seq,
+            "kind": "filter-beta",
+            "msg": "beta filter target",
+        })
+        seq += 1
+
+    return records, seq
+
+
 class InjectFanout:
     def __init__(self, targets: list[Target], connect_timeout: float):
         self._clients: dict[str, LogClient] = {}
@@ -192,7 +292,7 @@ def run(args: argparse.Namespace) -> int:
         print("[det-demo] inject targets:")
         for t in args.inject:
             print(f"  - {t.name} -> {t.host}:{t.port}")
-    print(f"[det-demo] tick_ms={args.tick_ms:g} cycles={'infinite' if args.cycles == 0 else args.cycles}")
+    print(f"[det-demo] tick_ms={args.tick_ms:g} cycles={'infinite' if args.cycles == 0 else args.cycles}{' mode=CBOR' if args.cbor else ''}")
 
     seq_by_src = {t.name: 1 for t in args.udp}
     inject = InjectFanout(args.inject, args.connect_timeout) if args.inject else None
@@ -213,10 +313,16 @@ def run(args: argparse.Namespace) -> int:
                 for index, target in enumerate(args.udp):
                     if index > 0 and per_source_offset > 0:
                         time.sleep(per_source_offset)
-                    lines, next_seq = build_udp_lines(target.name, tick, seq_by_src[target.name])
-                    seq_by_src[target.name] = next_seq
-                    payload = ("\n".join(lines) + "\n").encode("utf-8")
-                    udp_sock.sendto(payload, (target.host, target.port))
+                    if args.cbor:
+                        records, next_seq = build_cbor_records(target.name, tick, seq_by_src[target.name])
+                        seq_by_src[target.name] = next_seq
+                        for rec in records:
+                            udp_sock.sendto(cbor2.dumps(rec), (target.host, target.port))
+                    else:
+                        lines, next_seq = build_udp_lines(target.name, tick, seq_by_src[target.name])
+                        seq_by_src[target.name] = next_seq
+                        payload = ("\n".join(lines) + "\n").encode("utf-8")
+                        udp_sock.sendto(payload, (target.host, target.port))
 
                 if inject is not None and tick % 10 == 0:
                     for target in args.udp:

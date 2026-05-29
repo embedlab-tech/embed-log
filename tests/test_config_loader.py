@@ -140,5 +140,57 @@ sources:
             with self.assertRaises(ConfigError):
                 load_config(p)
 
+    def test_cbor_datagram_parser_accepted_on_udp(self):
+        cfg_text = """
+version: 1
+sources:
+  - name: A
+    type: udp
+    port: 6000
+    parser:
+      type: cbor-datagram
+""".strip()
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "cfg.yml"
+            p.write_text(cfg_text, encoding="utf-8")
+            cfg = load_config(p)
+
+        self.assertEqual(cfg["sources"][0]["parser"], {"type": "cbor-datagram"})
+
+    def test_cbor_datagram_parser_rejected_on_uart(self):
+        """cbor-datagram is only valid for UDP (datagram-oriented)."""
+        cfg_text = """
+version: 1
+sources:
+  - name: A
+    type: uart
+    port: /dev/ttyUSB0
+    parser:
+      type: cbor-datagram
+""".strip()
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "cfg.yml"
+            p.write_text(cfg_text, encoding="utf-8")
+            with self.assertRaises(ConfigError):
+                load_config(p)
+
+    def test_parser_extra_field_fails(self):
+        """Extra fields in parser config are rejected."""
+        cfg_text = """
+version: 1
+sources:
+  - name: A
+    type: udp
+    port: 6000
+    parser:
+      type: text
+      format: extended
+""".strip()
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "cfg.yml"
+            p.write_text(cfg_text, encoding="utf-8")
+            with self.assertRaises(ConfigError):
+                load_config(p)
+
 if __name__ == "__main__":
     unittest.main()

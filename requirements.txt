@@ -1,3 +1,4 @@
 pyserial>=3.5
 aiohttp>=3.9
 PyYAML>=6.0
+cbor2>=5.6

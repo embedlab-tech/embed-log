@@ -46,6 +46,10 @@ test.describe('embed-log deterministic demo smoke', () => {
     await page.getByRole('button', { name: 'DevB', exact: true }).click();
     await expect(page.locator('#pane-SENSOR_C .pane-name')).toHaveText('READER');
     await waitForSourceTestLine(page, 'SENSOR_C');
+
+    await page.getByRole('button', { name: 'cbor-tab', exact: true }).click();
+    await expect(page.locator('#pane-SENSOR_CBOR .pane-name')).toHaveText('CBOR');
+    await waitForLineContaining(page, 'SENSOR_CBOR', 'kind=sync');
   });
 
   test('shift-click selects a deterministic range and raw snippet downloads cleaned merged text', async ({ page }, testInfo) => {
