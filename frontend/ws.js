@@ -1,5 +1,5 @@
 import { state, TABS, PANES, PANE_LABELS, setTimestampContext } from './state.js';
-import { appendLineBatch, clearPane, setTimestampMode } from './lines.js';
+import { appendLineBatch, clearPane, rerenderPane, setTimestampMode } from './lines.js';
 import { createTabWithPanes } from './tabcreate.js';
 
 import { switchTab } from './tabs.js';
@@ -135,11 +135,12 @@ function wsConnect() {
         }
 
         if (msg.type === "session_info") {
-            setTimestampContext({
+            const enriched = setTimestampContext({
                 mode: msg.session?.timestamp_mode || state.sessionTimestampMode,
                 firstLogAt: msg.session?.first_log_at,
                 resetMode: false,
             });
+            if (enriched) PANES.forEach(rerenderPane);
             window.__embedLogUpdateTimestampModeUi?.();
             return;
         }

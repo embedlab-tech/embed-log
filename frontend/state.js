@@ -56,6 +56,36 @@ function _isoToEpochMs(iso) {
     return Number.isFinite(ms) ? ms : null;
 }
 
+function _formatAbsoluteTimestampFromMs(ms) {
+    if (!Number.isFinite(ms)) return null;
+    const d = new Date(ms);
+    if (!Number.isFinite(d.getTime())) return null;
+    return `${_formatMs3(d.getMonth() + 1).slice(1)}-${_formatMs3(d.getDate()).slice(1)} ${_formatMs3(d.getHours()).slice(1)}:${_formatMs3(d.getMinutes()).slice(1)}:${_formatMs3(d.getSeconds()).slice(1)}.${_formatMs3(d.getMilliseconds())}`;
+}
+
+function _enrichExistingTimestampVariants() {
+    if (!Number.isFinite(state.firstLogAtMs)) return false;
+    let changed = false;
+    PANES.forEach(paneId => {
+        const lines = state.rawLines[paneId] || [];
+        lines.forEach(line => {
+            if (!line) return;
+            if (!line.absTs && Number.isFinite(line.relNum)) {
+                line.absNum = state.firstLogAtMs + line.relNum;
+                line.absTs = _formatAbsoluteTimestampFromMs(line.absNum);
+                changed = true;
+            }
+            if ((!line.relTs || !Number.isFinite(line.relNum)) && Number.isFinite(line.absNum)) {
+                line.relNum = Math.max(0, line.absNum - state.firstLogAtMs);
+                line.relTs = formatRelativeTimestamp(line.relNum);
+                changed = true;
+            }
+            applyTimestampModeToLine(line);
+        });
+    });
+    return changed;
+}
+
 
 export const state = {
     showTs:      true,
@@ -89,6 +119,7 @@ export function setTimestampContext({ mode = null, firstLogAt = undefined, reset
         state.firstLogAt = typeof firstLogAt === "string" && firstLogAt.trim() ? firstLogAt.trim() : null;
         state.firstLogAtMs = _isoToEpochMs(state.firstLogAt);
     }
+    return _enrichExistingTimestampVariants();
 }
 
 export function lineHasTimestampMode(line, mode) {
@@ -144,6 +175,11 @@ export function buildTimestampInfo(ts, meta = {}) {
 
     if (!info.absTs && typeof ts === "string" && ts && !ts.startsWith("T+")) {
         info.absTs = ts;
+    }
+
+    if (!info.absTs && Number.isFinite(info.relNum) && Number.isFinite(state.firstLogAtMs)) {
+        info.absNum = state.firstLogAtMs + info.relNum;
+        info.absTs = _formatAbsoluteTimestampFromMs(info.absNum);
     }
 
     if ((!info.relTs || !Number.isFinite(info.relNum)) && Number.isFinite(info.absNum) && Number.isFinite(state.firstLogAtMs)) {
