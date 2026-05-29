@@ -52,6 +52,23 @@ test.describe('embed-log deterministic demo smoke', () => {
     await waitForLineContaining(page, 'SENSOR_CBOR', 'kind=sync');
   });
 
+  test('startup does not depend on external network assets', async ({ page }) => {
+    const requests = [];
+    page.on('request', request => requests.push(request.url()));
+
+    await page.goto('/');
+
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await expect(page.locator('#pane-SENSOR_A')).toBeVisible();
+
+    const origin = new URL(page.url()).origin;
+    const externalRequests = requests.filter(url => {
+      if (!url.startsWith('http://') && !url.startsWith('https://')) return false;
+      return new URL(url).origin !== origin;
+    });
+    expect(externalRequests).toEqual([]);
+  });
+
   test('shift-click selects a deterministic range and raw snippet downloads cleaned merged text', async ({ page }, testInfo) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });

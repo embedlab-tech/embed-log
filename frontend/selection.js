@@ -191,6 +191,7 @@ function _rebuildPaneSelector(paneId) {
         cb.addEventListener('change', e => {
             e.stopPropagation();
             state.contextPanes[id] = cb.checked;
+            _syncSelectionActions(paneId);
         });
         label.appendChild(cb);
         label.appendChild(document.createTextNode(' ' + unwrapPaneLabel(id)));
@@ -249,15 +250,18 @@ function _syncSelectionActions(paneId) {
     const rawBtn = document.getElementById("download-raw-" + paneId);
     if (!wrap || !copyBtn) return;
 
-    const count = state.selected[paneId].size;
-    const visible = count > 0;
+    const selectedCount = state.selected[paneId].size;
+    const visible = selectedCount > 0;
+    const displayCount = state.selectionScope === "exact"
+        ? selectedCount
+        : _countRangeEntries(paneId);
     wrap.classList.toggle("visible", visible);
     wrap.querySelectorAll(".copy-btn, .scope-btn, .more-toggle").forEach(el =>
         el.classList.toggle("visible", visible)
     );
 
     if (visible) {
-        copyBtn.textContent = `Copy (${count})`;
+        copyBtn.textContent = `Copy (${displayCount})`;
         rawBtn.textContent = `Download raw`;
     }
 }
@@ -354,14 +358,30 @@ function _selectionRange(paneId) {
     return { from: Math.min(...nums), to: Math.max(...nums) };
 }
 
+function _rangeTargetPanes() {
+    return state.selectionScope === 'context-selected'
+        ? PANES.filter(id => state.contextPanes[id])
+        : PANES;
+}
+
+function _countRangeEntries(paneId) {
+    const range = _selectionRange(paneId);
+    if (!range) return 0;
+    let count = 0;
+    _rangeTargetPanes().forEach(id => {
+        (state.rawLines[id] || []).forEach(line => {
+            const n = line?.numTs;
+            if (Number.isFinite(n) && n >= range.from && n <= range.to) count++;
+        });
+    });
+    return count;
+}
+
 function _collectRangeEntries(paneId) {
     const range = _selectionRange(paneId);
     if (!range) return [];
     const entries = [];
-    const targetPanes = state.selectionScope === 'context-selected'
-        ? PANES.filter(id => state.contextPanes[id])
-        : PANES;
-    targetPanes.forEach(id => {
+    _rangeTargetPanes().forEach(id => {
         (state.rawLines[id] || []).forEach((line, idx) => {
             const n = line?.numTs;
             if (Number.isFinite(n) && n >= range.from && n <= range.to) {

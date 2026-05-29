@@ -77,7 +77,8 @@ function flushLogMessages() {
 
 function wsConnect() {
     wsSetStatus("connecting", "connecting…");
-    ws = new WebSocket("ws://" + window.location.host + "/ws");
+    const wsScheme = window.location.protocol === "https:" ? "wss://" : "ws://";
+    ws = new WebSocket(wsScheme + window.location.host + "/ws");
 
     ws.addEventListener("open", () => {
         // UX policy: never show stale in-memory lines after reconnect/open.
