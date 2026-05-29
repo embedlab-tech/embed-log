@@ -85,12 +85,14 @@ export async function exportHtmlSnapshot(options = {}) {
             `window.PANES = ${_safeJson(PANES)};\n` +
             `window.PANE_LABELS = ${_safeJson(PANE_LABELS)};\n` +
             `window.__embedLogInitialThemeState = ${_safeJson(themeState)};\n` +
+            `window.__embedLogInitialTimestampMode = ${_safeJson(state.timestampMode)};\n` +
+            `window.__embedLogFirstLogAt = ${_safeJson(state.firstLogAt)};\n` +
             `window.__embedLogInitialFontSize = ${state.fontSize};`;
 
 
 
         // ------------------------------------------------------------------
-        // Serialize all pane data as { ts, text, isTx }.
+        // Serialize all pane data with both timestamp representations when known.
         // rawText may be absent on lines loaded before this session; fall back
         // to decoding the stored HTML via a temporary element (strips tags,
         // decodes entities) so the export always has something to render.
@@ -106,7 +108,13 @@ export async function exportHtmlSnapshot(options = {}) {
         if (!options.logData) {
             PANES.forEach(id => {
                 logData[id] = state.rawLines[id].map(line => ({
-                    ts: line.ts, text: _rawOf(line), isTx: line.isTx,
+                    ts: line.ts,
+                    text: _rawOf(line),
+                    isTx: line.isTx,
+                    absTs: line.absTs ?? null,
+                    absNum: Number.isFinite(line.absNum) ? line.absNum : null,
+                    relTs: line.relTs ?? null,
+                    relNum: Number.isFinite(line.relNum) ? line.relNum : null,
                 }));
             });
         }
@@ -141,7 +149,7 @@ export async function exportHtmlSnapshot(options = {}) {
         var entries = _logData[paneId];
         if (!entries || !entries.length) return;
         state.atBottom[paneId] = false;
-        entries.forEach(function (e) { appendLine(paneId, e.ts, e.text, e.isTx); });
+        entries.forEach(function (e) { appendLine(paneId, e.ts, e.text, e.isTx, e); });
         document.getElementById("log-" + paneId).scrollTop = 0;
         state.atBottom[paneId] = false;
         updateJumpBtn(paneId);
@@ -251,8 +259,12 @@ function _cleanMessage(rawText) {
         text = text
             // Strip ISO timestamp prefix like [2026-05-24T22:59:41.773+02:00]
             .replace(/^\[\d{4}-\d{2}-\d{2}T[^\]]+\]\s*/, "")
+            // Strip relative timestamp prefix like [T+00:00:01.234]
+            .replace(/^\[T\+\d+:\d{2}:\d{2}\.\d{3}\]\s*/, "")
             // Strip bare short timestamp prefix like 05-24 23:05:51.109
             .replace(/^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s*/, "")
+            // Strip bare relative timestamp prefix like T+00:00:01.234
+            .replace(/^T\+\d+:\d{2}:\d{2}\.\d{3}\s*/, "")
             // Strip source label prefix like [SENSOR_A]
             .replace(/^\[[A-Za-z_][A-Za-z0-9_-]*\]\s*/, "")
             .trim();

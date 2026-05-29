@@ -167,6 +167,8 @@ def load_config(path: str | Path) -> dict:
         out["default_light_theme"] = _require_str(server.get("default_light_theme"), "server.default_light_theme")
     if "default_dark_theme" in server:
         out["default_dark_theme"] = _require_str(server.get("default_dark_theme"), "server.default_dark_theme")
+    if "timestamp_mode" in server:
+        out["timestamp_mode"] = _require_choice(server.get("timestamp_mode"), "server.timestamp_mode", {"absolute", "relative"})
     if "queue_size" in server:
         out["queue_size"] = _as_int(server.get("queue_size"), "server.queue_size")
 

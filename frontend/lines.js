@@ -1,8 +1,8 @@
-import { state, TABS, PANES } from './state.js';
-
-// Live runtime keeps every received line in the DOM so the browser view
-// matches the full in-memory/exported log history.
-import { parseAnsi, tsToNum } from './ansi.js';
+import {
+    state, TABS, PANES, buildTimestampInfo, applyTimestampModeToLine,
+    lineHasTimestampMode,
+} from './state.js';
+import { parseAnsi } from './ansi.js';
 
 // ---------------------------------------------------------------------------
 // Line rendering
@@ -46,16 +46,22 @@ export function matchesFilter(line, rx) {
     return rx.test(plain);
 }
 
-export function appendLine(paneId, ts, rawText, isTx) {
-    const html  = parseAnsi(rawText);
-    const numTs = tsToNum(ts);
-    const line  = { ts, numTs, html, rawText, isTx };
+export function appendLine(paneId, ts, rawText, isTx, meta = null) {
+    const html = parseAnsi(rawText);
+    const line = {
+        ...buildTimestampInfo(ts, typeof meta === "object" && meta !== null
+            ? meta
+            : (Number.isFinite(meta) ? { numTs: meta } : {})),
+        html,
+        rawText,
+        isTx,
+    };
     state.rawLines[paneId].push(line);
 
     const logEl = document.getElementById("log-" + paneId);
     const idx   = state.rawLines[paneId].length - 1;
     const div   = document.createElement("div");
-    div.dataset.ts  = ts;
+    div.dataset.ts  = line.ts;
     div.dataset.idx = idx;
     div.className   = _lineClass(line, idx, paneId);
 
@@ -66,13 +72,12 @@ export function appendLine(paneId, ts, rawText, isTx) {
         div.innerHTML = buildLineHtml(line, state.showTs, rx);
     }
 
-
     logEl.appendChild(div);
-
 
     if (state.atBottom[paneId]) logEl.scrollTop = logEl.scrollHeight;
     updateJumpBtn(paneId);
     window.__embedLogSchedulePersist?.();
+    window.__embedLogUpdateTimestampModeUi?.();
 }
 
 export function rerenderPane(paneId) {
@@ -94,6 +99,34 @@ export function rerenderPane(paneId) {
         }
     }
     if (state.atBottom[paneId]) logEl.scrollTop = logEl.scrollHeight;
+}
+export function setTimestampMode(mode) {
+    const nextMode = mode === "relative" ? "relative" : "absolute";
+    if (state.timestampMode === nextMode) return;
+
+    state.timestampMode = nextMode;
+    state.syncTs = null;
+    state.syncTabSwitch = false;
+
+    PANES.forEach(paneId => {
+        const lines = state.rawLines[paneId] || [];
+        lines.forEach(applyTimestampModeToLine);
+        rerenderPane(paneId);
+        highlightLine(paneId, null);
+    });
+
+    window.__embedLogSchedulePersist?.();
+    window.__embedLogUpdateTimestampModeUi?.();
+}
+
+export function canDisplayTimestampMode(mode) {
+    for (const paneId of PANES) {
+        const lines = state.rawLines[paneId] || [];
+        for (const line of lines) {
+            if (lineHasTimestampMode(line, mode)) return true;
+        }
+    }
+    return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -171,6 +204,7 @@ export function clearPane(paneId) {
     // Close any open More dropdown for this pane
     document.getElementById("more-dropdown-" + paneId)?.classList.remove("open");
     window.__embedLogSchedulePersist?.();
+    window.__embedLogUpdateTimestampModeUi?.();
 }
 
 document.getElementById("btn-clear")?.addEventListener("click", () => {

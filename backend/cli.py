@@ -69,6 +69,10 @@ server:
   # ws_ui: /absolute/path/to/index.html
   app_name: embed-log
   open_browser: false
+  # absolute | relative
+  # absolute: local wall-clock date/time
+  # relative: elapsed time since the first log line (T+00:00:00.000)
+  timestamp_mode: absolute
   default_light_theme: whitesand
   default_dark_theme: one-dark
   # quiet | events | full
@@ -368,6 +372,7 @@ def _run_create_config(
             "ws_port": 8080,
             "app_name": app_name,
             "open_browser": open_browser,
+            "timestamp_mode": "absolute",
             "verbosity": "quiet",
         },
         "logs": {"dir": logs_dir},
@@ -1643,6 +1648,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="do not open browser (overrides config)",
     )
     p.add_argument(
+        "--timestamp-mode",
+        choices=["absolute", "relative"],
+        default=None,
+        dest="timestamp_mode",
+        help="timestamp display/storage mode (overrides config)",
+    )
+    p.add_argument(
         "--default-light-theme",
         dest="default_light_theme",
         default=None,
@@ -1858,6 +1870,11 @@ def _run_run(args: argparse.Namespace) -> int:
         else cfg.get("open_browser", False)
     )
     job_id = args.job_id if args.job_id is not None else cfg.get("job_id", None)
+    timestamp_mode = (
+        args.timestamp_mode
+        if args.timestamp_mode is not None
+        else cfg.get("timestamp_mode", "absolute")
+    )
     default_light_theme = (
         args.default_light_theme
         if args.default_light_theme is not None
@@ -1967,6 +1984,7 @@ def _run_run(args: argparse.Namespace) -> int:
         app_name=app_name,
         default_light_theme=default_light_theme,
         default_dark_theme=default_dark_theme,
+        timestamp_mode=timestamp_mode,
         queue_maxsize=queue_maxsize,
     )
 

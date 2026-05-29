@@ -16,6 +16,7 @@ server:
   open_browser: true
   verbosity: events
   queue_size: 32768
+  timestamp_mode: relative
   job_id: CI-42
 logs:
   dir: logs/
@@ -45,6 +46,7 @@ tabs:
         self.assertEqual(cfg["app_name"], "demo")
         self.assertTrue(cfg["open_browser"])
         self.assertEqual(cfg["verbosity"], "events")
+        self.assertEqual(cfg["timestamp_mode"], "relative")
         self.assertEqual(cfg["job_id"], "CI-42")
         self.assertEqual(cfg["queue_size"], 32768)
         self.assertEqual(cfg["log_dir"], "logs/")
@@ -59,6 +61,22 @@ tabs:
 version: 1
 server:
   verbosity: noisy
+sources:
+  - name: A
+    type: udp
+    port: 6000
+""".strip()
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "cfg.yml"
+            p.write_text(cfg_text, encoding="utf-8")
+            with self.assertRaises(ConfigError):
+                load_config(p)
+
+    def test_invalid_timestamp_mode_fails(self):
+        cfg_text = """
+version: 1
+server:
+  timestamp_mode: monotonic
 sources:
   - name: A
     type: udp

@@ -64,6 +64,7 @@ def run_app(
     default_light_theme: Optional[str],
     default_dark_theme: Optional[str],
     queue_maxsize: int = 20000,
+    timestamp_mode: str = "absolute",
 ) -> int:
     tab_label_by_source: dict[str, str] = {}
     for tab in tabs:
@@ -118,5 +119,6 @@ def run_app(
         },
         source_labels=source_labels,
         queue_maxsize=queue_maxsize,
+        timestamp_mode=timestamp_mode,
     ).run_forever()
     return 0

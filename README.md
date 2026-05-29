@@ -63,9 +63,10 @@ embed-log validate --config embed-log.yml
 ```
 
 Run:
-
 ```bash
 embed-log run --config embed-log.yml
+# or override timestamp mode from the CLI
+embed-log run --config embed-log.yml --timestamp-mode relative
 ```
 
 UI default:
@@ -87,6 +88,7 @@ server:
   app_name: embed-log
   open_browser: false
   verbose: false
+  timestamp_mode: absolute
 
 logs:
   dir: logs/
@@ -119,6 +121,12 @@ tabs:
   - label: Pytest
     panes: [PYTEST]
 ```
+
+`timestamp_mode` values:
+- `absolute` — wall-clock timestamps like `05-29 12:42:47.123`
+- `relative` — elapsed time from the first log line like `T+00:00:01.234`
+
+In the UI settings panel you can switch between absolute and relative time when the session carries the required origin metadata. Exported full HTML snapshots and exported HTML snippets embed that metadata too, so the same toggle works offline.
 
 ## Useful commands
 

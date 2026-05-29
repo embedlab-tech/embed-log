@@ -76,6 +76,7 @@ class CreateConfigWizardTests(unittest.TestCase):
             cfg = yaml.safe_load(out.read_text(encoding='utf-8'))
             self.assertEqual(cfg['server']['app_name'], 'demo-app')
             self.assertTrue(cfg['server']['open_browser'])
+            self.assertEqual(cfg['server']['timestamp_mode'], 'absolute')
             self.assertEqual(cfg['logs']['dir'], 'demo-logs/')
             self.assertEqual(
                 cfg['tabs'],

@@ -349,7 +349,7 @@ function _selectionRange(paneId) {
     const lines = state.rawLines[paneId] || [];
     const nums = Array.from(sel)
         .map(i => lines[i]?.numTs)
-        .filter(n => Number.isFinite(n) && n > 0);
+        .filter(n => Number.isFinite(n) && n >= 0);
     if (!nums.length) return null;
     return { from: Math.min(...nums), to: Math.max(...nums) };
 }
@@ -404,6 +404,8 @@ function _snippetMessageText(entry) {
         const before = text;
         text = text
             .replace(/^\[\d{4}-\d{2}-\d{2}T[^\]]+\]\s*/, "")
+            .replace(/^\[T\+\d+:\d{2}:\d{2}\.\d{3}\]\s*/, "")
+            .replace(/^T\+\d+:\d{2}:\d{2}\.\d{3}\s*/, "")
             .replace(sourcePrefix, "")
             .trim();
         if (text === before) break;
@@ -424,6 +426,10 @@ function _buildRangeLogData(entries) {
             ts: e.line.ts,
             text: `[${e.paneId}] ${_snippetMessageText(e)}`,
             isTx: e.line.isTx,
+            absTs: e.line.absTs ?? null,
+            absNum: Number.isFinite(e.line.absNum) ? e.line.absNum : null,
+            relTs: e.line.relTs ?? null,
+            relNum: Number.isFinite(e.line.relNum) ? e.line.relNum : null,
         });
     });
     return logData;

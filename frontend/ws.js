@@ -1,5 +1,5 @@
-import { state, TABS, PANES, PANE_LABELS } from './state.js';
-import { appendLine, clearPane } from './lines.js';
+import { state, TABS, PANES, PANE_LABELS, setTimestampContext } from './state.js';
+import { appendLine, clearPane, setTimestampMode } from './lines.js';
 import { createTabWithPanes } from './tabcreate.js';
 
 import { switchTab } from './tabs.js';
@@ -83,6 +83,16 @@ function wsConnect() {
             }
             currentSessionId = sessionId || currentSessionId;
 
+            setTimestampContext({
+                mode: msg.session?.timestamp_mode || "absolute",
+                firstLogAt: msg.session?.first_log_at,
+                resetMode: isSessionChange || (TABS.length === 0 && PANES.length === 0),
+            });
+            if (isSessionChange || (TABS.length === 0 && PANES.length === 0)) {
+                setTimestampMode(state.timestampMode);
+            }
+            window.__embedLogUpdateTimestampModeUi?.();
+
             window.__embedLogSetSession?.(msg.session || null);
             window.__embedLogOnSessionHtmlStatus?.({
                 ...msg.session,
@@ -101,6 +111,15 @@ function wsConnect() {
             return;
         }
 
+        if (msg.type === "session_info") {
+            setTimestampContext({
+                mode: msg.session?.timestamp_mode || state.sessionTimestampMode,
+                firstLogAt: msg.session?.first_log_at,
+                resetMode: false,
+            });
+            window.__embedLogUpdateTimestampModeUi?.();
+            return;
+        }
         if (msg.type === "session_html_status") {
             window.__embedLogOnSessionHtmlStatus?.(msg);
             return;
@@ -111,6 +130,13 @@ function wsConnect() {
             state.syncTs = null;
             state.syncTabSwitch = false;
             clearAllPaneContents();
+            setTimestampContext({
+                mode: msg.session?.timestamp_mode || "absolute",
+                firstLogAt: msg.session?.first_log_at,
+                resetMode: true,
+            });
+            setTimestampMode(state.timestampMode);
+            window.__embedLogUpdateTimestampModeUi?.();
             window.__embedLogSetSession?.(msg.session || null);
             window.__embedLogOnSessionHtmlStatus?.({
                 ...msg.session,
@@ -122,7 +148,7 @@ function wsConnect() {
 
         if (msg.type !== "rx" && msg.type !== "tx") return;
 
-        const { type, data, timestamp, source_id } = msg;
+        const { type, data, timestamp, timestamp_iso, timestamp_num, source_id } = msg;
         if (!source_id) return;
 
         // Unknown source_id — server has no --tab for it; ignore with a warning.
@@ -130,7 +156,10 @@ function wsConnect() {
             console.warn("embed-log: dropping message for unknown source_id:", source_id);
             return;
         }
-        appendLine(source_id, timestamp || "", data || "", type === "tx");
+        appendLine(source_id, timestamp || "", data || "", type === "tx", {
+            timestampIso: timestamp_iso,
+            numTs: timestamp_num,
+        });
     });
 
     ws.addEventListener("close", () => {

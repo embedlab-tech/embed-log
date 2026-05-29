@@ -21,6 +21,8 @@ class SessionManager:
         config_path: Optional[str],
         job_id: Optional[str],
         app_name: str,
+        timestamp_mode: str = "absolute",
+        first_log_at: Optional[str] = None,
     ):
         self.session_id = session_id
         self.session_dir = Path(session_dir)
@@ -31,10 +33,16 @@ class SessionManager:
         self.config_path = config_path
         self.job_id = job_id
         self.app_name = app_name
+        self.timestamp_mode = timestamp_mode
+        self.first_log_at = first_log_at
 
         self.manifest_path = self.session_dir / "manifest.json"
         self.html_path = self.session_dir / "session.html"
         self.snippets_dir = self.session_dir / "snippets"
+
+    def set_first_log_at(self, first_log_at: Optional[str]) -> None:
+        self.first_log_at = first_log_at
+
 
     def build_session_info(self) -> dict:
         html_ready = self.html_path.is_file()
@@ -57,6 +65,9 @@ class SessionManager:
             "html_updated_at": html_updated_at,
             "html_error": None,
             "api": "/api/session/current",
+            "started_at": self.started_at,
+            "timestamp_mode": self.timestamp_mode,
+            "first_log_at": self.first_log_at,
             "tabs": self.tabs,
             "pane_labels": self.source_labels,
             "sources": [
@@ -81,6 +92,8 @@ class SessionManager:
             "system_timezone": datetime.now().astimezone().tzname(),
             "job_id": self.job_id,
             "config_path": self.config_path,
+            "timestamp_mode": self.timestamp_mode,
+            "first_log_at": self.first_log_at,
             "tabs": self.tabs,
             "pane_labels": self.source_labels,
             "source_files": self.source_files,

@@ -40,6 +40,12 @@ test.describe('HTML export replay', () => {
       await expect(snippet.locator('#pane-SENSOR_B')).toBeVisible();
       await expect(snippet.locator('#log-SENSOR_A')).toContainText('kind=prefix-cleanup');
       await expect(snippet.locator('#ws-status')).toBeHidden();
+
+      await snippet.locator('#btn-settings').click();
+      await expect(snippet.locator('#btn-timestamp-mode')).toHaveText('Absolute');
+      await snippet.locator('#btn-timestamp-mode').click();
+      await expect(snippet.locator('#btn-timestamp-mode')).toHaveText('Relative');
+      await expect(snippet.locator('#log-SENSOR_A .log-line').first().locator('.ts')).toHaveText(/^T\+\d+:\d{2}:\d{2}\.\d{3}$/);
     } finally {
       await snippet.close();
     }

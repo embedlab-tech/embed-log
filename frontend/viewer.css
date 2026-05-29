@@ -131,6 +131,7 @@ button.active { background: var(--selection); border-color: var(--accent); color
 #settings-panel.open { display: flex; }
 #settings-panel .set-sep  { color: var(--border); margin: 0 4px; }
 #settings-panel .set-label { color: var(--ansi-0); margin-right: 2px; }
+#settings-panel .set-note  { color: var(--ansi-0); opacity: 0.85; }
 
 /* ---- Tag colours — entire line is tinted + slightly bold ---- */
 .log-line.line-wrn { color: var(--ansi-3); font-weight: 600; }  /* yellow */

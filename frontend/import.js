@@ -1,5 +1,5 @@
-import { state, PANES } from './state.js';
-import { parseAnsi, tsToNum } from './ansi.js';
+import { state, PANES, buildTimestampInfo } from './state.js';
+import { parseAnsi } from './ansi.js';
 import { parseLogLine } from './tsparse.js';
 import {
     clearPane, _lineClass, matchesFilter, buildLineHtml,
@@ -33,14 +33,14 @@ function _loadTextIntoPane(paneId, text) {
 
     function flush() {
         if (pendingTs === null) return;
-        const html  = parseAnsi(pendingData);
-        const numTs = tsToNum(pendingTs);
-        const line  = { ts: pendingTs, numTs, html, rawText: pendingData, isTx: false };
-        const idx   = state.rawLines[paneId].length;
+        const html = parseAnsi(pendingData);
+        const timestamp = buildTimestampInfo(pendingTs);
+        const line = { ...timestamp, html, rawText: pendingData, isTx: false };
+        const idx = state.rawLines[paneId].length;
         state.rawLines[paneId].push(line);
 
         const div = document.createElement("div");
-        div.dataset.ts  = pendingTs;
+        div.dataset.ts  = line.ts;
         div.dataset.idx = idx;
         div.className   = _lineClass(line, idx, paneId);
 
@@ -49,9 +49,9 @@ function _loadTextIntoPane(paneId, text) {
         } else {
             div.innerHTML = buildLineHtml(line, state.showTs, rx);
         }
-        div.addEventListener("click",     () => onLineClick(paneId, numTs, div));
+        div.addEventListener("click",     () => onLineClick(paneId, line.numTs, div));
         div.addEventListener("mousedown", e  => { if (e.button === 1) e.preventDefault(); });
-        div.addEventListener("auxclick",  e  => { if (e.button === 1) onMiddleClick(paneId, numTs, div); });
+        div.addEventListener("auxclick",  e  => { if (e.button === 1) onMiddleClick(paneId, line.numTs, div); });
         frag.appendChild(div);
         count++;
         pendingTs = null;

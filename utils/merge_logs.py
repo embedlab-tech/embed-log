@@ -29,12 +29,12 @@ Assets (viewer.css, state.js, …) are read from the same directory as this scri
 """
 
 import argparse
+from datetime import datetime, timedelta
 import html as _html
 import json
 import os
 import re
 import sys
-
 
 def _slug(label: str) -> str:
     """Convert a display label to a safe HTML element-ID slug."""
@@ -47,8 +47,10 @@ def _slug(label: str) -> str:
 #   [YYYY-MM-DDTHH:MM:SS[.frac][Z|±HH:MM]]   server / full ISO in brackets
 #   [MM-DD HH:MM:SS[.frac]]                   short, space-sep, in brackets
 #   [MM-DDTHH:MM:SS[.frac]]                   short ISO (T-sep), in brackets
+#   [T+HH:MM:SS[.frac]]                       relative elapsed time in brackets
 #   YYYY-MM-DDTHH:MM:SS[.frac][Z|±HH:MM]      bare ISO 8601 (no brackets)
-#   YYYY-MM-DD HH:MM:SS[.frac]                 space separator, no brackets
+#   YYYY-MM-DD HH:MM:SS[.frac]                space separator, no brackets
+#   T+HH:MM:SS[.frac]                         bare relative elapsed time
 #
 # Fractional seconds (any length) are truncated to 3 digits (ms).
 # Timezone suffixes are stripped — the local clock time is preserved so that
@@ -64,6 +66,51 @@ def _ms3(frac: str | None) -> str:
     if not frac:
         return "000"
     return (frac + "000")[:3]
+def _relative_ts_to_ms(ts: str | None) -> int | None:
+    if not ts:
+        return None
+    m = re.match(r"^T\+(\d+):(\d{2}):(\d{2})\.(\d{3})$", ts)
+    if not m:
+        return None
+    return (
+        int(m.group(1)) * 3_600_000
+        + int(m.group(2)) * 60_000
+        + int(m.group(3)) * 1_000
+        + int(m.group(4))
+    )
+
+
+def _format_relative_ms(total_ms: int) -> str:
+    if total_ms < 0:
+        total_ms = 0
+    hours, rem = divmod(total_ms, 3_600_000)
+    minutes, rem = divmod(rem, 60_000)
+    seconds, millis = divmod(rem, 1_000)
+    return f"T+{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}"
+
+
+def _format_absolute_display(dt: datetime) -> str:
+    return dt.strftime("%m-%d %H:%M:%S.%f")[:-3]
+
+
+def _parse_absolute_datetime(raw: str) -> datetime | None:
+    stripped = _RE_ANSI_PREFIX.sub("", raw).lstrip()
+    if stripped.startswith("["):
+        end = stripped.find("]")
+        token = stripped[1:end] if end > 0 else ""
+    else:
+        token = stripped.split(None, 1)[0]
+    if not token or token.startswith("T+"):
+        return None
+    token = token.replace(",", ".")
+    if "T" not in token and re.match(r"^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}", token):
+        token = token.replace(" ", "T", 1)
+    if token.endswith("Z"):
+        token = token[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(token)
+    except ValueError:
+        return None
 
 
 # ANSI prefix (e.g. \x1b[36m) can appear before timestamp when the whole
@@ -85,6 +132,11 @@ _RE_SHORT_ISO_BRACKET = re.compile(
     r"^\[(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:[.,](\d+))?\]\s*(.*)",
     re.DOTALL,
 )
+# [T+HH:MM:SS[.frac]]
+_RE_RELATIVE_BRACKET = re.compile(
+    r"^\[T\+(\d+):(\d{2}):(\d{2})(?:[.,](\d+))?\]\s*(.*)",
+    re.DOTALL,
+)
 # YYYY-MM-DDTHH:MM:SS[.frac][Z|±HH:MM]
 _RE_BARE_ISO = re.compile(
     r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:[.,](\d+))?(?:Z|[+-]\d{2}:\d{2})?\s*(.*)",
@@ -95,12 +147,18 @@ _RE_SPACE_ISO = re.compile(
     r"^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})(?:[.,](\d+))?\s*(.*)",
     re.DOTALL,
 )
+# T+HH:MM:SS[.frac]
+_RE_BARE_RELATIVE = re.compile(
+    r"^T\+(\d+):(\d{2}):(\d{2})(?:[.,](\d+))?\s*(.*)",
+    re.DOTALL,
+)
 
 
 def _parse_line(raw: str):
     """
     Try all supported timestamp formats on a raw log line.
-    Returns (ts, text) where ts is "MM-DD HH:MM:SS.mmm", or None if no match.
+    Returns (ts, text) where ts is "MM-DD HH:MM:SS.mmm" or "T+HH:MM:SS.mmm",
+    or None if no match.
 
     Important: some backend lines are wrapped with ANSI color escapes, e.g.
     "\x1b[36m[2026-... ] ... \x1b[0m". We strip only the ANSI *prefix* for
@@ -124,6 +182,10 @@ def _parse_line(raw: str):
     if m:
         return (f"{m[1]}-{m[2]} {m[3]}:{m[4]}:{m[5]}.{_ms3(m[6])}", ansi_prefix + m[7])
 
+    m = _RE_RELATIVE_BRACKET.match(raw)
+    if m:
+        return (f"T+{m[1].zfill(2)}:{m[2]}:{m[3]}.{_ms3(m[4])}", ansi_prefix + m[5])
+
     m = _RE_BARE_ISO.match(raw)
     if m:
         return (f"{m[2]}-{m[3]} {m[4]}:{m[5]}:{m[6]}.{_ms3(m[7])}", ansi_prefix + m[8])
@@ -131,6 +193,10 @@ def _parse_line(raw: str):
     m = _RE_SPACE_ISO.match(raw)
     if m:
         return (f"{m[2]}-{m[3]} {m[4]}:{m[5]}:{m[6]}.{_ms3(m[7])}", ansi_prefix + m[8])
+
+    m = _RE_BARE_RELATIVE.match(raw)
+    if m:
+        return (f"T+{m[1].zfill(2)}:{m[2]}:{m[3]}.{_ms3(m[4])}", ansi_prefix + m[5])
 
     return None
 
@@ -171,27 +237,46 @@ def parse_log_file(
 ) -> list:
     """
     Read a .log file and return a list of line dicts:
-        { "ts": "MM-DD HH:MM:SS.mmm", "text": str, "isTx": bool }
+        {
+            "ts": str,
+            "text": str,
+            "isTx": bool,
+            "absTs": str | None,
+            "absNum": int | None,
+            "relTs": str | None,
+            "relNum": int | None,
+        }
 
     Continuation lines (no timestamp) are appended to the preceding entry
     so multi-line stack traces stay together.
-
-    Note: we remove the leading system timestamp from stored text and keep it
-    only in normalised `ts`, so the viewer renders exactly one system timestamp
-    per line.
     """
     entries = []
     pending_ts: str | None = None
     pending_text: str | None = None
     pending_is_tx = False
+    pending_abs_ts: str | None = None
+    pending_abs_num: int | None = None
+    pending_rel_ts: str | None = None
+    pending_rel_num: int | None = None
 
     def _flush():
         nonlocal pending_ts, pending_text, pending_is_tx
+        nonlocal pending_abs_ts, pending_abs_num, pending_rel_ts, pending_rel_num
         if pending_ts is None:
             return
-        entries.append({"ts": pending_ts, "text": pending_text, "isTx": pending_is_tx})
+        entries.append({
+            "ts": pending_ts,
+            "text": pending_text,
+            "isTx": pending_is_tx,
+            "absTs": pending_abs_ts,
+            "absNum": pending_abs_num,
+            "relTs": pending_rel_ts,
+            "relNum": pending_rel_num,
+        })
         pending_ts = pending_text = None
         pending_is_tx = False
+        pending_abs_ts = pending_rel_ts = None
+        pending_abs_num = pending_rel_num = None
 
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
@@ -202,12 +287,19 @@ def parse_log_file(
                     _flush()
                     pending_ts = parsed[0]
                     pending_is_tx = "[TX::" in parsed[1]
-                    # Keep only message payload in exported HTML — the leading
-                    # system timestamp is already rendered by the viewer from
-                    # `ts`, so keeping raw line would duplicate it.
                     pending_text = _strip_embedlog_prefixes(parsed[1], pane_id, pane_label)
+
+                    pending_rel_num = _relative_ts_to_ms(pending_ts)
+                    if pending_rel_num is not None:
+                        pending_rel_ts = pending_ts
+                        pending_abs_ts = None
+                        pending_abs_num = None
+                    else:
+                        pending_abs_ts = pending_ts
+                        pending_rel_ts = None
+                        dt = _parse_absolute_datetime(raw)
+                        pending_abs_num = int(dt.timestamp() * 1000) if dt is not None else None
                 elif pending_ts is not None and raw.strip():
-                    # Continuation line — append to current entry
                     pending_text += " " + raw.strip()
         _flush()
     except FileNotFoundError:
@@ -324,7 +416,60 @@ def _render_toolbar() -> str:
     parts.append('</div>')
     return '\n'.join(parts)
 
-def generate_html(tab_specs: list) -> str:
+def _enrich_timestamp_variants(
+    log_data: dict[str, list],
+    *,
+    timestamp_mode: str,
+    first_log_at: str | None,
+) -> str | None:
+    origin_dt = None
+    if first_log_at:
+        token = first_log_at[:-1] + "+00:00" if first_log_at.endswith("Z") else first_log_at
+        try:
+            origin_dt = datetime.fromisoformat(token)
+        except ValueError:
+            origin_dt = None
+
+    if origin_dt is None:
+        abs_candidates = [
+            entry["absNum"]
+            for entries in log_data.values()
+            for entry in entries
+            if isinstance(entry.get("absNum"), int)
+        ]
+        if abs_candidates:
+            origin_dt = datetime.fromtimestamp(min(abs_candidates) / 1000).astimezone()
+
+    origin_ms = int(origin_dt.timestamp() * 1000) if origin_dt is not None else None
+    for entries in log_data.values():
+        for entry in entries:
+            abs_num = entry.get("absNum")
+            rel_num = entry.get("relNum")
+            if rel_num is None and abs_num is not None and origin_ms is not None:
+                rel_num = max(0, abs_num - origin_ms)
+                entry["relNum"] = rel_num
+                entry["relTs"] = _format_relative_ms(rel_num)
+            if abs_num is None and rel_num is not None and origin_dt is not None:
+                abs_dt = origin_dt + timedelta(milliseconds=rel_num)
+                entry["absNum"] = int(abs_dt.timestamp() * 1000)
+                entry["absTs"] = _format_absolute_display(abs_dt)
+            if timestamp_mode == "relative" and entry.get("relTs"):
+                entry["ts"] = entry["relTs"]
+            elif timestamp_mode == "absolute" and entry.get("absTs"):
+                entry["ts"] = entry["absTs"]
+            elif entry.get("absTs"):
+                entry["ts"] = entry["absTs"]
+            elif entry.get("relTs"):
+                entry["ts"] = entry["relTs"]
+
+    return origin_dt.isoformat(timespec="milliseconds") if origin_dt is not None else first_log_at
+
+def generate_html(
+    tab_specs: list,
+    *,
+    timestamp_mode: str = "absolute",
+    first_log_at: str | None = None,
+) -> str:
     """
     tab_specs: [
         { "label": str, "panes": [(pane_id, pane_label, file_path), ...] },
@@ -332,7 +477,6 @@ def generate_html(tab_specs: list) -> str:
     ]
     Returns a complete self-contained HTML string.
     """
-    # Parse all log data
     log_data: dict[str, list] = {}
     for tab in tab_specs:
         for pane_id, pane_label, file_path in tab["panes"]:
@@ -340,6 +484,11 @@ def generate_html(tab_specs: list) -> str:
             log_data[pane_id] = entries
             print(f"  [{tab['label']}] {pane_label!r}: {len(entries)} lines  ({file_path})")
 
+    effective_first_log_at = _enrich_timestamp_variants(
+        log_data,
+        timestamp_mode=timestamp_mode,
+        first_log_at=first_log_at,
+    )
     # Read frontend assets (strip ES module syntax for classic <script> embedding)
     def _js(filename: str) -> str:
         return _esc_script_text(_strip_module_syntax(_read_asset(filename)))
@@ -414,8 +563,9 @@ def generate_html(tab_specs: list) -> str:
         f"window.TABS = {tabs_json};\n"
         f"window.PANES = {panes_json};\n"
         f"window.PANE_LABELS = {pane_labels_json};\n"
+        f"window.__embedLogInitialTimestampMode = {json.dumps(timestamp_mode)};\n"
+        f"window.__embedLogFirstLogAt = {json.dumps(effective_first_log_at)};\n"
         f"window.__embedLogInitialFontSize = 14;"
-
     )
 
     # Bootstrap script: runs after all other scripts to inject log data
@@ -433,7 +583,7 @@ def generate_html(tab_specs: list) -> str:
         if (!entries || entries.length === 0) return;
         state.atBottom[paneId] = false;
         entries.forEach(function (e) {{
-            appendLine(paneId, e.ts, e.text, e.isTx);
+            appendLine(paneId, e.ts, e.text, e.isTx, e);
         }});
         document.getElementById("log-" + paneId).scrollTop = 0;
         state.atBottom[paneId] = false;
@@ -576,6 +726,17 @@ def main():
         default="merged.html",
         help="Output file path (default: merged.html)",
     )
+    parser.add_argument(
+        "--timestamp-mode",
+        choices=["absolute", "relative"],
+        default="absolute",
+        help="Initial timestamp mode for the exported viewer (default: absolute)",
+    )
+    parser.add_argument(
+        "--first-log-at",
+        default=None,
+        help="Absolute ISO timestamp of the first log line; enables absolute/relative conversion in static replay",
+    )
     args = parser.parse_args()
 
     tab_specs = []
@@ -597,7 +758,11 @@ def main():
             seen_ids[pane_id] = tab["label"]
 
     print("Parsing log files...")
-    html_content = generate_html(tab_specs)
+    html_content = generate_html(
+        tab_specs,
+        timestamp_mode=args.timestamp_mode,
+        first_log_at=args.first_log_at,
+    )
 
     with open(args.output, "w", encoding="utf-8") as fh:
         fh.write(html_content)
