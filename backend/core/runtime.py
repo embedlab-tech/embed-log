@@ -243,7 +243,10 @@ class SourceManager:
             name=f"{self.name}-writer",
         )
         self._writer_thread.start()
-        self.source.start(self._on_source_line, self._stop, self.name)
+        try:
+            self.source.start(self._on_source_line, self._stop, self.name)
+        except OSError as exc:
+            raise RuntimeError(f"[{self.name}] failed to start {type(self.source).__name__}: {exc}") from exc
         if self.inject_port:
             self._inject_server = InjectServer(
                 name=self.name,
@@ -254,7 +257,10 @@ class SourceManager:
                 on_client_disconnect=self._remove_stream_client,
                 on_json_line=self._ingest_json,
             )
-            self._inject_server.start()
+            try:
+                self._inject_server.start()
+            except OSError as exc:
+                raise RuntimeError(f"[{self.name}] failed to bind inject TCP {self.socket_host}:{self.inject_port}: {exc}") from exc
         self._forward_servers = []
         for port in self.forward_ports:
             server = ForwardServer(
@@ -266,7 +272,10 @@ class SourceManager:
                 on_client_disconnect=self._remove_forward_client,
             )
             self._forward_servers.append(server)
-            server.start()
+            try:
+                server.start()
+            except OSError as exc:
+                raise RuntimeError(f"[{self.name}] failed to bind forward TCP {self.socket_host}:{port}: {exc}") from exc
         logging.info(
             "[%s] started  source=%s  inject=%s  forward=%s  log=%s",
             self.name,
@@ -639,13 +648,19 @@ class LogServer:
         self._session.set_first_log_at(first_log_at)
         self._session_info["first_log_at"] = first_log_at
         self._exporter.set_first_log_at(first_log_at)
+        self._session.write_manifest(
+            reason="first_log_at",
+            exported_html=self._session_info.get("html_ready", False),
+            html_status=self._session_info.get("html_status", "pending"),
+            html_updated_at=self._session_info.get("html_updated_at"),
+            html_error=self._session_info.get("html_error"),
+        )
         if self._broadcaster:
             self._broadcaster.update_session_info({"first_log_at": first_log_at})
             self._broadcaster.broadcast({
                 "type": "session_info",
                 "session": dict(self._session_info),
             })
-
     def _publish_html_state(self) -> None:
         if not self._broadcaster:
             return

@@ -14,15 +14,20 @@ class UdpSource(LogSource):
         self.port = port
 
     def start(self, on_line, stop: threading.Event, name: str):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.bind(("0.0.0.0", self.port))
+            sock.settimeout(1.0)
+        except OSError:
+            sock.close()
+            raise
         threading.Thread(
-            target=self._run, args=(on_line, stop, name),
+            target=self._run, args=(sock, on_line, stop, name),
             daemon=True, name=f"{name}-udp",
         ).start()
 
-    def _run(self, on_line, stop: threading.Event, name: str):
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            sock.bind(("0.0.0.0", self.port))
-            sock.settimeout(1.0)
+    def _run(self, sock: socket.socket, on_line, stop: threading.Event, name: str):
+        with sock:
             logging.info("[%s] listening on UDP :%d", name, self.port)
             while not stop.is_set():
                 try:

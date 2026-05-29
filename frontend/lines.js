@@ -47,37 +47,61 @@ export function matchesFilter(line, rx) {
 }
 
 export function appendLine(paneId, ts, rawText, isTx, meta = null) {
-    const html = parseAnsi(rawText);
-    const line = {
-        ...buildTimestampInfo(ts, typeof meta === "object" && meta !== null
-            ? meta
-            : (Number.isFinite(meta) ? { numTs: meta } : {})),
-        html,
-        rawText,
-        isTx,
-    };
-    state.rawLines[paneId].push(line);
+    appendLineBatch([{ paneId, ts, rawText, isTx, meta }]);
+}
 
-    const logEl = document.getElementById("log-" + paneId);
-    const idx   = state.rawLines[paneId].length - 1;
-    const div   = document.createElement("div");
-    div.dataset.ts  = line.ts;
-    div.dataset.idx = idx;
-    div.className   = _lineClass(line, idx, paneId);
+export function appendLineBatch(entries) {
+    const fragments = new Map();
+    const touched = new Set();
 
-    const rx = state.filters[paneId];
-    if (!matchesFilter(line, rx)) {
-        div.style.display = "none";
-    } else {
-        div.innerHTML = buildLineHtml(line, state.showTs, rx);
+    entries.forEach(({ paneId, ts, rawText, isTx, meta = null }) => {
+        if (!state.rawLines[paneId]) return;
+
+        const html = parseAnsi(rawText);
+        const line = {
+            ...buildTimestampInfo(ts, typeof meta === "object" && meta !== null
+                ? meta
+                : (Number.isFinite(meta) ? { numTs: meta } : {})),
+            html,
+            rawText,
+            isTx,
+        };
+        state.rawLines[paneId].push(line);
+
+        const logEl = document.getElementById("log-" + paneId);
+        if (!logEl) return;
+
+        const idx = state.rawLines[paneId].length - 1;
+        const div = document.createElement("div");
+        div.dataset.ts = line.ts;
+        div.dataset.idx = idx;
+        div.className = _lineClass(line, idx, paneId);
+
+        const rx = state.filters[paneId];
+        if (!matchesFilter(line, rx)) {
+            div.style.display = "none";
+        } else {
+            div.innerHTML = buildLineHtml(line, state.showTs, rx);
+        }
+
+        if (!fragments.has(paneId)) fragments.set(paneId, document.createDocumentFragment());
+        fragments.get(paneId).appendChild(div);
+        touched.add(paneId);
+    });
+
+    touched.forEach(paneId => {
+        const logEl = document.getElementById("log-" + paneId);
+        const fragment = fragments.get(paneId);
+        if (!logEl || !fragment) return;
+        logEl.appendChild(fragment);
+        if (state.atBottom[paneId]) logEl.scrollTop = logEl.scrollHeight;
+        updateJumpBtn(paneId);
+    });
+
+    if (touched.size > 0) {
+        window.__embedLogSchedulePersist?.();
+        window.__embedLogUpdateTimestampModeUi?.();
     }
-
-    logEl.appendChild(div);
-
-    if (state.atBottom[paneId]) logEl.scrollTop = logEl.scrollHeight;
-    updateJumpBtn(paneId);
-    window.__embedLogSchedulePersist?.();
-    window.__embedLogUpdateTimestampModeUi?.();
 }
 
 export function rerenderPane(paneId) {

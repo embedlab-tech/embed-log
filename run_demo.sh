@@ -191,6 +191,43 @@ _kill_pid_and_wait() {
   kill -9 "$pid" 2>/dev/null || true
 }
 
+_is_demo_traffic_cmd() {
+  local cmd="$1"
+  case "$cmd" in
+    *"utils/udp_log_simulator.py"*)
+      [[ "$cmd" == *"127.0.0.1:6000"* ]] || \
+      [[ "$cmd" == *"127.0.0.1:6001"* ]] || \
+      [[ "$cmd" == *"127.0.0.1:6002"* ]]
+      ;;
+    *"utils/deterministic_demo_traffic.py"*)
+      [[ "$cmd" == *"127.0.0.1:6000"* ]] || \
+      [[ "$cmd" == *"127.0.0.1:6001"* ]] || \
+      [[ "$cmd" == *"127.0.0.1:6002"* ]]
+      ;;
+    *"utils/inject_log_demo.py"*)
+      [[ "$cmd" == *" 5001"* ]] || \
+      [[ "$cmd" == *" 5002"* ]] || \
+      [[ "$cmd" == *" 5003"* ]]
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+_reap_stale_demo_traffic() {
+  local pid cmd
+  while IFS= read -r line; do
+    pid="${line%% *}"
+    cmd="${line#* }"
+    [ -n "$pid" ] || continue
+    if _is_demo_traffic_cmd "$cmd"; then
+      echo "Releasing stale demo traffic process (pid $pid)..."
+      _kill_pid_and_wait "$pid"
+    fi
+  done < <(ps ax -o pid=,command= 2>/dev/null | awk '{$1=$1; print}')
+}
+
 _free_port_if_stale() {
   local proto="$1"   # tcp|udp
   local port="$2"
@@ -224,6 +261,7 @@ _free_port_if_stale() {
 }
 
 echo "Checking demo ports..."
+_reap_stale_demo_traffic
 for p in 5001 5002 5003; do
   _free_port_if_stale tcp "$p" || exit 1
 done

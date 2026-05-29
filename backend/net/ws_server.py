@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 import json
 import logging
 import threading
@@ -47,6 +48,9 @@ class WebSocketBroadcaster:
         self._tabs = tabs          # [{"label": str, "panes": [str, ...]}]
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._clients: set = set()
+        self._broadcast_queue = deque()
+        self._broadcast_scheduled = False
+        self._broadcast_lock = threading.Lock()
         self._source_map: dict = {}   # name → SourceManager
         self._session_info = session_info or {}
         self._sessions_root = Path(sessions_root) if sessions_root else None
@@ -71,20 +75,62 @@ class WebSocketBroadcaster:
         self._session_info.update(updates)
 
     def broadcast(self, msg: dict) -> None:
-        if self._loop and not self._loop.is_closed() and self._clients:
-            asyncio.run_coroutine_threadsafe(self._broadcast_async(msg), self._loop)
+        """Queue a live UI message without flooding the aiohttp event loop.
 
-    async def _broadcast_async(self, msg: dict) -> None:
-        if not self._clients:
+        Source writer threads can produce many log lines per second. Scheduling one
+        coroutine per line can starve new HTTP/WS handshakes under bursty input, so
+        this method coalesces cross-thread notifications into a single drain task.
+        """
+        loop = self._loop
+        if loop is None or loop.is_closed() or not self._clients:
             return
         data = json.dumps(msg)
-        dead = set()
-        for ws in list(self._clients):
-            try:
-                await ws.send_str(data)
-            except Exception:
-                dead.add(ws)
-        self._clients -= dead
+        with self._broadcast_lock:
+            self._broadcast_queue.append(data)
+            if self._broadcast_scheduled:
+                return
+            self._broadcast_scheduled = True
+        try:
+            loop.call_soon_threadsafe(self._start_broadcast_drain)
+        except RuntimeError:
+            with self._broadcast_lock:
+                self._broadcast_scheduled = False
+
+    def _start_broadcast_drain(self) -> None:
+        asyncio.create_task(self._broadcast_drain_async())
+
+    async def _broadcast_drain_async(self) -> None:
+        batch_size = 1000
+        while True:
+            batch = []
+            with self._broadcast_lock:
+                for _ in range(batch_size):
+                    if not self._broadcast_queue:
+                        break
+                    batch.append(self._broadcast_queue.popleft())
+                if not batch:
+                    self._broadcast_scheduled = False
+                    return
+
+            if not self._clients:
+                continue
+
+            dead = set()
+            clients = list(self._clients)
+            for data in batch:
+                for ws in clients:
+                    if ws in dead:
+                        continue
+                    try:
+                        await ws.send_str(data)
+                    except Exception:
+                        dead.add(ws)
+                if dead:
+                    self._clients -= dead
+                    clients = [ws for ws in clients if ws not in dead]
+                    if not clients:
+                        break
+            await asyncio.sleep(0)
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._run, daemon=True, name="ws-broadcaster")

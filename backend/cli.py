@@ -523,6 +523,11 @@ def _run_sessions(argv: list[str]) -> int:
         dest="panes",
         help="include only this pane (repeatable, default: all)",
     )
+    p_export.add_argument(
+        "--first-log-at",
+        default=None,
+        help="override the absolute ISO timestamp of the first log line when rebuilding HTML",
+    )
 
     p_open = sub.add_parser(
         "open", parents=[shared], help="open session HTML in the default browser"
@@ -986,6 +991,7 @@ def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
                 missing=False,
                 json=args.json,
                 log_dir=str(log_dir),
+                first_log_at=args.first_log_at,
             )
             rc = _run_sessions_export(log_dir, sub_args)
             if rc == 0:
@@ -1203,11 +1209,21 @@ def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
     }
     output = Path(args.output) if args.output else sdir / "session.html"
 
+    first_log_at = args.first_log_at if args.first_log_at is not None else manifest.get("first_log_at")
+    timestamp_mode = str(manifest.get("timestamp_mode") or "absolute")
+    if timestamp_mode == "relative" and not first_log_at:
+        print(
+            "warning: relative session has no first_log_at metadata; rebuilt HTML will stay relative-only until you re-export with --first-log-at",
+            file=sys.stderr,
+        )
+
     exporter = SessionExporter(
         session_html_path=output,
         source_files=source_files,
         tabs=tabs,
         source_labels=source_labels,
+        timestamp_mode=timestamp_mode,
+        first_log_at=first_log_at,
     )
     ok = exporter.export_html("sessions_export")
     if not ok:
@@ -1220,6 +1236,8 @@ def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
     manifest["session_html"] = str(output)
     manifest["html_status"] = "ready"
     manifest["html_updated_at"] = _dt2.now().astimezone().isoformat(timespec="seconds")
+    if first_log_at is not None:
+        manifest["first_log_at"] = first_log_at
     (sdir / "manifest.json").write_text(
         json.dumps(manifest, indent=2), encoding="utf-8"
     )

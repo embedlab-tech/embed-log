@@ -1,5 +1,5 @@
 import { state, TABS, PANES, PANE_LABELS, setTimestampContext } from './state.js';
-import { appendLine, clearPane, setTimestampMode } from './lines.js';
+import { appendLineBatch, clearPane, setTimestampMode } from './lines.js';
 import { createTabWithPanes } from './tabcreate.js';
 
 import { switchTab } from './tabs.js';
@@ -9,6 +9,9 @@ let wsRetryDelay = 1000;
 const WS_MAX_DELAY = 16000;
 const wsStatus = document.getElementById("ws-status");
 let currentSessionId = null;
+let pendingLogMessages = [];
+let pendingLogFlush = false;
+const LOG_FLUSH_MAX_LINES = 1000;
 
 function resetLayoutForNewSession() {
     const container = document.getElementById("container");
@@ -45,11 +48,31 @@ export function wsSend(obj) {
 window.wsSend = wsSend;
 
 function clearAllPaneContents() {
+    pendingLogMessages = [];
+    pendingLogFlush = false;
     PANES.forEach(paneId => {
         const logEl = document.getElementById("log-" + paneId);
         if (!logEl) return;
         clearPane(paneId);
     });
+}
+
+function enqueueLogMessage(entry) {
+    pendingLogMessages.push(entry);
+    if (pendingLogFlush) return;
+    pendingLogFlush = true;
+    requestAnimationFrame(flushLogMessages);
+}
+
+function flushLogMessages() {
+    const batch = pendingLogMessages.splice(0, LOG_FLUSH_MAX_LINES);
+    if (batch.length > 0) appendLineBatch(batch);
+
+    if (pendingLogMessages.length > 0) {
+        requestAnimationFrame(flushLogMessages);
+    } else {
+        pendingLogFlush = false;
+    }
 }
 
 function wsConnect() {
@@ -156,9 +179,15 @@ function wsConnect() {
             console.warn("embed-log: dropping message for unknown source_id:", source_id);
             return;
         }
-        appendLine(source_id, timestamp || "", data || "", type === "tx", {
-            timestampIso: timestamp_iso,
-            numTs: timestamp_num,
+        enqueueLogMessage({
+            paneId: source_id,
+            ts: timestamp || "",
+            rawText: data || "",
+            isTx: type === "tx",
+            meta: {
+                timestampIso: timestamp_iso,
+                numTs: timestamp_num,
+            },
         });
     });
 
