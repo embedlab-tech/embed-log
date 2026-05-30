@@ -185,5 +185,62 @@ test('runtime settings panel exposes working font-size controls', async ({ page 
   }).toBe(before);
 });
 
+  test('marker rendering, tooltip, and navigation', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await waitForSourceTestLine(page, 'SENSOR_A');
+
+    // Pick a log line index to mark
+    const markerLineIdx = await page.evaluate(() => {
+      const logEl = document.getElementById('log-SENSOR_A');
+      if (!logEl || !logEl.children.length) return -1;
+      const idx = Math.min(2, logEl.children.length - 1);
+      return parseInt(logEl.children[idx].dataset.idx, 10);
+    });
+    expect(markerLineIdx).toBeGreaterThanOrEqual(0);
+
+    // Send a save_markers WS command — the server broadcasts markers_update back
+    await page.evaluate((idx) => {
+      window.wsSend({
+        cmd: 'save_markers',
+        markers: [{
+          paneId: 'SENSOR_A',
+          lineIdx: idx,
+          endIdx: idx,
+          numTs: 0,
+          description: 'Test marker description',
+          createdAt: new Date().toISOString(),
+        }],
+      });
+    }, markerLineIdx);
+
+    // Wait for markers_update to be received and processed
+    await expect(page.locator('#marker-nav')).not.toBeHidden({ timeout: 15_000 });
+    await expect(page.locator('#marker-nav-total')).toHaveText('1');
+
+    // Check that the marked line has the has-marker CSS class
+    await expect(
+      page.locator(`#log-SENSOR_A [data-idx="${markerLineIdx}"]`)
+    ).toHaveClass(/has-marker/);
+
+    // Check that the tooltip appears on hover
+    const lineLocator = page.locator(`#log-SENSOR_A [data-idx="${markerLineIdx}"]`);
+    await lineLocator.hover();
+    await expect(page.locator('#marker-tooltip')).toBeVisible();
+    await expect(page.locator('#marker-tooltip')).toContainText('Test marker description');
+
+    // Check that navigation buttons work
+    await page.locator('#marker-nav-next').click();
+    await expect(page.locator('#marker-nav-idx')).toHaveText('1');
+
+    // Remove the marker
+    await page.evaluate(() => {
+      window.wsSend({ cmd: 'save_markers', markers: [] });
+    });
+
+    // Wait for markers_update with empty list
+    await expect(page.locator('#marker-nav')).toBeHidden({ timeout: 15_000 });
+  });
+
 });
 

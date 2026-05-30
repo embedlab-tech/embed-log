@@ -53,6 +53,7 @@ class WebSocketBroadcaster:
         self._broadcast_queue = deque()
         self._broadcast_scheduled = False
         self._broadcast_lock = threading.Lock()
+        self._replay_buffer = deque(maxlen=5000)
         self._source_map: dict = {}   # name → SourceManager
         self._sessions_root = Path(sessions_root) if sessions_root else None
         self._session_info = session_info or {}
@@ -85,9 +86,13 @@ class WebSocketBroadcaster:
         this method coalesces cross-thread notifications into a single drain task.
         """
         loop = self._loop
-        if loop is None or loop.is_closed() or not self._clients:
+        if loop is None or loop.is_closed():
             return
         data = json.dumps(msg)
+        # Always store in replay buffer so late-connecting clients catch up
+        self._replay_buffer.append(data)
+        if not self._clients:
+            return
         with self._broadcast_lock:
             self._broadcast_queue.append(data)
             if self._broadcast_scheduled:
@@ -350,6 +355,12 @@ class WebSocketBroadcaster:
         if self._no_clients_handle is not None:
             self._no_clients_handle.cancel()
             self._no_clients_handle = None
+        # Replay buffered log entries to the new client so no history is lost
+        for entry in list(self._replay_buffer):
+            try:
+                await ws.send_str(entry)
+            except Exception:
+                break
 
         try:
             async for msg in ws:

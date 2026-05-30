@@ -3,7 +3,7 @@ import { onLineClick } from './lines.js';
 import { exportHtmlSnapshot } from './export.js';
 import { can } from './profile.js';
 import { switchTab } from './tabs.js';
-
+import { _escHtml } from './renderPane.js';
 // ---------------------------------------------------------------------------
 // Line selection + copy / export actions
 //
