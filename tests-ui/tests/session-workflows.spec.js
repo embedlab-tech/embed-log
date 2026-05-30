@@ -17,7 +17,7 @@ async function openSettingsPanel(page) {
 }
 
 function currentHtmlButton(page) {
-  return page.locator('#settings-panel button').filter({ hasText: /Current HTML|No HTML yet|HTML error/ }).first();
+  return page.locator('#settings-panel button').filter({ hasText: /Open HTML|No HTML yet|HTML error/ }).first();
 }
 
 test.describe('session workflows', () => {
@@ -40,7 +40,7 @@ test.describe('session workflows', () => {
     await page.locator('#btn-save-to-server').click();
     const currentBtn = currentHtmlButton(page);
     await expect(currentBtn).toBeEnabled({ timeout: 20_000 });
-    await expect(currentBtn).toHaveText('Current HTML', { timeout: 20_000 });
+    await expect(currentBtn).toHaveText('Open HTML', { timeout: 20_000 });
 
     await page.evaluate(() => {
       window.__openedUrls = [];
@@ -92,7 +92,7 @@ test.describe('session workflows', () => {
     await page.locator('#btn-save-to-server').click();
     const currentBtn = currentHtmlButton(page);
     await expect(currentBtn).toBeEnabled({ timeout: 20_000 });
-    await expect(currentBtn).toHaveText('Current HTML', { timeout: 20_000 });
+    await expect(currentBtn).toHaveText('Open HTML', { timeout: 20_000 });
 
     await openSettingsPanel(page);
     await page.locator('#btn-sessions').click({ force: true });

@@ -98,7 +98,6 @@ test.describe('HTML export replay', () => {
       await expect(exported.locator('#btn-export')).toHaveCount(0);
       await expect(exported.locator('#ws-status')).toHaveCount(0);
 
-      await expect(exported.locator('#btn-download-raw')).toBeVisible();
       await expect(exported.locator('#btn-unwrap')).toBeVisible();
       await expect(exported.locator('#btn-theme')).toBeVisible();
       await expect(exported.locator('#btn-settings')).toBeVisible();
@@ -115,6 +114,7 @@ test.describe('HTML export replay', () => {
       await expect(exported.locator('#btn-font-dec')).toBeVisible();
       await expect(exported.locator('#btn-font-reset')).toBeVisible();
       await expect(exported.locator('#btn-font-inc')).toBeVisible();
+      await expect(exported.locator('#btn-download-raw')).toBeVisible();
 
       const line = exported.locator('#log-SENSOR_A .log-line').first();
       const before = await line.evaluate(el => getComputedStyle(el).fontSize);

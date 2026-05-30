@@ -85,9 +85,8 @@ test('relative-only static replay shows hint when absolute origin is unavailable
 
   const page = await openHtmlFile(browser, htmlPath);
   try {
-    await page.locator('#btn-settings').click();
     await expect(page.locator('#btn-timestamp-mode')).toBeDisabled();
-    await expect(page.locator('#timestamp-mode-hint')).toContainText('Absolute view unavailable');
+    await expect(page.locator('#btn-timestamp-mode')).toHaveAttribute('title', 'absolute timestamps are unavailable for the current data');
   } finally {
     await page.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });

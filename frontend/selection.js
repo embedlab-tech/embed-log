@@ -99,19 +99,19 @@ export function _selectionSetupPane(id) {
     htmlBtn.title = "Export selection to self-contained HTML file";
     htmlBtn.addEventListener("click", e => { e.stopPropagation(); _exportHtml(id); });
     moreDropdown.appendChild(htmlBtn);
-    // Marker toggle (runtime only)
+
+
+    actionRow.appendChild(copyBtn);
+    // Marker toggle (runtime only) — in the main action row
     if (can('markers')) {
         const markerBtn = document.createElement("button");
         markerBtn.className = "copy-btn";
         markerBtn.id = "marker-toggle-" + id;
-        markerBtn.textContent = "Set marker";
-        markerBtn.title = "Mark the selected/sync-highlighted line with a description";
+        markerBtn.textContent = "Add Note";
+        markerBtn.title = "Add a note to the selected/sync-highlighted line(s)";
         markerBtn.addEventListener("click", e => { e.stopPropagation(); _toggleMarker(id); });
-        moreDropdown.appendChild(markerBtn);
+        actionRow.appendChild(markerBtn);
     }
-
-
-    actionRow.appendChild(copyBtn);
     actionRow.appendChild(moreToggle);
     actionRow.appendChild(moreDropdown);
 
