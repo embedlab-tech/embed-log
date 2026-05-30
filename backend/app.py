@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from .core.naming import slugify
 from .parsers import create_parser
@@ -98,12 +97,12 @@ def run_app(
     verbose: bool,
     ws_port: int,
     ws_ui: str,
-    config_path: Optional[str],
-    job_id: Optional[str],
+    config_path: str | None,
+    job_id: str | None,
     open_browser: bool,
     app_name: str,
-    default_light_theme: Optional[str],
-    default_dark_theme: Optional[str],
+    default_light_theme: str | None,
+    default_dark_theme: str | None,
     queue_maxsize: int = 20000,
     timestamp_mode: str = "absolute",
 ) -> int:

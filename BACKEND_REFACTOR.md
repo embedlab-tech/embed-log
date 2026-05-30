@@ -394,6 +394,16 @@ tests/
 | 2026-05-30 | 1.1 | Config models | DONE | `backend/config/models.py` — AppConfig, SourceConfig, TabConfig, ServerConfig |
 | 2026-05-30 | 1.2 | Runtime models | DONE | `backend/core/models.py` — LogEntry(dataclass), QueueStats |
 | 2026-05-30 | 1.3 | Session models | DONE | `backend/session/models.py` — SessionStats, SnippetEntry |
+| 2026-05-30 | 3.1 | Split runtime.py | DONE | queue.py (81), clock.py (75), ansi.py (11). runtime.py 859→702 lines |
+| 2026-05-30 | 3.2 | Remove _slug wrapper | DONE | Replaced with direct slugify() calls |
+| 2026-05-30 | 4.1 | Narrow broad excepts | DONE | 4 blocks in ws_server.py + log_client.py now log at debug |
+| 2026-05-30 | 4.2 | Remove inline imports | DONE | cli/util.py, cli/sessions/export.py cleaned up |
+| 2026-05-30 | 5.1 | Protect _session_info | DONE | threading.Lock + _update_session_info() helper in LogServer |
+| 2026-05-30 | 5.2 | Fix O(n²) dead client cleanup | DONE | list.remove() loop → list comprehension rebuild |
+| 2026-05-30 | 6.1 | Inject clock into SourceManager | DONE | `clock` param in __init__, 7 `datetime.now()` calls replaced, 7 new tests |
+| 2026-05-30 | 6.2 | Unify manifest reading | SKIPPED | Two functions serve different contexts; coupling worse than duplication |
+| 2026-05-30 | 8.1 | `Optional[X]` → `X \| None` | DONE | 12 backend files updated, `from __future__ import annotations` already present |
+| 2026-05-30 | 8.2 | `match/case` dispatch | DONE | dispatch.py + sessions/__init__.py |
 
 _Update this table as tasks are completed. Format: `YYYY-MM-DD | 1.1 | Config model | DONE | PR #123`_
 

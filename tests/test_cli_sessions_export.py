@@ -1,6 +1,7 @@
 import argparse
 import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -138,6 +139,7 @@ class RuntimeFirstLogPersistenceTests(unittest.TestCase):
         }
         server._exporter = DummyExporter()
         server._broadcaster = None
+        server._session_lock = threading.Lock()
 
         LogServer._handle_first_log_at(server, "2026-01-01T00:00:01.234+00:00")
 

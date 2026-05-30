@@ -1,4 +1,5 @@
 from .models import LogEntry
-from .runtime import LogServer, SourceManager, _slug
+from .runtime import LogServer, SourceManager
 
-__all__ = ["LogEntry", "SourceManager", "LogServer", "_slug"]
+
+__all__ = ["LogEntry", "SourceManager", "LogServer"]

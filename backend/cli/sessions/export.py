@@ -290,11 +290,10 @@ def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
         return 1
 
     # Update manifest
-    from datetime import datetime as _dt2
 
     manifest["session_html"] = str(output)
     manifest["html_status"] = "ready"
-    manifest["html_updated_at"] = _dt2.now().astimezone().isoformat(timespec="seconds")
+    manifest["html_updated_at"] = _dt.datetime.now().astimezone().isoformat(timespec="seconds")
     if first_log_at is not None:
         manifest["first_log_at"] = first_log_at
     (sdir / "manifest.json").write_text(

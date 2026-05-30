@@ -7,6 +7,7 @@ from any context and straightforward to test in isolation.
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
 import re
@@ -197,10 +198,9 @@ def session_stats(session_dir: Path, manifest: dict | None) -> SessionStats:
 
     duration_secs: float | None = None
     if time_start and time_end:
-        import datetime as _dt
         try:
-            t1 = _dt.datetime.fromisoformat(time_start.rstrip("Z"))
-            t2 = _dt.datetime.fromisoformat(time_end.rstrip("Z"))
+            t1 = datetime.datetime.fromisoformat(time_start.rstrip("Z"))
+            t2 = datetime.datetime.fromisoformat(time_end.rstrip("Z"))
             duration_secs = (t2 - t1).total_seconds()
         except ValueError:
             pass

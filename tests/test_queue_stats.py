@@ -3,7 +3,7 @@ import threading
 import time
 import unittest
 
-from backend.core.runtime import TrackedQueue
+from backend.core.queue import TrackedQueue
 
 
 class TrackedQueueTests(unittest.TestCase):

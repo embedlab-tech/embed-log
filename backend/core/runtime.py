@@ -5,12 +5,12 @@ import json
 import logging
 import os
 
-import queue
+
 import signal
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional, TextIO
+from typing import Callable, TextIO
 
 import serial
 
@@ -18,168 +18,11 @@ from ..net import ForwardServer, InjectServer, WebSocketBroadcaster
 from ..session import SessionExporter, SessionManager
 from ..sources import LogSource
 from .models import LogEntry, QueueStats
+from .ansi import ANSI
+from .clock import SessionClock, TIMESTAMP_MODE_ABSOLUTE, TIMESTAMP_MODE_RELATIVE, TIMESTAMP_MODES
 from .naming import slugify
+from .queue import TrackedQueue
 
-# ---------------------------------------------------------------------------
-# ANSI colors available to clients
-# ---------------------------------------------------------------------------
-ANSI = {
-    "red":     "\033[31m",
-    "green":   "\033[32m",
-    "yellow":  "\033[33m",
-    "blue":    "\033[34m",
-    "magenta": "\033[35m",
-    "cyan":    "\033[36m",
-    "white":   "\033[37m",
-    "bold":    "\033[1m",
-    "reset":   "\033[0m",
-}
-
-class TrackedQueue:
-    """Bounded queue with throughput and saturation tracking.
-
-    Blocks on put() when full (backpressure — never drops entries).
-    Tracks enqueue/dequeue counts, peak depth, and near-full events.
-    """
-
-    __slots__ = (
-        "_queue", "_maxsize", "_near_full_pct",
-        "_enqueued", "_dequeued", "_peak_depth", "_near_full_count",
-        "_lock",
-    )
-
-    NEAR_FULL_PCT = 0.80
-
-    def __init__(self, maxsize: int = 0):
-        if maxsize <= 0:
-            maxsize = 0  # 0 = unbounded in Queue
-        self._queue: queue.Queue[Optional[LogEntry]] = queue.Queue(maxsize)
-        self._maxsize = maxsize
-        self._near_full_pct = self.NEAR_FULL_PCT
-        self._enqueued = 0
-        self._dequeued = 0
-        self._peak_depth = 0
-        self._near_full_count = 0
-        self._lock = threading.Lock()
-
-    @property
-    def maxsize(self) -> int:
-        return self._maxsize
-
-    def put(self, item: Optional[LogEntry]) -> None:
-        self._queue.put(item)
-        with self._lock:
-            self._enqueued += 1
-            depth = self._queue.qsize()
-            if depth > self._peak_depth:
-                self._peak_depth = depth
-            if self._maxsize > 0 and depth >= self._maxsize * self._near_full_pct:
-                self._near_full_count += 1
-
-    def get(self) -> Optional[LogEntry]:
-        item = self._queue.get()
-        with self._lock:
-            self._dequeued += 1
-        return item
-
-    def task_done(self) -> None:
-        self._queue.task_done()
-
-    def join(self) -> None:
-        self._queue.join()
-
-    def stats(self) -> QueueStats:
-        with self._lock:
-            qsize = self._queue.qsize()
-            return QueueStats(
-                maxsize=self._maxsize,
-                depth=qsize,
-                utilization_pct=round(qsize / self._maxsize * 100, 1) if self._maxsize > 0 else 0.0,
-                enqueued=self._enqueued,
-                dequeued=self._dequeued,
-                peak_depth=self._peak_depth,
-                near_full_events=self._near_full_count,
-            )
-
-    def clear_stats(self) -> None:
-        with self._lock:
-            self._enqueued = 0
-            self._dequeued = 0
-            self._peak_depth = self._queue.qsize()
-            self._near_full_count = 0
-
-
-def _slug(value: str) -> str:
-    return slugify(value)
-TIMESTAMP_MODE_ABSOLUTE = "absolute"
-TIMESTAMP_MODE_RELATIVE = "relative"
-TIMESTAMP_MODES = {TIMESTAMP_MODE_ABSOLUTE, TIMESTAMP_MODE_RELATIVE}
-
-
-def _format_relative_millis(total_ms: int) -> str:
-    if total_ms < 0:
-        total_ms = 0
-    hours, rem = divmod(total_ms, 3_600_000)
-    minutes, rem = divmod(rem, 60_000)
-    seconds, millis = divmod(rem, 1_000)
-    return f"T+{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}"
-
-
-class SessionClock:
-    def __init__(self, mode: str, *, on_origin_set: Optional[Callable[[str], None]] = None):
-        self.mode = mode if mode in TIMESTAMP_MODES else TIMESTAMP_MODE_ABSOLUTE
-        self._on_origin_set = on_origin_set
-        self._lock = threading.Lock()
-        self._origin: Optional[datetime] = None
-
-    def reset(self) -> None:
-        with self._lock:
-            self._origin = None
-
-    def first_log_at(self) -> Optional[str]:
-        with self._lock:
-            if self._origin is None:
-                return None
-            return self._origin.isoformat(timespec="milliseconds")
-
-    def _ensure_origin(self, timestamp: datetime) -> datetime:
-        callback = None
-        origin_iso = None
-        with self._lock:
-            if self._origin is None:
-                self._origin = timestamp
-                callback = self._on_origin_set
-                origin_iso = timestamp.isoformat(timespec="milliseconds")
-            origin = self._origin
-        if callback is not None and origin_iso is not None:
-            callback(origin_iso)
-        return origin
-    def observe(self, timestamp: datetime) -> None:
-        self._ensure_origin(timestamp)
-
-
-    def relative_millis(self, timestamp: datetime) -> int:
-        origin = self._ensure_origin(timestamp)
-        delta_ms = int((timestamp - origin).total_seconds() * 1000)
-        return delta_ms if delta_ms >= 0 else 0
-
-    def file_timestamp(self, timestamp: datetime) -> str:
-        self.observe(timestamp)
-        if self.mode == TIMESTAMP_MODE_RELATIVE:
-            return _format_relative_millis(self.relative_millis(timestamp))
-        return timestamp.isoformat(timespec="milliseconds")
-
-    def display_timestamp(self, timestamp: datetime) -> str:
-        self.observe(timestamp)
-        if self.mode == TIMESTAMP_MODE_RELATIVE:
-            return _format_relative_millis(self.relative_millis(timestamp))
-        return timestamp.strftime("%m-%d %H:%M:%S.%f")[:-3]
-
-    def numeric_timestamp(self, timestamp: datetime) -> int:
-        self.observe(timestamp)
-        if self.mode == TIMESTAMP_MODE_RELATIVE:
-            return self.relative_millis(timestamp)
-        return int(timestamp.timestamp() * 1000)
 
 class SourceManager:
     """
@@ -195,12 +38,13 @@ class SourceManager:
         source: LogSource,
         log_file: str,
         socket_host: str,
-        inject_port: Optional[int] = None,
-        forward_ports: Optional[list[int]] = None,
+        inject_port: int | None = None,
+        forward_ports: list[int] | None = None,
         verbose: bool = False,
-        broadcaster: Optional[WebSocketBroadcaster] = None,
+        broadcaster: WebSocketBroadcaster | None = None,
         queue_maxsize: int = 0,
-        session_clock: Optional[SessionClock] = None,
+        session_clock: SessionClock | None = None,
+        clock: Callable[[], datetime] | None = None,
     ):
         self.name = name
         self.source = source
@@ -211,6 +55,7 @@ class SourceManager:
         self.verbose = verbose
         self.broadcaster = broadcaster
         self.session_clock = session_clock or SessionClock(TIMESTAMP_MODE_ABSOLUTE)
+        self._clock = clock or (lambda: datetime.now().astimezone())
 
         self._queue: TrackedQueue = TrackedQueue(queue_maxsize)
         self._queue_maxsize = queue_maxsize
@@ -219,10 +64,10 @@ class SourceManager:
         self._clients_lock = threading.Lock()
         self._forward_clients: list = []
         self._forward_lock = threading.Lock()
-        self._writer_thread: Optional[threading.Thread] = None
+        self._writer_thread: threading.Thread | None = None
         self._file_lock = threading.Lock()
-        self._log_fd: Optional[TextIO] = None
-        self._inject_server: Optional[InjectServer] = None
+        self._log_fd: TextIO | None = None
+        self._inject_server: InjectServer | None = None
         self._forward_servers: list[ForwardServer] = []
     def start(self) -> None:
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -295,7 +140,7 @@ class SourceManager:
             self._writer_thread.join(timeout=2.0)
 
     def _on_source_line(self, message: str) -> None:
-        self._queue.put(LogEntry(datetime.now().astimezone(), "SERIAL", message))
+        self._queue.put(LogEntry(self._clock(), "SERIAL", message))
 
     def _format(self, entry: LogEntry) -> str:
         ts = self.session_clock.file_timestamp(entry.timestamp)
@@ -422,7 +267,7 @@ class SourceManager:
             self.log_file.parent.mkdir(parents=True, exist_ok=True)
             self._log_fd = open(self.log_file, "a", encoding="utf-8")
     def add_session_marker(self, message: str, *, no_ws: bool = True) -> None:
-        self._queue.put(LogEntry(datetime.now().astimezone(), "SYSTEM", message, "cyan", no_ws=no_ws))
+        self._queue.put(LogEntry(self._clock(), "SYSTEM", message, "cyan", no_ws=no_ws))
 
     def _stream_to_clients(self, data: bytes) -> None:
         with self._clients_lock:
@@ -432,8 +277,8 @@ class SourceManager:
                     conn.sendall(data)
                 except OSError:
                     dead.append(conn)
-            for conn in dead:
-                self._stream_clients.remove(conn)
+            if dead:
+                self._stream_clients = [c for c in self._stream_clients if c not in dead]
 
     def _forward_to_clients(self, data: bytes) -> None:
         with self._forward_lock:
@@ -443,11 +288,8 @@ class SourceManager:
                     conn.sendall(data)
                 except OSError:
                     dead.append(conn)
-            for conn in dead:
-                try:
-                    self._forward_clients.remove(conn)
-                except ValueError:
-                    pass
+            if dead:
+                self._forward_clients = [c for c in self._forward_clients if c not in dead]
 
     def _add_stream_client(self, conn) -> None:
         with self._clients_lock:
@@ -475,7 +317,7 @@ class SourceManager:
         self.source.write(data)
         printable = data.decode("utf-8", errors="replace").rstrip()
         self._queue.put(LogEntry(
-            datetime.now().astimezone(),
+            self._clock(),
             f"TX::{source}",
             printable,
             "yellow",
@@ -483,9 +325,9 @@ class SourceManager:
 
     def add_ui_clear_marker(self, scope: str = "pane") -> None:
         marker = f"[embed-log] UI clear ({scope})"
-        self._queue.put(LogEntry(datetime.now().astimezone(), "SYSTEM", "", "cyan", no_ws=True))
-        self._queue.put(LogEntry(datetime.now().astimezone(), "SYSTEM", marker, "cyan", no_ws=True))
-        self._queue.put(LogEntry(datetime.now().astimezone(), "SYSTEM", "", "cyan", no_ws=True))
+        self._queue.put(LogEntry(self._clock(), "SYSTEM", "", "cyan", no_ws=True))
+        self._queue.put(LogEntry(self._clock(), "SYSTEM", marker, "cyan", no_ws=True))
+        self._queue.put(LogEntry(self._clock(), "SYSTEM", "", "cyan", no_ws=True))
     def get_stats(self) -> dict:
         """Return per-source queue and throughput statistics."""
         qs = self._queue.stats()
@@ -513,7 +355,7 @@ class SourceManager:
                 logging.warning("%s", exc)
         else:
             self._queue.put(LogEntry(
-                datetime.now().astimezone(),
+                self._clock(),
                 source,
                 str(msg.get("message", "")),
                 msg.get("color"),
@@ -532,12 +374,12 @@ class LogServer:
         verbose: bool = False,
         ws_port: int = 0,
         ws_ui: str = "frontend/index.html",
-        config_path: Optional[str] = None,
-        job_id: Optional[str] = None,
+        config_path: str | None = None,
+        job_id: str | None = None,
         open_browser: bool = False,
         app_name: str = "embed-log",
-        theme_defaults: Optional[dict] = None,
-        source_labels: Optional[dict[str, str]] = None,
+        theme_defaults: dict | None = None,
+        source_labels: dict[str, str] | None = None,
         queue_maxsize: int = 20000,
         timestamp_mode: str = TIMESTAMP_MODE_ABSOLUTE,
     ):
@@ -554,6 +396,7 @@ class LogServer:
         self._timestamp_mode = timestamp_mode if timestamp_mode in TIMESTAMP_MODES else TIMESTAMP_MODE_ABSOLUTE
         self._rotate_lock = threading.Lock()
         self._export_lock = threading.Lock()
+        self._session_lock = threading.Lock()
         self._session_clock = SessionClock(self._timestamp_mode)
 
         self._source_files = {s["name"]: str(s["log_file"]) for s in sources}
@@ -588,7 +431,7 @@ class LogServer:
             first_log_at=self._session.first_log_at,
         )
 
-        broadcaster: Optional[WebSocketBroadcaster] = None
+        broadcaster: WebSocketBroadcaster | None = None
         if ws_port:
             broadcaster = WebSocketBroadcaster(
                 ws_ui,
@@ -637,34 +480,46 @@ class LogServer:
             html_error=self._session_info.get("html_error"),
         )
 
+    def _update_session_info(self, updates: dict) -> None:
+        with self._session_lock:
+            self._session_info.update(updates)
+
     def _handle_first_log_at(self, first_log_at: str) -> None:
         self._session.set_first_log_at(first_log_at)
-        self._session_info["first_log_at"] = first_log_at
+        self._update_session_info({"first_log_at": first_log_at})
         self._exporter.set_first_log_at(first_log_at)
+        with self._session_lock:
+            exported_html = self._session_info.get("html_ready", False)
+            html_status = self._session_info.get("html_status", "pending")
+            html_updated_at = self._session_info.get("html_updated_at")
+            html_error = self._session_info.get("html_error")
         self._session.write_manifest(
             reason="first_log_at",
-            exported_html=self._session_info.get("html_ready", False),
-            html_status=self._session_info.get("html_status", "pending"),
-            html_updated_at=self._session_info.get("html_updated_at"),
-            html_error=self._session_info.get("html_error"),
+            exported_html=exported_html,
+            html_status=html_status,
+            html_updated_at=html_updated_at,
+            html_error=html_error,
         )
         if self._broadcaster:
+            with self._session_lock:
+                session_snapshot = dict(self._session_info)
             self._broadcaster.update_session_info({"first_log_at": first_log_at})
             self._broadcaster.broadcast({
                 "type": "session_info",
-                "session": dict(self._session_info),
+                "session": session_snapshot,
             })
     def _publish_html_state(self) -> None:
         if not self._broadcaster:
             return
-        updates = {
-            "html_ready": self._session_info.get("html_ready", False),
-            "html_status": self._session_info.get("html_status", "pending"),
-            "html_updated_at": self._session_info.get("html_updated_at"),
-            "html_error": self._session_info.get("html_error"),
-            "last_export_reason": self._session_info.get("last_export_reason"),
-            "first_log_at": self._session_info.get("first_log_at"),
-        }
+        with self._session_lock:
+            updates = {
+                "html_ready": self._session_info.get("html_ready", False),
+                "html_status": self._session_info.get("html_status", "pending"),
+                "html_updated_at": self._session_info.get("html_updated_at"),
+                "html_error": self._session_info.get("html_error"),
+                "last_export_reason": self._session_info.get("last_export_reason"),
+                "first_log_at": self._session_info.get("first_log_at"),
+            }
         self._broadcaster.update_session_info(updates)
         self._broadcaster.broadcast({
             "type": "session_html_status",
@@ -699,15 +554,16 @@ class LogServer:
 
     def export_session_html(self, reason: str, *, log_files_locked: bool = False) -> bool:
         with self._export_lock:
-            if self._session_info.get("html_status") == "updating":
-                return False
+            with self._session_lock:
+                if self._session_info.get("html_status") == "updating":
+                    return False
 
             for mgr in self._managers:
                 mgr.wait_until_flushed()
             for mgr in self._managers:
                 mgr.flush_log_file(locked=log_files_locked)
 
-            self._session_info.update({
+            self._update_session_info({
                 "html_status": "updating",
                 "html_error": None,
                 "last_export_reason": reason,
@@ -724,7 +580,7 @@ class LogServer:
                     html_updated_at=updated_at,
                     html_error=None,
                 )
-                self._session_info.update({
+                self._update_session_info({
                     "html_ready": True,
                     "html_status": "ready",
                     "html_updated_at": updated_at,
@@ -735,14 +591,16 @@ class LogServer:
                 return True
 
             err = "export failed"
+            with self._session_lock:
+                html_updated_at = self._session_info.get("html_updated_at")
             self._session.write_manifest(
                 reason=reason,
                 exported_html=self._session.html_path.is_file(),
                 html_status="error",
-                html_updated_at=self._session_info.get("html_updated_at"),
+                html_updated_at=html_updated_at,
                 html_error=err,
             )
-            self._session_info.update({
+            self._update_session_info({
                 "html_ready": self._session.html_path.is_file(),
                 "html_status": "error",
                 "html_error": err,
@@ -753,7 +611,8 @@ class LogServer:
 
     def rotate_session(self, reason: str = "manual_ui") -> dict:
         with self._rotate_lock:
-            old_info = dict(self._session_info)
+            with self._session_lock:
+                old_info = dict(self._session_info)
             close_msg = f"[embed-log] session closed: {reason}"
             for mgr in self._managers:
                 mgr.add_session_marker(close_msg, no_ws=False)
@@ -814,17 +673,20 @@ class LogServer:
             )
 
             if self._broadcaster:
-                self._broadcaster.update_session_info(dict(self._session_info))
+                with self._session_lock:
+                    session_snapshot = dict(self._session_info)
+                self._broadcaster.update_session_info(session_snapshot)
                 self._broadcaster.broadcast({
                     "type": "session_rotated",
                     "old_session": old_info,
-                    "session": self._session_info,
+                    "session": session_snapshot,
                 })
 
             start_msg = f"[embed-log] clean session started: {reason}"
             for mgr in self._managers:
                 mgr.add_session_marker(start_msg, no_ws=False)
-            return {"old_session": old_info, "session": self._session_info}
+            with self._session_lock:
+                return {"old_session": old_info, "session": self._session_info}
 
     def start(self) -> None:
         if self._broadcaster:

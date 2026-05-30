@@ -248,23 +248,25 @@ def _run_sessions(argv: list[str]) -> int:
 
     log_dir = Path(args.log_dir) if hasattr(args, "log_dir") else Path("logs/")
 
-    if args.command == "list":
-        return _run_sessions_list(log_dir, args)
-    if args.command == "info":
-        return _run_sessions_info(log_dir, args)
-    if args.command == "logs":
-        return _run_sessions_logs(log_dir, args)
-    if args.command == "export":
-        return _run_sessions_export(log_dir, args)
-    if args.command == "open":
-        return _run_sessions_open(log_dir, args)
-    if args.command == "delete":
-        return _run_sessions_delete(log_dir, args)
-    if args.command == "snippet":
-        return _run_sessions_snippet(log_dir, args)
-    if args.command == "marker":
-        return _run_sessions_marker(log_dir, args)
-    return 1
+    match args.command:
+        case "list":
+            return _run_sessions_list(log_dir, args)
+        case "info":
+            return _run_sessions_info(log_dir, args)
+        case "logs":
+            return _run_sessions_logs(log_dir, args)
+        case "export":
+            return _run_sessions_export(log_dir, args)
+        case "open":
+            return _run_sessions_open(log_dir, args)
+        case "delete":
+            return _run_sessions_delete(log_dir, args)
+        case "snippet":
+            return _run_sessions_snippet(log_dir, args)
+        case "marker":
+            return _run_sessions_marker(log_dir, args)
+        case _:
+            return 1
 
 
 __all__ = [

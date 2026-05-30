@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Optional
 
 from .parser import build_parser
 
@@ -17,7 +16,7 @@ from ..file_tail_udp import run_tail_file
 from ..parse import run_parse
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Parse CLI arguments and dispatch to the appropriate handler."""
     argv = list(sys.argv[1:] if argv is None else argv)
 
@@ -75,25 +74,25 @@ def main(argv: Optional[list[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     # Dispatch based on parsed subcommand
-    if args.command == "create-config":
-        return _run_create_config(args)
-    if args.command == "validate":
-        return _run_validate(args)
-    if args.command == "run":
-        return _run_run(args)
-    if args.command == "merge":
-        return _run_merge(args)
-    if args.command == "parse":
-        return run_parse(argv[1:])  # keep old parse signature
-    if args.command == "tail-file":
-        return run_tail_file(args)
-    if args.command in {"version", "doctor"}:
-        return _run_version(args)
-    if args.command == "ports":
-        return _run_ports(args)
-    if args.command == "update":
-        return _run_update(args)
-
-    # Should not reach here
-    parser.print_help()
-    return 0
+    match args.command:
+        case "create-config":
+            return _run_create_config(args)
+        case "validate":
+            return _run_validate(args)
+        case "run":
+            return _run_run(args)
+        case "merge":
+            return _run_merge(args)
+        case "parse":
+            return run_parse(argv[1:])  # keep old parse signature
+        case "tail-file":
+            return run_tail_file(args)
+        case "version" | "doctor":
+            return _run_version(args)
+        case "ports":
+            return _run_ports(args)
+        case "update":
+            return _run_update(args)
+        case _:
+            parser.print_help()
+            return 0

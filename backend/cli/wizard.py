@@ -6,7 +6,7 @@ import argparse
 import re
 import sys
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable
 
 import yaml
 from serial.tools import list_ports
@@ -70,7 +70,7 @@ def _slug_name(value: str, fallback: str) -> str:
 def _prompt(
     text: str,
     *,
-    default: Optional[str] = None,
+    default: str | None = None,
     input_fn: Callable[[str], str] = input,
     allow_empty: bool = False,
 ) -> str:
@@ -109,7 +109,7 @@ def _prompt_int(
     *,
     default: int,
     minimum: int = 1,
-    maximum: Optional[int] = None,
+    maximum: int | None = None,
     input_fn: Callable[[str], str] = input,
 ) -> int:
     while True:
