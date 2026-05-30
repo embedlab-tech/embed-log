@@ -20,13 +20,13 @@ class TrackedQueueTests(unittest.TestCase):
     def test_stats_initial(self):
         q = TrackedQueue(maxsize=1000)
         s = q.stats()
-        self.assertEqual(s["maxsize"], 1000)
-        self.assertEqual(s["depth"], 0)
-        self.assertEqual(s["enqueued"], 0)
-        self.assertEqual(s["dequeued"], 0)
-        self.assertEqual(s["peak_depth"], 0)
-        self.assertEqual(s["near_full_events"], 0)
-        self.assertEqual(s["utilization_pct"], 0.0)
+        self.assertEqual(s.maxsize, 1000)
+        self.assertEqual(s.depth, 0)
+        self.assertEqual(s.enqueued, 0)
+        self.assertEqual(s.dequeued, 0)
+        self.assertEqual(s.peak_depth, 0)
+        self.assertEqual(s.near_full_events, 0)
+        self.assertEqual(s.utilization_pct, 0.0)
 
     def test_stats_after_put_get(self):
         q = TrackedQueue(maxsize=100)
@@ -34,10 +34,10 @@ class TrackedQueueTests(unittest.TestCase):
         q.put("y")
         q.get()
         s = q.stats()
-        self.assertEqual(s["enqueued"], 2)
-        self.assertEqual(s["dequeued"], 1)
-        self.assertEqual(s["depth"], 1)
-        self.assertEqual(s["peak_depth"], 2)
+        self.assertEqual(s.enqueued, 2)
+        self.assertEqual(s.dequeued, 1)
+        self.assertEqual(s.depth, 1)
+        self.assertEqual(s.peak_depth, 2)
         q.task_done()
         q.task_done()
 
@@ -46,12 +46,12 @@ class TrackedQueueTests(unittest.TestCase):
         q.put(1)
         q.put(2)
         q.put(3)
-        self.assertEqual(q.stats()["peak_depth"], 3)
+        self.assertEqual(q.stats().peak_depth, 3)
         q.get()
         q.get()
-        self.assertEqual(q.stats()["depth"], 1)
+        self.assertEqual(q.stats().depth, 1)
         # peak_depth is lifetime max, doesn't decrease
-        self.assertEqual(q.stats()["peak_depth"], 3)
+        self.assertEqual(q.stats().peak_depth, 3)
         q.task_done()
         q.task_done()
         q.task_done()
@@ -96,7 +96,7 @@ class TrackedQueueTests(unittest.TestCase):
         finally:
             TrackedQueue.NEAR_FULL_PCT = old_pct
         s = q.stats()
-        self.assertGreater(s["near_full_events"], 0)
+        self.assertGreater(s.near_full_events, 0)
         # Drain
         for _ in range(8):
             q.get()
@@ -109,9 +109,9 @@ class TrackedQueueTests(unittest.TestCase):
         for i in range(1000):
             q.put(i)
         s = q.stats()
-        self.assertEqual(s["maxsize"], 0)
-        self.assertEqual(s["utilization_pct"], 0.0)
-        self.assertEqual(s["near_full_events"], 0)
+        self.assertEqual(s.maxsize, 0)
+        self.assertEqual(s.utilization_pct, 0.0)
+        self.assertEqual(s.near_full_events, 0)
         # Drain
         for _ in range(1000):
             q.get()
@@ -125,13 +125,13 @@ class TrackedQueueTests(unittest.TestCase):
         q.get()
         q.task_done()
         s = q.stats()
-        self.assertEqual(s["enqueued"], 2)
+        self.assertEqual(s.enqueued, 2)
         q.clear_stats()
         s2 = q.stats()
-        self.assertEqual(s2["enqueued"], 0)
-        self.assertEqual(s2["dequeued"], 0)
+        self.assertEqual(s2.enqueued, 0)
+        self.assertEqual(s2.dequeued, 0)
         # peak_depth resets to current depth
-        self.assertEqual(s2["peak_depth"], 1)
+        self.assertEqual(s2.peak_depth, 1)
         q.get()
         q.task_done()
         q.join()

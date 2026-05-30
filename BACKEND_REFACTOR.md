@@ -391,6 +391,9 @@ tests/
 | 2026-05-30 | 2.14 | cli_update.py | DONE | self-update logic |
 | 2026-05-30 | 2.15 | cli_run.py | DONE | run/validate/merge |
 | 2026-05-30 | 2.16 | Final cutover to cli/ package | DONE | `backend/cli/` with `sessions/` subdir, 222 tests pass |
+| 2026-05-30 | 1.1 | Config models | DONE | `backend/config/models.py` — AppConfig, SourceConfig, TabConfig, ServerConfig |
+| 2026-05-30 | 1.2 | Runtime models | DONE | `backend/core/models.py` — LogEntry(dataclass), QueueStats |
+| 2026-05-30 | 1.3 | Session models | DONE | `backend/session/models.py` — SessionStats, SnippetEntry |
 
 _Update this table as tasks are completed. Format: `YYYY-MM-DD | 1.1 | Config model | DONE | PR #123`_
 

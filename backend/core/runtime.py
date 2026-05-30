@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import os
@@ -16,6 +17,7 @@ import serial
 from ..net import ForwardServer, InjectServer, WebSocketBroadcaster
 from ..session import SessionExporter, SessionManager
 from ..sources import LogSource
+from .models import LogEntry, QueueStats
 from .naming import slugify
 
 # ---------------------------------------------------------------------------
@@ -86,18 +88,18 @@ class TrackedQueue:
     def join(self) -> None:
         self._queue.join()
 
-    def stats(self) -> dict:
+    def stats(self) -> QueueStats:
         with self._lock:
             qsize = self._queue.qsize()
-            return {
-                "maxsize": self._maxsize,
-                "depth": qsize,
-                "utilization_pct": round(qsize / self._maxsize * 100, 1) if self._maxsize > 0 else 0.0,
-                "enqueued": self._enqueued,
-                "dequeued": self._dequeued,
-                "peak_depth": self._peak_depth,
-                "near_full_events": self._near_full_count,
-            }
+            return QueueStats(
+                maxsize=self._maxsize,
+                depth=qsize,
+                utilization_pct=round(qsize / self._maxsize * 100, 1) if self._maxsize > 0 else 0.0,
+                enqueued=self._enqueued,
+                dequeued=self._dequeued,
+                peak_depth=self._peak_depth,
+                near_full_events=self._near_full_count,
+            )
 
     def clear_stats(self) -> None:
         with self._lock:
@@ -178,19 +180,6 @@ class SessionClock:
         if self.mode == TIMESTAMP_MODE_RELATIVE:
             return self.relative_millis(timestamp)
         return int(timestamp.timestamp() * 1000)
-
-
-class LogEntry:
-    __slots__ = ("timestamp", "source", "message", "color", "no_ws")
-
-    def __init__(self, timestamp: datetime, source: str, message: str,
-                 color: Optional[str] = None, no_ws: bool = False):
-        self.timestamp = timestamp
-        self.source = source
-        self.message = message
-        self.color = color
-        self.no_ws = no_ws
-
 
 class SourceManager:
     """
@@ -363,15 +352,15 @@ class SourceManager:
                 # Log near-full warning periodically when queue is congested
                 if self._queue_maxsize > 0:
                     stats = self._queue.stats()
-                    if stats["utilization_pct"] >= 80:
-                        if stats["near_full_events"] % 100 == 1:
+                    if stats.utilization_pct >= 80:
+                        if stats.near_full_events % 100 == 1:
                             logging.warning(
                                 "[%s] queue congested: %d/%d (%.0f%%)  near_full=%d",
                                 self.name,
-                                stats["depth"],
+                                stats.depth,
                                 self._queue_maxsize,
-                                stats["utilization_pct"],
-                                stats["near_full_events"],
+                                stats.utilization_pct,
+                                stats.near_full_events,
                             )
                 line = self._format(entry)
                 if self.verbose:
@@ -502,7 +491,7 @@ class SourceManager:
         qs = self._queue.stats()
         return {
             "name": self.name,
-            "queue": qs,
+            "queue": dataclasses.asdict(qs),
             "source_type": type(self.source).__name__,
             "inject_port": self.inject_port,
             "forward_ports": list(self.forward_ports),

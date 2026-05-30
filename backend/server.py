@@ -12,12 +12,14 @@ from typing import Optional
 
 # Backward-compatible re-exports for imports that previously used backend.server
 try:
-    from .core.runtime import LogEntry, LogServer, SourceManager, _slug
+    from .core.models import LogEntry
+    from .core.runtime import LogServer, SourceManager, _slug
 except Exception:
     repo_root = Path(__file__).resolve().parents[1]
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
-    from backend.core.runtime import LogEntry, LogServer, SourceManager, _slug
+    from backend.core.models import LogEntry
+    from backend.core.runtime import LogServer, SourceManager, _slug
 
 
 def main(argv: Optional[list[str]] = None) -> int:

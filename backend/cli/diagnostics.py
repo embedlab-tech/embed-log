@@ -77,40 +77,41 @@ def _run_version(args: argparse.Namespace) -> int:
             cfg = load_config(str(cfg_path))
             checks.append(("config", str(cfg_path)))
             # Sources
-            srcs = cfg.get("sources", [])
-            names = [s.get("name") for s in srcs]
+            # Sources
+            srcs = cfg.sources
+            names = [s.name for s in srcs]
             if len(names) != len(set(names)):
                 checks.append(("source-names", "DUPLICATE"))
                 ok = False
             # Ports
             for s in srcs:
-                if s.get("type") == "udp":
+                if s.type == "udp":
                     try:
-                        int(s["port"])
-                    except (ValueError, KeyError):
-                        checks.append(("udp-port", f"INVALID: {s.get('port')}"))
+                        int(s.port)
+                    except (ValueError, TypeError):
+                        checks.append(("udp-port", f"INVALID: {s.port}"))
                         ok = False
             checks.append(("sources", f"{len(srcs)} configured"))
             # Tabs
-            tabs = cfg.get("tabs", [])
+            tabs = cfg.tabs
             for t in tabs:
-                for p in t.get("panes", []):
+                for p in t.panes:
                     if p not in names:
                         checks.append(
                             (
                                 "tab-refs",
-                                f"unknown source {p!r} in tab {t.get('label')!r}",
+                                f"unknown source {p!r} in tab {t.label!r}",
                             )
                         )
                         ok = False
             checks.append(("tabs", f"{len(tabs)} configured"))
             # Log dir
-            log_dir = Path(cfg.get("logs", {}).get("dir", "logs/"))
+            log_dir = Path(cfg.logs.dir)
             checks.append(
                 ("log-dir", str(log_dir) if log_dir.is_dir() else "NOT_FOUND")
             )
             # Frontend assets
-            ui_path = cfg.get("server", {}).get("ws_ui", "")
+            ui_path = cfg.server.ws_ui or ""
             if ui_path:
                 checks.append(
                     ("ui-assets", "present" if Path(ui_path).is_file() else "MISSING")

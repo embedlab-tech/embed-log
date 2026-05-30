@@ -107,5 +107,6 @@ _Agents: fill this section as Phase 1 tasks are completed._
 | Date | Change | Author | Tests |
 |------|--------|--------|-------|
 | 2026-05-30 | Phase 2 complete: `backend/cli.py` (2591 lines) → `backend/cli/` package (10 modules, 2715 lines total) | refactor | 222 tests pass |
+| 2026-05-30 | Phase 1 complete: typed data models (AppConfig, LogEntry, QueueStats, SessionStats) | refactor | 222 tests pass |
 
 _Update this section when adding features or making behavioral changes._

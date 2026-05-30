@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
+from backend.session.models import SessionStats
 
 # ---------------------------------------------------------------------------
 # Timestamp parsing for log lines
@@ -151,7 +152,7 @@ def read_manifest(session_dir: Path) -> dict | None:
 # Session stats and iteration
 # ---------------------------------------------------------------------------
 
-def session_stats(session_dir: Path, manifest: dict | None) -> dict:
+def session_stats(session_dir: Path, manifest: dict | None) -> SessionStats:
     """Return enriched metrics: alias, line count, size KB, time range, duration."""
     sid = (manifest or {}).get("session_id", session_dir.name)
     lines = 0
@@ -213,15 +214,15 @@ def session_stats(session_dir: Path, manifest: dict | None) -> dict:
         except (json.JSONDecodeError, OSError):
             pass
 
-    return {
-        "alias": short_alias(sid),
-        "lines": lines,
-        "size_kb": size_kb,
-        "time_start": time_start or "",
-        "time_end": time_end or "",
-        "duration_secs": duration_secs,
-        "markers": marker_count,
-    }
+    return SessionStats(
+        alias=short_alias(sid),
+        lines=lines,
+        size_kb=size_kb,
+        time_start=time_start or "",
+        time_end=time_end or "",
+        duration_secs=duration_secs,
+        markers=marker_count,
+    )
 
 
 def iter_sessions(log_dir: Path) -> list[dict]:
@@ -238,13 +239,13 @@ def iter_sessions(log_dir: Path) -> list[dict]:
         else:
             manifest = {"_dir": str(child)}
         stats = session_stats(child, manifest)
-        manifest["_alias"] = stats["alias"]
-        manifest["_lines"] = stats["lines"]
-        manifest["_size_kb"] = stats["size_kb"]
-        manifest["_time_start"] = stats["time_start"]
-        manifest["_time_end"] = stats["time_end"]
-        manifest["_duration_secs"] = stats["duration_secs"]
-        manifest["markers"] = stats["markers"]
+        manifest["_alias"] = stats.alias
+        manifest["_lines"] = stats.lines
+        manifest["_size_kb"] = stats.size_kb
+        manifest["_time_start"] = stats.time_start
+        manifest["_time_end"] = stats.time_end
+        manifest["_duration_secs"] = stats.duration_secs
+        manifest["markers"] = stats.markers
         sessions.append(manifest)
     return sessions
 

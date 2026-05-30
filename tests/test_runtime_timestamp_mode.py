@@ -1,7 +1,8 @@
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from backend.core.runtime import LogEntry, SessionClock, SourceManager, TIMESTAMP_MODE_RELATIVE
+from backend.core.models import LogEntry
+from backend.core.runtime import SessionClock, SourceManager, TIMESTAMP_MODE_RELATIVE
 
 
 class RelativeTimestampModeTests(unittest.TestCase):

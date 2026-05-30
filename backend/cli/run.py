@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from ..app import DEFAULT_WS_UI, build_source, parse_source, run_app
-from ..config import ConfigError, load_config
+from ..config import AppConfig, ConfigError, load_config
 from ..sources import LogSource
 
 
@@ -30,20 +30,20 @@ def _run_validate(args: argparse.Namespace) -> int:
                 {
                     "ok": True,
                     "config": args.config,
-                    "sources": len(cfg.get("sources", [])),
-                    "injects": len(cfg.get("injects", [])),
-                    "forwards": len(cfg.get("forwards", [])),
-                    "tabs": len(cfg.get("tabs", [])),
+                    "sources": len(cfg.sources),
+                    "injects": len(cfg.injects),
+                    "forwards": len(cfg.forwards),
+                    "tabs": len(cfg.tabs),
                 }
             )
         )
         return 0
 
     print("Config OK")
-    print(f"  sources: {len(cfg.get('sources', []))}")
-    print(f"  injects: {len(cfg.get('injects', []))}")
-    print(f"  forwards: {len(cfg.get('forwards', []))}")
-    print(f"  tabs: {len(cfg.get('tabs', []))}")
+    print(f"  sources: {len(cfg.sources)}")
+    print(f"  injects: {len(cfg.injects)}")
+    print(f"  forwards: {len(cfg.forwards)}")
+    print(f"  tabs: {len(cfg.tabs)}")
     return 0
 
 
@@ -74,7 +74,7 @@ def _run_merge(args: argparse.Namespace) -> int:
 
 
 def _run_run(args: argparse.Namespace) -> int:
-    cfg = {}
+    cfg = AppConfig()
     if args.config:
         try:
             cfg = load_config(args.config)
@@ -82,28 +82,33 @@ def _run_run(args: argparse.Namespace) -> int:
             print(f"config error: {exc}", file=sys.stderr)
             return 1
 
-    source_specs = args.sources if args.sources else cfg.get("sources", [])
-    inject_specs = args.injects if args.injects else cfg.get("injects", [])
-    forward_specs = args.forwards if args.forwards else cfg.get("forwards", [])
-    tab_specs = args.tabs if args.tabs else cfg.get("tabs", [])
+    source_specs = args.sources if args.sources else cfg.sources
+    inject_specs = args.injects if args.injects else cfg.injects
+    forward_specs = args.forwards if args.forwards else cfg.forwards
+    if args.tabs:
+        tab_specs = args.tabs
+    elif cfg.tabs:
+        tab_specs = [[t.label, *t.panes] for t in cfg.tabs]
+    else:
+        tab_specs = []
     source_labels = (
-        cfg.get("source_labels", {}) if (args.config and not args.sources) else {}
+        cfg.source_labels if (args.config and not args.sources) else {}
     )
 
     baudrate = (
-        args.baudrate if args.baudrate is not None else cfg.get("baudrate", 115200)
+        args.baudrate if args.baudrate is not None else cfg.baudrate
     )
     logs_root = Path(
-        args.log_dir if args.log_dir is not None else cfg.get("log_dir", "logs/")
+        args.log_dir if args.log_dir is not None else cfg.logs.dir
     )
-    host = args.host if args.host is not None else cfg.get("host", "127.0.0.1")
-    ws_port = args.ws_port if args.ws_port is not None else cfg.get("ws_port", 8080)
-    ws_ui = args.ws_ui if args.ws_ui is not None else cfg.get("ws_ui", DEFAULT_WS_UI)
+    host = args.host if args.host is not None else cfg.server.host
+    ws_port = args.ws_port if args.ws_port is not None else cfg.server.ws_port
+    ws_ui = args.ws_ui if args.ws_ui is not None else cfg.server.ws_ui or DEFAULT_WS_UI
     app_name = (
-        args.app_name if args.app_name is not None else cfg.get("app_name", "embed-log")
+        args.app_name if args.app_name is not None else cfg.server.app_name
     )
-    cfg_verbosity = cfg.get("verbosity")
-    cfg_legacy_verbose = bool(cfg.get("verbose", False))
+    cfg_verbosity = cfg.server.verbosity
+    cfg_legacy_verbose = cfg.server.verbose
     if args.verbosity is not None:
         verbosity = args.verbosity
     elif args.verbose_full is not None:
@@ -119,25 +124,25 @@ def _run_run(args: argparse.Namespace) -> int:
     open_browser = (
         args.open_browser
         if args.open_browser is not None
-        else cfg.get("open_browser", False)
+        else cfg.server.open_browser
     )
-    job_id = args.job_id if args.job_id is not None else cfg.get("job_id", None)
+    job_id = args.job_id if args.job_id is not None else cfg.server.job_id
     timestamp_mode = (
         args.timestamp_mode
         if args.timestamp_mode is not None
-        else cfg.get("timestamp_mode", "absolute")
+        else cfg.server.timestamp_mode
     )
     default_light_theme = (
         args.default_light_theme
         if args.default_light_theme is not None
-        else cfg.get("default_light_theme")
+        else cfg.server.default_light_theme
     )
     default_dark_theme = (
         args.default_dark_theme
         if args.default_dark_theme is not None
-        else cfg.get("default_dark_theme")
+        else cfg.server.default_dark_theme
     )
-    queue_maxsize = cfg.get("queue_size", 20000) if args.config else 20000
+    queue_maxsize = cfg.server.queue_size if args.config else 20000
 
     logging.basicConfig(
         level=logging.INFO if verbosity in {"events", "full"} else logging.WARNING,
@@ -167,12 +172,20 @@ def _run_run(args: argparse.Namespace) -> int:
             source_names.append(name)
     else:
         for source_config in source_specs:
-            name = source_config["name"]
+            name = source_config.name
             if name in source_objects:
                 print(f"duplicate source name: {name!r}", file=sys.stderr)
                 return 1
             try:
-                source_objects[name] = build_source(source_config)
+                source_dict = {
+                    "name": source_config.name,
+                    "type": source_config.type,
+                    "port": source_config.port,
+                    "parser": {"type": source_config.parser.type},
+                }
+                if source_config.baudrate is not None:
+                    source_dict["baudrate"] = source_config.baudrate
+                source_objects[name] = build_source(source_dict)
             except ValueError as exc:
                 print(f"source {name!r}: {exc}", file=sys.stderr)
                 return 1

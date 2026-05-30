@@ -103,8 +103,8 @@ def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
         time_end = manifest.get("_time_end", "")
         if (args.first or args.last) and (not time_start or not time_end):
             stats = session_stats(sdir, manifest)
-            time_start = stats["time_start"]
-            time_end = stats["time_end"]
+            time_start = stats.time_start
+            time_end = stats.time_end
         time_conflicts = []
         if args.after:
             time_conflicts.append("--after")
