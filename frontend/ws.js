@@ -131,6 +131,17 @@ function wsConnect() {
                 );
                 switchTab(0);
             }
+            // Apply markers from config if present
+            if (msg.markers && Array.isArray(msg.markers)) {
+                state.markers = {};
+                msg.markers.forEach(m => {
+                    if (!m.paneId) return;
+                    state.markers[m.paneId] = state.markers[m.paneId] || [];
+                    state.markers[m.paneId].push(m);
+                });
+                window.applyMarkers?.();
+                window.__embedLogOnMarkers?.();
+            }
             window.__embedLogAfterConfig?.(msg.tabs || []);
             return;
         }
@@ -168,6 +179,18 @@ function wsConnect() {
                 type: "session_html_status",
             });
             window.__embedLogSchedulePersist?.();
+            return;
+        }
+
+        if (msg.type === "markers_update") {
+            state.markers = {};
+            (msg.markers || []).forEach(m => {
+                if (!m.paneId) return;
+                state.markers[m.paneId] = state.markers[m.paneId] || [];
+                state.markers[m.paneId].push(m);
+            });
+            window.applyMarkers?.();
+            window.__embedLogOnMarkers?.();
             return;
         }
 

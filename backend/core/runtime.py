@@ -582,6 +582,9 @@ class LogServer:
             first_log_at=self._session_clock.first_log_at(),
         )
         self._session_info = self._session.build_session_info()
+        existing_markers = self._session.load_markers()
+        if existing_markers:
+            self._session_info["markers"] = existing_markers
         self._session_clock = SessionClock(
             self._timestamp_mode,
             on_origin_set=self._handle_first_log_at,
@@ -609,6 +612,7 @@ class LogServer:
                 on_export_session_html=lambda: self.export_session_html("manual_ui"),
                 on_rotate_session=lambda: self.rotate_session("manual_ui"),
                 on_save_snippet=lambda text, panes, scope, label: self._session.save_snippet(text, panes=panes, scope=scope, label=label),
+                on_save_markers=lambda markers: self._session.save_markers(markers),
                 open_browser=open_browser,
                 app_name=app_name,
                 theme_defaults=self._theme_defaults,

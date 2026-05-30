@@ -145,6 +145,7 @@ export async function exportHtmlSnapshot(options = {}) {
     "use strict";
     window.wsSend = function () {};
     var _logData = ${_safeJson(logData)};
+    var _markers = ${_safeJson(Object.values(state.markers).flat() || [])};
     function _loadPane(paneId) {
         var entries = _logData[paneId];
         if (!entries || !entries.length) return;
@@ -155,9 +156,49 @@ export async function exportHtmlSnapshot(options = {}) {
         updateJumpBtn(paneId);
     }
     PANES.forEach(_loadPane);
+    // Load markers
+    if (_markers.length) {
+        state.markers = {};
+        _markers.forEach(function (m) {
+            if (!m.paneId) return;
+            state.markers[m.paneId] = state.markers[m.paneId] || [];
+            state.markers[m.paneId].push(m);
+        });
+        if (typeof applyMarkers === "function") applyMarkers();
+        if (typeof window.__embedLogOnMarkers === "function") window.__embedLogOnMarkers();
+    }
     // Restore the tab that was active when the export was taken
     if (${activeTabIdx} !== 0) switchTab(${activeTabIdx});
-})();`;
+    // Jump to marker from URL hash (e.g. #marker-2)
+    (function () {
+        var m = window.location.hash.match(/^#marker-(\d+)$/);
+        if (!m) return;
+        var idx = parseInt(m[1], 10);
+        if (!Number.isFinite(idx) || idx < 1) return;
+        var flat = [];
+        Object.keys(state.markers).forEach(function (pid) {
+            (state.markers[pid] || []).forEach(function (mk) {
+                flat.push({ paneId: pid, lineIdx: mk.lineIdx, numTs: mk.numTs });
+            });
+        });
+        flat.sort(function (a, b) { return (a.numTs || 0) - (b.numTs || 0); });
+        if (idx > flat.length) return;
+        var target = flat[idx - 1];
+        var div = document.querySelector('#log-' + target.paneId + ' [data-idx="' + target.lineIdx + '"]');
+        if (!div) return;
+        var logEl = document.getElementById('log-' + target.paneId);
+        if (!logEl) return;
+        logEl.scrollTop = div.offsetTop - Math.floor(logEl.clientHeight / 3);
+        state.atBottom[target.paneId] = false;
+        if (typeof onLineClick === 'function') onLineClick(target.paneId, target.numTs, div);
+        // Find the tab containing this pane and switch to it
+        var tabIdx = -1;
+        for (var t = 0; t < TABS.length; t++) {
+            if (TABS[t].panes.indexOf(target.paneId) >= 0) { tabIdx = t; break; }
+        }
+        if (tabIdx >= 0 && typeof switchTab === 'function') switchTab(tabIdx);
+    })();
+})();`
 
         // ------------------------------------------------------------------
         // Assemble final HTML
@@ -172,8 +213,6 @@ export async function exportHtmlSnapshot(options = {}) {
 <head>
 <meta charset="UTF-8">
 <title>embed-log \u2014 ${title}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>${css}</style>
 </head>
 <body>

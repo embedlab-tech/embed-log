@@ -39,9 +39,25 @@ class SessionManager:
         self.manifest_path = self.session_dir / "manifest.json"
         self.html_path = self.session_dir / "session.html"
         self.snippets_dir = self.session_dir / "snippets"
+        self.markers_path = self.session_dir / "markers.json"
 
     def set_first_log_at(self, first_log_at: Optional[str]) -> None:
         self.first_log_at = first_log_at
+
+    def load_markers(self) -> list[dict]:
+        if self.markers_path.is_file():
+            try:
+                data = json.loads(self.markers_path.read_text(encoding="utf-8"))
+                return data.get("markers", [])
+            except (json.JSONDecodeError, OSError):
+                pass
+        return []
+
+    def save_markers(self, markers: list[dict]) -> None:
+        self.markers_path.write_text(
+            json.dumps({"session_id": self.session_id, "markers": markers}, indent=2),
+            encoding="utf-8",
+        )
 
 
     def build_session_info(self) -> dict:

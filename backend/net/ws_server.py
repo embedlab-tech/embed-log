@@ -34,9 +34,11 @@ class WebSocketBroadcaster:
         session_info: Optional[dict] = None,
         sessions_root: Optional[str] = None,
         on_all_clients_disconnected: Optional[Callable[[], None]] = None,
+
         on_export_session_html: Optional[Callable[[], bool]] = None,
         on_rotate_session: Optional[Callable[[], dict]] = None,
         on_save_snippet: Optional[Callable[[str, list[str], str], Optional[str]]] = None,
+        on_save_markers: Optional[Callable[[list[dict]], None]] = None,
         open_browser: bool = False,
         app_name: str = "embed-log",
         theme_defaults: Optional[dict] = None,
@@ -52,12 +54,13 @@ class WebSocketBroadcaster:
         self._broadcast_scheduled = False
         self._broadcast_lock = threading.Lock()
         self._source_map: dict = {}   # name → SourceManager
-        self._session_info = session_info or {}
         self._sessions_root = Path(sessions_root) if sessions_root else None
+        self._session_info = session_info or {}
         self._on_all_clients_disconnected = on_all_clients_disconnected
         self._on_export_session_html = on_export_session_html
         self._on_rotate_session = on_rotate_session
         self._on_save_snippet = on_save_snippet
+        self._on_save_markers = on_save_markers
         self._no_clients_handle = None
         self._thread: Optional[threading.Thread] = None
         self._started = threading.Event()
@@ -341,6 +344,7 @@ class WebSocketBroadcaster:
             "session": self._session_info,
             "app_name": self._app_name,
             "theme_defaults": self._theme_defaults,
+            "markers": self._session_info.get("markers", []),
         }))
         self._clients.add(ws)
         if self._no_clients_handle is not None:
@@ -410,3 +414,17 @@ class WebSocketBroadcaster:
                     logging.info("WS cmd clear_logs scope=pane source=%s", pane_id)
                     mgr.add_ui_clear_marker("pane")
                 return
+
+        if cmd == "save_markers" and self._on_save_markers is not None:
+            markers = msg.get("markers", [])
+            logging.info("WS cmd save_markers count=%d", len(markers))
+            await asyncio.to_thread(self._on_save_markers, markers)
+            self._session_info["markers"] = markers
+            # Broadcast updated markers to all connected clients
+            update = json.dumps({"type": "markers_update", "markers": markers})
+            for ws in list(self._clients):
+                try:
+                    await ws.send_str(update)
+                except Exception:
+                    pass
+            return

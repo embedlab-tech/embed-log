@@ -98,6 +98,8 @@ export const state = {
     filters:     {},
     wrap:        {},
     rawLines:    {},
+    markers:     {},       // paneId → [{lineIdx, numTs, description, createdAt}]
+    markerNavIdx: -1,      // index into flat marker list for navigation
     atBottom:    {},
     highlighted: {},
     selected:    {},

@@ -438,12 +438,16 @@ def _run_sessions(argv: list[str]) -> int:
             "Inspect and manage recorded sessions.\n"
             "\n"
             "Common workflows:\n"
-            "  sessions list                       list all sessions\n"
+            "  sessions list                       list all sessions (markers shown in MRK col)\n"
             "  sessions info <session-id>           session details\n"
             "  sessions export <session-id>         export HTML for one session\n"
             "  sessions export --missing            export HTML for all sessions without it\n"
+            "  sessions open <session-id>           open session HTML\n"
+            "  sessions open <session-id> marker N  open and jump to marker N\n"
+            "  sessions marker list <session-id>    list markers for a session\n"
+            "  sessions marker show <session-id> N  show marker N details\n"
             "  sessions snippet list <session-id>   list saved selection snippets\n"
-            "  sessions snippet show <session-id>   show the most recent snippet \n"
+            "  sessions snippet show <session-id>   show the most recent snippet\n"
             "  sessions delete --all                delete all sessions\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -533,6 +537,7 @@ def _run_sessions(argv: list[str]) -> int:
         "open", parents=[shared], help="open session HTML in the default browser"
     )
     p_open.add_argument("session_id")
+    p_open.add_argument("open_args", nargs="*", help="optional: specify marker N to jump to a marker (e.g. marker 2)")
 
     # ── delete ──
     p_delete = sub.add_parser(
@@ -563,6 +568,33 @@ def _run_sessions(argv: list[str]) -> int:
     p_delete.add_argument("--all", action="store_true", help="delete all sessions")
     p_delete.add_argument(
         "--yes", "-y", action="store_true", help="skip confirmation prompt"
+    )
+
+    # ── marker ──
+    p_marker = sub.add_parser(
+        "marker",
+        parents=[shared],
+        help="list/show session markers",
+        epilog=(
+            "Examples:\n"
+            "  sessions marker list <session-id>\n"
+            "  sessions marker show <session-id> 2\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_marker_sub = p_marker.add_subparsers(dest="marker_cmd")
+
+    p_marker_list = p_marker_sub.add_parser(
+        "list", parents=[shared], help="list all markers for a session"
+    )
+    p_marker_list.add_argument("session_id")
+
+    p_marker_show = p_marker_sub.add_parser(
+        "show", parents=[shared], help="show a specific marker"
+    )
+    p_marker_show.add_argument("session_id")
+    p_marker_show.add_argument(
+        "marker_index", type=int, help="marker index (1-based, from list)"
     )
 
     # ── snippet ──
@@ -638,6 +670,8 @@ def _run_sessions(argv: list[str]) -> int:
         return _run_sessions_delete(log_dir, args)
     if args.command == "snippet":
         return _run_sessions_snippet(log_dir, args)
+    if args.command == "marker":
+        return _run_sessions_marker(log_dir, args)
     return 1
 
 
@@ -804,6 +838,16 @@ def _session_stats(session_dir: Path, manifest: dict | None) -> dict:
         except ValueError:
             pass
 
+    # Marker count
+    markers_path = session_dir / "markers.json"
+    marker_count = 0
+    if markers_path.is_file():
+        try:
+            marker_data = json.loads(markers_path.read_text(encoding="utf-8"))
+            marker_count = len(marker_data.get("markers", []))
+        except (json.JSONDecodeError, OSError):
+            pass
+
     return {
         "alias": _short_alias(sid),
         "lines": lines,
@@ -811,6 +855,7 @@ def _session_stats(session_dir: Path, manifest: dict | None) -> dict:
         "time_start": time_start or "",
         "time_end": time_end or "",
         "duration_secs": duration_secs,
+        "markers": marker_count,
     }
 
 
@@ -833,6 +878,7 @@ def _iter_sessions(log_dir: Path) -> list[dict]:
         manifest["_time_start"] = stats["time_start"]
         manifest["_time_end"] = stats["time_end"]
         manifest["_duration_secs"] = stats["duration_secs"]
+        manifest["markers"] = stats["markers"]
         sessions.append(manifest)
     return sessions
 
@@ -844,7 +890,8 @@ def _format_session_row(m: dict) -> str:
     lines = m.get("_lines", 0)
     size_kb = m.get("_size_kb", 0)
     html = "yes" if m.get("session_html") else "-"
-    return f"{alias:<6s}  {sid:<40s}  {app:<16s}  {lines:<6d}  {size_kb:<4d}KB  {html}"
+    markers = m.get("markers", 0)
+    return f"{alias:<6s}  {sid:<40s}  {app:<16s}  {lines:>6d}  {size_kb:>4d}KB  {markers:>3d}m  {html}"
 
 
 def _run_sessions_list(log_dir: Path, args: argparse.Namespace) -> int:
@@ -863,9 +910,9 @@ def _run_sessions_list(log_dir: Path, args: argparse.Namespace) -> int:
         return 0
 
     print(
-        f"{'ALIAS':<6s}  {'ID':<40s}  {'APP':<16s}  {'LINES':<6s}  {'SIZE':<6s}  {'HTML'}"
+        f"{'ALIAS':<6s}  {'ID':<40s}  {'APP':<16s}  {'LINES':>6s}  {'SIZE':>6s}  {'MRK':>4s}  {'HTML':>6s}"
     )
-    print("-" * 90)
+    print("-" * 100)
     for m in sessions:
         print(_format_session_row(m))
     return 0
@@ -1258,11 +1305,93 @@ def _run_sessions_open(log_dir: Path, args: argparse.Namespace) -> int:
         print(f"Generate it with: sessions export {args.session_id}", file=sys.stderr)
         return 1
 
-    webbrowser.open(html_path.resolve().as_uri())
-    print(f"Opened: {html_path}")
+    # Parse optional marker spec: marker N
+    fragment = ""
+    marker_idx = None
+    if hasattr(args, "open_args") and args.open_args:
+        if len(args.open_args) >= 2 and args.open_args[0] == "marker":
+            try:
+                marker_idx = int(args.open_args[1])
+                fragment = f"#marker-{marker_idx}"
+            except ValueError:
+                print(f"Invalid marker index: {args.open_args[1]}", file=sys.stderr)
+                return 1
+        else:
+            print(f"Unknown open argument: {' '.join(args.open_args)}", file=sys.stderr)
+            return 1
+
+    uri = html_path.resolve().as_uri() + fragment
+    webbrowser.open(uri)
+    label = f"  (jumping to marker {marker_idx})" if fragment else ""
+    print(f"Opened: {html_path}{label}")
     return 0
 
 
+
+def _run_sessions_marker(log_dir: Path, args: argparse.Namespace) -> int:
+    if not hasattr(args, "marker_cmd") or not args.marker_cmd:
+        print("error: specify a marker command: list or show", file=sys.stderr)
+        return 1
+
+    sdir = _read_session_dir(log_dir, args.session_id)
+    if not sdir:
+        print(f"Session not found: {args.session_id}", file=sys.stderr)
+        return 1
+
+    markers_path = sdir / "markers.json"
+    if not markers_path.is_file():
+        print(f"No markers for session {args.session_id}")
+        return 0
+
+    try:
+        data = json.loads(markers_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"Error reading markers: {e}", file=sys.stderr)
+        return 1
+
+    markers = data.get("markers", [])
+
+    if args.marker_cmd == "list":
+        if not markers:
+            print(f"No markers for session {args.session_id}")
+            return 0
+        print(f"Session: {data.get('session_id', args.session_id)}")
+        print(f"Markers: {len(markers)}")
+        print()
+        for i, m in enumerate(markers, 1):
+            start = m.get("lineIdx", "?")
+            end = m.get("endIdx", start)
+            desc = m.get("description", "")
+            pane = m.get("paneId", "?")
+            line_range = f"line {start}" if start == end else f"lines {start}-{end}"
+            print(f"  {i}. [{pane}] {line_range}")
+            print(f"     {desc}")
+            ts = m.get("numTs")
+            if ts is not None:
+                print(f"     numTs={ts}")
+            print()
+        return 0
+
+    if args.marker_cmd == "show":
+        idx = args.marker_index
+        if idx < 1 or idx > len(markers):
+            print(f"Marker index {idx} out of range (1-{len(markers)})", file=sys.stderr)
+            return 1
+        m = markers[idx - 1]
+        print(f"Marker {idx}")
+        print(f"  Pane:       {m.get('paneId', '?')}")
+        start = m.get("lineIdx", "?")
+        end = m.get("endIdx", start)
+        print(f"  Lines:      {start}" if start == end else f"  Lines:      {start}-{end}")
+        print(f"  Description: {m.get('description', '')}")
+        ts = m.get("numTs")
+        if ts is not None:
+            print(f"  Timestamp:  {ts}")
+        print(f"  Created:    {m.get('createdAt', '?')}")
+        return 0
+
+    print(f"error: unknown marker command '{args.marker_cmd}'", file=sys.stderr)
+    return 1
 def _run_sessions_snippet(log_dir: Path, args: argparse.Namespace) -> int:
     if not hasattr(args, "snippet_cmd") or not args.snippet_cmd:
         print(

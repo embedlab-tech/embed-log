@@ -37,7 +37,13 @@ export function renderToolbar(profile) {
 
     if (caps.wsStatus) {
         parts.push('    <div id="ws-status" class="disconnected">WS: disconnected</div>');
+
     }
+    parts.push('    <div id="marker-nav" class="marker-nav" style="display:none">');
+    parts.push('        <button id="marker-nav-prev" title="Previous marker">◀</button>');
+    parts.push('        <span id="marker-nav-idx">1</span>/<span id="marker-nav-total">0</span>');
+    parts.push('        <button id="marker-nav-next" title="Next marker">▶</button>');
+    parts.push('    </div>');
 
     parts.push('</div>');
     return parts.join('\n');

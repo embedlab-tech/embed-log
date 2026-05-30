@@ -24,6 +24,7 @@ export const STATIC_PROFILE = {
         unwrap: true,
         wsStatus: false,
         dynamicTabs: false,
+        markers: false,
     },
 };
 
@@ -43,6 +44,7 @@ const LIVE_PROFILE = {
         unwrap: true,
         wsStatus: true,
         dynamicTabs: false,
+        markers: true,
     },
 };
 

@@ -101,6 +101,7 @@ export function appendLineBatch(entries) {
     if (touched.size > 0) {
         window.__embedLogSchedulePersist?.();
         window.__embedLogUpdateTimestampModeUi?.();
+        window.applyMarkers?.();
     }
 }
 
@@ -136,10 +137,12 @@ export function setTimestampMode(mode) {
         const lines = state.rawLines[paneId] || [];
         lines.forEach(applyTimestampModeToLine);
         rerenderPane(paneId);
+
         highlightLine(paneId, null);
     });
-
     window.__embedLogSchedulePersist?.();
+    window.applyMarkers?.();
+
     window.__embedLogUpdateTimestampModeUi?.();
 }
 
