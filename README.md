@@ -14,7 +14,7 @@ Read these in order:
 
 ## Quick install
 
-One command, no clone needed:
+One command, no clone needed — installs the **latest tagged release**:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.sh | bash
@@ -26,6 +26,20 @@ Windows (PowerShell):
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.ps1'))
 ```
 
+Install a specific version:
+
+```bash
+EMBED_LOG_REF_TYPE=release EMBED_LOG_REF=v1.0.2 curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.sh | bash
+```
+
+Install the **latest** `main` branch — clone and run the installer locally:
+
+```bash
+git clone https://github.com/krezolekcoder/embed-log.git
+cd embed-log
+./install.sh
+```
+
 After install, `embed-log` is available globally (no venv activation needed):
 
 ```bash
@@ -34,11 +48,13 @@ embed-log run --config embed-log.yml
 ```
 
 Uninstall:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/uninstall.sh | bash
 ```
 
 Windows (PowerShell):
+
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/krezolekcoder/embed-log/main/uninstall.ps1'))
 ```

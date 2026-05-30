@@ -17,11 +17,10 @@ set -euo pipefail
 
 INSTALL_TMPDIR=""
 REPO="krezolekcoder/embed-log"
-BRANCH="main"
 REPO_URL="https://github.com/${REPO}.git"
 MIN_PY="3.10"
-INSTALL_REF_TYPE="${EMBED_LOG_REF_TYPE:-branch}"
-INSTALL_REF="${EMBED_LOG_REF:-$BRANCH}"
+INSTALL_REF_TYPE="${EMBED_LOG_REF_TYPE:-release}"
+INSTALL_REF="${EMBED_LOG_REF:-latest}"
 OVERRIDE_REPO="${EMBED_LOG_REPO:-$REPO}"
 OVERRIDE_REPO_URL="${EMBED_LOG_REPO_URL:-https://github.com/${OVERRIDE_REPO}.git}"
 INSTALLER_VERSION="1.0.0"
