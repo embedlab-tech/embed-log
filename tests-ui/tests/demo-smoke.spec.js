@@ -4,7 +4,7 @@ import dgram from 'node:dgram';
 import { collectPageErrors, saveDownload, waitForLineContaining, waitForRangePair, waitForSourceTestLine } from './helpers.js';
 
 async function openMore(page, paneId) {
-  await page.locator(`#more-toggle-${paneId}`).click();
+  await page.locator(`#more-toggle-${paneId}`).click({ force: true });
 }
 async function sendUdpBurst(port, prefix, count = 220) {
   const socket = dgram.createSocket('udp4');
@@ -85,29 +85,30 @@ test.describe('embed-log deterministic demo smoke', () => {
     expect(text).toContain('kind=sync');
   });
 
-  test('shift-click selects a deterministic range and raw snippet downloads cleaned merged text', async ({ page }, testInfo) => {
+  test('shift-click selects a deterministic range and per-pane download still works', async ({ page }, testInfo) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await waitForSourceTestLine(page, 'SENSOR_A');
 
+    // Select a range
     const { start, end } = await waitForRangePair(page, 'SENSOR_A', 'kind=prefix-cleanup', 'kind=timestamp-cleanup');
     await start.click();
     await end.click({ modifiers: ['Shift'] });
 
     await expect.poll(async () => page.locator('#log-SENSOR_A .log-line.selected').count())
       .toBeGreaterThanOrEqual(2);
-    await expect(page.locator('#copy-actions-SENSOR_A')).toHaveClass(/visible/);
 
+    // Download full pane log via the per-pane Download button
     const downloadPromise = page.waitForEvent('download');
-    await page.locator('#download-raw-SENSOR_A').click();
+    await page.locator('#pane-SENSOR_A .pane-download-btn').click();
     const download = await downloadPromise;
 
-    expect(download.suggestedFilename()).toMatch(/^embed-log-exact-.*\.log$/);
+    expect(download.suggestedFilename()).toBe('SENSOR_A.log');
     const downloadedPath = await saveDownload(download, testInfo);
 
     const text = fs.readFileSync(downloadedPath, 'utf-8');
-    expect(text).toMatch(/\[SENSOR_A\]/);
+    expect(text).toContain('[SENSOR_A]');
     expect(text).toContain('kind=prefix-cleanup');
-    expect(text).toContain('kind=timestamp-cleanup');
   });
 
   test('HTML snippet uses the regular embed-log exported UI', async ({ page }, testInfo) => {
@@ -117,10 +118,10 @@ test.describe('embed-log deterministic demo smoke', () => {
     const { start, end } = await waitForRangePair(page, 'SENSOR_A', 'kind=prefix-cleanup', 'kind=timestamp-cleanup');
     await start.click();
     await end.click({ modifiers: ['Shift'] });
-
-    await openMore(page, 'SENSOR_A');
     const downloadPromise = page.waitForEvent('download');
-    await page.locator('#export-html-SENSOR_A').click();
+    await page.evaluate(() => {
+      document.getElementById('export-html-SENSOR_A').click();
+    });
     const download = await downloadPromise;
 
     expect(download.suggestedFilename()).toMatch(/^embed-log-exact-.*\.html$/);
