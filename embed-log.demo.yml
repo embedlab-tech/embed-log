@@ -8,6 +8,7 @@ server:
   default_light_theme: whitesand
   default_dark_theme: one-dark
   verbose: false
+  timestamp_mode: relative
 
 logs:
   dir: logs/
@@ -31,9 +32,19 @@ sources:
     port: 6002
     inject_port: 5003
 
+  - name: SENSOR_CBOR
+    label: CBOR
+    type: udp
+    port: 6003
+    parser:
+      type: cbor-datagram
+
 tabs:
   - label: DevA
     panes: [SENSOR_A, SENSOR_B]
 
   - label: DevB
     panes: [SENSOR_C]
+
+  - label: cbor-tab
+    panes: [SENSOR_CBOR]

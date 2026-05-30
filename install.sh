@@ -305,6 +305,27 @@ if [ -n "$INSTALL_TMPDIR" ] && [ -d "$INSTALL_TMPDIR" ]; then
   rm -rf "$INSTALL_TMPDIR"
 fi
 
+# ── Optional: install JetBrains Mono font for the best UI appearance ──
+case "$(uname -s)" in
+    Darwin)
+        if have_cmd brew && ! ls ~/Library/Fonts/JetBrains* /Library/Fonts/JetBrains* >/dev/null 2>&1; then
+            print_info "Installing JetBrains Mono font (optional)..."
+            brew tap homebrew/cask-fonts 2>/dev/null || true
+            if brew install --cask font-jetbrains-mono 2>/dev/null; then
+                print_ok "JetBrains Mono font installed."
+            else
+                print_warn "JetBrains Mono not installed (cask-fonts tap may be unavailable)."
+            fi
+        fi
+        ;;
+    Linux)
+        if ! fc-list 2>/dev/null | grep -qi "JetBrains Mono"; then
+            print_info "JetBrains Mono font not found."
+            echo "  For the best UI appearance, download from: https://www.jetbrains.com/lp/mono/"
+        fi
+        ;;
+esac
+
 # ─────────────────────────────────────────────────────────────────
 # Done
 # ─────────────────────────────────────────────────────────────────

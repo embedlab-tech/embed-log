@@ -257,6 +257,28 @@ Failed to install embed-log via pipx.
 }
 
 Write-OK "embed-log installed!"
+
+# ── Optional: install JetBrains Mono font ──
+function Test-FontInstalled {
+    param([string]$FontName)
+    $fontKey = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts'
+    $fonts = Get-ItemProperty -Path $fontKey -ErrorAction SilentlyContinue
+    return ($fonts.PSObject.Properties | Where-Object { $_.Name -match $FontName -or $_.Value -match $FontName }).Count -gt 0
+}
+if (-not (Test-FontInstalled 'JetBrains Mono')) {
+    if (Have-Cmd 'choco') {
+        Write-Info "Installing JetBrains Mono font (optional)..."
+        choco install jetbrainsmono -y 2>&1 | Out-Null
+        if ($?) {
+            Write-OK "JetBrains Mono font installed."
+        } else {
+            Write-Warn "JetBrains Mono not installed (chocolatey install failed)."
+        }
+    } else {
+        Write-Warn "JetBrains Mono font not found."
+        Write-Host "  For the best UI appearance, download from: https://www.jetbrains.com/lp/mono/"
+    }
+}
 Write-Host ""
 Write-Host "  Run from any terminal:"
 Write-Host ""

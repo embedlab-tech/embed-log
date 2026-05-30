@@ -15,11 +15,48 @@ from typing import Callable, Optional
 import yaml
 from serial.tools import list_ports
 
-from .app import DEFAULT_WS_UI, parse_source, run_app
+from .app import DEFAULT_WS_UI, build_source, parse_source, run_app
 from .file_tail_udp import parse_udp_target, run_tail_file
 from .config import ConfigError, load_config
 from .parse import run_parse
 from .sources import LogSource
+def _display_source_label(source_kind: str, ref_type: str, ref: str, local_path: str) -> str:
+    if source_kind == "local":
+        return f"local:{local_path or '?'}"
+    if source_kind == "unknown":
+        return "unknown"
+    return f"{ref_type}:{ref}"
+
+
+def _display_source_status(source_kind: str, ref_type: str, ref: str, local_path: str) -> str:
+    if source_kind == "local":
+        return f"local {local_path or '?'}"
+    if source_kind == "unknown":
+        return "unknown"
+    return f"{ref_type} {ref}"
+
+
+def _load_install_identity() -> tuple[str, str, str, str, str, str]:
+    try:
+        from ._version import __version__, __commit__
+    except ImportError:
+        __version__, __commit__ = "1.0.1", "unknown"
+    try:
+        from ._install_source import (
+            __local_path__ as local_path,
+            __ref__ as ref,
+            __ref_type__ as ref_type,
+            __source_kind__ as source_kind,
+        )
+    except ImportError:
+        source_kind, ref_type, ref, local_path = "unknown", "branch", "main", ""
+    return __version__, __commit__, source_kind, ref_type, ref, local_path
+
+
+def _display_version_line() -> str:
+    version, commit, source_kind, ref_type, ref, local_path = _load_install_identity()
+    source_label = _display_source_label(source_kind, ref_type, ref, local_path)
+    return f"embed-log {version} ({source_label}, {commit})"
 
 
 def _default_init_yaml() -> str:
@@ -32,6 +69,10 @@ server:
   # ws_ui: /absolute/path/to/index.html
   app_name: embed-log
   open_browser: false
+  # absolute | relative
+  # absolute: local wall-clock date/time
+  # relative: elapsed time since the first log line (T+00:00:00.000)
+  timestamp_mode: absolute
   default_light_theme: whitesand
   default_dark_theme: one-dark
   # quiet | events | full
@@ -331,6 +372,7 @@ def _run_create_config(
             "ws_port": 8080,
             "app_name": app_name,
             "open_browser": open_browser,
+            "timestamp_mode": "absolute",
             "verbosity": "quiet",
         },
         "logs": {"dir": logs_dir},
@@ -396,12 +438,16 @@ def _run_sessions(argv: list[str]) -> int:
             "Inspect and manage recorded sessions.\n"
             "\n"
             "Common workflows:\n"
-            "  sessions list                       list all sessions\n"
+            "  sessions list                       list all sessions (markers shown in MRK col)\n"
             "  sessions info <session-id>           session details\n"
             "  sessions export <session-id>         export HTML for one session\n"
             "  sessions export --missing            export HTML for all sessions without it\n"
+            "  sessions open <session-id>           open session HTML\n"
+            "  sessions open <session-id> marker N  open and jump to marker N\n"
+            "  sessions marker list <session-id>    list markers for a session\n"
+            "  sessions marker show <session-id> N  show marker N details\n"
             "  sessions snippet list <session-id>   list saved selection snippets\n"
-            "  sessions snippet show <session-id>   show the most recent snippet \n"
+            "  sessions snippet show <session-id>   show the most recent snippet\n"
             "  sessions delete --all                delete all sessions\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -481,11 +527,17 @@ def _run_sessions(argv: list[str]) -> int:
         dest="panes",
         help="include only this pane (repeatable, default: all)",
     )
+    p_export.add_argument(
+        "--first-log-at",
+        default=None,
+        help="override the absolute ISO timestamp of the first log line when rebuilding HTML",
+    )
 
     p_open = sub.add_parser(
         "open", parents=[shared], help="open session HTML in the default browser"
     )
     p_open.add_argument("session_id")
+    p_open.add_argument("open_args", nargs="*", help="optional: specify marker N to jump to a marker (e.g. marker 2)")
 
     # ── delete ──
     p_delete = sub.add_parser(
@@ -516,6 +568,33 @@ def _run_sessions(argv: list[str]) -> int:
     p_delete.add_argument("--all", action="store_true", help="delete all sessions")
     p_delete.add_argument(
         "--yes", "-y", action="store_true", help="skip confirmation prompt"
+    )
+
+    # ── marker ──
+    p_marker = sub.add_parser(
+        "marker",
+        parents=[shared],
+        help="list/show session markers",
+        epilog=(
+            "Examples:\n"
+            "  sessions marker list <session-id>\n"
+            "  sessions marker show <session-id> 2\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_marker_sub = p_marker.add_subparsers(dest="marker_cmd")
+
+    p_marker_list = p_marker_sub.add_parser(
+        "list", parents=[shared], help="list all markers for a session"
+    )
+    p_marker_list.add_argument("session_id")
+
+    p_marker_show = p_marker_sub.add_parser(
+        "show", parents=[shared], help="show a specific marker"
+    )
+    p_marker_show.add_argument("session_id")
+    p_marker_show.add_argument(
+        "marker_index", type=int, help="marker index (1-based, from list)"
     )
 
     # ── snippet ──
@@ -591,6 +670,8 @@ def _run_sessions(argv: list[str]) -> int:
         return _run_sessions_delete(log_dir, args)
     if args.command == "snippet":
         return _run_sessions_snippet(log_dir, args)
+    if args.command == "marker":
+        return _run_sessions_marker(log_dir, args)
     return 1
 
 
@@ -757,6 +838,16 @@ def _session_stats(session_dir: Path, manifest: dict | None) -> dict:
         except ValueError:
             pass
 
+    # Marker count
+    markers_path = session_dir / "markers.json"
+    marker_count = 0
+    if markers_path.is_file():
+        try:
+            marker_data = json.loads(markers_path.read_text(encoding="utf-8"))
+            marker_count = len(marker_data.get("markers", []))
+        except (json.JSONDecodeError, OSError):
+            pass
+
     return {
         "alias": _short_alias(sid),
         "lines": lines,
@@ -764,6 +855,7 @@ def _session_stats(session_dir: Path, manifest: dict | None) -> dict:
         "time_start": time_start or "",
         "time_end": time_end or "",
         "duration_secs": duration_secs,
+        "markers": marker_count,
     }
 
 
@@ -786,6 +878,7 @@ def _iter_sessions(log_dir: Path) -> list[dict]:
         manifest["_time_start"] = stats["time_start"]
         manifest["_time_end"] = stats["time_end"]
         manifest["_duration_secs"] = stats["duration_secs"]
+        manifest["markers"] = stats["markers"]
         sessions.append(manifest)
     return sessions
 
@@ -797,7 +890,8 @@ def _format_session_row(m: dict) -> str:
     lines = m.get("_lines", 0)
     size_kb = m.get("_size_kb", 0)
     html = "yes" if m.get("session_html") else "-"
-    return f"{alias:<6s}  {sid:<40s}  {app:<16s}  {lines:<6d}  {size_kb:<4d}KB  {html}"
+    markers = m.get("markers", 0)
+    return f"{alias:<6s}  {sid:<40s}  {app:<16s}  {lines:>6d}  {size_kb:>4d}KB  {markers:>3d}m  {html}"
 
 
 def _run_sessions_list(log_dir: Path, args: argparse.Namespace) -> int:
@@ -816,9 +910,9 @@ def _run_sessions_list(log_dir: Path, args: argparse.Namespace) -> int:
         return 0
 
     print(
-        f"{'ALIAS':<6s}  {'ID':<40s}  {'APP':<16s}  {'LINES':<6s}  {'SIZE':<6s}  {'HTML'}"
+        f"{'ALIAS':<6s}  {'ID':<40s}  {'APP':<16s}  {'LINES':>6s}  {'SIZE':>6s}  {'MRK':>4s}  {'HTML':>6s}"
     )
-    print("-" * 90)
+    print("-" * 100)
     for m in sessions:
         print(_format_session_row(m))
     return 0
@@ -944,6 +1038,7 @@ def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
                 missing=False,
                 json=args.json,
                 log_dir=str(log_dir),
+                first_log_at=args.first_log_at,
             )
             rc = _run_sessions_export(log_dir, sub_args)
             if rc == 0:
@@ -1161,11 +1256,21 @@ def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
     }
     output = Path(args.output) if args.output else sdir / "session.html"
 
+    first_log_at = args.first_log_at if args.first_log_at is not None else manifest.get("first_log_at")
+    timestamp_mode = str(manifest.get("timestamp_mode") or "absolute")
+    if timestamp_mode == "relative" and not first_log_at:
+        print(
+            "warning: relative session has no first_log_at metadata; rebuilt HTML will stay relative-only until you re-export with --first-log-at",
+            file=sys.stderr,
+        )
+
     exporter = SessionExporter(
         session_html_path=output,
         source_files=source_files,
         tabs=tabs,
         source_labels=source_labels,
+        timestamp_mode=timestamp_mode,
+        first_log_at=first_log_at,
     )
     ok = exporter.export_html("sessions_export")
     if not ok:
@@ -1178,6 +1283,8 @@ def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
     manifest["session_html"] = str(output)
     manifest["html_status"] = "ready"
     manifest["html_updated_at"] = _dt2.now().astimezone().isoformat(timespec="seconds")
+    if first_log_at is not None:
+        manifest["first_log_at"] = first_log_at
     (sdir / "manifest.json").write_text(
         json.dumps(manifest, indent=2), encoding="utf-8"
     )
@@ -1198,11 +1305,93 @@ def _run_sessions_open(log_dir: Path, args: argparse.Namespace) -> int:
         print(f"Generate it with: sessions export {args.session_id}", file=sys.stderr)
         return 1
 
-    webbrowser.open(html_path.resolve().as_uri())
-    print(f"Opened: {html_path}")
+    # Parse optional marker spec: marker N
+    fragment = ""
+    marker_idx = None
+    if hasattr(args, "open_args") and args.open_args:
+        if len(args.open_args) >= 2 and args.open_args[0] == "marker":
+            try:
+                marker_idx = int(args.open_args[1])
+                fragment = f"#marker-{marker_idx}"
+            except ValueError:
+                print(f"Invalid marker index: {args.open_args[1]}", file=sys.stderr)
+                return 1
+        else:
+            print(f"Unknown open argument: {' '.join(args.open_args)}", file=sys.stderr)
+            return 1
+
+    uri = html_path.resolve().as_uri() + fragment
+    webbrowser.open(uri)
+    label = f"  (jumping to marker {marker_idx})" if fragment else ""
+    print(f"Opened: {html_path}{label}")
     return 0
 
 
+
+def _run_sessions_marker(log_dir: Path, args: argparse.Namespace) -> int:
+    if not hasattr(args, "marker_cmd") or not args.marker_cmd:
+        print("error: specify a marker command: list or show", file=sys.stderr)
+        return 1
+
+    sdir = _read_session_dir(log_dir, args.session_id)
+    if not sdir:
+        print(f"Session not found: {args.session_id}", file=sys.stderr)
+        return 1
+
+    markers_path = sdir / "markers.json"
+    if not markers_path.is_file():
+        print(f"No markers for session {args.session_id}")
+        return 0
+
+    try:
+        data = json.loads(markers_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"Error reading markers: {e}", file=sys.stderr)
+        return 1
+
+    markers = data.get("markers", [])
+
+    if args.marker_cmd == "list":
+        if not markers:
+            print(f"No markers for session {args.session_id}")
+            return 0
+        print(f"Session: {data.get('session_id', args.session_id)}")
+        print(f"Markers: {len(markers)}")
+        print()
+        for i, m in enumerate(markers, 1):
+            start = m.get("lineIdx", "?")
+            end = m.get("endIdx", start)
+            desc = m.get("description", "")
+            pane = m.get("paneId", "?")
+            line_range = f"line {start}" if start == end else f"lines {start}-{end}"
+            print(f"  {i}. [{pane}] {line_range}")
+            print(f"     {desc}")
+            ts = m.get("numTs")
+            if ts is not None:
+                print(f"     numTs={ts}")
+            print()
+        return 0
+
+    if args.marker_cmd == "show":
+        idx = args.marker_index
+        if idx < 1 or idx > len(markers):
+            print(f"Marker index {idx} out of range (1-{len(markers)})", file=sys.stderr)
+            return 1
+        m = markers[idx - 1]
+        print(f"Marker {idx}")
+        print(f"  Pane:       {m.get('paneId', '?')}")
+        start = m.get("lineIdx", "?")
+        end = m.get("endIdx", start)
+        print(f"  Lines:      {start}" if start == end else f"  Lines:      {start}-{end}")
+        print(f"  Description: {m.get('description', '')}")
+        ts = m.get("numTs")
+        if ts is not None:
+            print(f"  Timestamp:  {ts}")
+        print(f"  Created:    {m.get('createdAt', '?')}")
+        return 0
+
+    print(f"error: unknown marker command '{args.marker_cmd}'", file=sys.stderr)
+    return 1
 def _run_sessions_snippet(log_dir: Path, args: argparse.Namespace) -> int:
     if not hasattr(args, "snippet_cmd") or not args.snippet_cmd:
         print(
@@ -1606,6 +1795,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="do not open browser (overrides config)",
     )
     p.add_argument(
+        "--timestamp-mode",
+        choices=["absolute", "relative"],
+        default=None,
+        dest="timestamp_mode",
+        help="timestamp display/storage mode (overrides config)",
+    )
+    p.add_argument(
         "--default-light-theme",
         dest="default_light_theme",
         default=None,
@@ -1717,21 +1913,23 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--encoding", default="utf-8", help="file encoding (default: utf-8)")
 
-    # ── doctor ──
+    # ── version ──
     p = sub.add_parser(
-        "doctor",
-        help="diagnose common issues",
-        description="Check environment, dependencies, and config for common issues.",
+        "version",
+        aliases=["doctor"],
+        help="show version and environment information",
+        description="Show version, environment, and config information.",
         epilog=(
             "Examples:\n"
-            "  embed-log doctor\n"
-            "  embed-log doctor --config embed-log.yml\n"
-            "  embed-log doctor --json\n"
+            "  embed-log version\n"
+            "  embed-log version --config embed-log.yml\n"
+            "  embed-log version --json\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--config", "-c", default=None, help="config file to check")
+    p.add_argument("--config", "-c", default=None, help="config file to inspect")
     p.add_argument("--json", action="store_true", help="machine-readable JSON output")
+
 
     # ── ports ──
     p = sub.add_parser(
@@ -1819,6 +2017,11 @@ def _run_run(args: argparse.Namespace) -> int:
         else cfg.get("open_browser", False)
     )
     job_id = args.job_id if args.job_id is not None else cfg.get("job_id", None)
+    timestamp_mode = (
+        args.timestamp_mode
+        if args.timestamp_mode is not None
+        else cfg.get("timestamp_mode", "absolute")
+    )
     default_light_theme = (
         args.default_light_theme
         if args.default_light_theme is not None
@@ -1846,16 +2049,29 @@ def _run_run(args: argparse.Namespace) -> int:
 
     source_names: list[str] = []
     source_objects: dict[str, LogSource] = {}
-    for name, spec in source_specs:
-        if name in source_objects:
-            print(f"duplicate --source name: {name!r}", file=sys.stderr)
-            return 1
-        try:
-            source_objects[name] = parse_source(name, spec, baudrate)
-        except ValueError as exc:
-            print(str(exc), file=sys.stderr)
-            return 1
-        source_names.append(name)
+    if args.sources:
+        for name, spec in source_specs:
+            if name in source_objects:
+                print(f"duplicate --source name: {name!r}", file=sys.stderr)
+                return 1
+            try:
+                source_objects[name] = parse_source(name, spec, baudrate)
+            except ValueError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
+            source_names.append(name)
+    else:
+        for source_config in source_specs:
+            name = source_config["name"]
+            if name in source_objects:
+                print(f"duplicate source name: {name!r}", file=sys.stderr)
+                return 1
+            try:
+                source_objects[name] = build_source(source_config)
+            except ValueError as exc:
+                print(f"source {name!r}: {exc}", file=sys.stderr)
+                return 1
+            source_names.append(name)
 
     inject_ports: dict[str, int] = {}
     for name, port_value in inject_specs:
@@ -1928,20 +2144,20 @@ def _run_run(args: argparse.Namespace) -> int:
         app_name=app_name,
         default_light_theme=default_light_theme,
         default_dark_theme=default_dark_theme,
+        timestamp_mode=timestamp_mode,
         queue_maxsize=queue_maxsize,
     )
 
 
-def _run_doctor(args: argparse.Namespace) -> int:
+def _run_version(args: argparse.Namespace) -> int:
+
     checks: list[dict] = []
     ok = True
 
-    # Version
-    try:
-        from ._version import __version__, __commit__
-    except ImportError:
-        __version__, __commit__ = "1.0.1", "unknown"
-    checks.append(("version", f"embed-log {__version__} ({__commit__})"))
+    version, commit, source_kind, ref_type, ref, local_path = _load_install_identity()
+    checks.append(("version", version))
+    checks.append(("source", _display_source_status(source_kind, ref_type, ref, local_path)))
+    checks.append(("commit", commit))
 
     # Python/runtime
     import sys as _sys
@@ -2015,7 +2231,8 @@ def _run_doctor(args: argparse.Namespace) -> int:
             )
         )
     else:
-        print("embed-log doctor")
+        print("embed-log version")
+
         print("")
         for name, status in checks:
             icon = (
@@ -2323,11 +2540,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         return _run_sessions(argv[1:])
     # ── Version requested ──
     if argv[0] in {"--version", "-V"}:
-        try:
-            from ._version import __version__, __commit__
-        except ImportError:
-            __version__, __commit__ = "1.0.1", "unknown"
-        print(f"embed-log {__version__} ({__commit__})")
+        print(_display_version_line())
         return 0
 
     # ── Help requested ──
@@ -2361,8 +2574,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         return run_parse(argv[1:])  # keep old parse signature
     if args.command == "tail-file":
         return run_tail_file(args)
-    if args.command == "doctor":
-        return _run_doctor(args)
+    if args.command in {"version", "doctor"}:
+        return _run_version(args)
     if args.command == "ports":
         return _run_ports(args)
     if args.command == "update":

@@ -25,7 +25,7 @@ export function renderPaneShell(paneId, label, { showTx = false } = {}) {
         '                <span class="pane-name">' + safeLabel + '</span>',
         '',
         '                <button class="pane-wrap-btn" title="Toggle word wrap in this pane">Wrap</button>',
-        '',
+        '                <button class="pane-download-btn" title="Download raw .log for this pane">Download</button>',
         '            </div>',
         '            <div class="filter-bar">',
         '                <input class="filter-input" data-pane="' + paneId + '" placeholder="Filter (regex)…">',

@@ -61,6 +61,54 @@ test.describe('scope-aware selection actions', () => {
     expect(copied).toMatch(/\[SENSOR_A\]/);
     expect(copied).toMatch(/\[SENSOR_B\]/);
   });
+  test('Copy button count reflects exact and range scopes', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+
+    const { start, end } = await waitForRangePair(page, 'SENSOR_A', 'kind=prefix-cleanup', 'kind=timestamp-cleanup');
+    await start.click();
+    await end.click({ modifiers: ['Shift'] });
+
+    const getDisplayedCount = async () => {
+      const text = await page.locator('#copy-SENSOR_A').textContent();
+      return Number(text.match(/\((\d+)\)/)?.[1] ?? NaN);
+    };
+    const getExpectedCount = async () => page.evaluate(async () => {
+      const { state, PANES } = await import('/state.js');
+      const paneId = 'SENSOR_A';
+      const sel = state.selected[paneId];
+      if (state.selectionScope === 'exact') return sel.size;
+
+      const lines = state.rawLines[paneId] || [];
+      const nums = Array.from(sel)
+        .map(i => lines[i]?.numTs)
+        .filter(n => Number.isFinite(n) && n >= 0);
+      if (!nums.length) return 0;
+
+      const range = { from: Math.min(...nums), to: Math.max(...nums) };
+      const targetPanes = state.selectionScope === 'context-selected'
+        ? PANES.filter(id => state.contextPanes[id])
+        : PANES;
+
+      let count = 0;
+      targetPanes.forEach(id => {
+        (state.rawLines[id] || []).forEach(line => {
+          const n = line?.numTs;
+          if (Number.isFinite(n) && n >= range.from && n <= range.to) count++;
+        });
+      });
+      return count;
+    });
+
+    expect(await getDisplayedCount()).toBe(await getExpectedCount());
+
+    await setScope(page, 'SENSOR_A', 'context');
+    expect(await getDisplayedCount()).toBe(await getExpectedCount());
+
+    await setScope(page, 'SENSOR_A', 'context-selected');
+    await page.locator('#pane-selector-SENSOR_A input[data-pane="SENSOR_C"]').click();
+    expect(await getDisplayedCount()).toBe(await getExpectedCount());
+  });
 
   test('Scope toggle persists across panes', async ({ page }) => {
     await page.goto('/');

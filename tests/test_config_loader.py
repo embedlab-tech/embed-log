@@ -16,6 +16,7 @@ server:
   open_browser: true
   verbosity: events
   queue_size: 32768
+  timestamp_mode: relative
   job_id: CI-42
 logs:
   dir: logs/
@@ -45,6 +46,7 @@ tabs:
         self.assertEqual(cfg["app_name"], "demo")
         self.assertTrue(cfg["open_browser"])
         self.assertEqual(cfg["verbosity"], "events")
+        self.assertEqual(cfg["timestamp_mode"], "relative")
         self.assertEqual(cfg["job_id"], "CI-42")
         self.assertEqual(cfg["queue_size"], 32768)
         self.assertEqual(cfg["log_dir"], "logs/")
@@ -53,12 +55,30 @@ tabs:
         self.assertEqual(len(cfg["forwards"]), 2)
         self.assertEqual(len(cfg["tabs"]), 1)
         self.assertEqual(cfg["source_labels"], {"UART_A": "READER", "UDP_A": "CONTROLLER"})
+        self.assertEqual(cfg["sources"][0]["parser"], {"type": "text"})
+        self.assertEqual(cfg["sources"][1]["parser"], {"type": "text"})
 
     def test_invalid_verbosity_fails(self):
         cfg_text = """
 version: 1
 server:
   verbosity: noisy
+sources:
+  - name: A
+    type: udp
+    port: 6000
+""".strip()
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "cfg.yml"
+            p.write_text(cfg_text, encoding="utf-8")
+            with self.assertRaises(ConfigError):
+                load_config(p)
+
+    def test_invalid_timestamp_mode_fails(self):
+        cfg_text = """
+version: 1
+server:
+  timestamp_mode: monotonic
 sources:
   - name: A
     type: udp
@@ -87,6 +107,90 @@ sources:
             with self.assertRaises(ConfigError):
                 load_config(p)
 
+    def test_explicit_text_parser_is_accepted(self):
+        cfg_text = """
+version: 1
+sources:
+  - name: A
+    type: uart
+    port: /dev/ttyUSB0
+    parser:
+      type: text
+""".strip()
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "cfg.yml"
+            p.write_text(cfg_text, encoding="utf-8")
+            cfg = load_config(p)
+
+        self.assertEqual(cfg["sources"][0]["parser"], {"type": "text"})
+
+    def test_unsupported_parser_type_fails(self):
+        cfg_text = """
+version: 1
+sources:
+  - name: A
+    type: uart
+    port: /dev/ttyUSB0
+    parser:
+      type: command
+""".strip()
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "cfg.yml"
+            p.write_text(cfg_text, encoding="utf-8")
+            with self.assertRaises(ConfigError):
+                load_config(p)
+
+    def test_cbor_datagram_parser_accepted_on_udp(self):
+        cfg_text = """
+version: 1
+sources:
+  - name: A
+    type: udp
+    port: 6000
+    parser:
+      type: cbor-datagram
+""".strip()
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "cfg.yml"
+            p.write_text(cfg_text, encoding="utf-8")
+            cfg = load_config(p)
+
+        self.assertEqual(cfg["sources"][0]["parser"], {"type": "cbor-datagram"})
+
+    def test_cbor_datagram_parser_rejected_on_uart(self):
+        """cbor-datagram is only valid for UDP (datagram-oriented)."""
+        cfg_text = """
+version: 1
+sources:
+  - name: A
+    type: uart
+    port: /dev/ttyUSB0
+    parser:
+      type: cbor-datagram
+""".strip()
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "cfg.yml"
+            p.write_text(cfg_text, encoding="utf-8")
+            with self.assertRaises(ConfigError):
+                load_config(p)
+
+    def test_parser_extra_field_fails(self):
+        """Extra fields in parser config are rejected."""
+        cfg_text = """
+version: 1
+sources:
+  - name: A
+    type: udp
+    port: 6000
+    parser:
+      type: text
+      format: extended
+""".strip()
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "cfg.yml"
+            p.write_text(cfg_text, encoding="utf-8")
+            with self.assertRaises(ConfigError):
+                load_config(p)
 
 if __name__ == "__main__":
     unittest.main()

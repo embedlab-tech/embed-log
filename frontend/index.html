@@ -3,8 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <title>embed-log</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="viewer.css">
 </head>
 <body>
@@ -21,6 +19,11 @@
     <div class="sep"></div>
     <button id="btn-theme" title="Toggle light / dark theme">🌙</button>
     <div id="ws-status" class="disconnected">WS: disconnected</div>
+    <div id="marker-nav" class="marker-nav" style="display:none">
+        <button id="marker-nav-prev" title="Previous marker">◀</button>
+        <span id="marker-nav-idx">1</span>/<span id="marker-nav-total">0</span>
+        <button id="marker-nav-next" title="Next marker">▶</button>
+    </div>
 </div>
 
 

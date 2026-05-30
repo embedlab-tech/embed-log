@@ -42,7 +42,15 @@ export function parseAnsi(raw) {
     return result;
 }
 
-// "03-25 11:50:00.123"  →  strip non-digits  →  sortable integer
+// "03-25 11:50:00.123" → sortable integer
+// "T+00:00:01.234"     → elapsed milliseconds
 export function tsToNum(ts) {
-    return parseInt(ts.replace(/\D/g, ""), 10) || 0;
+    const rel = /^T\+(\d+):(\d{2}):(\d{2})\.(\d{3})$/.exec(ts || "");
+    if (rel) {
+        return (parseInt(rel[1], 10) * 3_600_000)
+            + (parseInt(rel[2], 10) * 60_000)
+            + (parseInt(rel[3], 10) * 1_000)
+            + parseInt(rel[4], 10);
+    }
+    return parseInt((ts || "").replace(/\D/g, ""), 10) || 0;
 }

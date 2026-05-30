@@ -42,6 +42,18 @@ def _require_choice(value: Any, field: str, choices: set[str]) -> str:
     return s
 
 
+def _load_parser_config(value: Any, field: str) -> dict:
+    if value is None:
+        return {"type": "text"}
+
+    parser = _require_dict(value, field)
+    parser_type = _require_choice(parser.get("type"), f"{field}.type", {"text", "cbor-datagram"})
+    extra_fields = sorted(key for key in parser if key != "type")
+    if extra_fields:
+        raise ConfigError(f"{field}.{extra_fields[0]} unsupported for parser type {parser_type!r}")
+    return {"type": parser_type}
+
+
 def load_config(path: str | Path) -> dict:
     p = Path(path)
     if not p.is_file():
@@ -70,13 +82,11 @@ def load_config(path: str | Path) -> dict:
         logs = {}
     logs = _require_dict(logs, "logs")
 
-    # sources
-    sources_raw = cfg.get("sources", [])
-    sources_raw = _require_list(sources_raw, "sources")
+    sources_raw = _require_list(cfg.get("sources", []), "sources")
 
     source_names: set[str] = set()
     source_labels: dict[str, str] = {}
-    sources: list[tuple[str, str]] = []
+    sources: list[dict] = []
     injects: list[tuple[str, int]] = []
     forwards: list[tuple[str, int]] = []
 
@@ -88,26 +98,32 @@ def load_config(path: str | Path) -> dict:
         source_names.add(name)
 
         src_type = _require_str(src.get("type"), f"sources[{i}].type").lower()
+        parser = _load_parser_config(src.get("parser"), f"sources[{i}].parser")
+        if parser["type"] == "cbor-datagram" and src_type != "udp":
+            raise ConfigError(
+                f"sources[{i}].parser.type 'cbor-datagram' is only valid for UDP sources "
+                f"(got source type {src_type!r})"
+            )
+        source_config = {"name": name, "type": src_type, "parser": parser}
+
         if src_type == "uart":
-            port = _require_str(src.get("port"), f"sources[{i}].port")
+            source_config["port"] = _require_str(src.get("port"), f"sources[{i}].port")
             baud = src.get("baudrate")
-            spec = f"uart:{port}@{_as_int(baud, f'sources[{i}].baudrate')}" if baud is not None else f"uart:{port}"
+            if baud is not None:
+                source_config["baudrate"] = _as_int(baud, f"sources[{i}].baudrate")
         elif src_type == "udp":
-            port = _as_int(src.get("port"), f"sources[{i}].port")
-            spec = f"udp:{port}"
+            source_config["port"] = _as_int(src.get("port"), f"sources[{i}].port")
         else:
             raise ConfigError(f"sources[{i}].type unsupported: {src_type!r} (use 'uart' or 'udp')")
 
-        sources.append((name, spec))
         label = src.get("label")
         source_labels[name] = _require_str(label, f"sources[{i}].label") if label is not None else name
-
+        sources.append(source_config)
 
         inject_port = src.get("inject_port")
         if inject_port is not None:
             injects.append((name, _as_int(inject_port, f"sources[{i}].inject_port")))
 
-        # Optional forwarding ports (read-only stream fanout)
         forward_port = src.get("forward_port")
         if forward_port is not None:
             forwards.append((name, _as_int(forward_port, f"sources[{i}].forward_port")))
@@ -118,9 +134,7 @@ def load_config(path: str | Path) -> dict:
             for j, fp in enumerate(fp_list):
                 forwards.append((name, _as_int(fp, f"sources[{i}].forward_ports[{j}]")))
 
-    # tabs
-    tabs_raw = cfg.get("tabs", [])
-    tabs_raw = _require_list(tabs_raw, "tabs")
+    tabs_raw = _require_list(cfg.get("tabs", []), "tabs")
     tabs: list[list[str]] = []
 
     for i, item in enumerate(tabs_raw):
@@ -145,6 +159,7 @@ def load_config(path: str | Path) -> dict:
         "injects": injects,
         "forwards": forwards,
         "tabs": tabs,
+        "logs": logs,
     }
 
     if "host" in server:
@@ -167,6 +182,8 @@ def load_config(path: str | Path) -> dict:
         out["default_light_theme"] = _require_str(server.get("default_light_theme"), "server.default_light_theme")
     if "default_dark_theme" in server:
         out["default_dark_theme"] = _require_str(server.get("default_dark_theme"), "server.default_dark_theme")
+    if "timestamp_mode" in server:
+        out["timestamp_mode"] = _require_choice(server.get("timestamp_mode"), "server.timestamp_mode", {"absolute", "relative"})
     if "queue_size" in server:
         out["queue_size"] = _as_int(server.get("queue_size"), "server.queue_size")
 

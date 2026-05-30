@@ -131,6 +131,7 @@ button.active { background: var(--selection); border-color: var(--accent); color
 #settings-panel.open { display: flex; }
 #settings-panel .set-sep  { color: var(--border); margin: 0 4px; }
 #settings-panel .set-label { color: var(--ansi-0); margin-right: 2px; }
+#settings-panel .set-note  { color: var(--ansi-0); opacity: 0.85; }
 
 /* ---- Tag colours — entire line is tinted + slightly bold ---- */
 .log-line.line-wrn { color: var(--ansi-3); font-weight: 600; }  /* yellow */
@@ -426,6 +427,10 @@ button.active { background: var(--selection); border-color: var(--accent); color
     padding: 0 10px;
     min-height: 1.55em;
     cursor: pointer;
+    user-select: none;
+}
+body.alt-held .log-line {
+    user-select: text;
 }
 .log-line:hover  { background: var(--selection); }
 .log-line.tx-line { opacity: 0.8; }
@@ -749,3 +754,114 @@ mark.hl {
 .ansi-6 { color: var(--ansi-6); }
 .ansi-7 { color: var(--ansi-7); }
 .ansi-b { font-weight: 700; }
+
+/* ── Marker indicators ── */
+.log-line.has-marker {
+    border-left: 5px solid var(--accent);
+}
+
+.marker-nav {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    margin-left: 8px;
+    color: var(--fg);
+}
+.marker-nav button {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 1px 6px;
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 1.4;
+    border-radius: 2px;
+}
+
+/* ── Marker tooltip ── */
+#marker-tooltip {
+    position: fixed;
+    z-index: 9999;
+    background: var(--panel);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    line-height: 1.4;
+    max-width: 400px;
+    white-space: normal;
+    pointer-events: none;
+    display: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+#marker-tooltip.visible { display: block; }
+#marker-tooltip .mt-label {
+    font-weight: 700;
+    color: var(--accent);
+    margin-right: 4px;
+}
+.marker-nav button:hover {
+    border-color: var(--accent);
+}
+
+/* ── Marker input overlay ── */
+.marker-input-overlay {
+    position: fixed;
+    z-index: 9998;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    max-width: min(500px, calc(100vw - 16px));
+}
+.marker-input-label {
+    font-size: 12px;
+    color: var(--fg);
+    white-space: normal;
+}
+.marker-input {
+    font-family: inherit;
+    font-size: 12px;
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    padding: 2px 6px;
+    width: 280px;
+    outline: none;
+}
+.marker-input:focus {
+    border-color: var(--accent);
+}
+.marker-input-save {
+    font-family: inherit;
+    font-size: 11px;
+    background: var(--accent);
+    color: var(--bg);
+    border: none;
+    border-radius: 2px;
+    padding: 2px 8px;
+    cursor: pointer;
+}
+.marker-input-save:hover {
+    opacity: 0.85;
+}
+.marker-input-cancel {
+    font-family: inherit;
+    font-size: 13px;
+    background: transparent;
+    color: var(--fg);
+    border: none;
+    cursor: pointer;
+    padding: 0 2px;
+    line-height: 1;
+}
+.marker-input-cancel:hover {
+    color: var(--accent);
+}

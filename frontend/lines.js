@@ -1,8 +1,8 @@
-import { state, TABS, PANES } from './state.js';
-
-// Live runtime keeps every received line in the DOM so the browser view
-// matches the full in-memory/exported log history.
-import { parseAnsi, tsToNum } from './ansi.js';
+import {
+    state, TABS, PANES, buildTimestampInfo, applyTimestampModeToLine,
+    lineHasTimestampMode,
+} from './state.js';
+import { parseAnsi } from './ansi.js';
 
 // ---------------------------------------------------------------------------
 // Line rendering
@@ -46,33 +46,63 @@ export function matchesFilter(line, rx) {
     return rx.test(plain);
 }
 
-export function appendLine(paneId, ts, rawText, isTx) {
-    const html  = parseAnsi(rawText);
-    const numTs = tsToNum(ts);
-    const line  = { ts, numTs, html, rawText, isTx };
-    state.rawLines[paneId].push(line);
+export function appendLine(paneId, ts, rawText, isTx, meta = null) {
+    appendLineBatch([{ paneId, ts, rawText, isTx, meta }]);
+}
 
-    const logEl = document.getElementById("log-" + paneId);
-    const idx   = state.rawLines[paneId].length - 1;
-    const div   = document.createElement("div");
-    div.dataset.ts  = ts;
-    div.dataset.idx = idx;
-    div.className   = _lineClass(line, idx, paneId);
+export function appendLineBatch(entries) {
+    const fragments = new Map();
+    const touched = new Set();
 
-    const rx = state.filters[paneId];
-    if (!matchesFilter(line, rx)) {
-        div.style.display = "none";
-    } else {
-        div.innerHTML = buildLineHtml(line, state.showTs, rx);
+    entries.forEach(({ paneId, ts, rawText, isTx, meta = null }) => {
+        if (!state.rawLines[paneId]) return;
+
+        const html = parseAnsi(rawText);
+        const line = {
+            ...buildTimestampInfo(ts, typeof meta === "object" && meta !== null
+                ? meta
+                : (Number.isFinite(meta) ? { numTs: meta } : {})),
+            html,
+            rawText,
+            isTx,
+        };
+        state.rawLines[paneId].push(line);
+
+        const logEl = document.getElementById("log-" + paneId);
+        if (!logEl) return;
+
+        const idx = state.rawLines[paneId].length - 1;
+        const div = document.createElement("div");
+        div.dataset.ts = line.ts;
+        div.dataset.idx = idx;
+        div.className = _lineClass(line, idx, paneId);
+
+        const rx = state.filters[paneId];
+        if (!matchesFilter(line, rx)) {
+            div.style.display = "none";
+        } else {
+            div.innerHTML = buildLineHtml(line, state.showTs, rx);
+        }
+
+        if (!fragments.has(paneId)) fragments.set(paneId, document.createDocumentFragment());
+        fragments.get(paneId).appendChild(div);
+        touched.add(paneId);
+    });
+
+    touched.forEach(paneId => {
+        const logEl = document.getElementById("log-" + paneId);
+        const fragment = fragments.get(paneId);
+        if (!logEl || !fragment) return;
+        logEl.appendChild(fragment);
+        if (state.atBottom[paneId]) logEl.scrollTop = logEl.scrollHeight;
+        updateJumpBtn(paneId);
+    });
+
+    if (touched.size > 0) {
+        window.__embedLogSchedulePersist?.();
+        window.__embedLogUpdateTimestampModeUi?.();
+        window.applyMarkers?.();
     }
-
-
-    logEl.appendChild(div);
-
-
-    if (state.atBottom[paneId]) logEl.scrollTop = logEl.scrollHeight;
-    updateJumpBtn(paneId);
-    window.__embedLogSchedulePersist?.();
 }
 
 export function rerenderPane(paneId) {
@@ -94,6 +124,36 @@ export function rerenderPane(paneId) {
         }
     }
     if (state.atBottom[paneId]) logEl.scrollTop = logEl.scrollHeight;
+}
+export function setTimestampMode(mode) {
+    const nextMode = mode === "relative" ? "relative" : "absolute";
+    if (state.timestampMode === nextMode) return;
+
+    state.timestampMode = nextMode;
+    state.syncTs = null;
+    state.syncTabSwitch = false;
+
+    PANES.forEach(paneId => {
+        const lines = state.rawLines[paneId] || [];
+        lines.forEach(applyTimestampModeToLine);
+        rerenderPane(paneId);
+
+        highlightLine(paneId, null);
+    });
+    window.__embedLogSchedulePersist?.();
+    window.applyMarkers?.();
+
+    window.__embedLogUpdateTimestampModeUi?.();
+}
+
+export function canDisplayTimestampMode(mode) {
+    for (const paneId of PANES) {
+        const lines = state.rawLines[paneId] || [];
+        for (const line of lines) {
+            if (lineHasTimestampMode(line, mode)) return true;
+        }
+    }
+    return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -152,6 +212,26 @@ export function _linesSetupPane(id) {
             document.getElementById("log-" + id)?.classList.toggle("wrap", state.wrap[id]);
         });
     }
+
+    // Per-pane raw download
+    const dlBtn = document.querySelector(`#pane-${id} .pane-download-btn`);
+    if (dlBtn) {
+        dlBtn.addEventListener("click", () => {
+            const lines = state.rawLines[id] || [];
+            if (!lines.length) return;
+            const text = lines.map(line => {
+                const clean = (line.rawText ?? "").replace(/\x1b(?:\[[0-9;]*[A-Za-z]|\][^\x07]*\x07|[^[\]])/g, "").trim();
+                return `[${line.ts}] ${clean}`;
+            }).join("\n");
+            const blob = new Blob([text + "\n"], { type: "text/plain" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `${id}.log`;
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+    }
 }
 PANES.forEach(_linesSetupPane);
 
@@ -171,6 +251,7 @@ export function clearPane(paneId) {
     // Close any open More dropdown for this pane
     document.getElementById("more-dropdown-" + paneId)?.classList.remove("open");
     window.__embedLogSchedulePersist?.();
+    window.__embedLogUpdateTimestampModeUi?.();
 }
 
 document.getElementById("btn-clear")?.addEventListener("click", () => {

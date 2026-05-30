@@ -191,6 +191,44 @@ _kill_pid_and_wait() {
   kill -9 "$pid" 2>/dev/null || true
 }
 
+_is_demo_traffic_cmd() {
+  local cmd="$1"
+  case "$cmd" in
+    *"utils/udp_log_simulator.py"*)
+      [[ "$cmd" == *"127.0.0.1:6000"* ]] || \
+      [[ "$cmd" == *"127.0.0.1:6001"* ]] || \
+      [[ "$cmd" == *"127.0.0.1:6002"* ]]
+      ;;
+    *"utils/deterministic_demo_traffic.py"*)
+      [[ "$cmd" == *"127.0.0.1:6000"* ]] || \
+      [[ "$cmd" == *"127.0.0.1:6001"* ]] || \
+      [[ "$cmd" == *"127.0.0.1:6002"* ]] || \
+      [[ "$cmd" == *"127.0.0.1:6003"* ]]
+      ;;
+    *"utils/inject_log_demo.py"*)
+      [[ "$cmd" == *" 5001"* ]] || \
+      [[ "$cmd" == *" 5002"* ]] || \
+      [[ "$cmd" == *" 5003"* ]]
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+_reap_stale_demo_traffic() {
+  local pid cmd
+  while IFS= read -r line; do
+    pid="${line%% *}"
+    cmd="${line#* }"
+    [ -n "$pid" ] || continue
+    if _is_demo_traffic_cmd "$cmd"; then
+      echo "Releasing stale demo traffic process (pid $pid)..."
+      _kill_pid_and_wait "$pid"
+    fi
+  done < <(ps ax -o pid=,command= 2>/dev/null | awk '{$1=$1; print}')
+}
+
 _free_port_if_stale() {
   local proto="$1"   # tcp|udp
   local port="$2"
@@ -224,10 +262,11 @@ _free_port_if_stale() {
 }
 
 echo "Checking demo ports..."
+_reap_stale_demo_traffic
 for p in 5001 5002 5003; do
   _free_port_if_stale tcp "$p" || exit 1
 done
-for p in 6000 6001 6002; do
+for p in 6000 6001 6002 6003; do
   _free_port_if_stale udp "$p" || exit 1
 done
 
@@ -314,6 +353,12 @@ case "$DEMO_PROFILE" in
       --interval "$DEMO_INJECT_INTERVAL" \
       --duration 0 \
       --source demo &
+    echo "Starting CBOR demo traffic (tick 500ms)..."
+    "$PYTHON" utils/deterministic_demo_traffic.py \
+      --cbor \
+      --udp SENSOR_CBOR=127.0.0.1:6003 \
+      --tick-ms 500 \
+      --cycles 0 &
     ;;
   test)
     [ -z "$INTERVAL_MIN_ARG" ] || {
@@ -343,6 +388,12 @@ case "$DEMO_PROFILE" in
       --udp SENSOR_A=127.0.0.1:6000 \
       --udp SENSOR_B=127.0.0.1:6001 \
       --udp SENSOR_C=127.0.0.1:6002 \
+      --tick-ms "$DEMO_TEST_TICK_MS" \
+      --cycles 0 &
+    echo "Starting CBOR deterministic demo traffic (tick ${DEMO_TEST_TICK_MS}ms)..."
+    "$PYTHON" utils/deterministic_demo_traffic.py \
+      --cbor \
+      --udp SENSOR_CBOR=127.0.0.1:6003 \
       --tick-ms "$DEMO_TEST_TICK_MS" \
       --cycles 0 &
     ;;

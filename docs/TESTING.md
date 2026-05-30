@@ -70,6 +70,7 @@ Common helper patterns:
 - selection and clipboard flows
 - snippet export and replay
 - full export replay
+- timestamp mode toggling in both live and static replay, including missing-origin hinting
 - session HTML generation/opening
 - session rotation and stale-line clearing
 - cache/persistence-sensitive UI behavior

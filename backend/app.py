@@ -5,12 +5,13 @@ from pathlib import Path
 from typing import Optional
 
 from .core.naming import slugify
-from .sources import LogSource, UartSource, UdpSource
+from .parsers import create_parser
+from .sources import LogSource, ParsedSource, RawUartSource, RawUdpSource, UartSource, UdpSource
 
 DEFAULT_WS_UI = str((Path(__file__).resolve().parents[1] / "frontend" / "index.html").resolve())
 
 
-def parse_source(name: str, spec: str, default_baudrate: int) -> LogSource:
+def parse_source_config(name: str, spec: str, default_baudrate: int) -> dict:
     if ":" not in spec:
         raise ValueError(
             f"--source {name!r}: invalid spec {spec!r}. Use uart:/dev/path[@baud] or udp:PORT"
@@ -24,16 +25,33 @@ def parse_source(name: str, spec: str, default_baudrate: int) -> LogSource:
         if "@" in arg:
             path, baud = arg.rsplit("@", 1)
             try:
-                return UartSource(path, int(baud))
+                return {
+                    "name": name,
+                    "type": "uart",
+                    "port": path,
+                    "baudrate": int(baud),
+                    "parser": {"type": "text"},
+                }
             except ValueError:
                 raise ValueError(
                     f"--source {name!r}: uart baudrate must be integer, got {baud!r}"
                 )
-        return UartSource(arg, default_baudrate)
+        return {
+            "name": name,
+            "type": "uart",
+            "port": arg,
+            "baudrate": default_baudrate,
+            "parser": {"type": "text"},
+        }
 
     if kind == "udp":
         try:
-            return UdpSource(int(arg))
+            return {
+                "name": name,
+                "type": "udp",
+                "port": int(arg),
+                "parser": {"type": "text"},
+            }
         except ValueError:
             raise ValueError(
                 f"--source {name!r}: udp port must be an integer, got {arg!r}"
@@ -42,6 +60,29 @@ def parse_source(name: str, spec: str, default_baudrate: int) -> LogSource:
     raise ValueError(
         f"--source {name!r}: invalid spec {spec!r}. Use uart:/dev/path[@baud] or udp:PORT"
     )
+
+
+def build_source(source_config: dict) -> LogSource:
+    source_type = source_config["type"]
+    parser_config = source_config.get("parser")
+
+    if source_type == "uart" and parser_config == {"type": "text"}:
+        return UartSource(source_config["port"], source_config.get("baudrate", 115200))
+    if source_type == "udp" and parser_config == {"type": "text"}:
+        return UdpSource(source_config["port"])
+
+    if source_type == "uart":
+        raw_source = RawUartSource(source_config["port"], source_config.get("baudrate", 115200))
+    elif source_type == "udp":
+        raw_source = RawUdpSource(source_config["port"])
+    else:
+        raise ValueError(f"source {source_config.get('name', '?')!r}: unsupported type {source_type!r}")
+
+    return ParsedSource(raw_source, create_parser(parser_config))
+
+
+def parse_source(name: str, spec: str, default_baudrate: int) -> LogSource:
+    return build_source(parse_source_config(name, spec, default_baudrate))
 
 
 def run_app(
@@ -64,6 +105,7 @@ def run_app(
     default_light_theme: Optional[str],
     default_dark_theme: Optional[str],
     queue_maxsize: int = 20000,
+    timestamp_mode: str = "absolute",
 ) -> int:
     tab_label_by_source: dict[str, str] = {}
     for tab in tabs:
@@ -118,5 +160,6 @@ def run_app(
         },
         source_labels=source_labels,
         queue_maxsize=queue_maxsize,
+        timestamp_mode=timestamp_mode,
     ).run_forever()
     return 0

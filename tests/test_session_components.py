@@ -24,18 +24,24 @@ class SessionManagerTests(unittest.TestCase):
                 config_path="embed-log.yml",
                 job_id="CI-1",
                 app_name="demo",
+                timestamp_mode="relative",
+                first_log_at="2026-01-01T00:00:01.234+00:00",
             )
 
             info = mgr.build_session_info()
             self.assertEqual(info["id"], "2026-01-01_00-00-00")
             self.assertEqual(info["job_id"], "CI-1")
             self.assertEqual(info["app_name"], "demo")
+            self.assertEqual(info["timestamp_mode"], "relative")
+            self.assertEqual(info["first_log_at"], "2026-01-01T00:00:01.234+00:00")
             self.assertFalse(info["html_ready"])
             self.assertEqual("pending", info["html_status"])
 
             mgr.write_manifest(reason="start", exported_html=False)
             manifest = json.loads(mgr.manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(manifest["session_id"], "2026-01-01_00-00-00")
+            self.assertEqual(manifest["timestamp_mode"], "relative")
+            self.assertEqual(manifest["first_log_at"], "2026-01-01T00:00:01.234+00:00")
             self.assertIsNone(manifest["session_html"])
             self.assertEqual("pending", manifest["html_status"])
 
@@ -59,6 +65,8 @@ class SessionExporterTests(unittest.TestCase):
                 source_files={"A": str(td_path / "A.log")},
                 tabs=[{"label": "Tab", "panes": ["A"]}],
                 source_labels={"A": "READER"},
+                timestamp_mode="relative",
+                first_log_at="2026-01-01T00:00:01.234+00:00",
                 merge_script=merge_script,
                 python_executable="python3",
             )
@@ -72,6 +80,10 @@ class SessionExporterTests(unittest.TestCase):
 
             self.assertTrue(ok)
             args = run_mock.call_args[0][0]
+            self.assertIn("--timestamp-mode", args)
+            self.assertIn("relative", args)
+            self.assertIn("--first-log-at", args)
+            self.assertIn("2026-01-01T00:00:01.234+00:00", args)
             self.assertIn("--tab", args)
             self.assertIn("A=READER", args)
             self.assertIn("--output", args)
@@ -87,6 +99,7 @@ class SessionExporterTests(unittest.TestCase):
                 source_files={"A": str(td_path / "A.log")},
                 tabs=[{"label": "Tab", "panes": ["A"]}],
                 source_labels={"A": "READER"},
+                timestamp_mode="absolute",
                 merge_script=merge_script,
                 python_executable="python3",
             )

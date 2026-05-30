@@ -24,7 +24,9 @@ Main responsibilities:
 - UI-driven session export and clean-session rotation
 - inject-port JSON input and optional forward-port raw output
 - config-driven tab/pane layout shared with frontend
-
+- configurable timestamp mode:
+  - `absolute` wall-clock display/storage
+  - `relative` elapsed-from-first-log display/storage with preserved session origin for conversion
 ## Key files
 
 - `backend/app.py` — composes sources, runtime, tabs, logs
@@ -53,11 +55,10 @@ Main responsibilities:
 - `config` must be sent before log events.
 - `config.pane_labels` maps technical pane ids to the labels the UI should render; if omitted, frontend falls back to the pane ids.
 - `config.tabs` is authoritative for visible tabs/panes.
-- `config.session` contains current session metadata.
+- `config.session` contains current session metadata, including `timestamp_mode` and `first_log_at` when known.
 - `GET /api/session/current`
 - `GET /api/sessions`
 - `GET /sessions/<session_id>/<filename>`
-
 Breaking any of the above requires coordinated frontend and test changes.
 
 ## Things to preserve during backend changes

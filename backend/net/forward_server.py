@@ -25,18 +25,24 @@ class ForwardServer:
         self._on_client_disconnect = on_client_disconnect
 
     def start(self) -> None:
-        threading.Thread(
-            target=self._loop,
-            daemon=True,
-            name=f"{self._name}-fwd-{self._port}",
-        ).start()
-
-    def _loop(self) -> None:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
             srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             srv.bind((self._host, self._port))
             srv.listen(16)
             srv.settimeout(1.0)
+        except OSError:
+            srv.close()
+            raise
+        threading.Thread(
+            target=self._loop,
+            args=(srv,),
+            daemon=True,
+            name=f"{self._name}-fwd-{self._port}",
+        ).start()
+
+    def _loop(self, srv: socket.socket) -> None:
+        with srv:
             while not self._stop.is_set():
                 try:
                     conn, addr = srv.accept()

@@ -9,7 +9,7 @@ import signal
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, TextIO
+from typing import Callable, Optional, TextIO
 
 import serial
 
@@ -109,6 +109,75 @@ class TrackedQueue:
 
 def _slug(value: str) -> str:
     return slugify(value)
+TIMESTAMP_MODE_ABSOLUTE = "absolute"
+TIMESTAMP_MODE_RELATIVE = "relative"
+TIMESTAMP_MODES = {TIMESTAMP_MODE_ABSOLUTE, TIMESTAMP_MODE_RELATIVE}
+
+
+def _format_relative_millis(total_ms: int) -> str:
+    if total_ms < 0:
+        total_ms = 0
+    hours, rem = divmod(total_ms, 3_600_000)
+    minutes, rem = divmod(rem, 60_000)
+    seconds, millis = divmod(rem, 1_000)
+    return f"T+{hours:02d}:{minutes:02d}:{seconds:02d}.{millis:03d}"
+
+
+class SessionClock:
+    def __init__(self, mode: str, *, on_origin_set: Optional[Callable[[str], None]] = None):
+        self.mode = mode if mode in TIMESTAMP_MODES else TIMESTAMP_MODE_ABSOLUTE
+        self._on_origin_set = on_origin_set
+        self._lock = threading.Lock()
+        self._origin: Optional[datetime] = None
+
+    def reset(self) -> None:
+        with self._lock:
+            self._origin = None
+
+    def first_log_at(self) -> Optional[str]:
+        with self._lock:
+            if self._origin is None:
+                return None
+            return self._origin.isoformat(timespec="milliseconds")
+
+    def _ensure_origin(self, timestamp: datetime) -> datetime:
+        callback = None
+        origin_iso = None
+        with self._lock:
+            if self._origin is None:
+                self._origin = timestamp
+                callback = self._on_origin_set
+                origin_iso = timestamp.isoformat(timespec="milliseconds")
+            origin = self._origin
+        if callback is not None and origin_iso is not None:
+            callback(origin_iso)
+        return origin
+    def observe(self, timestamp: datetime) -> None:
+        self._ensure_origin(timestamp)
+
+
+    def relative_millis(self, timestamp: datetime) -> int:
+        origin = self._ensure_origin(timestamp)
+        delta_ms = int((timestamp - origin).total_seconds() * 1000)
+        return delta_ms if delta_ms >= 0 else 0
+
+    def file_timestamp(self, timestamp: datetime) -> str:
+        self.observe(timestamp)
+        if self.mode == TIMESTAMP_MODE_RELATIVE:
+            return _format_relative_millis(self.relative_millis(timestamp))
+        return timestamp.isoformat(timespec="milliseconds")
+
+    def display_timestamp(self, timestamp: datetime) -> str:
+        self.observe(timestamp)
+        if self.mode == TIMESTAMP_MODE_RELATIVE:
+            return _format_relative_millis(self.relative_millis(timestamp))
+        return timestamp.strftime("%m-%d %H:%M:%S.%f")[:-3]
+
+    def numeric_timestamp(self, timestamp: datetime) -> int:
+        self.observe(timestamp)
+        if self.mode == TIMESTAMP_MODE_RELATIVE:
+            return self.relative_millis(timestamp)
+        return int(timestamp.timestamp() * 1000)
 
 
 class LogEntry:
@@ -142,6 +211,7 @@ class SourceManager:
         verbose: bool = False,
         broadcaster: Optional[WebSocketBroadcaster] = None,
         queue_maxsize: int = 0,
+        session_clock: Optional[SessionClock] = None,
     ):
         self.name = name
         self.source = source
@@ -151,6 +221,7 @@ class SourceManager:
         self.forward_ports = list(forward_ports or [])
         self.verbose = verbose
         self.broadcaster = broadcaster
+        self.session_clock = session_clock or SessionClock(TIMESTAMP_MODE_ABSOLUTE)
 
         self._queue: TrackedQueue = TrackedQueue(queue_maxsize)
         self._queue_maxsize = queue_maxsize
@@ -164,7 +235,6 @@ class SourceManager:
         self._log_fd: Optional[TextIO] = None
         self._inject_server: Optional[InjectServer] = None
         self._forward_servers: list[ForwardServer] = []
-
     def start(self) -> None:
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
         self._writer_thread = threading.Thread(
@@ -173,7 +243,10 @@ class SourceManager:
             name=f"{self.name}-writer",
         )
         self._writer_thread.start()
-        self.source.start(self._on_source_line, self._stop, self.name)
+        try:
+            self.source.start(self._on_source_line, self._stop, self.name)
+        except OSError as exc:
+            raise RuntimeError(f"[{self.name}] failed to start {type(self.source).__name__}: {exc}") from exc
         if self.inject_port:
             self._inject_server = InjectServer(
                 name=self.name,
@@ -184,7 +257,10 @@ class SourceManager:
                 on_client_disconnect=self._remove_stream_client,
                 on_json_line=self._ingest_json,
             )
-            self._inject_server.start()
+            try:
+                self._inject_server.start()
+            except OSError as exc:
+                raise RuntimeError(f"[{self.name}] failed to bind inject TCP {self.socket_host}:{self.inject_port}: {exc}") from exc
         self._forward_servers = []
         for port in self.forward_ports:
             server = ForwardServer(
@@ -196,7 +272,10 @@ class SourceManager:
                 on_client_disconnect=self._remove_forward_client,
             )
             self._forward_servers.append(server)
-            server.start()
+            try:
+                server.start()
+            except OSError as exc:
+                raise RuntimeError(f"[{self.name}] failed to bind forward TCP {self.socket_host}:{port}: {exc}") from exc
         logging.info(
             "[%s] started  source=%s  inject=%s  forward=%s  log=%s",
             self.name,
@@ -230,7 +309,7 @@ class SourceManager:
         self._queue.put(LogEntry(datetime.now().astimezone(), "SERIAL", message))
 
     def _format(self, entry: LogEntry) -> str:
-        ts = entry.timestamp.isoformat(timespec="milliseconds")
+        ts = self.session_clock.file_timestamp(entry.timestamp)
         is_serial = entry.source == "SERIAL"
         if self.verbose:
             line = f"[{ts}] [{self.name}] [{entry.source}] {entry.message}"
@@ -248,12 +327,12 @@ class SourceManager:
             data = ANSI[entry.color] + entry.message + ANSI["reset"]
         else:
             data = entry.message
-        ts = entry.timestamp.strftime("%m-%d %H:%M:%S.%f")[:-3]
         return {
             "type": "tx" if is_tx else "rx",
             "data": data,
-            "timestamp": ts,
+            "timestamp": self.session_clock.display_timestamp(entry.timestamp),
             "timestamp_iso": entry.timestamp.isoformat(timespec="milliseconds"),
+            "timestamp_num": self.session_clock.numeric_timestamp(entry.timestamp),
             "source_id": self.name,
         }
 
@@ -471,6 +550,7 @@ class LogServer:
         theme_defaults: Optional[dict] = None,
         source_labels: Optional[dict[str, str]] = None,
         queue_maxsize: int = 20000,
+        timestamp_mode: str = TIMESTAMP_MODE_ABSOLUTE,
     ):
         self._tabs = tabs
         self._session_id = session_id
@@ -482,7 +562,10 @@ class LogServer:
         self._theme_defaults = theme_defaults or {}
         self._source_labels = source_labels or {s["name"]: s.get("label", s["name"]) for s in sources}
         self._queue_maxsize = queue_maxsize
+        self._timestamp_mode = timestamp_mode if timestamp_mode in TIMESTAMP_MODES else TIMESTAMP_MODE_ABSOLUTE
         self._rotate_lock = threading.Lock()
+        self._export_lock = threading.Lock()
+        self._session_clock = SessionClock(self._timestamp_mode)
 
         self._source_files = {s["name"]: str(s["log_file"]) for s in sources}
         self._session = SessionManager(
@@ -495,15 +578,26 @@ class LogServer:
             config_path=config_path,
             job_id=self._job_id,
             app_name=self._app_name,
+            timestamp_mode=self._timestamp_mode,
+            first_log_at=self._session_clock.first_log_at(),
         )
+        self._session_info = self._session.build_session_info()
+        existing_markers = self._session.load_markers()
+        if existing_markers:
+            self._session_info["markers"] = existing_markers
+        self._session_clock = SessionClock(
+            self._timestamp_mode,
+            on_origin_set=self._handle_first_log_at,
+        )
+        self._session.set_first_log_at(self._session_clock.first_log_at())
         self._exporter = SessionExporter(
             session_html_path=self._session.html_path,
             source_files=self._source_files,
             tabs=self._tabs,
             source_labels=self._source_labels,
+            timestamp_mode=self._timestamp_mode,
+            first_log_at=self._session.first_log_at,
         )
-        self._session_info = self._session.build_session_info()
-        self._export_lock = threading.Lock()
 
         broadcaster: Optional[WebSocketBroadcaster] = None
         if ws_port:
@@ -518,6 +612,7 @@ class LogServer:
                 on_export_session_html=lambda: self.export_session_html("manual_ui"),
                 on_rotate_session=lambda: self.rotate_session("manual_ui"),
                 on_save_snippet=lambda text, panes, scope, label: self._session.save_snippet(text, panes=panes, scope=scope, label=label),
+                on_save_markers=lambda markers: self._session.save_markers(markers),
                 open_browser=open_browser,
                 app_name=app_name,
                 theme_defaults=self._theme_defaults,
@@ -536,6 +631,7 @@ class LogServer:
                 verbose=verbose,
                 broadcaster=broadcaster,
                 queue_maxsize=self._queue_maxsize,
+                session_clock=self._session_clock,
             )
             for s in sources
         ]
@@ -552,6 +648,23 @@ class LogServer:
             html_error=self._session_info.get("html_error"),
         )
 
+    def _handle_first_log_at(self, first_log_at: str) -> None:
+        self._session.set_first_log_at(first_log_at)
+        self._session_info["first_log_at"] = first_log_at
+        self._exporter.set_first_log_at(first_log_at)
+        self._session.write_manifest(
+            reason="first_log_at",
+            exported_html=self._session_info.get("html_ready", False),
+            html_status=self._session_info.get("html_status", "pending"),
+            html_updated_at=self._session_info.get("html_updated_at"),
+            html_error=self._session_info.get("html_error"),
+        )
+        if self._broadcaster:
+            self._broadcaster.update_session_info({"first_log_at": first_log_at})
+            self._broadcaster.broadcast({
+                "type": "session_info",
+                "session": dict(self._session_info),
+            })
     def _publish_html_state(self) -> None:
         if not self._broadcaster:
             return
@@ -561,6 +674,7 @@ class LogServer:
             "html_updated_at": self._session_info.get("html_updated_at"),
             "html_error": self._session_info.get("html_error"),
             "last_export_reason": self._session_info.get("last_export_reason"),
+            "first_log_at": self._session_info.get("first_log_at"),
         }
         self._broadcaster.update_session_info(updates)
         self._broadcaster.broadcast({
@@ -568,7 +682,6 @@ class LogServer:
             "session_id": self._session_id,
             **updates,
         })
-
     def _build_source_files_for_session(self, session_id: str, session_dir: Path) -> dict[str, str]:
         tab_label_by_source: dict[str, str] = {}
         for tab in self._tabs:
@@ -680,6 +793,7 @@ class LogServer:
             self._started_at = started_at
             self._session_dir = session_dir
             self._source_files = source_files
+            self._session_clock.reset()
             self._session = SessionManager(
                 session_id=self._session_id,
                 session_dir=self._session_dir,
@@ -690,12 +804,16 @@ class LogServer:
                 config_path=self._session.config_path if hasattr(self._session, "config_path") else None,
                 job_id=self._job_id,
                 app_name=self._app_name,
+                timestamp_mode=self._timestamp_mode,
+                first_log_at=self._session_clock.first_log_at(),
             )
             self._exporter = SessionExporter(
                 session_html_path=self._session.html_path,
                 source_files=self._source_files,
                 tabs=self._tabs,
                 source_labels=self._source_labels,
+                timestamp_mode=self._timestamp_mode,
+                first_log_at=self._session.first_log_at,
             )
             self._session_info = self._session.build_session_info()
             self._session.write_manifest(

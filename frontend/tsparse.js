@@ -5,15 +5,17 @@
 //   [YYYY-MM-DDTHH:MM:SS[.frac][Z|±HH:MM]]   server / full ISO in brackets
 //   [MM-DD HH:MM:SS[.frac]]                   short, space-sep, in brackets
 //   [MM-DDTHH:MM:SS[.frac]]                   short ISO (T-sep), in brackets
+//   [T+HH:MM:SS[.frac]]                       relative elapsed time in brackets
 //   YYYY-MM-DDTHH:MM:SS[.frac][Z|±HH:MM]      bare ISO 8601 (no brackets)
-//   YYYY-MM-DD HH:MM:SS[.frac]                 space separator, no brackets
+//   YYYY-MM-DD HH:MM:SS[.frac]                space separator, no brackets
+//   T+HH:MM:SS[.frac]                         bare relative elapsed time
 //
 // Fractional seconds (any length) are truncated to 3 digits (ms).
 // Timezone suffixes are stripped — the local clock time is preserved so that
 // UART logs (the time reference) and UTC-stamped logs synchronise with a
 // constant offset that the user can reason about.
 //
-// Output timestamp format: "MM-DD HH:MM:SS.mmm"
+// Output timestamp format: "MM-DD HH:MM:SS.mmm" or "T+HH:MM:SS.mmm"
 // ---------------------------------------------------------------------------
 
 function _ms3(frac) {
@@ -21,7 +23,7 @@ function _ms3(frac) {
     return (frac + "000").slice(0, 3);
 }
 
-// Returns { ts: "MM-DD HH:MM:SS.mmm", data: <rest of line> } or null.
+// Returns { ts, data: <rest of line> } or null.
 export function parseLogLine(raw) {
     const s = raw.trimStart();
     let m;
@@ -38,6 +40,10 @@ export function parseLogLine(raw) {
     m = /^\[(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:[.,](\d+))?\]\s*(.*)/.exec(s);
     if (m) return { ts: `${m[1]}-${m[2]} ${m[3]}:${m[4]}:${m[5]}.${_ms3(m[6])}`, data: m[7] };
 
+    // [T+HH:MM:SS[.frac]]
+    m = /^\[T\+(\d+):(\d{2}):(\d{2})(?:[.,](\d+))?\]\s*(.*)/.exec(s);
+    if (m) return { ts: `T+${m[1].padStart(2, '0')}:${m[2]}:${m[3]}.${_ms3(m[4])}`, data: m[5] };
+
     // YYYY-MM-DDTHH:MM:SS[.frac][Z|±HH:MM]
     m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:[.,](\d+))?(?:Z|[+-]\d{2}:\d{2})?\s*(.*)/.exec(s);
     if (m) return { ts: `${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}.${_ms3(m[7])}`, data: m[8] };
@@ -45,6 +51,10 @@ export function parseLogLine(raw) {
     // YYYY-MM-DD HH:MM:SS[.frac]
     m = /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})(?:[.,](\d+))?\s*(.*)/.exec(s);
     if (m) return { ts: `${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}.${_ms3(m[7])}`, data: m[8] };
+
+    // T+HH:MM:SS[.frac]
+    m = /^T\+(\d+):(\d{2}):(\d{2})(?:[.,](\d+))?\s*(.*)/.exec(s);
+    if (m) return { ts: `T+${m[1].padStart(2, '0')}:${m[2]}:${m[3]}.${_ms3(m[4])}`, data: m[5] };
 
     return null;
 }

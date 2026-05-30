@@ -26,12 +26,14 @@ It is intentionally simple:
   - raw snippet download,
   - HTML snippet download
 - full snapshot export
-- settings panel
+- settings panel:
+  - theme/font/cache controls
+  - timestamp mode toggle (`absolute` / `relative`) when both views are available
+  - visible hint when imported/offline data lacks the session origin needed for conversion
 - sessions popup
 - clean-session rotation trigger
 - cache-backed layout/state persistence
 - pane swap UI and splitter dragging
-
 ## Key files
 
 - `frontend/state.js` — shared state, `TABS`, `PANES`, active tab, filters, sync state
@@ -50,9 +52,9 @@ It is intentionally simple:
 - Pane ids remain unique technical keys; visible pane names may now come from backend `config.pane_labels`.
 - Live runtime appends every received line into the pane DOM; the on-screen log must match the full live/exported history.
 - Live UI and exported HTML reuse the same general UI model.
+- Timestamp mode switching is a pure view switch when both timestamp representations are available; live/export paths preserve enough metadata to render both offline.
 - Not all panes are visible at once; current demo has multiple tabs.
 - Exported/static HTML may use slugged pane ids; tests should prefer pane labels when DOM ids are unstable across live/export paths.
-
 ## Demo layout used by tests
 
 - `DevA`:
@@ -67,11 +69,11 @@ This matters for assertions: a test that expects all three panes to be visible a
 
 - session export/open flow (`Save HTML`, `Current HTML`)
 - session rotation clearing stale state
+- timestamp-mode conversion when session origin metadata is missing or delayed
 - selection/clipboard/download path consistency
 - cache restore after layout mutations
 - cross-tab sync behavior when switching tabs after explicit sync gesture
 - frontend behavior under invalid regex input or malformed imported HTML
-
 ## UI testing guidance
 
 - Prefer deterministic waits using `tick=...` and `kind=...` markers.

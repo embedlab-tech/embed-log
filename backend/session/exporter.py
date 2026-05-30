@@ -15,6 +15,8 @@ class SessionExporter:
         source_files: dict[str, str],
         tabs: list,
         source_labels: dict[str, str],
+        timestamp_mode: str = "absolute",
+        first_log_at: str | None = None,
         merge_script: str | Path | None = None,
         python_executable: str | None = None,
     ):
@@ -22,9 +24,14 @@ class SessionExporter:
         self._source_files = source_files
         self._tabs = tabs
         self._source_labels = source_labels
+        self._timestamp_mode = timestamp_mode
+        self._first_log_at = first_log_at
         self._merge_script = Path(merge_script) if merge_script else (Path(__file__).resolve().parents[2] / "utils" / "merge_logs.py")
         self._python = python_executable or sys.executable
         self._lock = threading.Lock()
+    def set_first_log_at(self, first_log_at: str | None) -> None:
+        self._first_log_at = first_log_at
+
 
     def export_html(self, reason: str) -> bool:
         with self._lock:
@@ -37,6 +44,10 @@ class SessionExporter:
             ]
 
             cmd = [self._python, str(self._merge_script)]
+            if self._timestamp_mode:
+                cmd.extend(["--timestamp-mode", self._timestamp_mode])
+            if self._first_log_at:
+                cmd.extend(["--first-log-at", self._first_log_at])
             for tab in tabs_for_export:
                 cmd.extend(["--tab", tab["label"]])
                 pane_labels = tab.get("pane_labels", {})

@@ -1,5 +1,5 @@
 import { state, TABS, PANES } from './state.js';
-import { appendLine, updateJumpBtn } from './lines.js';
+import { appendLine, updateJumpBtn, setTimestampMode } from './lines.js';
 import { createTabWithPanes } from './tabcreate.js';
 import { switchTab } from './tabs.js';
 
@@ -28,6 +28,10 @@ function _snapshot() {
             ts: line.ts,
             text: line.rawText ?? '',
             isTx: !!line.isTx,
+            absTs: line.absTs ?? null,
+            absNum: Number.isFinite(line.absNum) ? line.absNum : null,
+            relTs: line.relTs ?? null,
+            relNum: Number.isFinite(line.relNum) ? line.relNum : null,
         }));
         if (sliced.length) lines[paneId] = sliced;
     });
@@ -36,6 +40,7 @@ function _snapshot() {
         tabs: TABS.map(t => ({ label: t.label, panes: [...t.panes] })),
         activeTab: state.activeTab,
         fontSize: state.fontSize,
+        timestampMode: state.timestampMode,
         lines,
         savedAt: Date.now(),
     };
@@ -87,7 +92,12 @@ function _restoreIfPossible() {
 
         state.atBottom[paneId] = false;
         entries.forEach(e => {
-            appendLine(paneId, e.ts || '', e.text || '', !!e.isTx);
+            appendLine(paneId, e.ts || '', e.text || '', !!e.isTx, {
+                absTs: e.absTs ?? null,
+                absNum: e.absNum ?? null,
+                relTs: e.relTs ?? null,
+                relNum: e.relNum ?? null,
+            });
         });
         const logEl = document.getElementById('log-' + paneId);
         if (logEl) {
@@ -100,6 +110,9 @@ function _restoreIfPossible() {
     // Restore font-size from cache
     if (typeof snap.fontSize === 'number' && snap.fontSize > 0) {
         state.fontSize = snap.fontSize;
+    }
+    if (snap.timestampMode === 'absolute' || snap.timestampMode === 'relative') {
+        setTimestampMode(snap.timestampMode);
     }
     
     _restoring = false;

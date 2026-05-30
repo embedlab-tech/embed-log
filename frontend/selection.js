@@ -1,6 +1,8 @@
-import { state, PANES, paneLabel, unwrapPaneLabel } from './state.js';
+import { state, TABS, PANES, paneLabel, unwrapPaneLabel } from './state.js';
 import { onLineClick } from './lines.js';
 import { exportHtmlSnapshot } from './export.js';
+import { can } from './profile.js';
+import { switchTab } from './tabs.js';
 
 // ---------------------------------------------------------------------------
 // Line selection + copy / export actions
@@ -166,6 +168,17 @@ export function _selectionSetupPane(id) {
     moreDropdown.appendChild(htmlBtn);
     moreDropdown.appendChild(clipAddBtn);
 
+    // Marker toggle (runtime only)
+    if (can('markers')) {
+        const markerBtn = document.createElement("button");
+        markerBtn.className = "copy-btn";
+        markerBtn.id = "marker-toggle-" + id;
+        markerBtn.textContent = "Set marker";
+        markerBtn.title = "Mark the selected/sync-highlighted line with a description";
+        markerBtn.addEventListener("click", e => { e.stopPropagation(); _toggleMarker(id); });
+        moreDropdown.appendChild(markerBtn);
+    }
+
     actionRow.appendChild(copyBtn);
     actionRow.appendChild(rawBtn);
     actionRow.appendChild(moreToggle);
@@ -191,6 +204,7 @@ function _rebuildPaneSelector(paneId) {
         cb.addEventListener('change', e => {
             e.stopPropagation();
             state.contextPanes[id] = cb.checked;
+            _syncSelectionActions(paneId);
         });
         label.appendChild(cb);
         label.appendChild(document.createTextNode(' ' + unwrapPaneLabel(id)));
@@ -249,17 +263,239 @@ function _syncSelectionActions(paneId) {
     const rawBtn = document.getElementById("download-raw-" + paneId);
     if (!wrap || !copyBtn) return;
 
-    const count = state.selected[paneId].size;
-    const visible = count > 0;
+    const selectedCount = state.selected[paneId].size;
+    const visible = selectedCount > 0;
+    const displayCount = state.selectionScope === "exact"
+        ? selectedCount
+        : _countRangeEntries(paneId);
     wrap.classList.toggle("visible", visible);
     wrap.querySelectorAll(".copy-btn, .scope-btn, .more-toggle").forEach(el =>
         el.classList.toggle("visible", visible)
     );
 
     if (visible) {
-        copyBtn.textContent = `Copy (${count})`;
+        copyBtn.textContent = `Copy (${displayCount})`;
         rawBtn.textContent = `Download raw`;
     }
+}
+
+// ── Markers ──
+function _flatMarkerList() {
+    const all = [];
+    Object.keys(state.markers).forEach(paneId => {
+        (state.markers[paneId] || []).forEach(m => {
+            all.push({ paneId, ...m });
+        });
+    });
+    all.sort((a, b) => (a.numTs ?? 0) - (b.numTs ?? 0));
+    return all;
+}
+
+function _markerLineIdx(paneId) {
+    const div = state.highlighted[paneId];
+    if (div) return parseInt(div.dataset.idx, 10);
+    const sel = state.selected[paneId];
+    if (sel?.size === 1) return [...sel][0];
+    return -1;
+}
+
+function _toggleMarker(paneId) {
+    // Get indices to mark: selected lines, or fall back to highlighted line
+    const sel = state.selected[paneId];
+    const indices = sel?.size > 0
+        ? Array.from(sel)
+        : (() => {
+            const idx = _markerLineIdx(paneId);
+            return idx >= 0 ? [idx] : [];
+          })();
+    if (!indices.length) return;
+
+    const markers = state.markers[paneId] = state.markers[paneId] || [];
+    const lines = state.rawLines[paneId] || [];
+
+    // If any indices are not yet marked, show the input to add/overwrite
+    _showMarkerInput(paneId, indices, lines);
+    // We don't handle "remove existing" here anymore — the save/commit
+    // in _showMarkerInput replaces any overlapping markers.
+}
+
+
+function _showMarkerInput(paneId, indices, lines) {
+    const body = document.querySelector(`#pane-${paneId} .pane-body`);
+    if (!body) return;
+
+    // Remove any existing marker input overlay
+    document.querySelectorAll(".marker-input-overlay").forEach(el => el.remove());
+
+    const overlay = document.createElement("div");
+    overlay.className = "marker-input-overlay";
+    overlay.innerHTML =
+        '<span class="marker-input-label">Marker:</span>' +
+        '<input class="marker-input" type="text" placeholder="Describe this marker…" autofocus>' +
+        '<button class="marker-input-save">Save</button>' +
+        '<button class="marker-input-cancel">✕</button>';
+
+    const input = overlay.querySelector(".marker-input");
+    const saveBtn = overlay.querySelector(".marker-input-save");
+    const cancelBtn = overlay.querySelector(".marker-input-cancel");
+
+    const candidates = indices.map(i => ({ lineIdx: i, numTs: lines[i]?.numTs ?? 0 }));
+    // Single marker for the entire range (first → last)
+    const rangeStart = Math.min(...indices);
+    const rangeEnd = Math.max(...indices);
+    let inputActive = true;
+
+    function commit() {
+        if (!inputActive) return;
+        inputActive = false;
+        const desc = (input.value || "").trim() || "(no description)";
+        const markers = state.markers[paneId] = state.markers[paneId] || [];
+        const keep = markers.filter(m => m.lineIdx < rangeStart || m.lineIdx > rangeEnd);
+        state.markers[paneId] = keep;
+        keep.push({
+            lineIdx: rangeStart,
+            endIdx: rangeEnd,
+            numTs: lines[rangeStart]?.numTs ?? 0,
+            description: desc,
+            createdAt: new Date().toISOString(),
+        });
+        overlay.remove();
+        applyMarkers();
+        _updateMarkerNav();
+        wsSend({ cmd: "save_markers", markers: _flatMarkerList() });
+    }
+
+    function cancel() {
+        if (!inputActive) return;
+        inputActive = false;
+        overlay.remove();
+    }
+
+    saveBtn.addEventListener("click", e => { e.stopPropagation(); commit(); });
+    cancelBtn.addEventListener("click", e => { e.stopPropagation(); cancel(); });
+    input.addEventListener("keydown", e => {
+        if (e.key === "Enter") commit();
+        if (e.key === "Escape") cancel();
+    });
+
+    // Show which lines are being marked
+    const label = overlay.querySelector(".marker-input-label");
+    const count = rangeEnd - rangeStart + 1;
+    if (count > 1) label.textContent = `Marker (${count} lines):`;
+
+    // Position overlay near the copy-actions
+    const actions = body.querySelector(".copy-actions");
+    if (actions) {
+        const rect = actions.getBoundingClientRect();
+        overlay.style.position = "fixed";
+        overlay.style.left = rect.left + "px";
+        overlay.style.top = (rect.bottom + 4) + "px";
+        // Clamp so overlay doesn't extend past right edge
+        requestAnimationFrame(() => {
+            const ow = overlay.offsetWidth;
+            if (rect.left + ow > window.innerWidth) {
+                overlay.style.left = Math.max(8, window.innerWidth - ow - 8) + "px";
+                }
+            });
+        }
+    body.appendChild(overlay);
+    setTimeout(() => input.focus(), 50);
+}
+
+
+export function applyMarkers() {
+    const byPane = state.markers;
+    PANES.forEach(paneId => {
+        const logEl = document.getElementById("log-" + paneId);
+        if (!logEl) return;
+        const paneMarkers = byPane[paneId] || [];
+        // Build a lookup: lineIdx → description (mark every line in a range)
+        const byLine = {};
+        paneMarkers.forEach(m => {
+            const end = m.endIdx ?? m.lineIdx;
+            for (let i = m.lineIdx; i <= end; i++) {
+                if (byLine[i] === undefined) byLine[i] = m.description;
+            }
+        });
+        Array.from(logEl.children).forEach((div, i) => {
+            const hasMarker = byLine[i] !== undefined;
+            div.classList.toggle("has-marker", hasMarker);
+            div.title = hasMarker ? "Marker: " + byLine[i] : "";
+        });
+    });
+}
+window.applyMarkers = applyMarkers;
+
+// ── Marker tooltip ──
+const _tooltipEl = document.createElement("div");
+_tooltipEl.id = "marker-tooltip";
+document.body.appendChild(_tooltipEl);
+
+document.addEventListener("mouseover", e => {
+    const line = e.target.closest(".log-line.has-marker");
+    if (!line) { _tooltipEl.classList.remove("visible"); return; }
+    const desc = line.title.replace(/^Marker:\s*/, "");
+    if (!desc) return;
+    const rect = line.getBoundingClientRect();
+    _tooltipEl.innerHTML = '<span class="mt-label">Marker</span>' + _escHtml(desc);
+    // Position above the line so it doesn't cover log text below
+    _tooltipEl.style.left = Math.max(4, rect.left) + "px";
+    _tooltipEl.style.bottom = (window.innerHeight - rect.top + 4) + "px";
+    _tooltipEl.classList.add("visible");
+});
+
+
+function _updateMarkerNav() {
+    const flat = _flatMarkerList();
+    const navEl = document.getElementById("marker-nav");
+    if (!navEl) return;
+    if (flat.length === 0) {
+        navEl.style.display = "none";
+        state.markerNavIdx = -1;
+        return;
+    }
+    navEl.style.display = "";
+    const total = document.getElementById("marker-nav-total");
+    if (total) total.textContent = String(flat.length);
+    // Clamp nav index
+    if (state.markerNavIdx < 0 || state.markerNavIdx >= flat.length) {
+        state.markerNavIdx = 0;
+    }
+    _updateMarkerNavBtn();
+}
+
+function _updateMarkerNavBtn() {
+    const el = document.getElementById("marker-nav-idx");
+    if (el) el.textContent = String(state.markerNavIdx + 1);
+}
+
+document.getElementById("marker-nav-prev")?.addEventListener("click", () => {
+    const flat = _flatMarkerList();
+    if (!flat.length) return;
+    state.markerNavIdx = (state.markerNavIdx - 1 + flat.length) % flat.length;
+    _jumpMarker(flat[state.markerNavIdx]);
+});
+
+document.getElementById("marker-nav-next")?.addEventListener("click", () => {
+    const flat = _flatMarkerList();
+    if (!flat.length) return;
+    state.markerNavIdx = (state.markerNavIdx + 1) % flat.length;
+    _jumpMarker(flat[state.markerNavIdx]);
+});
+
+function _jumpMarker(m) {
+    const paneId = m.paneId;
+    // Switch to the tab containing this pane
+    const tabIdx = TABS.findIndex(t => t.panes.includes(paneId));
+    if (tabIdx >= 0) switchTab(tabIdx);
+    const div = document.querySelector(`#log-${paneId} [data-idx="${m.lineIdx}"]`);
+    if (!div) return;
+    const logEl = document.getElementById("log-" + paneId);
+    if (!logEl) return;
+    logEl.scrollTop = div.offsetTop - Math.floor(logEl.clientHeight / 3);
+    state.atBottom[paneId] = false;
+    onLineClick(paneId, m.numTs, div);
+    _updateMarkerNavBtn();
 }
 
 function _applySelection(paneId) {
@@ -349,19 +585,35 @@ function _selectionRange(paneId) {
     const lines = state.rawLines[paneId] || [];
     const nums = Array.from(sel)
         .map(i => lines[i]?.numTs)
-        .filter(n => Number.isFinite(n) && n > 0);
+        .filter(n => Number.isFinite(n) && n >= 0);
     if (!nums.length) return null;
     return { from: Math.min(...nums), to: Math.max(...nums) };
+}
+
+function _rangeTargetPanes() {
+    return state.selectionScope === 'context-selected'
+        ? PANES.filter(id => state.contextPanes[id])
+        : PANES;
+}
+
+function _countRangeEntries(paneId) {
+    const range = _selectionRange(paneId);
+    if (!range) return 0;
+    let count = 0;
+    _rangeTargetPanes().forEach(id => {
+        (state.rawLines[id] || []).forEach(line => {
+            const n = line?.numTs;
+            if (Number.isFinite(n) && n >= range.from && n <= range.to) count++;
+        });
+    });
+    return count;
 }
 
 function _collectRangeEntries(paneId) {
     const range = _selectionRange(paneId);
     if (!range) return [];
     const entries = [];
-    const targetPanes = state.selectionScope === 'context-selected'
-        ? PANES.filter(id => state.contextPanes[id])
-        : PANES;
-    targetPanes.forEach(id => {
+    _rangeTargetPanes().forEach(id => {
         (state.rawLines[id] || []).forEach((line, idx) => {
             const n = line?.numTs;
             if (Number.isFinite(n) && n >= range.from && n <= range.to) {
@@ -404,6 +656,8 @@ function _snippetMessageText(entry) {
         const before = text;
         text = text
             .replace(/^\[\d{4}-\d{2}-\d{2}T[^\]]+\]\s*/, "")
+            .replace(/^\[T\+\d+:\d{2}:\d{2}\.\d{3}\]\s*/, "")
+            .replace(/^T\+\d+:\d{2}:\d{2}\.\d{3}\s*/, "")
             .replace(sourcePrefix, "")
             .trim();
         if (text === before) break;
@@ -424,6 +678,10 @@ function _buildRangeLogData(entries) {
             ts: e.line.ts,
             text: `[${e.paneId}] ${_snippetMessageText(e)}`,
             isTx: e.line.isTx,
+            absTs: e.line.absTs ?? null,
+            absNum: Number.isFinite(e.line.absNum) ? e.line.absNum : null,
+            relTs: e.line.relTs ?? null,
+            relNum: Number.isFinite(e.line.relNum) ? e.line.relNum : null,
         });
     });
     return logData;
@@ -682,6 +940,8 @@ function _addSelectedToBuffer(paneId) {
 let _drag = null;          // { paneId, startIdx, startY, lineEl, active }
 let _suppressClick = false;
 let _rangeAnchor = null;   // { paneId, idx } set by a normal line click for Shift+Click range selection
+let _altSelection = false; // true during an Alt-native-text-select drag
+
 
 document.addEventListener("pointerdown", e => {
     if (e.button !== 0) return;
@@ -689,6 +949,8 @@ document.addEventListener("pointerdown", e => {
     if (!line) return;
     const logArea = line.closest(".log-area");
     if (!logArea) return;
+    if (e.altKey) { _altSelection = true; return; }
+
 
     _drag = {
         paneId: logArea.id.slice(4),
@@ -732,7 +994,14 @@ document.addEventListener("pointermove", e => {
     _applySelection(_drag.paneId);
 });
 
-document.addEventListener("pointerup", () => { _drag = null; });
+document.addEventListener("pointerup", () => {
+    if (_altSelection) {
+        _altSelection = false;
+        const text = window.getSelection()?.toString();
+        if (text) navigator.clipboard.writeText(text).catch(() => {});
+    }
+    _drag = null;
+});
 
 document.addEventListener("click", e => {
     if (_suppressClick) {
@@ -746,7 +1015,7 @@ document.addEventListener("click", e => {
 
     const clickedLine = e.target.closest(".log-line");
     const clickedLogArea = clickedLine?.closest(".log-area");
-    if (clickedLine && clickedLogArea) {
+    if (clickedLine && clickedLogArea && !e.altKey) {
         const paneId = clickedLogArea.id.slice(4);
         const idx = parseInt(clickedLine.dataset.idx, 10);
 
@@ -780,7 +1049,17 @@ document.addEventListener("click", e => {
 document.addEventListener("keydown", e => {
     if ((e.ctrlKey || e.metaKey) && e.key === "c") {
         const pane = PANES.find(id => state.selected[id].size > 0);
-        if (pane) { _copyExact(pane); e.preventDefault(); }
+        if (pane) { _copyExact(pane); e.preventDefault(); return; }
+        // No explicit selection — fall back to the sync-highlighted line.
+        const hlPane = PANES.find(id => state.highlighted[id]);
+        if (hlPane) {
+            const div = state.highlighted[hlPane];
+            const idx = parseInt(div?.dataset.idx, 10);
+            if (Number.isFinite(idx)) {
+                const text = _formatSelectionBlock(hlPane, [idx]);
+                if (text) { _copyText(text); e.preventDefault(); return; }
+            }
+        }
         return;
     }
     if (e.key === "Escape") {
@@ -792,3 +1071,17 @@ document.addEventListener("keydown", e => {
         _clearAllSelections();
     }
 });
+// ── Alt key: hold to enable native text selection on log lines ──
+document.addEventListener("keydown", e => {
+    if (e.key === "Alt" && !e.ctrlKey && !e.metaKey) {
+        document.body.classList.add("alt-held");
+    }
+});
+document.addEventListener("keyup", e => {
+    if (e.key === "Alt") document.body.classList.remove("alt-held");
+});
+window.addEventListener("blur", () => document.body.classList.remove("alt-held"));
+// Update marker nav when markers arrive from server
+window.__embedLogOnMarkers = () => {
+    _updateMarkerNav();
+};

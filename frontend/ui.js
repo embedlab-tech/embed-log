@@ -1,5 +1,5 @@
 import { state, TABS, PANES, paneLabel } from './state.js';
-import { clearPane, rerenderPane } from './lines.js';
+import { clearPane, rerenderPane, setTimestampMode, canDisplayTimestampMode } from './lines.js';
 import { rebuildLayout } from './tabcreate.js';
 
 
@@ -15,6 +15,66 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
     rebuildLayout(wasUnwrapped);
 });
 
+// ---------------------------------------------------------------------------
+// Settings panel — timestamp mode toggle
+// ---------------------------------------------------------------------------
+(function () {
+    const panel = document.getElementById("settings-panel");
+    if (!panel) return;
+
+    const sep = document.createElement("span");
+    sep.className = "set-sep";
+    sep.textContent = "|";
+
+    const label = document.createElement("span");
+    label.className = "set-label";
+    label.textContent = "Time";
+
+    const btn = document.createElement("button");
+    btn.id = "btn-timestamp-mode";
+
+    const hint = document.createElement("span");
+    hint.id = "timestamp-mode-hint";
+    hint.className = "set-note";
+
+    function update() {
+        const current = state.timestampMode === "relative" ? "relative" : "absolute";
+        const other = current === "relative" ? "absolute" : "relative";
+        const hasLines = PANES.some(id => (state.rawLines[id] || []).length > 0);
+        const canSwitch = canDisplayTimestampMode(other) || !hasLines;
+        btn.textContent = current === "relative" ? "Relative" : "Absolute";
+        btn.title = canSwitch
+            ? `Switch timestamps to ${other}`
+            : `${other} timestamps are unavailable for the current data`;
+        btn.disabled = !canSwitch;
+        btn.classList.toggle("active", current === "relative");
+
+        if (canSwitch || !hasLines) {
+            hint.textContent = "";
+            hint.hidden = true;
+            return;
+        }
+
+        if (other === "absolute") {
+            hint.textContent = "Absolute view unavailable: this data has no embedded session origin.";
+        } else {
+            hint.textContent = "Relative view unavailable: this data has no embedded session origin.";
+        }
+        hint.hidden = false;
+    }
+
+    btn.addEventListener("click", () => {
+        setTimestampMode(state.timestampMode === "relative" ? "absolute" : "relative");
+        update();
+    });
+
+    panel.appendChild(sep);
+    panel.appendChild(label);
+    panel.appendChild(btn);
+    panel.appendChild(hint);
+    window.__embedLogUpdateTimestampModeUi = update;
+    update();
+})();
 // ---------------------------------------------------------------------------
 // Settings panel — clear cached session (localStorage restore cache)
 // ---------------------------------------------------------------------------
