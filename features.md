@@ -1,6 +1,6 @@
 # Implemented Features
 
-Living document of all features in `embed-log`. Agents: update this file when adding or changing observable behavior.
+Living document of the `embed-log` codebase. Agents: update this file when adding or changing observable behavior.
 
 ---
 
@@ -9,19 +9,18 @@ Living document of all features in `embed-log`. Agents: update this file when ad
 - **Before starting work:** Read relevant sections to understand what exists.
 - **After implementing a feature:** Add or update the entry. Include the test that covers it.
 - **Format:** `| Feature | Scope | Test(s) | Notes |`
-- **Architecture notes** at the bottom capture hard-won knowledge about how modules connect.
 
 ---
 
-## Architecture Overview
+## Architecture
 
 ```
 backend/
   app.py                   — source construction, run_app() entry point
   server.py                — thin __main__ entrypoint
-  cli/                     — CLI package (refactored from monolithic cli.py)
+  cli/                     — CLI package
     __init__.py            — re-exports main()
-    dispatch.py            — main() dispatcher, routes subcommands
+    dispatch.py            — main() dispatcher, match/case routing
     parser.py              — argparse construction for all subcommands
     util.py                — pure helpers: timestamps, durations, file stats, session ID
     wizard.py              — create-config interactive wizard
@@ -30,14 +29,24 @@ backend/
     run.py                 — run / validate / merge
     sessions/
       __init__.py          — _run_sessions() dispatcher + re-exports
-      list.py, info.py, logs.py, export.py, delete.py, open.py, marker.py, snippet.py
+      list.py              — sessions list
+      info.py              — sessions info
+      logs.py              — sessions logs
+      export.py            — sessions export (HTML + raw format)
+      delete.py            — sessions delete
+      open.py              — sessions open
+      marker.py            — sessions marker list/show
+      snippet.py           — sessions snippet list/show/delete
   config/
     loader.py              — YAML config parsing + validation
     models.py              — AppConfig, SourceConfig, TabConfig, ServerConfig, LogsConfig, ParserConfig
   core/
-    runtime.py             — SourceManager, LogServer, ANSI dict
+    runtime.py             — SourceManager, LogServer (thread-safe _session_info)
+    queue.py               — TrackedQueue (bounded queue with saturation tracking)
+    clock.py               — SessionClock (absolute/relative timestamp modes)
     models.py              — LogEntry(@dataclass(slots=True)), QueueStats
     naming.py              — slugify()
+    ansi.py                — ANSI color codes dict
   net/
     ws_server.py           — WebSocketBroadcaster (aiohttp in background thread)
     inject_server.py       — InjectServer (bidirectional TCP)
@@ -59,10 +68,10 @@ backend/
     models.py              — SessionStats, SnippetEntry
 ```
 
-### Key import chains
+### Import chains
 
-- `cli/dispatch.py` → imports `_run_*` handlers from `cli/run.py`, `cli/wizard.py`, `cli/diagnostics.py`, `cli/update.py`, `cli/sessions/`
-- `cli/sessions/__init__.py` → imports from `cli/util.py` for session helpers
+- `cli/dispatch.py` → imports handlers from `cli/run.py`, `cli/wizard.py`, `cli/diagnostics.py`, `cli/update.py`, `cli/sessions/`
+- `cli/sessions/__init__.py` → imports from `cli/util.py`
 - `cli/diagnostics.py` → imports `_detected_serial_ports` from `cli/wizard.py`
 - `cli/run.py` → imports from `backend/app.py` and `backend/config/`
 - `backend/app.py` → imports from `backend/sources/`, `backend/parsers/`, `backend/core/`
@@ -75,10 +84,7 @@ backend/
 - **Per-source reader thread:** reads from serial/UDP, enqueues LogEntry
 - **WS broadcaster thread:** runs aiohttp event loop in its own thread
 - **Inject/forward server threads:** one per inject/forward port, accept + handle TCP clients
-
-### Circular import avoidance
-
-`backend/cli.py` → `backend/cli/__init__.py`: The old monolithic `cli.py` was converted to a package. The `main()` function uses a deferred import (`from .cli_dispatch import main as _main`) inside the function body to avoid circular imports when `python3 -m backend.cli` is used (which loads `__init__.py` as `__main__`).
+- `_session_info` is protected by `threading.Lock` in LogServer
 
 ---
 
@@ -95,8 +101,9 @@ backend/
 | WebSocket UI server | backend/net | Playwright tests | Config-first protocol, replay buffer (5000 entries), batch drain |
 | Session logging (per-source .log files) | backend/core | `test_session_components` | Timestamped lines written to disk, flush every 100 lines |
 | ANSI color passthrough | backend/core | (manual) | Color codes in log lines forwarded to UI, stripped in file output |
-| Queue backpressure (TrackedQueue) | backend/core | `test_queue_stats` | Bounded queue with saturation tracking, blocks on put() when full |
-| Session clock (relative mode) | backend/core | `test_runtime_timestamp_mode` | T+HH:MM:SS.mmm from first log line, origin set on first observe |
+| Queue backpressure (TrackedQueue) | backend/core/queue.py | `test_queue_stats` | Bounded queue with saturation tracking, blocks on put() when full |
+| Session clock (relative mode) | backend/core/clock.py | `test_runtime_timestamp_mode` | T+HH:MM:SS.mmm from first log line, origin set on first observe |
+| Injectable clock | backend/core/runtime.py | `test_source_manager_clock` | SourceManager accepts `clock` callable for deterministic testing |
 
 ---
 
@@ -175,36 +182,30 @@ backend/
 
 ---
 
-## Data Models (Post-Refactor)
+## Data Models
 
-| Model | Location | Key Fields | Replaces |
-|-------|----------|------------|----------|
-| `AppConfig` | backend/config/models.py | sources, tabs, server, logs, injects, forwards, baudrate | Flat dict from load_config() |
-| `SourceConfig` | backend/config/models.py | name, type, port, parser, baudrate, label, inject_port, forward_ports | Source dicts |
-| `TabConfig` | backend/config/models.py | label, panes | `[label, *pane_names]` lists |
-| `ServerConfig` | backend/config/models.py | host, ws_port, ws_ui, app_name, verbosity, timestamp_mode, ... | `cfg.get("host")` chains |
-| `LogsConfig` | backend/config/models.py | dir | `cfg.get("log_dir")` |
-| `ParserConfig` | backend/config/models.py | type | `{"type": "text"}` dicts |
-| `LogEntry` | backend/core/models.py | timestamp, source, message, color, no_ws | Manual __slots__ class |
-| `QueueStats` | backend/core/models.py | maxsize, depth, utilization_pct, enqueued, dequeued, peak_depth, near_full_events | Dict from TrackedQueue.stats() |
-| `SessionStats` | backend/session/models.py | alias, lines, size_kb, time_start, time_end, duration_secs, markers | Dict from _session_stats() |
-| `SnippetEntry` | backend/session/models.py | file, label, scope, panes, line_count, saved_at | Snippet dicts in manifest |
+| Model | Location | Key Fields |
+|-------|----------|------------|
+| `AppConfig` | backend/config/models.py | sources, tabs, server, logs, injects, forwards, baudrate |
+| `SourceConfig` | backend/config/models.py | name, type, port, parser, baudrate, label, inject_port, forward_ports |
+| `TabConfig` | backend/config/models.py | label, panes |
+| `ServerConfig` | backend/config/models.py | host, ws_port, ws_ui, app_name, verbosity, timestamp_mode, ... |
+| `LogsConfig` | backend/config/models.py | dir |
+| `ParserConfig` | backend/config/models.py | type |
+| `LogEntry` | backend/core/models.py | timestamp, source, message, color, no_ws (`@dataclass(slots=True)`) |
+| `QueueStats` | backend/core/models.py | maxsize, depth, utilization_pct, enqueued, dequeued, peak_depth, near_full_events |
+| `SessionStats` | backend/session/models.py | alias, lines, size_kb, time_start, time_end, duration_secs, markers |
+| `SnippetEntry` | backend/session/models.py | file, label, scope, panes, line_count, saved_at |
 
 ---
 
-## Known Issues / Tech Debt
+## Known Issues
 
-| Issue | Scope | Impact | Notes |
-|-------|-------|--------|-------|
-| ~~`_session_info` dict mutated without lock~~ | ~~backend/core/runtime.py~~ | ✅ Fixed | threading.Lock + _update_session_info() helper |
-| ~~Broad `except Exception: pass`~~ | ~~backend/net/ws_server.py~~ | ✅ Fixed | 4 blocks now log at debug level |
-| ~~Hardcoded `datetime.now()` in SourceManager~~ | ~~backend/core/runtime.py~~ | ✅ Fixed | Injected `clock` callable, 7 new tests verify deterministic time |
-| ~~O(n²) dead client cleanup~~ | ~~backend/core/runtime.py~~ | ✅ Fixed | list comprehension rebuild |
-| Session stats reads full log files | backend/cli/util.py | Performance | Low priority — CLI command, not hot path |
-
-| Duplicated session ID generation | backend/app.py + backend/core/runtime.py | DRY | Same collision-avoidance algorithm in two places |
-| `_run_sessions_export` is ~300 lines | backend/cli/sessions/export.py | Readability | Mixes --missing batch mode, raw format, HTML format |
-| Playwright scope-selection tests flaky | tests-ui | CI reliability | Timing-sensitive, retry on first attempt, timeout at 300s |
+| Issue | Scope | Notes |
+|-------|-------|-------|
+| Duplicated session ID generation | backend/app.py + backend/core/runtime.py | Same collision-avoidance algorithm in two places |
+| `_run_sessions_export` is ~300 lines | backend/cli/sessions/export.py | Mixes --missing batch mode, raw format, HTML format |
+| Playwright scope-selection tests flaky | tests-ui | Timing-sensitive, retry on first attempt, timeout at 300s |
 
 ---
 
@@ -217,23 +218,6 @@ backend/
 | `sessions logs` | No dedicated test | Low |
 | `sessions delete` | No dedicated test | Medium |
 | `sessions open` | No dedicated test (involves webbrowser.open) | Low |
-| `_parse_duration` / `_format_duration` | Now tested in test_cli_util.py | ✅ Covered |
-| `_parse_log_timestamp` / `_ms3` | Now tested in test_cli_util.py | ✅ Covered |
-| `_run_validate` standalone | Only via test_config_loader | Low |
 | `_run_run` end-to-end | Only timestamp override tested | Medium |
-| `_build_parser` structure | Now tested in test_cli_parser.py | ✅ Covered |
 | WS broadcast coalescing | No unit test | Medium |
 | WS command handling | No unit test (E2E only) | Medium |
-
----
-
-## Changelog
-
-| Date | Change | Author | Tests |
-|------|--------|--------|-------|
-| 2026-05-30 | Phase 2: `backend/cli.py` (2591 lines) → `backend/cli/` package (18 files, ~2700 lines) | refactor | 222 unit + 8 E2E smoke pass |
-| 2026-05-30 | Phase 1: typed data models — AppConfig, LogEntry, QueueStats, SessionStats | refactor | 222 unit tests pass |
-| 2026-05-30 | Added test_cli_util.py (49 tests), test_cli_parser.py (40 tests), test_cli_run.py (19 tests) | testing | 108 new tests |
-| 2026-05-30 | E2E verification: Playwright smoke tests pass, full suite has pre-existing flakiness in scope-selection | verification | 8/8 smoke pass |
-
-_Update this section when adding features or making behavioral changes._
