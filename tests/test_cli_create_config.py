@@ -6,7 +6,7 @@ import argparse
 
 import yaml
 
-from backend import cli
+from backend.cli.wizard import _detected_serial_ports, _run_create_config
 
 
 class CreateConfigWizardTests(unittest.TestCase):
@@ -22,8 +22,8 @@ class CreateConfigWizardTests(unittest.TestCase):
             Port('COM4', 'USB Serial'),
         ]
 
-        with patch('backend.cli.list_ports.comports', return_value=ports):
-            detected = cli._detected_serial_ports()
+        with patch('backend.cli.wizard.list_ports.comports', return_value=ports):
+            detected = _detected_serial_ports()
 
         self.assertEqual(
             detected,
@@ -66,8 +66,8 @@ class CreateConfigWizardTests(unittest.TestCase):
 
             detected = [Port('/dev/cu.usbmodem1101', 'USB Modem')]
 
-            with patch('backend.cli.list_ports.comports', return_value=detected):
-                rc = cli._run_create_config(
+            with patch('backend.cli.wizard.list_ports.comports', return_value=detected):
+                rc = _run_create_config(
                     argparse.Namespace(output=str(out), force=True),
                     input_fn=lambda _prompt: next(answers)
                 )

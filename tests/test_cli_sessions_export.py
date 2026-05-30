@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from backend import cli
+from backend.cli.sessions import _run_sessions_export
 from backend.core.runtime import LogServer
 
 
@@ -55,7 +55,7 @@ class SessionsExportTimestampTests(unittest.TestCase):
             )
 
             with patch("backend.session.SessionExporter", FakeExporter):
-                rc = cli._run_sessions_export(log_dir, args)
+                rc = _run_sessions_export(log_dir, args)
 
         self.assertEqual(rc, 0)
         self.assertEqual(captured["timestamp_mode"], "relative")
@@ -105,7 +105,7 @@ class SessionsExportTimestampTests(unittest.TestCase):
             )
 
             with patch("backend.session.SessionExporter", FakeExporter):
-                rc = cli._run_sessions_export(log_dir, args)
+                rc = _run_sessions_export(log_dir, args)
 
             updated = json.loads(manifest_path.read_text(encoding="utf-8"))
 

@@ -7,7 +7,7 @@ from pathlib import Path
 from subprocess import CompletedProcess
 from unittest.mock import patch
 
-from backend import cli
+from backend.cli import update as cli
 from backend import _install_source as install_source
 
 
@@ -67,7 +67,7 @@ class UpdateCommandTests(unittest.TestCase):
                  patch.object(install_source, "__repo_url__", "https://github.com/krezolekcoder/embed-log.git"), \
                  patch.object(install_source, "__ref_type__", "branch"), \
                  patch.object(install_source, "__ref__", "main"), \
-                 patch("backend.cli.shutil.which", side_effect=lambda name: {"pipx": "/opt/pipx", "bash": "/bin/bash"}.get(name)), \
+                 patch("backend.cli.update.shutil.which", side_effect=lambda name: {"pipx": "/opt/pipx", "bash": "/bin/bash"}.get(name)), \
                  patch("subprocess.run", side_effect=fake_run):
                 buf = io.StringIO()
                 with redirect_stdout(buf):
@@ -96,7 +96,7 @@ class UpdateCommandTests(unittest.TestCase):
              patch.object(install_source, "__repo_url__", "https://github.com/krezolekcoder/embed-log.git"), \
              patch.object(install_source, "__ref_type__", "branch"), \
              patch.object(install_source, "__ref__", "main"), \
-             patch("backend.cli.shutil.which", side_effect=lambda name: {"pipx": "/opt/pipx", "bash": "/bin/bash"}.get(name)), \
+             patch("backend.cli.update.shutil.which", side_effect=lambda name: {"pipx": "/opt/pipx", "bash": "/bin/bash"}.get(name)), \
              patch("urllib.request.urlopen", return_value=_Response(b"#!/usr/bin/env bash\n")), \
              patch("subprocess.run", side_effect=fake_run):
             buf = io.StringIO()
@@ -117,7 +117,7 @@ class UpdateCommandTests(unittest.TestCase):
              patch.object(install_source, "__repo_url__", "https://github.com/krezolekcoder/embed-log.git"), \
              patch.object(install_source, "__ref_type__", "branch"), \
              patch.object(install_source, "__ref__", "main"), \
-             patch("backend.cli.shutil.which", side_effect=lambda name: {"pipx": "/opt/pipx", "bash": "/bin/bash"}.get(name)), \
+             patch("backend.cli.update.shutil.which", side_effect=lambda name: {"pipx": "/opt/pipx", "bash": "/bin/bash"}.get(name)), \
              patch("subprocess.run", return_value=CompletedProcess(["/opt/pipx", "list", "--json"], 0, _pipx_list_json(missing), "")):
             buf = io.StringIO()
             with redirect_stdout(buf):
@@ -157,7 +157,7 @@ class UpdateCommandTests(unittest.TestCase):
              patch.object(install_source, "__repo_url__", "https://github.com/krezolekcoder/embed-log.git"), \
              patch.object(install_source, "__ref_type__", "branch"), \
              patch.object(install_source, "__ref__", "main"), \
-             patch("backend.cli.shutil.which", side_effect=lambda name: {"pipx": "/opt/pipx", "bash": "/bin/bash"}.get(name)), \
+             patch("backend.cli.update.shutil.which", side_effect=lambda name: {"pipx": "/opt/pipx", "bash": "/bin/bash"}.get(name)), \
              patch("urllib.request.urlopen", side_effect=fake_urlopen), \
              patch("subprocess.run", side_effect=fake_run):
             buf = io.StringIO()

@@ -4,7 +4,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from backend import cli
+from backend.cli.sessions import _run_sessions_marker
+from backend.cli.util import iter_sessions
 
 
 def _make_session(log_dir: Path, sid: str, markers: list[dict]) -> Path:
@@ -46,25 +47,25 @@ class CliMarkersTest(unittest.TestCase):
             {"paneId": "B", "lineIdx": 5, "numTs": 200, "description": "marker two", "createdAt": "2026-01-01T00:00:01Z"},
         ])
         args = _ns(marker_cmd="list", session_id="s1")
-        rc = cli._run_sessions_marker(self.log_dir, args)
+        rc = _run_sessions_marker(self.log_dir, args)
         self.assertEqual(rc, 0)
 
     def test_marker_list_empty_session_returns_zero(self):
         _make_session(self.log_dir, "s1", [])
         args = _ns(marker_cmd="list", session_id="s1")
-        rc = cli._run_sessions_marker(self.log_dir, args)
+        rc = _run_sessions_marker(self.log_dir, args)
         self.assertEqual(rc, 0)
 
     def test_marker_list_no_markers_file_returns_zero(self):
         sdir = self.log_dir / "s1"
         sdir.mkdir()
         args = _ns(marker_cmd="list", session_id="s1")
-        rc = cli._run_sessions_marker(self.log_dir, args)
+        rc = _run_sessions_marker(self.log_dir, args)
         self.assertEqual(rc, 0)
 
     def test_marker_list_unknown_session_returns_1(self):
         args = _ns(marker_cmd="list", session_id="nosuch")
-        rc = cli._run_sessions_marker(self.log_dir, args)
+        rc = _run_sessions_marker(self.log_dir, args)
         self.assertEqual(rc, 1)
 
     # ── marker show ──
@@ -75,7 +76,7 @@ class CliMarkersTest(unittest.TestCase):
             {"paneId": "B", "lineIdx": 5, "numTs": 200, "description": "second", "createdAt": "2026-01-01T00:00:01Z"},
         ])
         args = _ns(marker_cmd="show", session_id="s1", marker_index=2)
-        rc = cli._run_sessions_marker(self.log_dir, args)
+        rc = _run_sessions_marker(self.log_dir, args)
         self.assertEqual(rc, 0)
 
     def test_marker_show_out_of_range_returns_1(self):
@@ -83,7 +84,7 @@ class CliMarkersTest(unittest.TestCase):
             {"paneId": "A", "lineIdx": 0, "numTs": 100, "description": "first", "createdAt": "2026-01-01T00:00:00Z"},
         ])
         args = _ns(marker_cmd="show", session_id="s1", marker_index=5)
-        rc = cli._run_sessions_marker(self.log_dir, args)
+        rc = _run_sessions_marker(self.log_dir, args)
         self.assertEqual(rc, 1)
 
     def test_marker_show_zero_index_returns_1(self):
@@ -91,7 +92,7 @@ class CliMarkersTest(unittest.TestCase):
             {"paneId": "A", "lineIdx": 0, "numTs": 100, "description": "first", "createdAt": "2026-01-01T00:00:00Z"},
         ])
         args = _ns(marker_cmd="show", session_id="s1", marker_index=0)
-        rc = cli._run_sessions_marker(self.log_dir, args)
+        rc = _run_sessions_marker(self.log_dir, args)
         self.assertEqual(rc, 1)
 
     def test_marker_show_negative_index_returns_1(self):
@@ -99,7 +100,7 @@ class CliMarkersTest(unittest.TestCase):
             {"paneId": "A", "lineIdx": 0, "numTs": 100, "description": "first", "createdAt": "2026-01-01T00:00:00Z"},
         ])
         args = _ns(marker_cmd="show", session_id="s1", marker_index=-1)
-        rc = cli._run_sessions_marker(self.log_dir, args)
+        rc = _run_sessions_marker(self.log_dir, args)
         self.assertEqual(rc, 1)
 
     # ── sessions list marker count ──
@@ -113,8 +114,12 @@ class CliMarkersTest(unittest.TestCase):
             {"paneId": "B", "lineIdx": 1, "numTs": 200, "description": "b", "createdAt": "2026-01-01T00:00:00Z"},
         ])
         _make_session(self.log_dir, "s3", [])
-        sessions = cli._iter_sessions(self.log_dir)
+        sessions = iter_sessions(self.log_dir)
         by_id = {s.get("session_id"): s.get("markers", -1) for s in sessions}
         self.assertEqual(by_id.get("s1"), 1)
         self.assertEqual(by_id.get("s2"), 2)
         self.assertEqual(by_id.get("s3"), 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

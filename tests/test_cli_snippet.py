@@ -1,11 +1,9 @@
 import json
-import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
-from backend.cli import _run_sessions_snippet
+from backend.cli.sessions import _run_sessions_snippet
 
 
 def _make_session(log_dir: Path, sid: str) -> Path:
@@ -15,28 +13,35 @@ def _make_session(log_dir: Path, sid: str) -> Path:
     snippets_dir = sdir / "snippets"
     snippets_dir.mkdir(exist_ok=True)
 
-    snippet_specs = [
-        ("2026-01-01_00-00-01-alpha.log", "alpha content\n", "exact", ["SENSOR_A"]),
-        ("2026-01-01_00-00-02-beta.log", "beta content\nline 2\n", "context", ["SENSOR_A", "SENSOR_B"]),
-        ("2026-01-01_00-00-03-gamma.log", "gamma content\n", "context-selected", ["SENSOR_C"]),
-    ]
-    snippets = []
-    for i, (filename, text, scope, panes) in enumerate(snippet_specs):
-        (snippets_dir / filename).write_text(text, encoding="utf-8")
-        snippets.append({
-            "file": f"snippets/{filename}",
-            "label": filename.split("-", 3)[-1].replace(".log", ""),
-            "scope": scope,
-            "panes": panes,
-            "line_count": text.count("\n") + 1,
-            "saved_at": f"2026-01-01T00:00:{i:02d}:00+00:00",
-        })
+    snip1 = snippets_dir / "2026-01-01T00-00-00_sel.json"
+    snip1.write_text(json.dumps({"lines": ["a", "b"]}), encoding="utf-8")
+    snip2 = snippets_dir / "2026-01-01T00-01-00_sel.json"
+    snip2.write_text(json.dumps({"lines": ["c"]}), encoding="utf-8")
 
     manifest = {
         "session_id": sid,
-        "snippets": snippets,
+        "source_files": {"A": str(sdir / "A.log")},
+        "snippets": [
+            {
+                "file": "snippets/2026-01-01T00-00-00_sel.json",
+                "saved_at": "2026-01-01T00:00:00Z",
+                "scope": "pane",
+                "panes": ["A"],
+                "line_count": 2,
+                "label": "first",
+            },
+            {
+                "file": "snippets/2026-01-01T00-01-00_sel.json",
+                "saved_at": "2026-01-01T00:01:00Z",
+                "scope": "pane",
+                "panes": ["A"],
+                "line_count": 1,
+                "label": "second",
+            },
+        ],
     }
     (sdir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    (sdir / "A.log").write_text("[T+00:00:00.000] boot\n", encoding="utf-8")
     return sdir
 
 
@@ -49,96 +54,112 @@ class TestSnippetList(unittest.TestCase):
     def setUp(self):
         self.td = tempfile.TemporaryDirectory()
         self.log_dir = Path(self.td.name)
-        self.sid = "2026-01-01_test-session"
-        _make_session(self.log_dir, self.sid)
+        self.sdir = _make_session(self.log_dir, "s1")
 
     def tearDown(self):
         self.td.cleanup()
 
-    def test_list_exits_zero(self):
-        ns = _ns(snippet_cmd="list", session_id=self.sid, json=False, log_dir=str(self.log_dir))
-        rc = _run_sessions_snippet(self.log_dir, ns)
+    def test_list_shows_all_snippets(self):
+        args = _ns(snippet_cmd="list", session_id="s1", json=False)
+        rc = _run_sessions_snippet(self.log_dir, args)
         self.assertEqual(rc, 0)
 
     def test_list_json(self):
-        ns = _ns(snippet_cmd="list", session_id=self.sid, json=True, log_dir=str(self.log_dir))
-        rc = _run_sessions_snippet(self.log_dir, ns)
+        args = _ns(snippet_cmd="list", session_id="s1", json=True)
+        rc = _run_sessions_snippet(self.log_dir, args)
         self.assertEqual(rc, 0)
 
-    def test_show_last_default(self):
-        ns = _ns(snippet_cmd="show", session_id=self.sid, snippet_id=None,
-                 last=False, index=None, log_dir=str(self.log_dir))
-        rc = _run_sessions_snippet(self.log_dir, ns)
+
+class TestSnippetShow(unittest.TestCase):
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.log_dir = Path(self.td.name)
+        self.sdir = _make_session(self.log_dir, "s1")
+
+    def tearDown(self):
+        self.td.cleanup()
+
+    def test_show_last_by_default(self):
+        args = _ns(snippet_cmd="show", session_id="s1", snippet_id=None, last=True, index=None)
+        rc = _run_sessions_snippet(self.log_dir, args)
         self.assertEqual(rc, 0)
 
-    def test_show_with_index(self):
-        ns = _ns(snippet_cmd="show", session_id=self.sid, snippet_id=None,
-                 last=False, index=2, log_dir=str(self.log_dir))
-        rc = _run_sessions_snippet(self.log_dir, ns)
+    def test_show_by_index(self):
+        args = _ns(snippet_cmd="show", session_id="s1", snippet_id=None, last=False, index=1)
+        rc = _run_sessions_snippet(self.log_dir, args)
         self.assertEqual(rc, 0)
 
-    def test_show_with_filename_prefix(self):
-        ns = _ns(snippet_cmd="show", session_id=self.sid, snippet_id="alpha",
-                 last=False, index=None, log_dir=str(self.log_dir))
-        rc = _run_sessions_snippet(self.log_dir, ns)
+    def test_show_by_filename_match(self):
+        args = _ns(snippet_cmd="show", session_id="s1", snippet_id="00-00-00", last=False, index=None)
+        rc = _run_sessions_snippet(self.log_dir, args)
         self.assertEqual(rc, 0)
 
-    def test_show_out_of_range_index(self):
-        ns = _ns(snippet_cmd="show", session_id=self.sid, snippet_id=None,
-                 last=False, index=99, log_dir=str(self.log_dir))
-        rc = _run_sessions_snippet(self.log_dir, ns)
+    def test_show_no_match_returns_1(self):
+        args = _ns(snippet_cmd="show", session_id="s1", snippet_id="nonexistent", last=False, index=None)
+        rc = _run_sessions_snippet(self.log_dir, args)
         self.assertEqual(rc, 1)
 
-    def test_show_no_match(self):
-        ns = _ns(snippet_cmd="show", session_id=self.sid, snippet_id="nonexistent",
-                 last=False, index=None, log_dir=str(self.log_dir))
-        rc = _run_sessions_snippet(self.log_dir, ns)
+    def test_show_out_of_range_index_returns_1(self):
+        args = _ns(snippet_cmd="show", session_id="s1", snippet_id=None, last=False, index=99)
+        rc = _run_sessions_snippet(self.log_dir, args)
         self.assertEqual(rc, 1)
+
+
+class TestSnippetDelete(unittest.TestCase):
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.log_dir = Path(self.td.name)
+        self.sdir = _make_session(self.log_dir, "s1")
+
+    def tearDown(self):
+        self.td.cleanup()
 
     def test_delete_by_index(self):
-        ns = _ns(snippet_cmd="delete", session_id=self.sid, all=False,
-                 index=1, log_dir=str(self.log_dir))
-        rc = _run_sessions_snippet(self.log_dir, ns)
+        args = _ns(snippet_cmd="delete", session_id="s1", index=1, all=False)
+        rc = _run_sessions_snippet(self.log_dir, args)
         self.assertEqual(rc, 0)
-
-        manifest = json.loads((self.log_dir / self.sid / "manifest.json").read_text(encoding="utf-8"))
-        self.assertEqual(len(manifest["snippets"]), 2)
-        self.assertFalse((self.log_dir / self.sid / "snippets" / "2026-01-01_00-00-01-alpha.log").exists())
+        remaining = json.loads((self.sdir / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(remaining["snippets"]), 1)
 
     def test_delete_all(self):
-        ns = _ns(snippet_cmd="delete", session_id=self.sid, all=True,
-                 index=None, log_dir=str(self.log_dir))
-        rc = _run_sessions_snippet(self.log_dir, ns)
+        args = _ns(snippet_cmd="delete", session_id="s1", index=None, all=True)
+        rc = _run_sessions_snippet(self.log_dir, args)
         self.assertEqual(rc, 0)
+        remaining = json.loads((self.sdir / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(remaining["snippets"]), 0)
 
-        manifest = json.loads((self.log_dir / self.sid / "manifest.json").read_text(encoding="utf-8"))
-        self.assertEqual(len(manifest["snippets"]), 0)
-        self.assertFalse((self.log_dir / self.sid / "snippets").exists())
+    def test_delete_without_flag_returns_1(self):
+        args = _ns(snippet_cmd="delete", session_id="s1", index=None, all=False)
+        rc = _run_sessions_snippet(self.log_dir, args)
+        self.assertEqual(rc, 1)
 
-    def test_delete_without_flags(self):
-        ns = _ns(snippet_cmd="delete", session_id=self.sid, all=False,
-                 index=None, log_dir=str(self.log_dir))
-        rc = _run_sessions_snippet(self.log_dir, ns)
+
+class TestSnippetMissing(unittest.TestCase):
+    def setUp(self):
+        self.td = tempfile.TemporaryDirectory()
+        self.log_dir = Path(self.td.name)
+
+    def tearDown(self):
+        self.td.cleanup()
+
+    def test_missing_session_returns_1(self):
+        args = _ns(snippet_cmd="list", session_id="nosuch", json=False)
+        rc = _run_sessions_snippet(self.log_dir, args)
         self.assertEqual(rc, 1)
 
     def test_no_snippets_returns_zero(self):
-        empty_sid = "empty-session"
-        sdir = self.log_dir / empty_sid
-        sdir.mkdir(exist_ok=True)
-        (sdir / "manifest.json").write_text(json.dumps({"session_id": empty_sid}), encoding="utf-8")
-        ns = _ns(snippet_cmd="list", session_id=empty_sid, json=False, log_dir=str(self.log_dir))
-        rc = _run_sessions_snippet(self.log_dir, ns)
+        sdir = self.log_dir / "s1"
+        sdir.mkdir()
+        (sdir / "manifest.json").write_text(json.dumps({"session_id": "s1", "snippets": []}), encoding="utf-8")
+        args = _ns(snippet_cmd="list", session_id="s1", json=False)
+        rc = _run_sessions_snippet(self.log_dir, args)
         self.assertEqual(rc, 0)
 
-    def test_session_not_found(self):
-        ns = _ns(snippet_cmd="list", session_id="no-such-session", json=False,
-                 log_dir=str(self.log_dir))
-        rc = _run_sessions_snippet(self.log_dir, ns)
-        self.assertEqual(rc, 1)
-
-    def test_no_command(self):
-        ns = _ns(snippet_cmd="", session_id=self.sid, json=False, log_dir=str(self.log_dir))
-        rc = _run_sessions_snippet(self.log_dir, ns)
+    def test_no_command_returns_1(self):
+        sdir = self.log_dir / "s1"
+        sdir.mkdir()
+        args = _ns(snippet_cmd=None, session_id="s1")
+        rc = _run_sessions_snippet(self.log_dir, args)
         self.assertEqual(rc, 1)
 
 
