@@ -43,10 +43,18 @@ function Invoke-Pipx {
 function Write-VersionFile {
     param([string]$Dir, [string]$Commit)
     $versionFile = Join-Path $Dir 'backend\_version.py'
+    $projFile = Join-Path $Dir 'pyproject.toml'
+    $version = "0.0.0"
+    if (Test-Path $projFile) {
+        $line = Get-Content $projFile | Select-String '^version = ' | Select-Object -First 1
+        if ($line) {
+            $version = ($line -replace '^version = "(.*)"', '$1').Trim()
+        }
+    }
     @"
 # Auto-generated. Do not edit manually.
 # Install scripts populate __commit__ before pipx install.
-__version__ = "1.0.1"
+__version__ = "$version"
 __commit__ = "$Commit"
 "@ | Set-Content -Path $versionFile -Encoding UTF8
 }
