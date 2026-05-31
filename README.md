@@ -1,4 +1,5 @@
 # embed-log
+[embed-lab](https://embedlab.tech/) · Log aggregation for embedded development and CI
 
 `embed-log` is a configurable log aggregation server for embedded development and CI.
 

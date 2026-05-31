@@ -269,3 +269,44 @@ All subcommands accept:
 - `marker` and `snippet` commands operate on data already written to disk by the server at runtime
 - The `--json` flag works with `list`, `info`, and `export` commands
 - Confirmation (`--yes`) is required for destructive `delete` operations; without it the command prompts interactively
+
+---
+
+## Quick install
+
+Install embed-log, generate a config, and start the UI — no source checkout needed.
+
+### macOS / Linux
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.sh | bash
+```
+
+### Windows (PowerShell 7+)
+
+```powershell
+iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.ps1'))
+```
+
+### After install
+
+```bash
+# Generate a config file (interactive)
+embed-log sample-config
+
+# Or pick a template directly:
+embed-log sample-config --sample single-tab-dual-pane.yml
+
+# Start the server
+embed-log run --config embed-log.yml
+
+# Open the UI in your browser
+# Default: http://127.0.0.1:8080/
+
+# No hardware yet? Run the simulated demo:
+embed-log demo
+embed-log demo --profile curated   # more realistic sensor data
+embed-log demo --fast              # higher speed, fewer cycles
+```
+
+**Requirements:** Python ≥ 3.10 (installer handles pipx setup automatically).
