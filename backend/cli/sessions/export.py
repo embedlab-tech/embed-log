@@ -50,7 +50,6 @@ def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
                 last=None,
                 panes=None,
                 missing=False,
-                json=args.json,
                 log_dir=str(log_dir),
                 first_log_at=args.first_log_at,
             )

@@ -23,7 +23,7 @@ class ParserStructureTests(unittest.TestCase):
         """All expected subcommands must be registered."""
         expected = {
             "run", "demo", "sessions", "merge", "parse",
-            "tail-file", "version", "ports", "update",
+            "tail-file", "version", "ports", "sample-config", "skill",
         }
         # subparsers are stored in the _subparsers action
         subparser_actions = [
@@ -228,33 +228,6 @@ class PortsSubcommandTests(unittest.TestCase):
     def test_ports_json(self):
         args = self.parser.parse_args(["ports", "--json"])
         self.assertTrue(args.json)
-
-
-class UpdateSubcommandTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.parser = build_parser()
-
-    def test_update_defaults(self):
-        args = self.parser.parse_args(["update"])
-        self.assertFalse(args.force)
-        self.assertFalse(args.release)
-        self.assertIsNone(args.branch)
-        self.assertIsNone(args.tag)
-        self.assertIsNone(args.ref)
-
-    def test_update_release(self):
-        args = self.parser.parse_args(["update", "--release"])
-        self.assertTrue(args.release)
-
-    def test_update_branch(self):
-        args = self.parser.parse_args(["update", "--branch", "main"])
-        self.assertEqual(args.branch, "main")
-
-    def test_update_mutually_exclusive(self):
-        """--branch and --release cannot be combined."""
-        with self.assertRaises(SystemExit):
-            self.parser.parse_args(["update", "--branch", "main", "--release"])
 
 
 if __name__ == "__main__":

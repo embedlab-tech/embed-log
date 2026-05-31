@@ -138,9 +138,21 @@ def _run_sessions(argv: list[str]) -> int:
     )
 
     p_open = sub.add_parser(
-        "open", parents=[shared], help="open session HTML in the default browser"
+        "open", parents=[shared], help="open session HTML in the default browser",
+        epilog=(
+            "Examples:\n"
+            "  sessions open                       open latest session\n"
+            "  sessions open <session-id>          open specific session\n"
+            "  sessions open <session-id> marker N  open and jump to marker N\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p_open.add_argument("session_id")
+    p_open.add_argument(
+        "session_id",
+        nargs="?",
+        default=None,
+        help="session ID or short alias (default: latest session)",
+    )
     p_open.add_argument("open_args", nargs="*", help="optional: specify marker N to jump to a marker (e.g. marker 2)")
 
     # ── delete ──

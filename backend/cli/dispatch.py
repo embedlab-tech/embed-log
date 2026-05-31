@@ -13,7 +13,6 @@ from .diagnostics import _display_version_line, _run_ports, _run_version
 from .run import _run_merge, _run_run
 from .demo import _run_demo
 from .sample_config import _run_sample_config
-from .update import _run_update
 from ..file_tail_udp import run_tail_file
 from ..parse import run_parse
 
@@ -95,8 +94,6 @@ def main(argv: list[str] | None = None) -> int:
             return _run_version(args)
         case "ports":
             return _run_ports(args)
-        case "update":
-            return _run_update(args)
         case "sessions":
             return _run_sessions(argv[1:])
         case "skill":

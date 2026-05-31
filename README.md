@@ -19,7 +19,7 @@ One command, no clone needed — installs the **latest tagged release**:
 curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.sh | bash
 ```
 
-Windows (PowerShell):
+Windows (PowerShell 7+):
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.ps1'))
@@ -52,7 +52,14 @@ Uninstall:
 curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/uninstall.sh | bash
 ```
 
-Windows (PowerShell):
+### Fonts
+
+The UI defaults to **JetBrains Mono** (a Nerd Font). If it's not installed,
+the browser falls back through:
+`ui-monospace` → `SFMono-Regular` (macOS) → `Menlo` → `Monaco`
+→ `Consolas` (Windows) → `'Courier New'` → `monospace`
+
+Windows (PowerShell 7+):
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/krezolekcoder/embed-log/main/uninstall.ps1'))

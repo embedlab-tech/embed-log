@@ -29,6 +29,7 @@ class SessionExporter:
         self._merge_script = Path(merge_script) if merge_script else (Path(__file__).resolve().parents[2] / "utils" / "merge_logs.py")
         self._python = python_executable or sys.executable
         self._lock = threading.Lock()
+
     def set_first_log_at(self, first_log_at: str | None) -> None:
         self._first_log_at = first_log_at
 
@@ -58,7 +59,9 @@ class SessionExporter:
                     pane_label = pane_labels.get(pane, self._source_labels.get(pane, pane))
                     cmd.extend([f"{pane}={pane_label}", file_path])
             cmd.extend(["--output", str(self._session_html_path)])
-
+            markers_path = self._session_html_path.parent / "markers.json"
+            if markers_path.is_file():
+                cmd.extend(["--markers-file", str(markers_path)])
             try:
                 proc = subprocess.run(cmd, capture_output=True, text=True)
                 if proc.returncode != 0:

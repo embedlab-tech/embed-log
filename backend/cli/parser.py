@@ -293,29 +293,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--json", action="store_true", help="machine-readable JSON output")
 
-    # ── update ──
-    p = sub.add_parser(
-        "update",
-        help="update embed-log from its recorded install source",
-        description="Update embed-log by re-running the appropriate installer.",
-        epilog=(
-            "Examples:\n"
-            "  embed-log update\n"
-            "  embed-log update --release\n"
-            "  embed-log update --branch main\n"
-            "  embed-log update --tag v1.0.1\n"
-            "  embed-log update --ref abc1234\n"
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    p.add_argument("--force", action="store_true",
-                   help="force the underlying installer path when supported")
-    source = p.add_mutually_exclusive_group()
-    source.add_argument("--branch", help="update from a specific branch")
-    source.add_argument("--tag", help="update from a specific tag")
-    source.add_argument("--ref", help="update from a specific commit or git ref")
-    source.add_argument("--release", action="store_true",
-                        help="update to the latest GitHub release tag")
     # ── merge ──
     p = sub.add_parser(
         "merge",

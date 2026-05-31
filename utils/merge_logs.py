@@ -35,6 +35,7 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
 
 def _slug(label: str) -> str:
     """Convert a display label to a safe HTML element-ID slug."""
@@ -470,6 +471,7 @@ def generate_html(
     *,
     timestamp_mode: str = "absolute",
     first_log_at: str | None = None,
+    markers_file: str | None = None,
 ) -> str:
     """
     tab_specs: [
@@ -485,6 +487,16 @@ def generate_html(
             log_data[pane_id] = entries
             print(f"  [{tab['label']}] {pane_label!r}: {len(entries)} lines  ({file_path})")
 
+    # Load markers from markers.json if provided
+    markers_list: list[dict] = []
+    if markers_file:
+        try:
+            markers_path = Path(markers_file)
+            if markers_path.is_file():
+                markers_data = json.loads(markers_path.read_text(encoding="utf-8"))
+                markers_list = markers_data.get("markers", [])
+        except (json.JSONDecodeError, OSError):
+            pass
     effective_first_log_at = _enrich_timestamp_variants(
         log_data,
         timestamp_mode=timestamp_mode,
@@ -592,6 +604,18 @@ def generate_html(
     }}
 
     PANES.forEach(_loadPane);
+
+    var _markers = {json.dumps(markers_list, ensure_ascii=False)};
+    if (_markers.length) {{
+        state.markers = {{}};
+        _markers.forEach(function (m) {{
+            if (!m.paneId) return;
+            state.markers[m.paneId] = state.markers[m.paneId] || [];
+            state.markers[m.paneId].push(m);
+        }});
+        if (typeof applyMarkers === "function") applyMarkers();
+        if (typeof window.__embedLogOnMarkers === "function") window.__embedLogOnMarkers();
+    }}
 }})();""")
 
     return f"""<!DOCTYPE html>
@@ -738,6 +762,11 @@ def main():
         default=None,
         help="Absolute ISO timestamp of the first log line; enables absolute/relative conversion in static replay",
     )
+    parser.add_argument(
+        "--markers-file",
+        default=None,
+        help="Path to markers.json; embedded markers will be navigable in the exported viewer",
+    )
     args = parser.parse_args()
 
     tab_specs = []
@@ -763,6 +792,7 @@ def main():
         tab_specs,
         timestamp_mode=args.timestamp_mode,
         first_log_at=args.first_log_at,
+        markers_file=args.markers_file,
     )
 
     with open(args.output, "w", encoding="utf-8") as fh:

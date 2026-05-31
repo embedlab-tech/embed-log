@@ -2,6 +2,7 @@ import io
 import json
 import sys
 import tempfile
+from unittest.mock import patch
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -401,6 +402,56 @@ class SessionsCommandTests(unittest.TestCase):
         rc = _run_sessions(["export", "nonexistent", "--log-dir", str(self.log_dir)])
         self.assertEqual(rc, 1)
 
+    # -- open --
+
+    def test_open_explicit_session(self):
+        """Open with an explicit session_id that has HTML."""
+        html = self.sess_dir / "session.html"
+        html.write_text("<html></html>", encoding="utf-8")
+        with patch("webbrowser.open") as mock_open:
+            rc = _run_sessions(["open", "2026-01-01_00-00-00", "--log-dir", str(self.log_dir)])
+        self.assertEqual(rc, 0)
+        mock_open.assert_called_once()
+
+    def test_open_no_html(self):
+        """Open with an explicit session_id that has no HTML."""
+        rc = _run_sessions(["open", "2026-01-01_00-00-00", "--log-dir", str(self.log_dir)])
+        self.assertEqual(rc, 1)
+
+    def test_open_nonexistent_session(self):
+        rc = _run_sessions(["open", "nonexistent", "--log-dir", str(self.log_dir)])
+        self.assertEqual(rc, 1)
+
+    def test_open_latest_with_html(self):
+        """Open with no session_id resolves to latest session with HTML."""
+        # setUp created 2026-01-01_00-00-00; add a newer one with HTML
+        new_dir = self.log_dir / "2026-01-02_00-00-00"
+        new_dir.mkdir(parents=True, exist_ok=True)
+        (new_dir / "manifest.json").write_text(
+            '{"session_id":"2026-01-02_00-00-00","tabs":[],"source_files":{}}',
+            encoding="utf-8",
+        )
+        (new_dir / "session.html").write_text("<html></html>", encoding="utf-8")
+        with patch("webbrowser.open") as mock_open:
+            rc = _run_sessions(["open", "--log-dir", str(self.log_dir)])
+        self.assertEqual(rc, 0)
+        mock_open.assert_called_once()
+
+    def test_open_latest_no_sessions(self):
+        """Open with no session_id when no sessions exist."""
+        rc = _run_sessions(["open", "--log-dir", "/tmp/nonexistent"])
+        self.assertEqual(rc, 1)
+
+    def test_open_latest_missing_html(self):
+        """Open with no session_id when latest session has no HTML."""
+        new_dir = self.log_dir / "2026-01-02_00-00-00"
+        new_dir.mkdir(parents=True, exist_ok=True)
+        (new_dir / "manifest.json").write_text(
+            '{"session_id":"2026-01-02_00-00-00","tabs":[],"source_files":{}}',
+            encoding="utf-8",
+        )
+        rc = _run_sessions(["open", "--log-dir", str(self.log_dir)])
+        self.assertEqual(rc, 1)
     # -- dispatch via main --
 
     def test_dispatch_from_main(self):
