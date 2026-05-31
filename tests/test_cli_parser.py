@@ -22,7 +22,7 @@ class ParserStructureTests(unittest.TestCase):
     def test_subcommands_present(self):
         """All expected subcommands must be registered."""
         expected = {
-            "create-config", "validate", "run", "merge", "parse",
+            "run", "demo", "sessions", "merge", "parse",
             "tail-file", "version", "ports", "update",
         }
         # subparsers are stored in the _subparsers action
@@ -37,14 +37,6 @@ class ParserStructureTests(unittest.TestCase):
         # Check that all expected commands are present
         for cmd in expected:
             self.assertIn(cmd, choices, f"subcommand {cmd!r} not found in parser")
-
-    def test_version_alias_doctor(self):
-        """'version' subcommand should also accept 'doctor' as alias."""
-        args = self.parser.parse_args(["version"])
-        self.assertEqual(args.command, "version")
-        args2 = self.parser.parse_args(["doctor"])
-        self.assertEqual(args2.command, "doctor")
-
 
 class RunSubcommandTests(unittest.TestCase):
     """Test 'run' subcommand argument parsing."""
@@ -148,40 +140,6 @@ class RunSubcommandTests(unittest.TestCase):
     def test_run_job_id(self):
         args = self.parser.parse_args(["run", "--job-id", "GH-12345"])
         self.assertEqual(args.job_id, "GH-12345")
-
-
-class ValidateSubcommandTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.parser = build_parser()
-
-    def test_validate_defaults(self):
-        args = self.parser.parse_args(["validate"])
-        self.assertEqual(args.config, "embed-log.yml")
-        self.assertFalse(args.json)
-
-    def test_validate_json(self):
-        args = self.parser.parse_args(["validate", "--json"])
-        self.assertTrue(args.json)
-
-
-class CreateConfigSubcommandTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.parser = build_parser()
-
-    def test_defaults(self):
-        args = self.parser.parse_args(["create-config"])
-        self.assertEqual(args.output, "embed-log.yml")
-        self.assertFalse(args.force)
-
-    def test_force(self):
-        args = self.parser.parse_args(["create-config", "--force"])
-        self.assertTrue(args.force)
-
-    def test_output(self):
-        args = self.parser.parse_args(["create-config", "-o", "custom.yml"])
-        self.assertEqual(args.output, "custom.yml")
 
 
 class MergeSubcommandTests(unittest.TestCase):

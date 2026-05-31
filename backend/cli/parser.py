@@ -13,8 +13,6 @@ def build_parser() -> argparse.ArgumentParser:
         description="embed-log — collect UART/UDP logs and view them in a browser UI.",
         epilog=(
             "Common workflow:\n"
-            "  embed-log create-config\n"
-            "  embed-log validate --config embed-log.yml\n"
             "  embed-log run --config embed-log.yml\n"
             "  embed-log sessions list\n"
             "\n"
@@ -23,46 +21,6 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sub = parser.add_subparsers(dest="command", metavar="COMMAND")
-
-    # ── create-config ──
-    p = sub.add_parser(
-        "create-config",
-        help="interactively create a config file",
-        description="Interactively create an embed-log YAML config.",
-        epilog=(
-            "Examples:\n  embed-log create-config\n  embed-log create-config --force\n"
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    p.add_argument(
-        "--output",
-        "-o",
-        default="embed-log.yml",
-        help="output config path (default: embed-log.yml)",
-    )
-    p.add_argument(
-        "--force", action="store_true", help="overwrite if file already exists"
-    )
-
-    # ── validate ──
-    p = sub.add_parser(
-        "validate",
-        help="validate a config file",
-        description="Validate an embed-log YAML config file.",
-        epilog=(
-            "Examples:\n"
-            "  embed-log validate --config embed-log.yml\n"
-            "  embed-log validate --json\n"
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    p.add_argument(
-        "--config",
-        "-c",
-        default="embed-log.yml",
-        help="config file path (default: embed-log.yml)",
-    )
-    p.add_argument("--json", action="store_true", help="machine-readable JSON output")
 
     # ── run ──
     p = sub.add_parser(
@@ -223,32 +181,46 @@ def build_parser() -> argparse.ArgumentParser:
         dest="job_id",
         help="CI/job identifier for session naming",
     )
-
-    # ── merge ──
+    from .demo import add_subparser
+    add_subparser(sub)
+    # ── sessions ──
     p = sub.add_parser(
-        "merge",
-        help="merge raw logs into static HTML",
-        description="Merge raw log files into a standalone static HTML file.",
+        "sessions",
+        help="list, inspect, and export session artifacts",
+        description="Manage embed-log session artifacts (list, info, export, logs).",
         epilog=(
             "Examples:\n"
-            '  embed-log merge --tab "My Tab" SENSOR_A sensor.log\n'
-            '  embed-log merge --tab "My Tab" SENSOR_A sensor.log --output merged.html\n'
+            "  embed-log sessions list\n"
+            "  embed-log sessions list --json\n"
+            "  embed-log sessions info <session-id>\n"
+            "  embed-log sessions export <session-id>\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument(
-        "--tab",
-        nargs="+",
-        action="append",
-        metavar="ARG",
-        required=True,
-        help="TAB_LABEL PANE_LABEL FILE [PANE_LABEL FILE] (repeatable)",
+    # ── skill ──
+    p = sub.add_parser(
+        "skill",
+        help="list and export built-in skills for agent workflows",
+        description=(
+            "List and export built-in skill markdown files.\n"
+            "\n"
+            "Skills describe workflows an agent or user can follow.\n"
+            "Use `skill show <name>` to print the markdown to stdout.\n"
+            "\n"
+            "Agents: capture the output of `skill show <name>`\n"
+            "and inject it as context — no source checkout needed."
+        ),
+        epilog=(
+            "Examples:\n"
+            "  embed-log skill list\n"
+            "  embed-log skill show sessions\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument(
-        "--output",
-        default="merged.html",
-        help="output HTML file path (default: merged.html)",
-    )
+
+    # ── sample-config ──
+    from .sample_config import add_subparser as add_sample_config_subparser
+    add_sample_config_subparser(sub)
 
     # ── parse ──
     p = sub.add_parser(
@@ -298,7 +270,6 @@ def build_parser() -> argparse.ArgumentParser:
     # ── version ──
     p = sub.add_parser(
         "version",
-        aliases=["doctor"],
         help="show version and environment information",
         description="Show version, environment, and config information.",
         epilog=(
@@ -345,5 +316,30 @@ def build_parser() -> argparse.ArgumentParser:
     source.add_argument("--ref", help="update from a specific commit or git ref")
     source.add_argument("--release", action="store_true",
                         help="update to the latest GitHub release tag")
+    # ── merge ──
+    p = sub.add_parser(
+        "merge",
+        help="merge raw logs into static HTML",
+        description="Merge raw log files into a standalone static HTML file.",
+        epilog=(
+            "Examples:\n"
+            '  embed-log merge --tab "My Tab" SENSOR_A sensor.log\n'
+            '  embed-log merge --tab "My Tab" SENSOR_A sensor.log --output merged.html\n'
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument(
+        "--tab",
+        nargs="+",
+        action="append",
+        metavar="ARG",
+        required=True,
+        help="TAB_LABEL PANE_LABEL FILE [PANE_LABEL FILE] (repeatable)",
+    )
+    p.add_argument(
+        "--output",
+        default="merged.html",
+        help="output HTML file path (default: merged.html)",
+    )
 
     return parser

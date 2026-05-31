@@ -1,0 +1,31 @@
+# Single-tab, dual-pane config
+# Shows two UART sources side-by-side in one tab.
+
+version: 1
+
+server:
+  host: 127.0.0.1
+  ws_port: 8080
+  app_name: embed-log
+  open_browser: false
+  timestamp_mode: absolute
+
+logs:
+  dir: logs/
+
+baudrate: 115200
+
+sources:
+  - name: DUT
+    type: uart
+    port: /dev/ttyUSB0
+    inject_port: 5001
+
+  - name: AUX
+    type: uart
+    port: /dev/ttyUSB1
+    inject_port: 5002
+
+tabs:
+  - label: Devices
+    panes: [DUT, AUX]

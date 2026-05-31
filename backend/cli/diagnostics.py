@@ -6,9 +6,40 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from serial.tools import list_ports
 
 from ..config import ConfigError, load_config
-from .wizard import _detected_serial_ports
+
+def _detected_serial_ports() -> list[dict[str, str]]:
+    ports = []
+    for info in list_ports.comports():
+        device = (info.device or "").strip()
+        if not device:
+            continue
+        desc = (info.description or "").strip()
+        if device.startswith("/dev/tty.") and "/dev/cu." + device.split("/dev/tty.", 1)[
+            1
+        ] not in {p["device"] for p in ports}:
+            continue
+        ports.append({"device": device, "label": desc})
+
+    def _sort_key(item: dict[str, str]) -> tuple[int, str]:
+        device = item["device"]
+        if device.startswith("COM"):
+            return (0, device)
+        if device.startswith("/dev/cu."):
+            return (1, device)
+        return (2, device)
+
+    ports.sort(key=_sort_key)
+    seen = set()
+    unique = []
+    for port in ports:
+        if port["device"] in seen:
+            continue
+        seen.add(port["device"])
+        unique.append(port)
+    return unique
 
 
 def _display_source_label(source_kind: str, ref_type: str, ref: str, local_path: str) -> str:

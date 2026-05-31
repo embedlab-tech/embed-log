@@ -8,9 +8,11 @@ from pathlib import Path
 from .parser import build_parser
 
 from .sessions import _run_sessions
+from .skill import _run_skill
 from .diagnostics import _display_version_line, _run_ports, _run_version
-from .wizard import _run_create_config
-from .run import _run_merge, _run_run, _run_validate
+from .run import _run_merge, _run_run
+from .demo import _run_demo
+from .sample_config import _run_sample_config
 from .update import _run_update
 from ..file_tail_udp import run_tail_file
 from ..parse import run_parse
@@ -26,7 +28,6 @@ def main(argv: list[str] | None = None) -> int:
         if cfg_path.exists():
             print("Config found: embed-log.yml")
             print("")
-            print("  embed-log validate --config embed-log.yml")
             print("  embed-log run --config embed-log.yml")
             print("")
             print("  embed-log --help             all options")
@@ -39,13 +40,16 @@ def main(argv: list[str] | None = None) -> int:
                 "  embed-log run --config embed-log.yml    (if you already have a config)"
             )
             print("")
-            print("  embed-log create-config                 (otherwise, create one)")
             print("")
             print("  embed-log --help                        all options")
             print("")
             print("Development (run from source):")
             print("  python3 -m backend.server <command>")
         return 0
+
+    # ── skill uses its own internal sub-sub-parsers ──
+    if argv[0] == "skill":
+        return _run_skill(argv[1:])
 
     # ── sessions uses its own internal sub-sub-parsers ──
     if argv[0] == "sessions":
@@ -75,24 +79,28 @@ def main(argv: list[str] | None = None) -> int:
 
     # Dispatch based on parsed subcommand
     match args.command:
-        case "create-config":
-            return _run_create_config(args)
-        case "validate":
-            return _run_validate(args)
         case "run":
             return _run_run(args)
+        case "demo":
+            return _run_demo(args)
+        case "sample-config":
+            return _run_sample_config(args)
         case "merge":
             return _run_merge(args)
         case "parse":
             return run_parse(argv[1:])  # keep old parse signature
         case "tail-file":
             return run_tail_file(args)
-        case "version" | "doctor":
+        case "version":
             return _run_version(args)
         case "ports":
             return _run_ports(args)
         case "update":
             return _run_update(args)
+        case "sessions":
+            return _run_sessions(argv[1:])
+        case "skill":
+            return _run_skill(argv[1:])
         case _:
             parser.print_help()
             return 0

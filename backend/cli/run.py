@@ -1,50 +1,15 @@
-"""Run/validate/merge subcommand handlers."""
+"""Run/merge subcommand handlers."""
 
 from __future__ import annotations
 
 import argparse
-import json
 import logging
-import subprocess
 import sys
 from pathlib import Path
 
 from ..app import DEFAULT_WS_UI, build_source, parse_source, run_app
 from ..config import AppConfig, ConfigError, load_config
 from ..sources import LogSource
-
-
-def _run_validate(args: argparse.Namespace) -> int:
-    try:
-        cfg = load_config(args.config)
-    except ConfigError as exc:
-        if args.json:
-            print(json.dumps({"ok": False, "error": str(exc), "config": args.config}))
-        else:
-            print(f"Config INVALID: {exc}", file=sys.stderr)
-        return 2
-
-    if args.json:
-        print(
-            json.dumps(
-                {
-                    "ok": True,
-                    "config": args.config,
-                    "sources": len(cfg.sources),
-                    "injects": len(cfg.injects),
-                    "forwards": len(cfg.forwards),
-                    "tabs": len(cfg.tabs),
-                }
-            )
-        )
-        return 0
-
-    print("Config OK")
-    print(f"  sources: {len(cfg.sources)}")
-    print(f"  injects: {len(cfg.injects)}")
-    print(f"  forwards: {len(cfg.forwards)}")
-    print(f"  tabs: {len(cfg.tabs)}")
-    return 0
 
 
 def _run_merge(args: argparse.Namespace) -> int:

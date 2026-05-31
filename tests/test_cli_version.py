@@ -58,7 +58,7 @@ class VersionCommandTests(unittest.TestCase):
             try:
                 import os
                 os.chdir(cwd)
-                for command in ("version", "doctor"):
+                for command in ("version",):
                     buf = io.StringIO()
                     with redirect_stdout(buf):
                         rc = main([command])
