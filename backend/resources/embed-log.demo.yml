@@ -1,0 +1,66 @@
+# Default demo config for embed-log
+# Layout:
+#   DevA    → DEVICE_A (DUT) + HOST (test controller)
+#   DevB    → AUX (auxiliary monitor)
+#   PYTEST  → PYTEST (test execution)
+#   cbor-tab → CBOR (structured diagnostics)
+
+version: 1
+
+server:
+  host: 127.0.0.1
+  ws_port: 8080
+  app_name: embed-log
+  open_browser: true
+  default_light_theme: whitesand
+  default_dark_theme: one-dark
+  verbose: false
+  timestamp_mode: relative
+
+logs:
+  dir: logs/
+
+sources:
+  - name: SENSOR_A
+    label: DEVICE_A
+    type: udp
+    port: 6000
+    inject_port: 5001
+
+  - name: SENSOR_B
+    label: HOST
+    type: udp
+    port: 6001
+    inject_port: 5002
+
+  - name: SENSOR_C
+    label: AUX
+    type: udp
+    port: 6002
+    inject_port: 5003
+
+  - name: SENSOR_D
+    label: PYTEST
+    type: udp
+    port: 6004
+    inject_port: 5004
+
+  - name: SENSOR_CBOR
+    label: CBOR
+    type: udp
+    port: 6003
+    parser:
+      type: cbor-datagram
+
+tabs:
+  - label: DevA
+    panes: [SENSOR_A, SENSOR_B]
+
+  - label: DevB
+    panes: [SENSOR_C]
+
+  - label: PYTEST
+    panes: [SENSOR_D]
+
+  - label: cbor-tab
+    panes: [SENSOR_CBOR]

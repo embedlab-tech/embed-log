@@ -19,8 +19,16 @@ WS_PORT = 8080
 ALL_PORTS = INJECT_PORTS + UDP_PORTS + [WS_PORT]
 
 ROOT = Path(__file__).resolve().parents[2]
-DEMO_CONFIG = ROOT / "embed-log.demo.yml"
 DEMO_UTILS = ROOT / "utils"
+
+
+def _resolve_demo_config() -> Path | None:
+    from . import _resolve_bundled_file
+
+    return _resolve_bundled_file(
+        "embed-log.demo.yml",
+        packaged_relative="embed-log.demo.yml",
+    )
 
 
 def _port_in_use(port: int, proto: str = "tcp") -> bool:
@@ -105,9 +113,10 @@ class DemoRunner:
 
     def run(self) -> int:
         """Start the demo and wait for it to finish."""
-        if not DEMO_CONFIG.is_file():
-            print(f"Demo config not found: {DEMO_CONFIG}", file=sys.stderr)
-            print("Run from the repository root or ensure embed-log.demo.yml exists.", file=sys.stderr)
+        demo_config = _resolve_demo_config()
+        if demo_config is None:
+            print("Demo config not found.", file=sys.stderr)
+            print("Ensure embed-log.demo.yml is bundled or run from the repository root.", file=sys.stderr)
             return 1
 
         # ── Port cleanup ──
@@ -120,7 +129,7 @@ class DemoRunner:
         python = sys.executable
         server_cmd = [
             python, str(ROOT / "backend" / "server.py"),
-            "run", "--config", str(DEMO_CONFIG),
+            "run", "--config", str(demo_config),
             "--ws-port", str(WS_PORT),
         ]
         if self.args.no_browser:

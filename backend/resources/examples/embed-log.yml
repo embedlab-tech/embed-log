@@ -1,0 +1,44 @@
+version: 1
+
+server:
+  host: 127.0.0.1
+  ws_port: 8080
+  app_name: embed-log
+  open_browser: false
+  verbose: false
+  # optional: include CI/job id in session and log naming
+  # job_id: GH-12345
+
+logs:
+  dir: logs/
+
+# Optional global UART baudrate for uart sources without explicit per-source baudrate
+baudrate: 115200
+
+sources:
+  - name: FTDI_A
+    label: DUT
+    type: uart
+    port: /dev/ttyFTDI_A
+    inject_port: 5001
+
+  - name: FTDI_B
+    label: AUX
+    type: uart
+    port: /dev/ttyFTDI_B
+    inject_port: 5002
+
+  - name: PYTEST
+    label: PYTEST
+    type: udp
+    port: 6000
+    inject_port: 5003
+    # optional: mirror raw RX lines to one or more read-only TCP forward ports
+    # forward_ports: [7001]
+
+tabs:
+  - label: Devices
+    panes: [FTDI_A, FTDI_B]
+
+  - label: Pytest
+    panes: [PYTEST]
