@@ -62,8 +62,7 @@ benchmarks/serial_stress.py
 1. The benchmark starts one TCP server per source on ephemeral ports.
 2. A temporary YAML config is generated pointing each source at
    `socket://127.0.0.1:<port>`.
-3. The embed-log backend is launched as a subprocess (`python -u -m backend.cli run
-   --config <config>`).
+3. The embed-log backend is launched as a subprocess (`embed-log run` or `python -m backend.server run`
 4. Once all backend connections are detected, each producer sends
    deterministic numbered frames at the configured rate.
 5. After the test duration, producers are stopped and a drain wait gives

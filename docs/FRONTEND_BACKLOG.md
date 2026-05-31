@@ -11,7 +11,7 @@ Prioritized frontend/UI backlog distilled from current UI notes and E2E backlog.
    - keyboard shortcut Ctrl/Cmd+C always copies exact (predictable)
    - source labels (`[SENSOR_A]`) shown consistently in all output formats
 
-2. ~~Cross-tab sync persistence~~ **Works — click syncs, tab switch follows. E2E coverage optional.**
+2. ~~Cross-tab sync persistence~~ **Works — click syncs, tab switch follows.**
    - click in one pane/tab,
    - switch tabs,
    - verify sync lands near same tick in the other tab.
@@ -25,32 +25,32 @@ Prioritized frontend/UI backlog distilled from current UI notes and E2E backlog.
    - repeated Export captures more log lines on each invocation
    - E2E test verifies second export has more `[SENSOR_A]...TEST` lines than the first
 
-5. Stronger session-rotation stale-line guard
+5. ~~UNWRAP virtual single-pane presentation mode~~ **Done**
+   - toolbar toggle unwraps grouped tabs into one tab per pane
+   - preserves log content across toggle
+   - no "+" button in unwrap mode
+   - config (TABS/PANES) is never mutated
+
+6. Stronger session-rotation stale-line guard
    - verify multiple old lines are gone after rotation,
    - verify fresh lines arrive on all panes.
 
 ## Medium priority
 
-6. Sessions list ordering and metadata coverage
+7. Sessions list ordering and metadata coverage
    - current marker,
    - newest-first ordering,
    - valid manifest/html links.
 
-7. Export during active traffic
+8. Export during active traffic
    - ensure consistency while stream is still live.
 
-8. Clipboard normalization and overlapping-range behavior
+9. Clipboard normalization and overlapping-range behavior
    - deterministic copy output,
    - no broken boundary handling.
 
-9. Clear-cache UX verification
-   - layout/filter/session cache should reset cleanly.
-
-10. ~~UNWRAP virtual single-pane presentation mode~~ **Done**
-    - toolbar toggle unwraps grouped tabs into one tab per pane
-    - preserves log content across toggle
-    - no "+" button in unwrap mode
-    - config (TABS/PANES) is never mutated
+10. Clear-cache UX verification
+    - layout/filter/session cache should reset cleanly.
 
 ## Lower priority / future work
 
@@ -75,3 +75,10 @@ Prioritized frontend/UI backlog distilled from current UI notes and E2E backlog.
 - clean session rotation basics
 - sessions popup basics
 - shared page error guard
+- CBOR decoder rendering
+- layout sync / time synchronization across panes
+- timestamp toggle (absolute / relative)
+- filter keyboard interaction
+- relative time in replay
+- clipboard content matching
+- export replay consistency

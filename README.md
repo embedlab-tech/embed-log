@@ -7,7 +7,6 @@ It reads logs from UART and UDP sources, stores them in per-session artifacts, a
 
 Read these in order:
 - `AGENTS.md` — fast repo orientation for humans and coding agents
-- `DEVELOPMENT.md` — working from the source tree
 - `docs/ARCHITECTURE.md` — end-to-end system flow
 - `docs/BACKEND.md` / `docs/FRONTEND.md` — subsystem details
 - `docs/TESTING.md` — test strategy and commands
@@ -67,8 +66,6 @@ source .venv/bin/activate
 pip install -r requirements.txt
 pip install -e .
 ```
-
-See `DEVELOPMENT.md` for the full development workflow — running from source, testing, debugging.
 
 ## Run with a config file
 
@@ -224,7 +221,7 @@ embed-log sessions export <session-id>
 embed-log sessions marker list <session-id> --search boot
 ```
 
-Full documentation with all flags and examples is at `docs/SESSIONS_CLI_SKILL.md`.
+Full documentation with all flags and examples is at `backend/skills/sessions.md` (also available via `read skill://sessions`).
 
 
 ## Testing

@@ -22,7 +22,6 @@ Use the files below as the canonical entry points.
 - `INSTALL.md` — installation details
 - `MERGE_LOGS.md` — offline merge/export behavior
 - `SAMPLE_COMMANDS.md` — command cookbook
-- `../tests_backlog.md` — detailed working UI/E2E backlog notebook
 
 ## Canonical agent entry point
 
