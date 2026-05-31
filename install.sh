@@ -42,10 +42,14 @@ die() {
 
 _write_version() {
   local dir="$1" sha="$2"
+  # Read version from the source pyproject.toml (matches the fetched ref)
+  local version
+  version=$(grep -E '^version = ' "$dir/pyproject.toml" 2>/dev/null | sed 's/^version = "\(.*\)"/\1/')
+  [ -n "$version" ] || version="0.0.0"
   cat > "$dir/backend/_version.py" <<VERSION_EOF
 # Auto-generated. Do not edit manually.
 # Install scripts populate __commit__ before pipx install.
-__version__ = "1.0.1"
+__version__ = "$version"
 __commit__ = "$sha"
 VERSION_EOF
 }
