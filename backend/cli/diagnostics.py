@@ -62,7 +62,7 @@ def _load_install_identity() -> tuple[str, str, str, str, str, str]:
     try:
         from .._version import __version__, __commit__
     except ImportError:
-        __version__, __commit__ = "1.0.1", "unknown"
+        __version__, __commit__ = "1.1.3", "unknown"
     try:
         from .._install_source import (
             __local_path__ as local_path,

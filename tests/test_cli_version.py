@@ -28,13 +28,13 @@ class VersionCommandTests(unittest.TestCase):
         buf = io.StringIO()
         with patch(
             "backend.cli.diagnostics._load_install_identity",
-            return_value=("1.0.1", "abc1234", "branch", "branch", "cli-version", ""),
+            return_value=("1.1.3", "abc1234", "branch", "branch", "cli-version", ""),
         ):
             with redirect_stdout(buf):
                 rc = _run_version(args)
         self.assertEqual(rc, 0)
         text = buf.getvalue()
-        self.assertIn("[OK] version: 1.0.1", text)
+        self.assertIn("[OK] version: 1.1.3", text)
         self.assertIn("[OK] source: branch cli-version", text)
         self.assertIn("[OK] commit: abc1234", text)
 
@@ -69,11 +69,11 @@ class VersionCommandTests(unittest.TestCase):
 
     def test_main_version_flag_shows_source_and_commit(self):
         buf = io.StringIO()
-        with patch("backend.cli.dispatch._display_version_line", return_value="embed-log 1.0.1 (branch:cli-version, abc1234)"):
+        with patch("backend.cli.dispatch._display_version_line", return_value="embed-log 1.1.3 (branch:cli-version, abc1234)"):
             with redirect_stdout(buf):
                 rc = main(["--version"])
         self.assertEqual(rc, 0)
-        self.assertEqual(buf.getvalue().strip(), "embed-log 1.0.1 (branch:cli-version, abc1234)")
+        self.assertEqual(buf.getvalue().strip(), "embed-log 1.1.3 (branch:cli-version, abc1234)")
 
 
 if __name__ == "__main__":
