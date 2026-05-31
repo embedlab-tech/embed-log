@@ -14,6 +14,12 @@ test.describe('CBOR decoder demo', () => {
     expect(errors).toEqual([]);
   });
 
+// Scenario: CBOR tab shows structured key=value pairs
+//   Given the user navigates to the app and connects
+//   When  the user switches to the CBOR tab
+//   Then  decoded lines contain key=value pairs like src=SENSOR_CBOR and kind=sync
+//   And   no raw CBOR binary bytes leak through
+
   test('cbor-tab shows CBOR-decoded lines with key=value pairs', async ({ page }) => {
     await page.goto('/');
 
@@ -43,6 +49,11 @@ test.describe('CBOR decoder demo', () => {
     }
   });
 
+// Scenario: CBOR-decoded lines appear in exported HTML preserving parser output
+//   Given CBOR-decoded lines are visible in the CBOR tab
+//   When  the user exports the full session as HTML
+//   Then  the exported file contains CBOR-decoded text (src=SENSOR_CBOR, kind=sync)
+//   And   no raw CBOR binary bytes appear in the export
   test('CBOR-decoded lines appear in exported HTML', async ({ page }, testInfo) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });

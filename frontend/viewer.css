@@ -443,91 +443,6 @@ body.alt-held .log-line {
 }
 .log-line .ts.hidden { display: none; }
 
-/* Clipboard accumulation indicator */
-#clip-indicator {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 11px;
-    padding: 3px 8px;
-    border-radius: 3px;
-    border: 1px solid var(--accent);
-    color: var(--accent);
-}
-#clip-indicator .clip-sep { opacity: 0.4; }
-#clip-indicator .clip-count {
-    cursor: pointer;
-}
-#clip-indicator .clip-count:hover {
-    text-decoration: underline;
-}
-#clip-indicator .clip-peek,
-#clip-indicator .clip-clear {
-    background: none;
-    border: none;
-    color: var(--accent);
-    padding: 0;
-    font-size: 11px;
-    cursor: pointer;
-    opacity: 0.7;
-}
-#clip-indicator .clip-peek:hover,
-#clip-indicator .clip-clear:hover { opacity: 1; border: none; }
-#clip-indicator .clip-peek:disabled {
-    opacity: 0.35;
-    cursor: default;
-}
-
-/* Clipboard peek popup */
-#clip-peek-menu {
-    position: fixed;
-    z-index: 1100;
-    min-width: 320px;
-    max-width: min(70vw, 900px);
-    max-height: 60vh;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--panel);
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
-    display: none;
-}
-#clip-peek-menu.open { display: block; }
-#clip-peek-menu .clip-peek-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 8px 10px;
-    border-bottom: 1px solid var(--border);
-    color: var(--accent);
-    font-size: 12px;
-}
-#clip-peek-menu .clip-peek-copyall {
-    background: none;
-    border: 1px solid var(--border);
-    color: var(--accent);
-    border-radius: 4px;
-    padding: 2px 8px;
-    font-size: 11px;
-}
-#clip-peek-menu .clip-peek-copyall:hover {
-    border-color: var(--accent);
-}
-#clip-peek-menu .clip-peek-copyall:disabled {
-    opacity: 0.45;
-    cursor: default;
-}
-#clip-peek-menu .clip-peek-body {
-    margin: 0;
-    padding: 10px;
-    max-height: calc(60vh - 36px);
-    overflow: auto;
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-size: 12px;
-    line-height: 1.45;
-}
-
 /* Line selection — drag along .ts gutter */
 .log-line.selected {
     background: var(--selection);
@@ -544,6 +459,7 @@ body.alt-held .log-line {
     align-items: flex-end;
     gap: 4px;
     z-index: 10;
+    isolation: isolate;
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.15s;

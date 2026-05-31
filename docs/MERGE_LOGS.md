@@ -63,6 +63,15 @@ If display labels repeat across tabs, use explicit pane ids, e.g. `--tab "A" "re
 ### `--output`
 
 Output file path. Defaults to `merged.html`.
+lz|### `--timestamp-mode`
+
+ok|Timestamp display mode in the generated HTML viewer. Defaults to `absolute`. Set to `relative` to show `T+HH:MM:SS.mmm` elapsed time instead.
+
+ir|### `--first-log-at`
+
+gy|Absolute ISO timestamp of the first log line. When provided, enables the absolute/relative toggle in the static replay viewer.
+
+ej|
 
 ---
 
@@ -129,15 +138,24 @@ UI.
 
 `utils/merge_logs.py` reads the following files from `frontend/` and inlines
 them into the output HTML:
-
 ```
-frontend/viewer.css   styles and themes
-frontend/state.js     shared state and TABS / PANES constants
-frontend/ansi.js      ANSI escape sequence parser
-frontend/lines.js     line rendering and sync logic
-frontend/tabs.js      tab bar and tab switching
-frontend/ui.js        toolbar controls, filter, splitter
-frontend/export.js    in-browser HTML export
+frontend/viewer.css        styles and themes
+frontend/state.js          shared state and TABS / PANES constants
+frontend/themes.js         theme definitions
+frontend/settings.js       user preference controls
+frontend/fontsize.js       font size controls
+frontend/ansi.js           ANSI escape sequence parser
+frontend/lines.js          line rendering and sync logic
+frontend/tabs.js           tab bar and tab switching
+frontend/tabcreate.js      dynamic tab creation
+frontend/ui.js             toolbar controls, filter, splitter
+frontend/export.js         in-browser HTML export
+frontend/selection.js      range selection overlay
+frontend/tsparse.js        timestamp parsing
+frontend/import.js         import functionality
+frontend/renderPane.js     pane rendering
+frontend/renderToolbar.js  toolbar rendering
+frontend/profile.js        demo profile config
 ```
 
 `ws.js` is intentionally omitted — there is no WebSocket connection in static

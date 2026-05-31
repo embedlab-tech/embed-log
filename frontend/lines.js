@@ -11,11 +11,13 @@ import { parseAnsi } from './ansi.js';
 
 // parseAnsi HTML-escapes < and >, so <wrn> becomes &lt;wrn&gt; in stored HTML.
 // <inf> is intentionally excluded — it stays unstyled.
-const _LINE_TAG_RE = /&lt;(wrn|warn|dbg|debug|err|error)&gt;/i;
+// Also matches bracket-style markers like [ERR], [WRN], [error], [warning].
+const _LINE_TAG_RE = /(?:&lt;(wrn|warn|dbg|debug|err|error)&gt;|\[(err|wrn|dbg|warn|debug|error|warning|ERROR|WARNING|ERR|WRN|DBG|DEBUG)\])/;
 function _lineTagClass(html) {
     const m = _LINE_TAG_RE.exec(html);
     if (!m) return "";
-    switch (m[1].toLowerCase()) {
+    const tag = (m[1] || m[2]).toLowerCase();
+    switch (tag) {
         case "wrn":  case "warn":  return " line-wrn";
         case "dbg":  case "debug": return " line-dbg";
         case "err":  case "error": return " line-err";

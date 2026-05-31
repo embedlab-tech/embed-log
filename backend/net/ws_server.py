@@ -7,7 +7,7 @@ import logging
 import threading
 import webbrowser
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable
 
 import aiohttp
 from aiohttp import web
@@ -31,28 +31,29 @@ class WebSocketBroadcaster:
         host: str,
         port: int,
         tabs: list,
-        session_info: Optional[dict] = None,
-        sessions_root: Optional[str] = None,
-        on_all_clients_disconnected: Optional[Callable[[], None]] = None,
+        session_info: dict | None = None,
+        sessions_root: str | None = None,
+        on_all_clients_disconnected: Callable[[], None] | None = None,
 
-        on_export_session_html: Optional[Callable[[], bool]] = None,
-        on_rotate_session: Optional[Callable[[], dict]] = None,
-        on_save_snippet: Optional[Callable[[str, list[str], str], Optional[str]]] = None,
-        on_save_markers: Optional[Callable[[list[dict]], None]] = None,
+        on_export_session_html: Callable[[], bool] | None = None,
+        on_rotate_session: Callable[[], dict] | None = None,
+        on_save_snippet: Callable[[str, list[str], str], str | None] | None = None,
+        on_save_markers: Callable[[list[dict]], None] | None = None,
         open_browser: bool = False,
         app_name: str = "embed-log",
-        theme_defaults: Optional[dict] = None,
-        source_labels: Optional[dict[str, str]] = None,
+        theme_defaults: dict | None = None,
+        source_labels: dict[str, str] | None = None,
     ):
         self._html_path = Path(html_path)
         self._host = host
         self._port = port
         self._tabs = tabs          # [{"label": str, "panes": [str, ...]}]
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._clients: set = set()
         self._broadcast_queue = deque()
         self._broadcast_scheduled = False
         self._broadcast_lock = threading.Lock()
+        self._replay_buffer = deque(maxlen=5000)
         self._source_map: dict = {}   # name → SourceManager
         self._sessions_root = Path(sessions_root) if sessions_root else None
         self._session_info = session_info or {}
@@ -62,10 +63,10 @@ class WebSocketBroadcaster:
         self._on_save_snippet = on_save_snippet
         self._on_save_markers = on_save_markers
         self._no_clients_handle = None
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._started = threading.Event()
-        self._start_error: Optional[Exception] = None
-        self._stop_async: Optional[asyncio.Event] = None
+        self._start_error: Exception | None = None
+        self._stop_async: asyncio.Event | None = None
         self._open_browser = open_browser
         self._app_name = app_name
         self._theme_defaults = theme_defaults or {}
@@ -85,9 +86,13 @@ class WebSocketBroadcaster:
         this method coalesces cross-thread notifications into a single drain task.
         """
         loop = self._loop
-        if loop is None or loop.is_closed() or not self._clients:
+        if loop is None or loop.is_closed():
             return
         data = json.dumps(msg)
+        # Always store in replay buffer so late-connecting clients catch up
+        self._replay_buffer.append(data)
+        if not self._clients:
+            return
         with self._broadcast_lock:
             self._broadcast_queue.append(data)
             if self._broadcast_scheduled:
@@ -279,8 +284,8 @@ class WebSocketBroadcaster:
                     html_status = manifest.get("html_status") or html_status
                     html_updated_at = manifest.get("html_updated_at")
                     html_error = manifest.get("html_error")
-                except Exception:
-                    pass
+                except (json.JSONDecodeError, OSError) as exc:
+                    logging.debug("manifest parse error for %s: %s", session_id, exc)
 
             sessions.append({
                 "id": session_id,
@@ -350,14 +355,20 @@ class WebSocketBroadcaster:
         if self._no_clients_handle is not None:
             self._no_clients_handle.cancel()
             self._no_clients_handle = None
+        # Replay buffered log entries to the new client so no history is lost
+        for entry in list(self._replay_buffer):
+            try:
+                await ws.send_str(entry)
+            except Exception:
+                break
 
         try:
             async for msg in ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:
                     try:
                         await self._handle_command(json.loads(msg.data))
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logging.debug("WS command error: %s", exc)
                 elif msg.type == aiohttp.WSMsgType.ERROR:
                     logging.debug("WS error: %s", ws.exception())
         finally:
@@ -425,6 +436,6 @@ class WebSocketBroadcaster:
             for ws in list(self._clients):
                 try:
                     await ws.send_str(update)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logging.debug("failed to send markers update to client: %s", exc)
             return

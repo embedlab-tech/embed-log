@@ -109,11 +109,21 @@ Debug one test:
 npm run test:debug
 ```
 
-## Current coverage
+The current test suite (11 spec files) covers:
 
-The initial tests cover:
-
-- UI connects to backend and receives demo logs
-- Shift+Click range selection
-- raw merged snippet download and duplicate-prefix cleanup
-- HTML snippet download using the regular embed-log exported UI
+- Live UI connects to backend and receives deterministic demo logs
+- Tab/pane layout matches backend config
+- Shift+Click and drag range selection
+- Raw merged snippet download with duplicate-prefix cleanup
+- HTML snippet and full export using the standard embed-log UI
+- Exported HTML replay verification
+- Clipboard copy flow (selected range, buffer)
+- Scope-aware selection (Exact / Context / Sel…)
+- Per-pane wrap toggle and UNWRAP single-pane mode
+- Cross-tab and cross-pane time synchronization
+- Timestamp toggle (absolute / relative)
+- Regex filter resilience and keyboard interaction
+- Session rotation and sessions popup
+- CBOR decoder rendering
+- Relative time display in static replay
+- Shared page error guard

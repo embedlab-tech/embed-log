@@ -29,6 +29,11 @@ test.describe('clipboard UX', () => {
     expect(errors).toEqual([]);
   });
 
+// Scenario: Context copy matches raw file content character-for-character
+//   Given the user selects a range in SENSOR_A and switches to context scope
+//   When  they click the copy button
+//   Then  the clipboard text matches the downloaded raw context file content exactly
+
   test('context copy matches downloaded context raw file content', async ({ page }, testInfo) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
@@ -43,6 +48,7 @@ test.describe('clipboard UX', () => {
     await page.locator('#copy-SENSOR_A').click();
     const copied = (await readClipboard(page)).trimEnd();
 
+    await openMore(page, 'SENSOR_A');
     const downloadPromise = page.waitForEvent('download');
     await page.locator('#download-raw-SENSOR_A').click();
     const download = await downloadPromise;
@@ -51,6 +57,11 @@ test.describe('clipboard UX', () => {
 
     expect(copied).toBe(raw);
   });
+
+// Scenario: Cmd/Ctrl+C copies exact selection to clipboard
+//   Given the user selects a range in SENSOR_A
+//   When  they press the platform copy shortcut (Cmd/Ctrl+C)
+//   Then  the clipboard contains the selected text including SENSOR_A
 
   test('platform shortcut copies exact selection', async ({ page }) => {
     await page.goto('/');
@@ -67,7 +78,12 @@ test.describe('clipboard UX', () => {
     expect(copied).toContain('SENSOR_A');
   });
 
-  test('clipboard buffer add, peek, copy all, and clear works across panes', async ({ page }) => {
+  // Clipboard buffer UI was removed in frontend refactoring.
+// Scenario: Clipboard buffer add, peek, copy all, and clear across panes
+//   Given the user selects lines in SENSOR_A and SENSOR_B and adds them to the clipboard buffer
+//   When  they peek at the buffer, copy all contents, then clear it
+//   Then  the peek menu shows both sources, copy-all yields both selections, and clearing hides the indicator
+  test.skip('clipboard buffer add, peek, copy all, and clear works across panes', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
 

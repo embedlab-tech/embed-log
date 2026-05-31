@@ -23,6 +23,7 @@ packages = ["backend"]
 [tool.hatch.build.targets.wheel.force-include]
 "frontend" = "frontend"
 "utils" = "utils"
+"backend/skills" = "backend/skills"
 
 [tool.hatch.build.targets.sdist]
 include = [

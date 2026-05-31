@@ -52,6 +52,17 @@ Success response:
   "ok": true,
   "old_session": { "id": "..." },
   "session": { "id": "new-session-id" }
+```
+
+### `POST /api/session/snippet`
+Saves a selection snippet from the UI.
+
+Success response:
+
+```json
+{
+  "ok": true,
+  "filename": "embed-log-snippet-2026-05-31T13-00-00.html"
 }
 ```
 
@@ -168,6 +179,26 @@ Published after clean-session rotation.
 
 Frontend uses this to clear stale state and bind to the new session.
 
+### 5. `markers_update`
+Published when markers are saved via the UI.
+
+```json
+{
+  "type": "markers_update",
+  "markers": [
+    {
+      "pane": "FTDI_A",
+      "lines": [1, 5],
+      "description": "Boot complete",
+      "timestamp": "...",
+      "created_at": "..."
+    }
+  ]
+}
+```
+
+Frontend uses this to update the marker list without re-fetching.
+
 ## WebSocket client → server commands
 
 ### `send_raw`
@@ -197,6 +228,24 @@ All panes:
 
 ```json
 { "cmd": "clear_logs", "scope": "all" }
+```
+
+### `save_markers`
+Save markers from the UI.
+
+```json
+{
+  "cmd": "save_markers",
+  "markers": [
+    {
+      "pane": "FTDI_A",
+      "lines": [1, 5],
+      "description": "Boot complete",
+      "timestamp": "2026-05-23T18:23:16.123+02:00",
+      "created_at": "2026-05-23T18:23:16.456+02:00"
+    }
+  ]
+}
 ```
 
 ## Compatibility notes

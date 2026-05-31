@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 MAX_SNIPPETS = 50
 
 
@@ -18,11 +17,11 @@ class SessionManager:
         source_files: dict[str, str],
         source_labels: dict[str, str],
         started_at: str,
-        config_path: Optional[str],
-        job_id: Optional[str],
+        config_path: str | None,
+        job_id: str | None,
         app_name: str,
         timestamp_mode: str = "absolute",
-        first_log_at: Optional[str] = None,
+        first_log_at: str | None = None,
     ):
         self.session_id = session_id
         self.session_dir = Path(session_dir)
@@ -41,7 +40,7 @@ class SessionManager:
         self.snippets_dir = self.session_dir / "snippets"
         self.markers_path = self.session_dir / "markers.json"
 
-    def set_first_log_at(self, first_log_at: Optional[str]) -> None:
+    def set_first_log_at(self, first_log_at: str | None) -> None:
         self.first_log_at = first_log_at
 
     def load_markers(self) -> list[dict]:
@@ -98,8 +97,8 @@ class SessionManager:
         reason: str,
         exported_html: bool = False,
         html_status: str = "pending",
-        html_updated_at: Optional[str] = None,
-        html_error: Optional[str] = None,
+        html_updated_at: str | None = None,
+        html_error: str | None = None,
     ) -> None:
         manifest = {
             "session_id": self.session_id,
@@ -128,7 +127,7 @@ class SessionManager:
         panes: list[str],
         scope: str,
         label: str = "",
-    ) -> Optional[str]:
+    ) -> str | None:
         """Save a snippet to the session's snippets/ directory.
         Returns the relative URL path, or None if limit exceeded or text empty.
         """

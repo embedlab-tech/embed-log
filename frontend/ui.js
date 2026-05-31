@@ -11,31 +11,23 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
     if (PANES.length === 0) return;  // no panes loaded yet
     const wasUnwrapped = state.unwrap;
     state.unwrap = !state.unwrap;
-    document.getElementById("btn-unwrap")?.classList.toggle("active", state.unwrap);
+    const btn = document.getElementById("btn-unwrap");
+    if (btn) {
+        btn.classList.toggle("active", state.unwrap);
+        btn.textContent = state.unwrap ? "Wrap" : "Unwrap";
+        btn.title = state.unwrap
+            ? "Wrap single-pane tabs back into tab groups"
+            : "Unwrap multi-pane tabs into single-pane tabs";
+    }
     rebuildLayout(wasUnwrapped);
 });
 
 // ---------------------------------------------------------------------------
-// Settings panel — timestamp mode toggle
+// Toolbar — timestamp mode toggle (switches between relative/absolute)
 // ---------------------------------------------------------------------------
 (function () {
-    const panel = document.getElementById("settings-panel");
-    if (!panel) return;
-
-    const sep = document.createElement("span");
-    sep.className = "set-sep";
-    sep.textContent = "|";
-
-    const label = document.createElement("span");
-    label.className = "set-label";
-    label.textContent = "Time";
-
-    const btn = document.createElement("button");
-    btn.id = "btn-timestamp-mode";
-
-    const hint = document.createElement("span");
-    hint.id = "timestamp-mode-hint";
-    hint.className = "set-note";
+    const btn = document.getElementById("btn-timestamp-mode");
+    if (!btn) return;
 
     function update() {
         const current = state.timestampMode === "relative" ? "relative" : "absolute";
@@ -48,19 +40,6 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
             : `${other} timestamps are unavailable for the current data`;
         btn.disabled = !canSwitch;
         btn.classList.toggle("active", current === "relative");
-
-        if (canSwitch || !hasLines) {
-            hint.textContent = "";
-            hint.hidden = true;
-            return;
-        }
-
-        if (other === "absolute") {
-            hint.textContent = "Absolute view unavailable: this data has no embedded session origin.";
-        } else {
-            hint.textContent = "Relative view unavailable: this data has no embedded session origin.";
-        }
-        hint.hidden = false;
     }
 
     btn.addEventListener("click", () => {
@@ -68,10 +47,6 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
         update();
     });
 
-    panel.appendChild(sep);
-    panel.appendChild(label);
-    panel.appendChild(btn);
-    panel.appendChild(hint);
     window.__embedLogUpdateTimestampModeUi = update;
     update();
 })();
@@ -105,6 +80,25 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
     panel.appendChild(sep);
     panel.appendChild(btn);
 })();
+// ---------------------------------------------------------------------------
+// Settings panel — download raw logs (merged or per pane)
+// ---------------------------------------------------------------------------
+(function () {
+    const panel = document.getElementById("settings-panel");
+    if (!panel) return;
+
+    const sep = document.createElement("span");
+    sep.className = "set-sep";
+    sep.textContent = "|";
+
+    const btn = document.createElement("button");
+    btn.id = "btn-download-raw";
+    btn.title = "Download all logs as merged raw text file";
+    btn.textContent = "Download raw";
+
+    panel.appendChild(sep);
+    panel.appendChild(btn);
+})();
 
 // ---------------------------------------------------------------------------
 // Settings panel — sessions list popup + current session links
@@ -119,8 +113,8 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
     // Create panel buttons for server-side actions (formerly in toolbar)
     const btnSave = document.createElement("button");
     btnSave.id = "btn-save-to-server";
-    btnSave.title = "Generate/refresh session HTML on the backend server";
-    btnSave.textContent = "Save to server";
+    btnSave.title = "Generate/refresh session HTML on the backend";
+    btnSave.textContent = "Save HTML";
 
     const sep1 = document.createElement("span");
     sep1.className = "set-sep";
@@ -128,8 +122,8 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
 
     const btnCleanSession = document.createElement("button");
     btnCleanSession.id = "btn-clean-session";
-    btnCleanSession.title = "Save current session HTML and start a clean session";
-    btnCleanSession.textContent = "Clean session";
+    btnCleanSession.title = "Save current session and start a new one";
+    btnCleanSession.textContent = "New session";
 
     const sep2 = document.createElement("span");
     sep2.className = "set-sep";
@@ -137,8 +131,8 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
 
     const btnCurrent = document.createElement("button");
     btnCurrent.id = "btn-current-session";
-    btnCurrent.title = "Open current session HTML";
-    btnCurrent.textContent = "Current HTML";
+    btnCurrent.title = "Open server-generated session HTML";
+    btnCurrent.textContent = "Open HTML";
 
     const btn = document.createElement("button");
     btn.id = "btn-sessions";
@@ -174,15 +168,15 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
 
         if (btnCleanSession) {
             btnCleanSession.disabled = status === "updating";
-            btnCleanSession.textContent = status === "updating" ? "Rotating…" : "Clean session";
+            btnCleanSession.textContent = status === "updating" ? "Rotating…" : "New session";
         }
 
         if (currentSession?.html_ready && currentSession?.html) {
             btnCurrent.disabled = false;
-            btnCurrent.textContent = "Current HTML";
+            btnCurrent.textContent = "Open HTML";
             btnCurrent.title = currentSession?.html_updated_at
-                ? `Open current session HTML (updated ${currentSession.html_updated_at})`
-                : "Open current session HTML";
+                ? `Open server session HTML (updated ${currentSession.html_updated_at})`
+                : "Open server session HTML";
         } else {
             btnCurrent.disabled = true;
             btnCurrent.textContent = status === "error" ? "HTML error" : "No HTML yet";
@@ -239,7 +233,7 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
     }
 
     async function createCleanSession() {
-        if (!window.confirm("Save current session HTML and start a clean session?")) return;
+        if (!window.confirm("Save current session and start a new one?")) return;
         if (btnCleanSession) {
             btnCleanSession.disabled = true;
             btnCleanSession.textContent = "Rotating…";
@@ -270,6 +264,7 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
     btnSave?.addEventListener("click", saveCurrentSessionHtml);
     btnCleanSession?.addEventListener("click", createCleanSession);
     btnCurrent.addEventListener("click", openCurrentSessionHtml);
+    document.getElementById("btn-new-session")?.addEventListener("click", createCleanSession);
 
     async function loadSessions() {
         const body = menu.querySelector(".sessions-body");

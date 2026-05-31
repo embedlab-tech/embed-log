@@ -13,6 +13,14 @@ Quick onboarding notes for humans and coding agents working in `embed-log`.
 - `docs/FRONTEND.md` — frontend architecture and UI behavior
 - `docs/TESTING.md` — backend + Playwright test strategy
 - `docs/README.md` — documentation index
+## Skill system
+
+Built-in skills document CLI workflows. Two access methods:
+
+- **Internal URI** — `read skill://<name>` (the name is the stem only, no `.md` extension)
+- **CLI** — `embed-log skill list` / `embed-log skill show <name>`
+
+Start with `embed-log skill list` to see what's available, then use `read skill://<name>` to load the full instructions.
 
 ## Architecture at a glance
 
