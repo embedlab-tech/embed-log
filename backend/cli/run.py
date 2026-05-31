@@ -117,7 +117,7 @@ def _run_run(args: argparse.Namespace) -> int:
 
     if not source_specs:
         print(
-            "no sources configured. Use embed-log create-config, --source ..., or --config FILE.",
+            "no sources configured. Use embed-log sample-config, --source ..., or --config FILE.",
             file=sys.stderr,
         )
         return 1

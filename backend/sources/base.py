@@ -14,6 +14,8 @@ class LogSource(ABC):
     @abstractmethod
     def start(self, on_line: Callable[[str], None], stop: threading.Event, name: str) -> None:
         """Start reading in a background thread. on_line(text) per line."""
+    def close(self) -> None:
+        """Release background resources for a prompt shutdown."""
 
     def write(self, data: bytes) -> None:
         raise TypeError(f"{type(self).__name__} does not support write")

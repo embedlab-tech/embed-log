@@ -15,6 +15,8 @@ class RawLogSource(ABC):
         name: str,
     ) -> None:
         """Start reading in a background thread. Emit bytes and transport boundaries."""
+    def close(self) -> None:
+        """Release background resources for a prompt shutdown."""
 
     def write(self, data: bytes) -> None:
         raise TypeError(f"{type(self).__name__} does not support write")

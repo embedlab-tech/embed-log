@@ -28,6 +28,8 @@ class ParsedSource(LogSource):
                 emit_lines(self.parser.flush())
 
         self.raw_source.start(on_chunk, on_boundary, stop, name)
+    def close(self) -> None:
+        self.raw_source.close()
 
     def write(self, data: bytes) -> None:
         self.raw_source.write(data)

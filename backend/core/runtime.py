@@ -78,38 +78,42 @@ class SourceManager:
         )
         self._writer_thread.start()
         try:
-            self.source.start(self._on_source_line, self._stop, self.name)
-        except OSError as exc:
-            raise RuntimeError(f"[{self.name}] failed to start {type(self.source).__name__}: {exc}") from exc
-        if self.inject_port:
-            self._inject_server = InjectServer(
-                name=self.name,
-                host=self.socket_host,
-                port=self.inject_port,
-                stop=self._stop,
-                on_client_connect=self._add_stream_client,
-                on_client_disconnect=self._remove_stream_client,
-                on_json_line=self._ingest_json,
-            )
             try:
-                self._inject_server.start()
+                self.source.start(self._on_source_line, self._stop, self.name)
             except OSError as exc:
-                raise RuntimeError(f"[{self.name}] failed to bind inject TCP {self.socket_host}:{self.inject_port}: {exc}") from exc
-        self._forward_servers = []
-        for port in self.forward_ports:
-            server = ForwardServer(
-                name=self.name,
-                host=self.socket_host,
-                port=port,
-                stop=self._stop,
-                on_client_connect=self._add_forward_client,
-                on_client_disconnect=self._remove_forward_client,
-            )
-            self._forward_servers.append(server)
-            try:
-                server.start()
-            except OSError as exc:
-                raise RuntimeError(f"[{self.name}] failed to bind forward TCP {self.socket_host}:{port}: {exc}") from exc
+                raise RuntimeError(f"[{self.name}] failed to start {type(self.source).__name__}: {exc}") from exc
+            if self.inject_port:
+                self._inject_server = InjectServer(
+                    name=self.name,
+                    host=self.socket_host,
+                    port=self.inject_port,
+                    stop=self._stop,
+                    on_client_connect=self._add_stream_client,
+                    on_client_disconnect=self._remove_stream_client,
+                    on_json_line=self._ingest_json,
+                )
+                try:
+                    self._inject_server.start()
+                except OSError as exc:
+                    raise RuntimeError(f"[{self.name}] failed to bind inject TCP {self.socket_host}:{self.inject_port}: {exc}") from exc
+            self._forward_servers = []
+            for port in self.forward_ports:
+                server = ForwardServer(
+                    name=self.name,
+                    host=self.socket_host,
+                    port=port,
+                    stop=self._stop,
+                    on_client_connect=self._add_forward_client,
+                    on_client_disconnect=self._remove_forward_client,
+                )
+                self._forward_servers.append(server)
+                try:
+                    server.start()
+                except OSError as exc:
+                    raise RuntimeError(f"[{self.name}] failed to bind forward TCP {self.socket_host}:{port}: {exc}") from exc
+        except Exception:
+            self.stop()
+            raise
         logging.info(
             "[%s] started  source=%s  inject=%s  forward=%s  log=%s",
             self.name,
@@ -121,7 +125,13 @@ class SourceManager:
 
     def stop(self) -> None:
         self._stop.set()
-        self._queue.put(None)
+        self.source.close()
+        if self._inject_server is not None:
+            self._inject_server.stop()
+            self._inject_server = None
+        for server in self._forward_servers:
+            server.stop()
+        self._forward_servers = []
         with self._clients_lock:
             for conn in list(self._stream_clients):
                 try:
@@ -136,8 +146,11 @@ class SourceManager:
                 except OSError:
                     pass
             self._forward_clients.clear()
-        if self._writer_thread and self._writer_thread.is_alive():
-            self._writer_thread.join(timeout=2.0)
+        writer_thread = self._writer_thread
+        self._writer_thread = None
+        if writer_thread and writer_thread.is_alive():
+            self._queue.put(None)
+            writer_thread.join(timeout=2.0)
 
     def _on_source_line(self, message: str) -> None:
         self._queue.put(LogEntry(self._clock(), "SERIAL", message))
