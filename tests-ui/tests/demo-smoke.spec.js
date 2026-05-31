@@ -290,5 +290,48 @@ test('runtime settings panel exposes working font-size controls', async ({ page 
     await expect(page.locator('#marker-nav')).toBeHidden({ timeout: 15_000 });
   });
 
+// Scenario: Marker persists after unwrap toggle
+//   Given a marker applied on a SENSOR_A line
+//   When  the user toggles the Unwrap button
+//   Then  the has-marker class persists on the marked line
+//
+  test('marker persists after unwrap toggle', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await waitForSourceTestLine(page, 'SENSOR_A');
+
+    // Select a range in SENSOR_A to enable the Add Note button (Exact scope)
+    const { start, end } = await waitForRangePair(page, 'SENSOR_A', 'kind=prefix-cleanup', 'kind=timestamp-cleanup');
+    await start.click();
+    await end.click({ modifiers: ['Shift'] });
+
+    // Grab the first selected line index for later verification
+    const firstIdx = await page.evaluate(() => {
+      const sel = document.querySelector('#log-SENSOR_A .log-line.selected');
+      return sel ? parseInt(sel.dataset.idx, 10) : -1;
+    });
+    expect(firstIdx).toBeGreaterThanOrEqual(0);
+
+    // Click Add Note and save a marker
+    await page.locator('#marker-toggle-SENSOR_A').click();
+    await page.locator('.marker-input').fill('unwrap regression marker');
+    await page.locator('.marker-input-save').click();
+
+    // Wait for marker UI to appear
+    await expect(page.locator('#marker-nav')).not.toBeHidden({ timeout: 10_000 });
+
+    // Marker visible before unwrap
+    await expect(
+      page.locator(`#log-SENSOR_A [data-idx="${firstIdx}"]`)
+    ).toHaveClass(/has-marker/);
+
+    // Toggle unwrap
+    await page.locator('#btn-unwrap').click();
+
+    // Marker still visible after DOM rebuild
+    await expect(
+      page.locator(`#log-SENSOR_A [data-idx="${firstIdx}"]`)
+    ).toHaveClass(/has-marker/);
+  });
 });
 

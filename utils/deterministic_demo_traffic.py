@@ -271,60 +271,60 @@ def build_cbor_records(src: str, tick: int, seq_start: int) -> tuple[list[dict],
 # ═══════════════════════════════════════════════════════════════════
 
 CURATED_DEVICE_A: dict[int, list[str]] = {
-    1: ["[INFO] net: link up, MAC=de:ad:be:ef:01:02", "[INFO] httpd: listening on 0.0.0.0:8080, awaiting commands"],
-    2: ["[INFO] net: connection from 192.168.1.100:45012", "[INFO] httpd: accepted, 1 active session"],
-    3: ["[INFO] httpd: session established, protocol REST/1.0", "[INFO] sys: test mode enabled via header X-Test-Suite"],
-    4: ["[INFO] httpd: << GET /api/status", "[INFO] handler: processing status request"],
-    5: ["[INFO] handler: mem_free=18324KB uptime=3600s cpu_load=12%", "[INFO] httpd: >> 200 OK  {status:ok, uptime:3600}  (12ms)"],
-    6: [],
-    7: ["[INFO] httpd: << GET /api/config", "[INFO] handler: reading config service endpoint"],
-    8: ["[ERR] handler: config service not initialized", "[ERR] handler: config.json missing from flash partition"],
-    9: ["[INFO] httpd: >> 503 Service Unavailable  {error:config_unavailable}  (8ms)"],
-    10: [],
-    11: ["[INFO] httpd: << GET /api/health", "[INFO] handler: health check requested"],
-    12: ["[INFO] handler: services=all_ok, last_boot=2026-05-31T10:28:04Z", "[INFO] handler: self-test — passed (mem=18240KB, disk=ok)"],
-    13: ["[INFO] httpd: >> 200 OK  {status:healthy, uptime:3612}  (15ms)"],
-    14: ["[INFO] httpd: session close from 192.168.1.100:45012", "[INFO] httpd: connection terminated, session count=0"],
-    15: ["[INFO] sys: test flag cleared, returning to normal mode"],
-    16: ["[INFO] httpd: listening, awaiting commands"],
+    1: ["<inf> net: link up, MAC=de:ad:be:ef:01:02", "<inf> httpd: listening on 0.0.0.0:8080, awaiting commands"],
+    2: ["<inf> net: connection from 192.168.1.100:45012", "<inf> httpd: accepted, 1 active session"],
+    3: ["<inf> httpd: session established, protocol REST/1.0", "<inf> sys: test mode enabled via header X-Test-Suite"],
+    4: ["<inf> httpd: << GET /api/status", "<inf> handler: processing status request"],
+    5: ["<inf> handler: mem_free=18324KB uptime=3600s cpu_load=12%", "<inf> httpd: >> 200 OK  {status:ok, uptime:3600}  (12ms)"],
+    6: ["<wrn> sys: cpu temperature at 87C — approaching throttle threshold"],
+    7: ["<inf> httpd: << GET /api/config", "<inf> handler: reading config service endpoint"],
+    8: ["<err> handler: config service not initialized", "<err> handler: config.json missing from flash partition"],
+    9: ["<inf> httpd: >> 503 Service Unavailable  {error:config_unavailable}  (8ms)"],
+    10: ["<err> sys: memory allocation failed at httpd_handler.c:412", "<err> sys: heap fragmented (max block 4096 bytes, requested 8192)"],
+    11: ["<inf> httpd: << GET /api/health", "<inf> handler: health check requested"],
+    12: ["<inf> handler: services=all_ok, last_boot=2026-05-31T10:28:04Z", "<inf> handler: self-test — passed (mem=18240KB, disk=ok)"],
+    13: ["<inf> httpd: >> 200 OK  {status:healthy, uptime:3612}  (15ms)"],
+    14: ["<inf> httpd: session close from 192.168.1.100:45012", "<inf> httpd: connection terminated, session count=0"],
+    15: ["<inf> sys: test flag cleared, returning to normal mode"],
+    16: ["<inf> httpd: listening, awaiting commands"],
 }
 
 CURATED_HOST: dict[int, list[str]] = {
-    1: ["[INFO] session: starting test suite — target: 192.168.1.10:8080", "[INFO] session: test vector loaded — 3 test cases"],
-    2: ["[INFO] session: connecting to DEVICE_A...", "[INFO] session: connected (TCP seq=1)"],
-    3: ["[INFO] session: handshake complete, protocol REST/1.0"],
-    4: ["[INFO] req: >> GET /api/status", "[INFO] req: awaiting response..."],
-    5: ["[INFO] resp: << 200 OK  in 12ms", "[INFO] resp: body={status:ok, uptime:3600, mem_free:18324KB}"],
-    6: ["[INFO] req: >> GET /api/config", "[INFO] req: awaiting response..."],
-    7: ["[INFO] req: waiting... (2s timeout)"],
-    8: ["[INFO] resp: << 503 Service Unavailable  in 8ms", "[INFO] resp: body={error:config_unavailable}", "[INFO] assert: status=503 — expected failure confirmed"],
-    9: [],
-    10: ["[INFO] req: >> GET /api/health", "[INFO] req: awaiting response..."],
-    11: ["[INFO] req: waiting..."],
-    12: ["[INFO] resp: << 200 OK  in 15ms", "[INFO] resp: body={status:healthy, uptime:3612, self_test:passed}", "[INFO] assert: status=healthy — OK"],
-    13: ["[INFO] session: all requests completed", "[INFO] session: closing connection..."],
-    14: ["[INFO] session: disconnected", "[INFO] session: test suite complete — 3/3 passed in 1.234s"],
-    15: ["[INFO] session: generating report..."],
-    16: ["[INFO] session: report written to test-results/2026-05-31.xml"],
+    1: ["<inf> session: starting test suite — target: 192.168.1.10:8080", "<inf> session: test vector loaded — 3 test cases"],
+    2: ["<inf> session: connecting to DEVICE_A...", "<inf> session: connected (TCP seq=1)"],
+    3: ["<inf> session: handshake complete, protocol REST/1.0"],
+    4: ["<inf> req: >> GET /api/status", "<inf> req: awaiting response..."],
+    5: ["<inf> resp: << 200 OK  in 12ms", "<inf> resp: body={status:ok, uptime:3600, mem_free:18324KB}"],
+    6: ["<inf> req: >> GET /api/config", "<inf> req: awaiting response..."],
+    7: ["<inf> req: waiting... (2s timeout)"],
+    8: ["<inf> resp: << 503 Service Unavailable  in 8ms", "<inf> resp: body={error:config_unavailable}", "<inf> assert: status=503 — expected failure confirmed"],
+    9: ["<wrn> req: response time 2032ms exceeds SLA of 2000ms", "<err> session: connection reset by peer on retry, reconnecting..."],
+    10: ["<inf> req: >> GET /api/health", "<inf> req: awaiting response..."],
+    11: ["<inf> req: waiting..."],
+    12: ["<inf> resp: << 200 OK  in 15ms", "<inf> resp: body={status:healthy, uptime:3612, self_test:passed}", "<inf> assert: status=healthy — OK"],
+    13: ["<inf> session: all requests completed", "<inf> session: closing connection..."],
+    14: ["<inf> session: disconnected", "<inf> session: test suite complete — 3/3 passed in 1.234s"],
+    15: ["<inf> session: generating report..."],
+    16: ["<inf> session: report written to test-results/2026-05-31.xml"],
 }
 
 CURATED_AUX: dict[int, list[str]] = {
-    1: ["[INFO] mon: sensor online, fw v1.9.2", "[INFO] mon: monitoring ambient at 1s interval"],
-    2: ["[INFO] mon: ambient temp=23.4C noise=-72dBm"],
-    3: ["[INFO] mon: heartbeat OK"],
-    4: ["[INFO] mon: ambient stable — no anomalies"],
-    5: ["[INFO] mon: ambient temp=23.4C noise=-71dBm"],
-    6: ["[INFO] mon: ambient temp=23.5C noise=-72dBm"],
-    7: ["[INFO] mon: heartbeat OK"],
-    8: ["[INFO] mon: cross-check request received from DEVICE_A", "[INFO] mon: confirming — ambient nominal, no interference"],
-    9: ["[INFO] mon: ambient temp=23.4C noise=-72dBm"],
-    10: ["[INFO] mon: heartbeat OK"],
-    11: ["[INFO] mon: ambient temp=23.4C noise=-72dBm"],
-    12: ["[INFO] mon: ambient temp=23.5C noise=-71dBm"],
-    13: ["[INFO] mon: heartbeat OK — all clear"],
-    14: ["[INFO] mon: ambient temp=23.4C noise=-72dBm"],
-    15: ["[INFO] mon: device under test activity complete"],
-    16: ["[INFO] mon: continuing normal monitoring"],
+    1: ["<inf> mon: sensor online, fw v1.9.2", "<inf> mon: monitoring ambient at 1s interval"],
+    2: ["<inf> mon: ambient temp=23.4C noise=-72dBm"],
+    3: ["<inf> mon: heartbeat OK"],
+    4: ["<inf> mon: ambient stable — no anomalies"],
+    5: ["<inf> mon: ambient temp=23.4C noise=-71dBm"],
+    6: ["<inf> mon: ambient temp=23.5C noise=-72dBm"],
+    7: ["<inf> mon: heartbeat OK"],
+    8: ["<inf> mon: cross-check request received from DEVICE_A", "<inf> mon: confirming — ambient nominal, no interference"],
+    9: ["<inf> mon: ambient temp=23.4C noise=-72dBm"],
+    10: ["<inf> mon: heartbeat OK"],
+    11: ["<inf> mon: ambient temp=23.4C noise=-72dBm"],
+    12: ["<inf> mon: ambient temp=23.5C noise=-71dBm"],
+    13: ["<inf> mon: heartbeat OK — all clear"],
+    14: ["<inf> mon: ambient temp=23.4C noise=-72dBm"],
+    15: ["<inf> mon: device under test activity complete"],
+    16: ["<inf> mon: continuing normal monitoring"],
 }
 
 CURATED_PYTEST: dict[int, list[str]] = {
@@ -342,8 +342,8 @@ CURATED_PYTEST: dict[int, list[str]] = {
     12: ["[STEP] test_03_get_health — assert response.status == 200", "[STEP] test_03_get_health — assert response.body.status == 'healthy'", "[PASS] ✓ test_03_get_health — PASSED (0.089s)"],
     13: ["[STEP] test_suite_teardown — closing device session", "[STEP] ✓ fixture 'device_session' — disconnected cleanly"],
     14: ["[PASS] ========== 3 passed in 1.234s =========="],
-    15: ["[INFO] test report: tests=3 passed=3 failed=0 duration=1.234s"],
-    16: ["[INFO] test report: written to test-results/2026-05-31.xml"],
+    15: ["<inf> test report: tests=3 passed=3 failed=0 duration=1.234s"],
+    16: ["<inf> test report: written to test-results/2026-05-31.xml"],
 }
 
 CURATED_CBOR: dict[int, list[dict]] = {
@@ -431,6 +431,10 @@ def run(args: argparse.Namespace) -> int:
         raise ValueError("--cycles must be >= 0")
 
     is_curated = args.content == "curated"
+    max_curated_tick = max(
+        max((lines or {0: []}).keys())
+        for lines in CURATED_LINES.values()
+    ) if is_curated else 0
     mode_label = "curated" if is_curated else "test"
 
     print(f"[det-demo] content={mode_label} UDP targets:")
@@ -455,6 +459,9 @@ def run(args: argparse.Namespace) -> int:
         try:
             while args.cycles == 0 or tick < args.cycles:
                 tick += 1
+                # In infinite curated mode, wrap tick so content cycles forever
+                if args.cycles == 0 and is_curated and max_curated_tick > 0 and tick > max_curated_tick:
+                    tick = 1
                 now = time.monotonic()
                 if now < next_tick_at:
                     time.sleep(next_tick_at - now)

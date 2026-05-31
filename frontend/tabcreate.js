@@ -2,7 +2,7 @@ import { state, TABS, PANES, paneLabel, unwrapPaneLabel } from './state.js';
 
 import { _linesSetupPane, repopulatePaneLogs } from './lines.js';
 import { _uiSetupPane, _uiSetupTxPane } from './ui.js';
-import { _selectionSetupPane } from './selection.js';
+import { _selectionSetupPane, applyMarkers } from './selection.js';
 import { renderTabBar, switchTab } from './tabs.js';
 import { renderPaneShell } from './renderPane.js';
 
@@ -120,7 +120,7 @@ export function rebuildLayout(previousUnwrap = state.unwrap) {
         _selectionSetupPane(paneId);
     });
     PANES.forEach(paneId => repopulatePaneLogs(paneId));
-
+    applyMarkers();
     renderTabBar();
     const targetTab = state.unwrap
         ? (state.activePaneTab < PANES.length ? state.activePaneTab : 0)

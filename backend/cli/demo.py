@@ -43,12 +43,12 @@ def _try_kill_port_pid(port: int, proto: str = "tcp") -> bool:
     try:
         if proto == "tcp":
             out = _sp.run(
-                ["lsof", "-tiTCP", str(port), "-sTCP:LISTEN"],
+                ["lsof", f"-tiTCP:{port}", "-sTCP:LISTEN"],
                 capture_output=True, text=True, timeout=5,
             )
         else:
             out = _sp.run(
-                ["lsof", "-tiUDP", str(port)],
+                ["lsof", f"-tiUDP:{port}"],
                 capture_output=True, text=True, timeout=5,
             )
     except (FileNotFoundError, _sp.TimeoutExpired):
@@ -75,11 +75,13 @@ def _try_kill_port_pid(port: int, proto: str = "tcp") -> bool:
 def _free_port(port: int, proto: str = "tcp") -> None:
     if not _port_in_use(port, proto):
         return
-    _try_kill_port_pid(port, proto)
-    time.sleep(0.5)
-    if _port_in_use(port, proto):
-        print(f"ERROR: {proto} port {port} is in use by a non-demo process.", file=sys.stderr)
-        sys.exit(1)
+    for attempt in range(3):
+        _try_kill_port_pid(port, proto)
+        time.sleep(0.5)
+        if not _port_in_use(port, proto):
+            return
+    print(f"ERROR: {proto} port {port} is in use by a non-demo process.", file=sys.stderr)
+    sys.exit(1)
 
 
 class DemoRunner:
@@ -87,8 +89,19 @@ class DemoRunner:
 
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
-        self._processes: list[subprocess.Popen] = []
+        # (subprocess.Popen, restart_command_or_None)
+        # restart_command is None for the server process (never auto-restart)
+        self._processes: list[tuple[subprocess.Popen, list[str] | None]] = []
         self._server_pid: int | None = None
+
+    def _content_cycles(self, content_mode: str) -> int:
+        """Return number of traffic cycles: 0 = infinite (with --continuous or
+        --cycles 0); finite otherwise so the demo runs once and stops."""
+        if self.args.continuous:
+            return 0
+        if self.args.cycles is not None:
+            return self.args.cycles
+        return 20 if content_mode == "curated" else 100
 
     def run(self) -> int:
         """Start the demo and wait for it to finish."""
@@ -120,7 +133,7 @@ class DemoRunner:
         print(f"Starting embed-log server on port {WS_PORT}...")
         server = subprocess.Popen(server_cmd)
         self._server_pid = server.pid
-        self._processes.append(server)
+        self._processes.append((server, None))
 
         time.sleep(1)
         if server.poll() is not None:
@@ -166,13 +179,24 @@ class DemoRunner:
         print("Press Ctrl+C to stop all processes.")
         print("")
 
-        # ── Wait for any process to exit ──
+        # ── Wait for any process to exit; restart traffic when --continuous ──
         try:
             while True:
-                for p in self._processes[:]:
-                    ret = p.poll()
+                for item in list(self._processes):
+                    proc, cmd = item
+                    ret = proc.poll()
                     if ret is not None and ret != -9:
-                        self._processes.remove(p)
+                        if cmd is not None and self.args.continuous:
+                            # Traffic process exited — restart it
+                            print(f"Traffic process (pid={proc.pid}) exited with code {ret}, restarting...")
+                            try:
+                                new_proc = subprocess.Popen(cmd)
+                                self._processes[self._processes.index(item)] = (new_proc, cmd)
+                            except OSError as e:
+                                print(f"Failed to restart traffic: {e}", file=sys.stderr)
+                                self._processes.remove(item)
+                        else:
+                            self._processes.remove(item)
                 if not self._processes:
                     break
                 time.sleep(0.5)
@@ -199,7 +223,7 @@ class DemoRunner:
             "--interval-max", str(self.args.interval_max),
         ]
         print(f"Starting UDP simulator (interval {self.args.interval_min}-{self.args.interval_max}s)...")
-        self._processes.append(subprocess.Popen(cmd))
+        self._processes.append((subprocess.Popen(cmd), cmd))
 
         inject_script = DEMO_UTILS / "inject_log_demo.py"
         if inject_script.is_file():
@@ -214,7 +238,7 @@ class DemoRunner:
                 "--source", "demo",
             ]
             print(f"Starting marker injector (interval {self.args.inject_interval}s)...")
-            self._processes.append(subprocess.Popen(inject_cmd))
+            self._processes.append((subprocess.Popen(inject_cmd), inject_cmd))
 
         deterministic_script = DEMO_UTILS / "deterministic_demo_traffic.py"
         if deterministic_script.is_file():
@@ -223,10 +247,10 @@ class DemoRunner:
                 "--cbor",
                 "--udp", "SENSOR_CBOR=127.0.0.1:6003",
                 "--tick-ms", "500",
-                "--cycles", "0",
+                "--cycles", str(self._content_cycles("curated")),
             ]
             print("Starting CBOR demo traffic (tick 500ms)...")
-            self._processes.append(subprocess.Popen(cbor_cmd))
+            self._processes.append((subprocess.Popen(cbor_cmd), cbor_cmd))
 
     def _start_deterministic_traffic(self, content_mode: str = "test") -> None:
         """Start deterministic demo traffic (test or curated content)."""
@@ -243,11 +267,11 @@ class DemoRunner:
             "--udp", "SENSOR_C=127.0.0.1:6002",
             "--udp", "SENSOR_D=127.0.0.1:6004",
             "--tick-ms", str(self.args.tick_ms),
-            "--cycles", "0",
+            "--cycles", str(self._content_cycles(content_mode)),
         ]
         label = "curated demo" if content_mode == "curated" else "deterministic test"
         print(f"Starting {label} traffic (tick {self.args.tick_ms}ms)...")
-        self._processes.append(subprocess.Popen(cmd))
+        self._processes.append((subprocess.Popen(cmd), cmd))
 
         cbor_cmd = [
             sys.executable, str(deterministic_script),
@@ -255,10 +279,10 @@ class DemoRunner:
             "--cbor",
             "--udp", "SENSOR_CBOR=127.0.0.1:6003",
             "--tick-ms", str(self.args.tick_ms),
-            "--cycles", "0",
+            "--cycles", str(self._content_cycles(content_mode)),
         ]
         print(f"Starting CBOR {label} traffic (tick {self.args.tick_ms}ms)...")
-        self._processes.append(subprocess.Popen(cbor_cmd))
+        self._processes.append((subprocess.Popen(cbor_cmd), cbor_cmd))
 
     def _cleanup(self) -> None:
         """Stop all child processes."""
@@ -266,9 +290,10 @@ class DemoRunner:
         print("Stopping demo...")
 
         # SIGTERM children (reverse order: traffic first, server last)
-        for p in reversed(self._processes):
+        for item in reversed(self._processes):
+            proc, _ = item
             try:
-                p.terminate()
+                proc.terminate()
             except ProcessLookupError:
                 pass
 
@@ -288,10 +313,11 @@ class DemoRunner:
         time.sleep(0.4)
 
         # SIGKILL remaining
-        for p in self._processes:
+        for item in self._processes:
+            proc, _ = item
             try:
-                p.kill()
-                p.wait(timeout=2)
+                proc.kill()
+                proc.wait(timeout=2)
             except (ProcessLookupError, subprocess.TimeoutExpired):
                 pass
         self._processes.clear()
@@ -313,6 +339,9 @@ def add_subparser(subparsers) -> None:
             "  embed-log demo --fast\n"
             "  embed-log demo --profile deterministic --fast\n"
             "  embed-log demo --profile random --no-browser\n"
+            "  embed-log demo --profile deterministic --fast --continuous\n"
+            "  embed-log demo --cycles 50\n"
+            "  embed-log demo --cycles 0\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -352,4 +381,12 @@ def add_subparser(subparsers) -> None:
     p.add_argument(
         "--inject-interval", type=float, default=None,
         help="random profile inject interval in seconds (default: 5, fast: 1)",
+    )
+    p.add_argument(
+        "--cycles", type=int, default=None,
+        help="number of traffic ticks to send (default: 20 for curated, 100 for test; 0 = infinite like --continuous)",
+    )
+    p.add_argument(
+        "--continuous", action="store_true",
+        help="restart traffic processes automatically when they exit (keeps server alive for testing)",
     )
