@@ -1,0 +1,4612 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="whitesand">
+<head>
+<meta charset="UTF-8">
+<title>embed-log — DevA + DevB + PYTEST + cbor-tab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>/* ============================================================
+   embed-log — stylesheet
+   Themes: Whitesand (warm light, default) · One Dark (dark default)
+   ============================================================ */
+
+:root {
+    /* --- One Dark (dark) --- */
+    --bg:        #282c34;
+    --panel:     #21252b;
+    --header:    #21252b;
+    --text:      #abb2bf;
+    --accent:    #61afef;
+    --border:    #3e4451;
+    --selection: #3e4451;
+    --input-bg:  #21252b;
+
+    /* ANSI */
+    --ansi-0: #5c6370;
+    --ansi-1: #e06c75;
+    --ansi-2: #98c379;
+    --ansi-3: #e5c07b;
+    --ansi-4: #61afef;
+    --ansi-5: #c678dd;
+    --ansi-6: #56b6c2;
+    --ansi-7: #abb2bf;
+
+    --font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco,
+                   Consolas, 'Courier New', monospace;
+    --font-size: 14px;
+}
+
+[data-theme="whitesand"] {
+    /* --- Whitesand (warm light) --- */
+    --bg:        #fbf6ee;
+    --panel:     #f4ede1;
+    --header:    #efe6d8;
+    --text:      #3f3a33;
+    --accent:    #2f7bbd;
+    --border:    #d7cbb8;
+    --selection: #e6dac6;
+    --input-bg:  #efe6d8;
+
+    --ansi-0: #6b6257;
+    --ansi-1: #b6404b;
+    --ansi-2: #2f7f4f;
+    --ansi-3: #a06a00;
+    --ansi-4: #2f7bbd;
+    --ansi-5: #7a4db3;
+    --ansi-6: #0f7c78;
+    --ansi-7: #3f3a33;
+}
+
+/* ---- Reset / base ---- */
+* { box-sizing: border-box; }
+
+body {
+    font-family: var(--font-family);
+    background: var(--bg);
+    color: var(--text);
+    margin: 0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* ---- Toolbar ---- */
+#toolbar {
+    height: 44px;
+    background: var(--header);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+#toolbar .app-name {
+    font-weight: 700;
+    color: var(--accent);
+    font-size: 14px;
+    margin-right: 4px;
+}
+
+button, select {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+button:hover, select:hover { border-color: var(--accent); color: var(--accent); }
+button.active { background: var(--selection); border-color: var(--accent); color: var(--accent); }
+
+.sep { width: 1px; height: 20px; background: var(--border); }
+
+/* WS status badge */
+#ws-status {
+    margin-left: auto;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: none;
+    cursor: default;
+}
+#ws-status:hover { border-color: var(--border); color: var(--text); }
+#ws-status.connected    { color: var(--ansi-2); border-color: var(--ansi-2); }
+#ws-status.connecting   { color: var(--ansi-3); border-color: var(--ansi-3); }
+#ws-status.disconnected { color: var(--ansi-1); border-color: var(--ansi-1); }
+
+/* ---- Settings panel ---- */
+#settings-panel {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    font-size: 12px;
+    flex-wrap: wrap;
+}
+#settings-panel.open { display: flex; }
+#settings-panel .set-sep  { color: var(--border); margin: 0 4px; }
+#settings-panel .set-label { color: var(--ansi-0); margin-right: 2px; }
+#settings-panel .set-note  { color: var(--ansi-0); opacity: 0.85; }
+
+/* ---- Tag colours — entire line is tinted + slightly bold ---- */
+.log-line.line-wrn { color: var(--ansi-3); font-weight: 600; }  /* yellow */
+.log-line.line-dbg { font-weight: 600; }                        /* normal color, slightly bold */
+.log-line.line-err { color: var(--ansi-1); font-weight: 600; }  /* red    */
+/* <inf> lines are intentionally left unstyled */
+
+
+
+/* ---- Tab bar ---- */
+#tab-bar {
+    display: flex;   /* always shown — contains the + button */
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    background: var(--header);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.tab-btn.tab-add {
+    font-size: 16px;
+    padding: 0 10px;
+    line-height: 1.6;
+    border-style: dashed;
+    opacity: 0.6;
+}
+.tab-btn.tab-add:hover { opacity: 1; }
+
+.tab-btn {
+    padding: 3px 14px;
+    border-radius: 3px;
+    font-size: 12px;
+    cursor: pointer;
+}
+.tab-btn.active {
+    background: var(--accent);
+    color: var(--header);
+    border-color: var(--accent);
+}
+
+/* Hover popup for pane swapping from tab labels */
+#tab-swap-menu {
+    position: fixed;
+    z-index: 1000;
+    min-width: 280px;
+    max-width: 420px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+    display: none;
+}
+#tab-swap-menu.open { display: block; }
+#tab-swap-menu .tab-swap-title {
+    font-size: 11px;
+    color: var(--ansi-0);
+    margin-bottom: 6px;
+}
+#tab-swap-menu .tab-swap-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+}
+#tab-swap-menu .tab-swap-pane-name {
+    min-width: 100px;
+    font-size: 12px;
+    color: var(--accent);
+}
+#tab-swap-menu .tab-swap-select {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+}
+
+/* Sessions list popup */
+#sessions-menu {
+    position: fixed;
+    z-index: 1100;
+    min-width: 320px;
+    max-width: 520px;
+    max-height: 60vh;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+    display: none;
+}
+#sessions-menu.open { display: block; }
+#sessions-menu .sessions-head {
+    position: sticky;
+    top: 0;
+    background: var(--header);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 10px;
+    font-size: 12px;
+    color: var(--accent);
+}
+#sessions-menu .sessions-body { padding: 8px; }
+#sessions-menu .session-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 4px;
+    border-bottom: 1px dashed var(--border);
+}
+#sessions-menu .session-row:last-child { border-bottom: none; }
+#sessions-menu .session-meta {
+    font-size: 12px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#sessions-menu .session-tags { display: flex; gap: 4px; }
+#sessions-menu .session-tag {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0 6px;
+    font-size: 10px;
+    line-height: 18px;
+}
+#sessions-menu .session-tag.current {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+#sessions-menu .session-tag.pending {
+    color: var(--ansi-3);
+}
+#sessions-menu .session-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+#sessions-menu .session-actions a {
+    font-size: 11px;
+    color: var(--accent);
+    text-decoration: none;
+}
+#sessions-menu .session-actions a:hover { text-decoration: underline; }
+#sessions-menu .session-actions a.disabled {
+
+    color: var(--ansi-0);
+    pointer-events: none;
+    text-decoration: none;
+}
+
+/* Download raw popup menu */
+#download-raw-menu {
+    position: fixed;
+    z-index: 1100;
+    min-width: 320px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+    display: none;
+}
+#download-raw-menu.open { display: block; }
+#download-raw-menu .download-raw-head {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    color: var(--accent);
+    font-size: 12px;
+}
+#download-raw-menu .download-raw-body {
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+#download-raw-menu .download-raw-opt {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: var(--text);
+    cursor: pointer;
+}
+#download-raw-menu .download-raw-opt:hover {
+    background: var(--selection);
+    color: var(--accent);
+}
+
+
+/* ---- Main layout ---- */
+#container {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+/* Each tab's pane group; only the active one is visible */
+.tab-content {
+    flex: 1;
+    display: flex;
+    flex-direction: row;
+    overflow: hidden;
+    background: var(--border);
+    gap: 1px;
+}
+
+.pane {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    background: var(--bg);
+}
+
+/* ---- Pane header ---- */
+.pane-header {
+    height: 30px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    gap: 6px;
+    flex-shrink: 0;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--accent);
+}
+.pane-header .pane-name { flex: 1; }
+.pane-header button { padding: 2px 6px; font-size: 11px; }
+.pane-header button.active { border-color: var(--accent); }
+
+/* Pane swap feedback animation */
+.pane.swap-anim {
+    animation: pane-swap-pulse 0.32s ease-out;
+}
+@keyframes pane-swap-pulse {
+    0%   { box-shadow: inset 0 0 0 0 var(--accent); }
+    50%  { box-shadow: inset 0 0 0 2px var(--accent); }
+    100% { box-shadow: inset 0 0 0 0 var(--accent); }
+}
+
+/* ---- Filter bar ---- */
+.filter-bar {
+    height: 26px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    gap: 6px;
+    flex-shrink: 0;
+}
+.filter-input {
+    flex: 1;
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 12px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    outline: none;
+}
+.filter-input:focus  { border-color: var(--accent); }
+.filter-input.invalid { border-color: var(--ansi-1); }
+
+/* ---- Log area ---- */
+.pane-body {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+}
+
+.log-area {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 4px 0;
+    scroll-behavior: auto;
+    white-space: pre;
+}
+.log-area.wrap { white-space: pre-wrap; word-break: break-all; }
+
+.log-line {
+    font-size: var(--font-size);
+    line-height: 1.55;
+    padding: 0 10px;
+    min-height: 1.55em;
+    cursor: pointer;
+    user-select: none;
+}
+body.alt-held .log-line {
+    user-select: text;
+}
+.log-line:hover  { background: var(--selection); }
+.log-line.tx-line { opacity: 0.8; }
+
+.log-line .ts {
+    color: var(--ansi-0);
+    margin-right: 6px;
+    user-select: none;
+    font-size: 0.92em;
+}
+.log-line .ts.hidden { display: none; }
+
+/* Line selection — drag along .ts gutter */
+.log-line.selected {
+    background: var(--selection);
+    box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* Copy-selection overlay actions */
+.copy-actions {
+    position: absolute;
+    right: 8px;
+    top: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    z-index: 10;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s;
+}
+.copy-actions.visible { opacity: 0.95; pointer-events: auto; }
+
+/* Scope toggle row */
+.scope-row {
+    display: flex;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+}
+.scope-btn {
+    background: var(--panel);
+    color: var(--ansi-0);
+    border: none;
+    padding: 2px 10px;
+    font-size: 10px;
+    cursor: pointer;
+    transition: none;
+    opacity: 0;
+    pointer-events: none;
+}
+.scope-btn.visible { opacity: 1; pointer-events: auto; }
+.scope-btn:hover { color: var(--accent); }
+.scope-btn.active {
+    background: var(--accent);
+    color: var(--header);
+    font-weight: 600;
+}
+.scope-btn.active:hover { color: var(--header); }
+
+/* Pane selector (context-selected scope) */
+.pane-selector {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 6px;
+    margin-top: 4px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 11px;
+}
+.pane-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    color: var(--ansi-0);
+    white-space: nowrap;
+}
+.pane-checkbox input[type="checkbox"] {
+    margin: 0;
+    cursor: pointer;
+}
+
+/* Primary action row */
+.action-row {
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+    position: relative;
+}
+
+.copy-btn {
+    padding: 3px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    background: var(--panel);
+    font-size: 11px;
+    cursor: pointer;
+    transition: none;
+    white-space: nowrap;
+}
+.copy-btn.visible { opacity: 0.95; pointer-events: auto; }
+.copy-btn:hover   { opacity: 1; }
+
+/* More toggle */
+.more-toggle {
+    padding: 3px 8px;
+    letter-spacing: 1px;
+}
+
+/* More dropdown */
+.more-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    min-width: 150px;
+    padding: 4px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+    z-index: 20;
+    flex-direction: column;
+    gap: 2px;
+}
+.more-dropdown.open {
+    display: flex;
+}
+.more-dropdown .copy-btn {
+    border: none;
+    border-radius: 4px;
+    text-align: left;
+    width: 100%;
+    font-size: 11px;
+    padding: 4px 10px;
+    background: transparent;
+}
+.more-dropdown .copy-btn:hover {
+    background: var(--selection);
+}
+
+
+mark.hl {
+    background: var(--ansi-3);
+    color: var(--header);
+    border-radius: 2px;
+    padding: 0 1px;
+}
+
+/* Persistent sync highlight — cleared on next click */
+.log-line.sync-highlight {
+    background: var(--selection);
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+}
+
+/* Jump-to-bottom overlay */
+.jump-btn {
+    position: absolute;
+    left: 50%;
+    bottom: 8px;
+    transform: translateX(-50%);
+    padding: 3px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    background: var(--panel);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s;
+    z-index: 10;
+    font-size: 11px;
+}
+.jump-btn.visible { opacity: 0.9; pointer-events: auto; }
+.jump-btn:hover   { opacity: 1; }
+
+/* ---- Input row ---- */
+.input-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.serial-input {
+    flex: 1;
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 3px;
+    outline: none;
+}
+.serial-input:focus { border-color: var(--accent); }
+.send-btn { padding: 4px 12px; flex-shrink: 0; }
+
+/* ---- Splitter ---- */
+.splitter {
+    width: 10px;
+    flex: 0 0 10px;
+    cursor: col-resize;
+    background: var(--border);
+    position: relative;
+    user-select: none;
+    touch-action: none;
+}
+.splitter::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 4px;
+    width: 2px;
+    background: var(--panel);
+}
+.splitter:hover::after,
+.splitter.dragging::after { background: var(--accent); }
+
+/* ---- ANSI color spans ---- */
+.ansi-1 { color: var(--ansi-1); }
+.ansi-2 { color: var(--ansi-2); }
+.ansi-3 { color: var(--ansi-3); }
+.ansi-4 { color: var(--ansi-4); }
+.ansi-5 { color: var(--ansi-5); }
+.ansi-6 { color: var(--ansi-6); }
+.ansi-7 { color: var(--ansi-7); }
+.ansi-b { font-weight: 700; }
+
+/* ── Marker indicators ── */
+.log-line.has-marker {
+    border-left: 5px solid var(--accent);
+}
+
+.marker-nav {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    margin-left: 8px;
+    color: var(--fg);
+}
+.marker-nav button {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 1px 6px;
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 1.4;
+    border-radius: 2px;
+}
+
+/* ── Marker tooltip ── */
+#marker-tooltip {
+    position: fixed;
+    z-index: 9999;
+    background: var(--panel);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    line-height: 1.4;
+    max-width: 400px;
+    white-space: normal;
+    pointer-events: none;
+    display: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+#marker-tooltip.visible { display: block; }
+#marker-tooltip .mt-label {
+    font-weight: 700;
+    color: var(--accent);
+    margin-right: 4px;
+}
+.marker-nav button:hover {
+    border-color: var(--accent);
+}
+
+/* ── Marker input overlay ── */
+.marker-input-overlay {
+    position: fixed;
+    z-index: 9998;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    max-width: min(500px, calc(100vw - 16px));
+}
+.marker-input-label {
+    font-size: 12px;
+    color: var(--fg);
+    white-space: normal;
+}
+.marker-input {
+    font-family: inherit;
+    font-size: 12px;
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    padding: 2px 6px;
+    width: 280px;
+    outline: none;
+}
+.marker-input:focus {
+    border-color: var(--accent);
+}
+.marker-input-save {
+    font-family: inherit;
+    font-size: 11px;
+    background: var(--accent);
+    color: var(--bg);
+    border: none;
+    border-radius: 2px;
+    padding: 2px 8px;
+    cursor: pointer;
+}
+.marker-input-save:hover {
+    opacity: 0.85;
+}
+.marker-input-cancel {
+    font-family: inherit;
+    font-size: 13px;
+    background: transparent;
+    color: var(--fg);
+    border: none;
+    cursor: pointer;
+    padding: 0 2px;
+    line-height: 1;
+}
+.marker-input-cancel:hover {
+    color: var(--accent);
+}
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+    <span class="app-name">embed-log</span>
+    <div class="sep"></div>
+    <button id="btn-download-raw" title="Download all logs as merged raw text file">Download raw</button>
+    <button id="btn-unwrap" title="Unwrap multi-pane tabs into single-pane tabs">Unwrap</button>
+    <button id="btn-timestamp-mode" title="Switch timestamps">Absolute</button>
+    <div class="sep"></div>
+    <button id="btn-theme" title="Toggle light / dark theme">&#x1F319;</button>
+</div>
+
+<div id="download-raw-menu">
+    <div class="download-raw-head">Download raw logs</div>
+    <div class="download-raw-body">
+        <button id="btn-download-merged" class="download-raw-opt">Merged (.log) — all panes interleaved</button>
+        <button id="btn-download-split" class="download-raw-opt">Per pane (.log files) — one file per source</button>
+    </div>
+</div>
+
+<!-- ── TAB BAR — shown by tabs.js when there is more than one tab ── -->
+<div id="tab-bar"></div>
+
+<!-- ── PANES ────────────────────────────────────────────────── -->
+<div id="container">
+    <div class="tab-content" id="tab-content-0">
+        <div class="pane" id="pane-SENSOR_A">
+            <div class="pane-header">
+                <span class="pane-name">DEVICE_A</span>
+
+                <button class="pane-wrap-btn" title="Toggle word wrap in this pane">Wrap</button>
+
+            </div>
+            <div class="filter-bar">
+                <input class="filter-input" data-pane="SENSOR_A" placeholder="Filter (regex)…">
+            </div>
+            <div class="pane-body">
+                <div class="log-area" id="log-SENSOR_A"></div>
+                <button class="jump-btn" id="jump-SENSOR_A">jump to bottom</button>
+            </div>
+            <div class="input-row" style="display:none">
+                <input class="serial-input" id="input-SENSOR_A" autocomplete="off">
+                <button class="send-btn" data-pane="SENSOR_A">Send</button>
+            </div>
+        </div>
+        <div class="splitter"></div>
+        <div class="pane" id="pane-SENSOR_B">
+            <div class="pane-header">
+                <span class="pane-name">HOST</span>
+
+                <button class="pane-wrap-btn" title="Toggle word wrap in this pane">Wrap</button>
+
+            </div>
+            <div class="filter-bar">
+                <input class="filter-input" data-pane="SENSOR_B" placeholder="Filter (regex)…">
+            </div>
+            <div class="pane-body">
+                <div class="log-area" id="log-SENSOR_B"></div>
+                <button class="jump-btn" id="jump-SENSOR_B">jump to bottom</button>
+            </div>
+            <div class="input-row" style="display:none">
+                <input class="serial-input" id="input-SENSOR_B" autocomplete="off">
+                <button class="send-btn" data-pane="SENSOR_B">Send</button>
+            </div>
+        </div>
+    </div>
+    <div class="tab-content" id="tab-content-1">
+        <div class="pane" id="pane-SENSOR_C">
+            <div class="pane-header">
+                <span class="pane-name">AUX</span>
+
+                <button class="pane-wrap-btn" title="Toggle word wrap in this pane">Wrap</button>
+
+            </div>
+            <div class="filter-bar">
+                <input class="filter-input" data-pane="SENSOR_C" placeholder="Filter (regex)…">
+            </div>
+            <div class="pane-body">
+                <div class="log-area" id="log-SENSOR_C"></div>
+                <button class="jump-btn" id="jump-SENSOR_C">jump to bottom</button>
+            </div>
+            <div class="input-row" style="display:none">
+                <input class="serial-input" id="input-SENSOR_C" autocomplete="off">
+                <button class="send-btn" data-pane="SENSOR_C">Send</button>
+            </div>
+        </div>
+    </div>
+    <div class="tab-content" id="tab-content-2">
+        <div class="pane" id="pane-SENSOR_D">
+            <div class="pane-header">
+                <span class="pane-name">PYTEST</span>
+
+                <button class="pane-wrap-btn" title="Toggle word wrap in this pane">Wrap</button>
+
+            </div>
+            <div class="filter-bar">
+                <input class="filter-input" data-pane="SENSOR_D" placeholder="Filter (regex)…">
+            </div>
+            <div class="pane-body">
+                <div class="log-area" id="log-SENSOR_D"></div>
+                <button class="jump-btn" id="jump-SENSOR_D">jump to bottom</button>
+            </div>
+            <div class="input-row" style="display:none">
+                <input class="serial-input" id="input-SENSOR_D" autocomplete="off">
+                <button class="send-btn" data-pane="SENSOR_D">Send</button>
+            </div>
+        </div>
+    </div>
+    <div class="tab-content" id="tab-content-3">
+        <div class="pane" id="pane-SENSOR_CBOR">
+            <div class="pane-header">
+                <span class="pane-name">CBOR</span>
+
+                <button class="pane-wrap-btn" title="Toggle word wrap in this pane">Wrap</button>
+
+            </div>
+            <div class="filter-bar">
+                <input class="filter-input" data-pane="SENSOR_CBOR" placeholder="Filter (regex)…">
+            </div>
+            <div class="pane-body">
+                <div class="log-area" id="log-SENSOR_CBOR"></div>
+                <button class="jump-btn" id="jump-SENSOR_CBOR">jump to bottom</button>
+            </div>
+            <div class="input-row" style="display:none">
+                <input class="serial-input" id="input-SENSOR_CBOR" autocomplete="off">
+                <button class="send-btn" data-pane="SENSOR_CBOR">Send</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>window.__embedLogProfile = {"kind": "static", "capabilities": {"clearAll": false, "downloadRaw": true, "exportHtml": false, "fontSize": true, "paneSwap": true, "persistCache": false, "selectionExportHtml": true, "sessionApi": false, "themeToggle": true, "tx": false, "unwrap": true, "wsStatus": false, "dynamicTabs": false}};
+window.TABS = [{"id": "tab-0", "label": "DevA", "panes": ["SENSOR_A", "SENSOR_B"]}, {"id": "tab-1", "label": "DevB", "panes": ["SENSOR_C"]}, {"id": "tab-2", "label": "PYTEST", "panes": ["SENSOR_D"]}, {"id": "tab-3", "label": "cbor-tab", "panes": ["SENSOR_CBOR"]}];
+window.PANES = ["SENSOR_A", "SENSOR_B", "SENSOR_C", "SENSOR_D", "SENSOR_CBOR"];
+window.PANE_LABELS = {"SENSOR_A": "DEVICE_A", "SENSOR_B": "HOST", "SENSOR_C": "AUX", "SENSOR_D": "PYTEST", "SENSOR_CBOR": "CBOR"};
+window.__embedLogInitialTimestampMode = "absolute";
+window.__embedLogFirstLogAt = "2026-05-31T10:49:42.242+02:00";
+window.__embedLogInitialFontSize = 14;</script>
+<script>// Profile: tells the viewer what mode we're in and what features are enabled.
+// Modules that need capability gating read window.__embedLogProfile directly.
+// This is done so it works in both live mode (ES module) and static mode
+// (module syntax stripped, window.__embedLogProfile set by bootstrap config).
+//
+// In live mode: import this module to trigger the side effect that sets
+// window.__embedLogProfile. The default profile is LIVE.
+// In static mode: bootstrap/config sets window.__embedLogProfile before
+// the bundled classic scripts run.
+
+const STATIC_PROFILE = {
+    kind: "static",
+    capabilities: {
+        clearAll: false,
+        downloadRaw: true,
+        exportHtml: false,
+        fontSize: true,
+        paneSwap: true,
+        persistCache: false,
+        selectionExportHtml: true,
+        sessionApi: false,
+        themeToggle: true,
+        tx: false,
+        unwrap: true,
+        wsStatus: false,
+        dynamicTabs: false,
+        markers: false,
+    },
+};
+
+const LIVE_PROFILE = {
+    kind: "live",
+    capabilities: {
+        clearAll: true,
+        downloadRaw: true,
+        exportHtml: true,
+        fontSize: true,
+        paneSwap: true,
+        persistCache: true,
+        selectionExportHtml: true,
+        sessionApi: true,
+        themeToggle: true,
+        tx: true,
+        unwrap: true,
+        wsStatus: true,
+        dynamicTabs: false,
+        markers: true,
+    },
+};
+
+const profile = window.__embedLogProfile || LIVE_PROFILE;
+window.__embedLogProfile = profile;
+
+const PROFILE = profile;
+function can(feature) {
+    return profile.capabilities[feature] === true;
+}
+</script>
+<script>// Shared pane shell renderer.
+// Used by tabcreate.js (live mode) and export.js (runtime export).
+// merge_logs.py produces the same structure in Python.
+
+function _escHtml(str) {
+    return str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+}
+
+function renderPaneShell(paneId, label, { showTx = false } = {}) {
+    const safeLabel = _escHtml(label);
+    const txInputAttrs = ' placeholder="Serial TX — press Enter to send"' + (showTx ? '' : ' style="display:none"');
+    const txRow = [
+        '            <div class="input-row"' + (showTx ? '' : ' style="display:none"') + '>',
+        '                <input class="serial-input" id="input-' + paneId + '" autocomplete="off"' + (showTx ? ' placeholder="Serial TX — press Enter to send"' : '') + '>',
+        '                <button class="send-btn" data-pane="' + paneId + '">Send</button>',
+        '            </div>',
+    ].join('\n');
+    return [
+        '        <div class="pane" id="pane-' + paneId + '">',
+        '            <div class="pane-header">',
+        '                <span class="pane-name">' + safeLabel + '</span>',
+        '',
+        '                <button class="pane-wrap-btn" title="Toggle word wrap in this pane">Wrap</button>',
+        '                <button class="pane-download-btn" title="Download raw .log for this pane">Download</button>',
+        '            </div>',
+        '            <div class="filter-bar">',
+        '                <input class="filter-input" data-pane="' + paneId + '" placeholder="Filter (regex)…">',
+        '            </div>',
+        '            <div class="pane-body">',
+        '                <div class="log-area" id="log-' + paneId + '"></div>',
+        '                <button class="jump-btn" id="jump-' + paneId + '">jump to bottom</button>',
+        '            </div>',
+        txRow,
+        '        </div>',
+    ].join('\n');
+}
+</script>
+<script>// Toolbar action registry and renderer.
+// Produces toolbar HTML based on the current profile.
+// In live mode the toolbar is already in index.html — the IIFE below
+// only fills the toolbar when it starts empty (static/exported mode).
+
+const ACTIONS = [
+    { id: 'btn-clear',         label: 'Clear',       title: 'Clear all panes',                                              cap: 'clearAll' },
+    { id: 'btn-export',        label: 'Export HTML',  title: 'Export current session as a self-contained HTML file',          cap: 'exportHtml' },
+    { id: 'btn-new-session',   label: 'New session',  title: 'Save current session and start a new one',                     cap: 'sessionApi' },
+    { id: 'btn-unwrap',        label: 'Unwrap',       title: 'Unwrap multi-pane tabs into single-pane tabs',                  cap: 'unwrap' },
+    { id: 'btn-timestamp-mode', label: 'Absolute',    title: 'Switch timestamps' },
+    '__sep__',
+    { id: 'btn-theme',         label: '\u{1F319}',    title: 'Toggle light / dark theme',                                    cap: 'themeToggle' },
+];
+
+/**
+ * Render the toolbar HTML for a given profile.
+ * Returns the full <div id="toolbar">…</div> string.
+ */
+function renderToolbar(profile) {
+    const caps = profile.capabilities;
+    const parts = ['<div id="toolbar">'];
+    parts.push('    <span class="app-name">embed-log</span>');
+
+    let pendingSep = false;
+    ACTIONS.forEach(item => {
+        if (item === '__sep__') {
+            pendingSep = true;
+            return;
+        }
+        if (item.cap && caps[item.cap] === false) return;
+        if (pendingSep) {
+            parts.push('    <div class="sep"></div>');
+            pendingSep = false;
+        }
+        parts.push(`    <button id="${item.id}" title="${_escAttr(item.title)}">${item.label}</button>`);
+    });
+
+    if (caps.wsStatus) {
+        parts.push('    <div id="ws-status" class="disconnected">WS: disconnected</div>');
+
+    }
+    parts.push('    <div id="marker-nav" class="marker-nav" style="display:none">');
+    parts.push('        <button id="marker-nav-prev" title="Previous marker">◀</button>');
+    parts.push('        <span id="marker-nav-idx">1</span>/<span id="marker-nav-total">0</span>');
+    parts.push('        <button id="marker-nav-next" title="Next marker">▶</button>');
+    parts.push('    </div>');
+
+    parts.push('</div>');
+    return parts.join('\n');
+}
+
+function _escAttr(str) {
+    return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+}
+
+// ── Auto-fill the toolbar when this module loads ──
+// In live mode (toolbar already has buttons in index.html), skip.
+// In static/exported mode (empty shell), render the full toolbar.
+(function () {
+    const toolbar = document.getElementById('toolbar');
+    if (!toolbar) return;
+    if (toolbar.querySelector('button')) return; // already populated
+    toolbar.innerHTML = renderToolbar(window.__embedLogProfile);
+})();
+</script>
+<script>// Tab definitions — each tab shows 1 or 2 panes side-by-side.
+// In live mode TABS/PANES start empty; ws.js populates them dynamically.
+// In static mode (export/merge_logs) a classic <script> sets window.TABS and
+// window.PANES before this module runs so the per-pane state is pre-seeded.
+const TABS  = window.TABS  ?? [];
+const PANES = window.PANES ?? [...new Set(TABS.flatMap(t => t.panes))];
+const PANE_LABELS = window.PANE_LABELS ?? {};
+const INITIAL_TIMESTAMP_MODE =
+    window.__embedLogInitialTimestampMode === "relative" ? "relative" : "absolute";
+const INITIAL_FIRST_LOG_AT =
+    typeof window.__embedLogFirstLogAt === "string" && window.__embedLogFirstLogAt.trim()
+        ? window.__embedLogFirstLogAt.trim()
+        : null;
+
+function paneLabel(paneId) {
+    return PANE_LABELS[paneId] || paneId;
+}
+
+function unwrapPaneLabel(paneId) {
+    const base = paneLabel(paneId);
+    const tab = TABS.find(t => t.panes.includes(paneId));
+    if (!tab) return base;
+    return base + '-' + tab.label;
+}
+
+function _formatMs3(value) {
+    return String(value).padStart(3, "0");
+}
+
+function formatRelativeTimestamp(totalMs) {
+    const safeMs = Number.isFinite(totalMs) && totalMs >= 0 ? Math.floor(totalMs) : 0;
+    const hours = Math.floor(safeMs / 3_600_000);
+    const minutes = Math.floor((safeMs % 3_600_000) / 60_000);
+    const seconds = Math.floor((safeMs % 60_000) / 1_000);
+    const millis = safeMs % 1_000;
+    return `T+${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${_formatMs3(millis)}`;
+}
+
+function parseRelativeTimestamp(ts) {
+    const m = /^T\+(\d+):(\d{2}):(\d{2})\.(\d{3})$/.exec(ts || "");
+    if (!m) return null;
+    return (parseInt(m[1], 10) * 3_600_000)
+        + (parseInt(m[2], 10) * 60_000)
+        + (parseInt(m[3], 10) * 1_000)
+        + parseInt(m[4], 10);
+}
+
+function formatAbsoluteTimestampFromIso(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:[.,](\d+))?/.exec(iso || "");
+    if (!m) return null;
+    return `${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}.${_formatMs3((m[7] || "").slice(0, 3))}`;
+}
+
+function _isoToEpochMs(iso) {
+    const ms = Date.parse(iso || "");
+    return Number.isFinite(ms) ? ms : null;
+}
+
+function _formatAbsoluteTimestampFromMs(ms) {
+    if (!Number.isFinite(ms)) return null;
+    const d = new Date(ms);
+    if (!Number.isFinite(d.getTime())) return null;
+    return `${_formatMs3(d.getMonth() + 1).slice(1)}-${_formatMs3(d.getDate()).slice(1)} ${_formatMs3(d.getHours()).slice(1)}:${_formatMs3(d.getMinutes()).slice(1)}:${_formatMs3(d.getSeconds()).slice(1)}.${_formatMs3(d.getMilliseconds())}`;
+}
+
+function _enrichExistingTimestampVariants() {
+    if (!Number.isFinite(state.firstLogAtMs)) return false;
+    let changed = false;
+    PANES.forEach(paneId => {
+        const lines = state.rawLines[paneId] || [];
+        lines.forEach(line => {
+            if (!line) return;
+            if (!line.absTs && Number.isFinite(line.relNum)) {
+                line.absNum = state.firstLogAtMs + line.relNum;
+                line.absTs = _formatAbsoluteTimestampFromMs(line.absNum);
+                changed = true;
+            }
+            if ((!line.relTs || !Number.isFinite(line.relNum)) && Number.isFinite(line.absNum)) {
+                line.relNum = Math.max(0, line.absNum - state.firstLogAtMs);
+                line.relTs = formatRelativeTimestamp(line.relNum);
+                changed = true;
+            }
+            applyTimestampModeToLine(line);
+        });
+    });
+    return changed;
+}
+
+
+const state = {
+    showTs:      true,
+
+    fontSize:    14,
+    activeTab:   0,
+    activePaneTab: 0,
+    syncTs:      null,   // last-clicked numeric timestamp
+    syncTabSwitch: false, // true after explicit line sync; next tab switches follow syncTs
+    filters:     {},
+    wrap:        {},
+    rawLines:    {},
+    markers:     {},       // paneId → [{lineIdx, numTs, description, createdAt}]
+    markerNavIdx: -1,      // index into flat marker list for navigation
+    atBottom:    {},
+    highlighted: {},
+    selected:    {},
+    selectionScope:  'exact', // 'exact', 'context', or 'context-selected'
+    contextPanes:    {},       // paneId → bool; only used when selectionScope === 'context-selected'
+    unwrap:        false,
+    timestampMode: INITIAL_TIMESTAMP_MODE,
+    sessionTimestampMode: INITIAL_TIMESTAMP_MODE,
+    firstLogAt: INITIAL_FIRST_LOG_AT,
+    firstLogAtMs: _isoToEpochMs(INITIAL_FIRST_LOG_AT),
+};
+
+function setTimestampContext({ mode = null, firstLogAt = undefined, resetMode = false } = {}) {
+    if (mode === "absolute" || mode === "relative") {
+        state.sessionTimestampMode = mode;
+        if (resetMode) state.timestampMode = mode;
+    }
+    if (firstLogAt !== undefined) {
+        state.firstLogAt = typeof firstLogAt === "string" && firstLogAt.trim() ? firstLogAt.trim() : null;
+        state.firstLogAtMs = _isoToEpochMs(state.firstLogAt);
+    }
+    return _enrichExistingTimestampVariants();
+}
+
+function lineHasTimestampMode(line, mode) {
+    return mode === "relative" ? !!line?.relTs : !!line?.absTs;
+}
+
+function applyTimestampModeToLine(line) {
+    if (!line) return;
+    if (state.timestampMode === "relative" && line.relTs) {
+        line.ts = line.relTs;
+        line.numTs = Number.isFinite(line.relNum) ? line.relNum : 0;
+        return;
+    }
+    if (state.timestampMode === "absolute" && line.absTs) {
+        line.ts = line.absTs;
+        line.numTs = Number.isFinite(line.absNum) ? line.absNum : line.numTs;
+        return;
+    }
+    if (line.absTs) {
+        line.ts = line.absTs;
+        line.numTs = Number.isFinite(line.absNum) ? line.absNum : line.numTs;
+        return;
+    }
+    if (line.relTs) {
+        line.ts = line.relTs;
+        line.numTs = Number.isFinite(line.relNum) ? line.relNum : 0;
+    }
+}
+
+function buildTimestampInfo(ts, meta = {}) {
+    const info = {
+        ts: ts || "",
+        numTs: Number.isFinite(meta.numTs) ? meta.numTs : null,
+        absTs: typeof meta.absTs === "string" && meta.absTs ? meta.absTs : null,
+        absNum: Number.isFinite(meta.absNum) ? meta.absNum : null,
+        relTs: typeof meta.relTs === "string" && meta.relTs ? meta.relTs : null,
+        relNum: Number.isFinite(meta.relNum) ? meta.relNum : null,
+    };
+
+    if (!info.absTs && typeof meta.timestampIso === "string") {
+        info.absTs = formatAbsoluteTimestampFromIso(meta.timestampIso);
+    }
+    if (!Number.isFinite(info.absNum) && typeof meta.timestampIso === "string") {
+        info.absNum = _isoToEpochMs(meta.timestampIso);
+    }
+
+    if (!info.relTs && typeof ts === "string" && ts.startsWith("T+")) {
+        info.relTs = ts;
+    }
+    if (!Number.isFinite(info.relNum) && info.relTs) {
+        info.relNum = parseRelativeTimestamp(info.relTs);
+    }
+
+    if (!info.absTs && typeof ts === "string" && ts && !ts.startsWith("T+")) {
+        info.absTs = ts;
+    }
+
+    if (!info.absTs && Number.isFinite(info.relNum) && Number.isFinite(state.firstLogAtMs)) {
+        info.absNum = state.firstLogAtMs + info.relNum;
+        info.absTs = _formatAbsoluteTimestampFromMs(info.absNum);
+    }
+
+    if ((!info.relTs || !Number.isFinite(info.relNum)) && Number.isFinite(info.absNum) && Number.isFinite(state.firstLogAtMs)) {
+        info.relNum = Math.max(0, info.absNum - state.firstLogAtMs);
+        info.relTs = formatRelativeTimestamp(info.relNum);
+    }
+
+
+    if (!Number.isFinite(info.numTs)) {
+        if (state.timestampMode === "relative" && Number.isFinite(info.relNum)) {
+            info.numTs = info.relNum;
+        } else if (state.timestampMode === "absolute" && Number.isFinite(info.absNum)) {
+            info.numTs = info.absNum;
+        } else if (Number.isFinite(info.relNum)) {
+            info.numTs = info.relNum;
+        } else if (Number.isFinite(info.absNum)) {
+            info.numTs = info.absNum;
+        } else {
+            info.numTs = 0;
+        }
+    }
+
+    applyTimestampModeToLine(info);
+    return info;
+}
+
+// Initialise per-pane state for every pane in the system
+PANES.forEach(id => {
+    state.filters[id]     = null;
+    state.rawLines[id]    = [];
+    state.atBottom[id]    = true;
+
+    state.wrap[id]        = false;
+    state.highlighted[id] = null;
+    state.selected[id]    = new Set();
+});</script>
+<script>// ---------------------------------------------------------------------------
+// Theme manager
+// - Quick toolbar toggle: light/dark
+// - Detailed palette choice (dark + light) in settings panel
+// Defaults:
+//   light mode -> Whitesand
+//   dark mode  -> One Dark
+// ---------------------------------------------------------------------------
+
+const DARK_PALETTES = [
+    { key: "dracula",          label: "Dracula",
+      vars: { "--bg":"#282a36","--panel":"#21222c","--header":"#21222c","--text":"#f8f8f2","--accent":"#bd93f9","--border":"#44475a","--selection":"#44475a","--input-bg":"#21222c","--ansi-0":"#6272a4","--ansi-1":"#ff5555","--ansi-2":"#50fa7b","--ansi-3":"#f1fa8c","--ansi-4":"#6272a4","--ansi-5":"#bd93f9","--ansi-6":"#8be9fd","--ansi-7":"#f8f8f2" } },
+    { key: "one-dark",         label: "One Dark",
+      vars: { "--bg":"#282c34","--panel":"#21252b","--header":"#21252b","--text":"#abb2bf","--accent":"#61afef","--border":"#3e4451","--selection":"#3e4451","--input-bg":"#21252b","--ansi-0":"#5c6370","--ansi-1":"#e06c75","--ansi-2":"#98c379","--ansi-3":"#e5c07b","--ansi-4":"#61afef","--ansi-5":"#c678dd","--ansi-6":"#56b6c2","--ansi-7":"#abb2bf" } },
+    { key: "nord",             label: "Nord",
+      vars: { "--bg":"#2e3440","--panel":"#3b4252","--header":"#3b4252","--text":"#eceff4","--accent":"#88c0d0","--border":"#434c5e","--selection":"#434c5e","--input-bg":"#3b4252","--ansi-0":"#616e88","--ansi-1":"#bf616a","--ansi-2":"#a3be8c","--ansi-3":"#ebcb8b","--ansi-4":"#81a1c1","--ansi-5":"#b48ead","--ansi-6":"#88c0d0","--ansi-7":"#eceff4" } },
+    { key: "monokai",          label: "Monokai",
+      vars: { "--bg":"#272822","--panel":"#1e1f1c","--header":"#1e1f1c","--text":"#f8f8f2","--accent":"#a6e22e","--border":"#3e3d32","--selection":"#49483e","--input-bg":"#1e1f1c","--ansi-0":"#75715e","--ansi-1":"#f92672","--ansi-2":"#a6e22e","--ansi-3":"#f4bf75","--ansi-4":"#66d9e8","--ansi-5":"#ae81ff","--ansi-6":"#66d9e8","--ansi-7":"#f8f8f2" } },
+    { key: "tokyo-night",      label: "Tokyo Night",
+      vars: { "--bg":"#1a1b26","--panel":"#16161e","--header":"#16161e","--text":"#c0caf5","--accent":"#7aa2f7","--border":"#292e42","--selection":"#292e42","--input-bg":"#16161e","--ansi-0":"#565f89","--ansi-1":"#f7768e","--ansi-2":"#9ece6a","--ansi-3":"#e0af68","--ansi-4":"#7aa2f7","--ansi-5":"#bb9af7","--ansi-6":"#7dcfff","--ansi-7":"#c0caf5" } },
+    { key: "gruvbox-dark",     label: "Gruvbox Dark",
+      vars: { "--bg":"#282828","--panel":"#1d2021","--header":"#1d2021","--text":"#ebdbb2","--accent":"#fabd2f","--border":"#3c3836","--selection":"#504945","--input-bg":"#1d2021","--ansi-0":"#928374","--ansi-1":"#fb4934","--ansi-2":"#b8bb26","--ansi-3":"#fabd2f","--ansi-4":"#83a598","--ansi-5":"#d3869b","--ansi-6":"#8ec07c","--ansi-7":"#ebdbb2" } },
+    { key: "catppuccin-mocha", label: "Catppuccin Mocha",
+      vars: { "--bg":"#1e1e2e","--panel":"#181825","--header":"#181825","--text":"#cdd6f4","--accent":"#cba6f7","--border":"#313244","--selection":"#45475a","--input-bg":"#181825","--ansi-0":"#6c7086","--ansi-1":"#f38ba8","--ansi-2":"#a6e3a1","--ansi-3":"#f9e2af","--ansi-4":"#89b4fa","--ansi-5":"#cba6f7","--ansi-6":"#89dceb","--ansi-7":"#cdd6f4" } },
+];
+
+const LIGHT_PALETTES = [
+    { key: "whitesand",        label: "Whitesand",
+      vars: { "--bg":"#fbf6ee","--panel":"#f4ede1","--header":"#efe6d8","--text":"#3f3a33","--accent":"#2f7bbd","--border":"#d7cbb8","--selection":"#e6dac6","--input-bg":"#efe6d8","--ansi-0":"#6b6257","--ansi-1":"#b6404b","--ansi-2":"#2f7f4f","--ansi-3":"#a06a00","--ansi-4":"#2f7bbd","--ansi-5":"#7a4db3","--ansi-6":"#0f7c78","--ansi-7":"#3f3a33" } },
+    { key: "github-light",     label: "GitHub Light",
+      vars: { "--bg":"#ffffff","--panel":"#f6f8fa","--header":"#f6f8fa","--text":"#24292f","--accent":"#0969da","--border":"#d0d7de","--selection":"#ddf4ff","--input-bg":"#f6f8fa","--ansi-0":"#6e7781","--ansi-1":"#cf222e","--ansi-2":"#116329","--ansi-3":"#9a6700","--ansi-4":"#0969da","--ansi-5":"#8250df","--ansi-6":"#0969da","--ansi-7":"#24292f" } },
+    { key: "solarized-light",  label: "Solarized Light",
+      vars: { "--bg":"#fdf6e3","--panel":"#eee8d5","--header":"#eee8d5","--text":"#657b83","--accent":"#268bd2","--border":"#93a1a1","--selection":"#eee8d5","--input-bg":"#eee8d5","--ansi-0":"#93a1a1","--ansi-1":"#dc322f","--ansi-2":"#859900","--ansi-3":"#b58900","--ansi-4":"#268bd2","--ansi-5":"#6c71c4","--ansi-6":"#2aa198","--ansi-7":"#657b83" } },
+    { key: "catppuccin-latte", label: "Catppuccin Latte",
+      vars: { "--bg":"#eff1f5","--panel":"#e6e9ef","--header":"#e6e9ef","--text":"#4c4f69","--accent":"#1e66f5","--border":"#ccd0da","--selection":"#acb0be","--input-bg":"#e6e9ef","--ansi-0":"#8c8fa1","--ansi-1":"#d20f39","--ansi-2":"#40a02b","--ansi-3":"#df8e1d","--ansi-4":"#1e66f5","--ansi-5":"#8839ef","--ansi-6":"#04a5e5","--ansi-7":"#4c4f69" } },
+    { key: "gruvbox-light",    label: "Gruvbox Light",
+      vars: { "--bg":"#fbf1c7","--panel":"#f2e5bc","--header":"#ebdbb2","--text":"#3c3836","--accent":"#b57614","--border":"#d5c4a1","--selection":"#ebdbb2","--input-bg":"#ebdbb2","--ansi-0":"#928374","--ansi-1":"#9d0006","--ansi-2":"#79740e","--ansi-3":"#b57614","--ansi-4":"#076678","--ansi-5":"#8f3f71","--ansi-6":"#427b58","--ansi-7":"#3c3836" } },
+];
+
+const DEFAULT_LIGHT = "whitesand";
+const DEFAULT_DARK = "one-dark";
+
+function _isValidLight(key) {
+    return LIGHT_PALETTES.some(p => p.key === key);
+}
+
+function _isValidDark(key) {
+    return DARK_PALETTES.some(p => p.key === key);
+}
+
+let _mode = document.documentElement.getAttribute("data-theme") === "whitesand" ? "light" : "dark";
+let _lightKey = DEFAULT_LIGHT;
+let _darkKey = DEFAULT_DARK;
+const _listeners = new Set();
+
+const _initial = window.__embedLogInitialThemeState;
+if (_initial && typeof _initial === "object") {
+    if (_initial.mode === "light" || _initial.mode === "dark") _mode = _initial.mode;
+    if (typeof _initial.lightKey === "string") _lightKey = _initial.lightKey;
+    if (typeof _initial.darkKey === "string") _darkKey = _initial.darkKey;
+}
+
+function _find(list, key) {
+    return list.find(p => p.key === key) || list[0];
+}
+
+function _applyVars(vars) {
+    const root = document.documentElement;
+    for (const [k, v] of Object.entries(vars)) {
+        root.style.setProperty(k, v);
+    }
+}
+
+function _emit() {
+    _listeners.forEach(fn => {
+        try { fn(); } catch (_) {}
+    });
+}
+
+function _applyCurrent() {
+    const palette = _mode === "dark"
+        ? _find(DARK_PALETTES, _darkKey)
+        : _find(LIGHT_PALETTES, _lightKey);
+    _applyVars(palette.vars);
+    document.documentElement.setAttribute("data-theme", _mode === "light" ? "whitesand" : "");
+    _emit();
+}
+
+function _setMode(mode) {
+    _mode = mode === "dark" ? "dark" : "light";
+    _applyCurrent();
+}
+
+function _setDarkPalette(key) {
+    _darkKey = _find(DARK_PALETTES, key).key;
+    if (_mode === "dark") _applyCurrent();
+}
+
+function _setLightPalette(key) {
+    _lightKey = _find(LIGHT_PALETTES, key).key;
+    if (_mode === "light") _applyCurrent();
+}
+
+function _toggle() {
+    _setMode(_mode === "dark" ? "light" : "dark");
+}
+
+function _applyDefaultsFromBackend(defaults) {
+    if (!defaults || typeof defaults !== "object") return;
+    const light = typeof defaults.light === "string" ? defaults.light : "";
+    const dark = typeof defaults.dark === "string" ? defaults.dark : "";
+
+    let changed = false;
+    if (light && _isValidLight(light)) {
+        _lightKey = light;
+        changed = true;
+    }
+    if (dark && _isValidDark(dark)) {
+        _darkKey = dark;
+        changed = true;
+    }
+    if (changed) _applyCurrent();
+}
+
+window.__embedLogTheme = {
+    toggle: _toggle,
+    isDark: () => _mode === "dark",
+    mode: () => _mode,
+    getState: () => ({ mode: _mode, lightKey: _lightKey, darkKey: _darkKey }),
+    onChange: fn => {
+        if (typeof fn !== "function") return () => {};
+        _listeners.add(fn);
+        return () => _listeners.delete(fn);
+    },
+    setDarkPalette: _setDarkPalette,
+    setLightPalette: _setLightPalette,
+    applyDefaults: _applyDefaultsFromBackend,
+};
+
+function _makeSelect(items, selectedKey) {
+    const sel = document.createElement("select");
+    items.forEach(item => {
+        const opt = document.createElement("option");
+        opt.value = item.key;
+        opt.textContent = item.label;
+        sel.appendChild(opt);
+    });
+    sel.value = selectedKey;
+    return sel;
+}
+
+function _mountSettingsControls() {
+    const panel = document.getElementById("settings-panel");
+    if (!panel) return false;
+    if (document.getElementById("set-theme-light")) return true;
+
+    const sep1 = document.createElement("span");
+    sep1.className = "set-sep";
+    sep1.textContent = "|";
+    panel.appendChild(sep1);
+
+    const lblLight = document.createElement("span");
+    lblLight.className = "set-label";
+    lblLight.textContent = "Light theme:";
+    panel.appendChild(lblLight);
+
+    const selLight = _makeSelect(LIGHT_PALETTES, _lightKey);
+    selLight.id = "set-theme-light";
+    selLight.addEventListener("change", () => _setLightPalette(selLight.value));
+    panel.appendChild(selLight);
+
+    const sep2 = document.createElement("span");
+    sep2.className = "set-sep";
+    sep2.textContent = "|";
+    panel.appendChild(sep2);
+
+    const lblDark = document.createElement("span");
+    lblDark.className = "set-label";
+    lblDark.textContent = "Dark theme:";
+    panel.appendChild(lblDark);
+
+    const selDark = _makeSelect(DARK_PALETTES, _darkKey);
+    selDark.id = "set-theme-dark";
+    selDark.addEventListener("change", () => _setDarkPalette(selDark.value));
+    panel.appendChild(selDark);
+
+    return true;
+}
+
+(function _deferMount() {
+    if (_mountSettingsControls()) return;
+    setTimeout(_deferMount, 50);
+})();
+
+_applyCurrent();
+window.dispatchEvent(new Event("embedlog-theme-ready"));
+</script>
+<script>// ---------------------------------------------------------------------------
+// Settings panel — injected after #toolbar
+// Gear button (⚙) in the toolbar toggles the panel open/closed.
+// Every change rerenders all panes; no page reload needed.
+// ---------------------------------------------------------------------------
+(function () {
+    const toolbar = document.getElementById("toolbar");
+    const wsStatus = document.getElementById("ws-status");
+
+    // ---- Gear button ----
+    const gearBtn = document.createElement("button");
+    gearBtn.id        = "btn-settings";
+    gearBtn.title     = "Settings";
+    gearBtn.textContent = "⚙";
+    if (wsStatus) {
+        wsStatus.before(gearBtn);
+    } else {
+        toolbar?.appendChild(gearBtn);
+    }
+
+    // ---- Settings panel (inserted after toolbar) ----
+    const panel = document.createElement("div");
+    panel.id = "settings-panel";
+    toolbar.after(panel);
+
+    gearBtn.addEventListener("click", () => {
+        panel.classList.toggle("open");
+        gearBtn.classList.toggle("active");
+    });
+
+
+})();
+</script>
+<script>
+// Initialise font-size from saved state or bootstrap config.
+// In exported/static HTML, window.__embedLogInitialFontSize is set by configJs.
+// In live mode it is absent, so state.fontSize (default 14) is used.
+const initialFontSize = window.__embedLogInitialFontSize;
+if (typeof initialFontSize === 'number' && initialFontSize > 0) {
+    state.fontSize = initialFontSize;
+}
+
+function applyFontSize() {
+    document.documentElement.style.setProperty('--font-size', state.fontSize + 'px');
+}
+
+(function () {
+    // Apply the font size on load.
+    applyFontSize();
+
+    const panel = document.getElementById("settings-panel");
+    if (!panel) return;
+
+    // Separator
+    const sep = document.createElement("span");
+    sep.className = "set-sep";
+    sep.textContent = "|";
+
+    // Decrease
+    const decBtn = document.createElement("button");
+    decBtn.id = "btn-font-dec";
+    decBtn.title = "Decrease font size";
+    decBtn.textContent = "A-";
+    decBtn.addEventListener("click", () => {
+        state.fontSize = Math.max(8, state.fontSize - 1);
+        applyFontSize();
+        window.__embedLogSchedulePersist?.();
+    });
+
+    // Reset
+    const resetBtn = document.createElement("button");
+    resetBtn.id = "btn-font-reset";
+    resetBtn.title = "Reset font size to 14px";
+    resetBtn.textContent = "A";
+    resetBtn.addEventListener("click", () => {
+        state.fontSize = 14;
+        applyFontSize();
+        window.__embedLogSchedulePersist?.();
+    });
+
+    // Increase
+    const incBtn = document.createElement("button");
+    incBtn.id = "btn-font-inc";
+    incBtn.title = "Increase font size";
+    incBtn.textContent = "A+";
+    incBtn.addEventListener("click", () => {
+        state.fontSize = Math.min(32, state.fontSize + 1);
+        applyFontSize();
+        window.__embedLogSchedulePersist?.();
+    });
+
+    panel.appendChild(decBtn);
+    panel.appendChild(resetBtn);
+    panel.appendChild(incBtn);
+    panel.appendChild(sep);
+})();
+</script>
+<script>// SGR code → CSS class
+const ANSI_MAP = {
+    "1":  "ansi-b",
+    "31": "ansi-1", "32": "ansi-2", "33": "ansi-3",
+    "34": "ansi-4", "35": "ansi-5", "36": "ansi-6", "37": "ansi-7",
+};
+
+// Convert raw text with ANSI escape sequences to safe HTML.
+// SGR color/bold codes → <span class="ansi-N">
+// All other sequences (cursor movement, erase, OSC, bare ESC) → stripped silently.
+function parseAnsi(raw) {
+    let s = raw
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+
+    let result = "";
+    let open    = false;
+    // CSI: ESC [ params letter  |  OSC: ESC ] ... BEL  |  bare: ESC <other>
+    const re = /\x1b(?:\[([0-9;]*)([A-Za-z])|\][^\x07]*\x07|[^[\]])/g;
+    let last = 0, m;
+
+    while ((m = re.exec(s)) !== null) {
+        result += s.slice(last, m.index);
+        last = m.index + m[0].length;
+
+        if (m[2] === "m") {  // SGR — colour / bold
+            const codes = (m[1] || "0").split(";");
+            if (codes[0] === "0" || codes[0] === "") {
+                if (open) { result += "</span>"; open = false; }
+            } else {
+                if (open) result += "</span>";
+                const cls = codes.map(c => ANSI_MAP[c]).filter(Boolean).join(" ");
+                if (cls) { result += `<span class="${cls}">`; open = true; }
+                else open = false;
+            }
+        }
+        // everything else: silently dropped
+    }
+    result += s.slice(last);
+    if (open) result += "</span>";
+    return result;
+}
+
+// "03-25 11:50:00.123" → sortable integer
+// "T+00:00:01.234"     → elapsed milliseconds
+function tsToNum(ts) {
+    const rel = /^T\+(\d+):(\d{2}):(\d{2})\.(\d{3})$/.exec(ts || "");
+    if (rel) {
+        return (parseInt(rel[1], 10) * 3_600_000)
+            + (parseInt(rel[2], 10) * 60_000)
+            + (parseInt(rel[3], 10) * 1_000)
+            + parseInt(rel[4], 10);
+    }
+    return parseInt((ts || "").replace(/\D/g, ""), 10) || 0;
+}
+</script>
+<script>// ---------------------------------------------------------------------------
+// Line rendering
+// ---------------------------------------------------------------------------
+
+
+// parseAnsi HTML-escapes < and >, so <wrn> becomes &lt;wrn&gt; in stored HTML.
+// <inf> is intentionally excluded — it stays unstyled.
+const _LINE_TAG_RE = /&lt;(wrn|warn|dbg|debug|err|error)&gt;/i;
+function _lineTagClass(html) {
+    const m = _LINE_TAG_RE.exec(html);
+    if (!m) return "";
+    switch (m[1].toLowerCase()) {
+        case "wrn":  case "warn":  return " line-wrn";
+        case "dbg":  case "debug": return " line-dbg";
+        case "err":  case "error": return " line-err";
+        default: return "";
+    }
+}
+
+function buildLineHtml(line, showTs, filterRx) {
+    const tsClass = "ts" + (showTs ? "" : " hidden");
+    let content = line.html;
+    if (filterRx) {
+        content = content.replace(filterRx, m => `<mark class="hl">${m}</mark>`);
+    }
+    return `<span class="${tsClass}">${line.ts}</span>${content}`;
+}
+
+// Build the full className string for a log-line div, preserving selection state.
+function _lineClass(line, idx, paneId) {
+    return "log-line"
+        + (line.isTx ? " tx-line" : "")
+        + _lineTagClass(line.html)
+        + (state.selected[paneId].has(idx) ? " selected" : "");
+}
+
+function matchesFilter(line, rx) {
+    if (!rx) return true;
+    const plain = line.html.replace(/<[^>]+>/g, "") + " " + line.ts;
+    return rx.test(plain);
+}
+
+function appendLine(paneId, ts, rawText, isTx, meta = null) {
+    appendLineBatch([{ paneId, ts, rawText, isTx, meta }]);
+}
+
+function appendLineBatch(entries) {
+    const fragments = new Map();
+    const touched = new Set();
+
+    entries.forEach(({ paneId, ts, rawText, isTx, meta = null }) => {
+        if (!state.rawLines[paneId]) return;
+
+        const html = parseAnsi(rawText);
+        const line = {
+            ...buildTimestampInfo(ts, typeof meta === "object" && meta !== null
+                ? meta
+                : (Number.isFinite(meta) ? { numTs: meta } : {})),
+            html,
+            rawText,
+            isTx,
+        };
+        state.rawLines[paneId].push(line);
+
+        const logEl = document.getElementById("log-" + paneId);
+        if (!logEl) return;
+
+        const idx = state.rawLines[paneId].length - 1;
+        const div = document.createElement("div");
+        div.dataset.ts = line.ts;
+        div.dataset.idx = idx;
+        div.className = _lineClass(line, idx, paneId);
+
+        const rx = state.filters[paneId];
+        if (!matchesFilter(line, rx)) {
+            div.style.display = "none";
+        } else {
+            div.innerHTML = buildLineHtml(line, state.showTs, rx);
+        }
+
+        if (!fragments.has(paneId)) fragments.set(paneId, document.createDocumentFragment());
+        fragments.get(paneId).appendChild(div);
+        touched.add(paneId);
+    });
+
+    touched.forEach(paneId => {
+        const logEl = document.getElementById("log-" + paneId);
+        const fragment = fragments.get(paneId);
+        if (!logEl || !fragment) return;
+        logEl.appendChild(fragment);
+        if (state.atBottom[paneId]) logEl.scrollTop = logEl.scrollHeight;
+        updateJumpBtn(paneId);
+    });
+
+    if (touched.size > 0) {
+        window.__embedLogSchedulePersist?.();
+        window.__embedLogUpdateTimestampModeUi?.();
+        window.applyMarkers?.();
+    }
+}
+
+function rerenderPane(paneId) {
+    const logEl = document.getElementById("log-" + paneId);
+    const lines = state.rawLines[paneId];
+    const divs  = logEl.children;
+    const rx    = state.filters[paneId];
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const div  = divs[i];
+        if (!div) continue;
+        div.className = _lineClass(line, i, paneId);
+        if (!matchesFilter(line, rx)) {
+            div.style.display = "none";
+        } else {
+            div.style.display = "";
+            div.innerHTML = buildLineHtml(line, state.showTs, rx);
+        }
+    }
+    if (state.atBottom[paneId]) logEl.scrollTop = logEl.scrollHeight;
+}
+function setTimestampMode(mode) {
+    const nextMode = mode === "relative" ? "relative" : "absolute";
+    if (state.timestampMode === nextMode) return;
+
+    state.timestampMode = nextMode;
+    state.syncTs = null;
+    state.syncTabSwitch = false;
+
+    PANES.forEach(paneId => {
+        const lines = state.rawLines[paneId] || [];
+        lines.forEach(applyTimestampModeToLine);
+        rerenderPane(paneId);
+
+        highlightLine(paneId, null);
+    });
+    window.__embedLogSchedulePersist?.();
+    window.applyMarkers?.();
+
+    window.__embedLogUpdateTimestampModeUi?.();
+}
+
+function canDisplayTimestampMode(mode) {
+    for (const paneId of PANES) {
+        const lines = state.rawLines[paneId] || [];
+        for (const line of lines) {
+            if (lineHasTimestampMode(line, mode)) return true;
+        }
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// Jump-to-bottom
+// ---------------------------------------------------------------------------
+
+function updateJumpBtn(paneId) {
+    document.getElementById("jump-" + paneId)
+        .classList.toggle("visible", !state.atBottom[paneId]);
+}
+
+function scrollPaneToBottom(paneId) {
+    const logEl = document.getElementById("log-" + paneId);
+    if (!logEl) return;
+    logEl.scrollTop = logEl.scrollHeight;
+    state.atBottom[paneId] = true;
+    updateJumpBtn(paneId);
+}
+
+function _linesSetupPane(id) {
+    const logEl = document.getElementById("log-" + id);
+    logEl.addEventListener("scroll", () => {
+        state.atBottom[id] = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
+        updateJumpBtn(id);
+    });
+    // Event delegation — replaces per-line listeners for better performance
+    logEl.addEventListener("click", e => {
+        const lineDiv = e.target.closest(".log-line");
+        if (!lineDiv) return;
+        const idx = parseInt(lineDiv.dataset.idx, 10);
+        const line = state.rawLines[id] ? state.rawLines[id][idx] : null;
+        if (!line) return;
+        onLineClick(id, line.numTs, lineDiv);
+    });
+    logEl.addEventListener("mousedown", e => { if (e.button === 1) e.preventDefault(); });
+    logEl.addEventListener("auxclick", e => {
+        if (e.button !== 1) return;
+        const lineDiv = e.target.closest(".log-line");
+        if (!lineDiv) return;
+        const idx = parseInt(lineDiv.dataset.idx, 10);
+        const line = state.rawLines[id] ? state.rawLines[id][idx] : null;
+        if (!line) return;
+        onMiddleClick(id, line.numTs, lineDiv);
+    });
+    document.getElementById("jump-" + id).addEventListener("click", () => {
+        state.syncTabSwitch = false;
+        scrollPaneToBottom(id);
+    });
+
+    // Per-pane wrap toggle
+    const wrapBtn = document.querySelector(`#pane-${id} .pane-wrap-btn`);
+    if (wrapBtn) {
+        wrapBtn.addEventListener("click", () => {
+            state.wrap[id] = !state.wrap[id];
+            wrapBtn.classList.toggle("active", state.wrap[id]);
+            document.getElementById("log-" + id)?.classList.toggle("wrap", state.wrap[id]);
+        });
+    }
+
+    // Per-pane raw download
+    const dlBtn = document.querySelector(`#pane-${id} .pane-download-btn`);
+    if (dlBtn) {
+        dlBtn.addEventListener("click", () => {
+            const lines = state.rawLines[id] || [];
+            if (!lines.length) return;
+            const text = lines.map(line => {
+                const clean = (line.rawText ?? "").replace(/\x1b(?:\[[0-9;]*[A-Za-z]|\][^\x07]*\x07|[^[\]])/g, "").trim();
+                return `[${line.ts}] ${clean}`;
+            }).join("\n");
+            const blob = new Blob([text + "\n"], { type: "text/plain" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `${id}.log`;
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+    }
+}
+PANES.forEach(_linesSetupPane);
+
+// ---------------------------------------------------------------------------
+// Clear
+// ---------------------------------------------------------------------------
+
+function clearPane(paneId) {
+    state.rawLines[paneId] = [];
+    state.selected[paneId] = new Set();
+    document.getElementById("log-" + paneId).innerHTML = "";
+    highlightLine(paneId, null);
+    state.atBottom[paneId] = true;
+    updateJumpBtn(paneId);
+    // Hide copy-selection actions if selection.js has added them
+    document.getElementById("copy-actions-" + paneId)?.classList.remove("visible");
+    // Close any open More dropdown for this pane
+    document.getElementById("more-dropdown-" + paneId)?.classList.remove("open");
+    window.__embedLogSchedulePersist?.();
+    window.__embedLogUpdateTimestampModeUi?.();
+}
+
+document.getElementById("btn-clear")?.addEventListener("click", () => {
+    window.wsSend?.({ cmd: "clear_logs", scope: "all" });
+    PANES.forEach(clearPane);
+});
+
+
+// Rebuild DOM for a pane from stored state — used after layout rebuild (UNWRAP toggle)
+function repopulatePaneLogs(paneId) {
+    const logEl = document.getElementById("log-" + paneId);
+    if (!logEl) return;
+    logEl.innerHTML = "";
+    const lines = state.rawLines[paneId] || [];
+    const rx = state.filters[paneId];
+    lines.forEach((line, idx) => {
+        const div = document.createElement("div");
+        div.dataset.ts  = line.ts;
+        div.dataset.idx = idx;
+        div.className   = _lineClass(line, idx, paneId);
+        if (matchesFilter(line, rx)) {
+            div.innerHTML = buildLineHtml(line, state.showTs, rx);
+        } else {
+            div.style.display = "none";
+        }
+
+        logEl.appendChild(div);
+    });
+    if (state.atBottom[paneId]) logEl.scrollTop = logEl.scrollHeight;
+    updateJumpBtn(paneId);
+}
+// ---------------------------------------------------------------------------
+// Sync
+// ---------------------------------------------------------------------------
+
+function highlightLine(paneId, div) {
+    const prev = state.highlighted[paneId];
+    if (prev) prev.classList.remove("sync-highlight");
+    state.highlighted[paneId] = div;
+    if (div) div.classList.add("sync-highlight");
+}
+
+// Scroll a pane to the line closest to numTs — used when switching tabs.
+// Centers the matched line at ~1/3 from the top.
+function scrollPaneToTs(paneId, numTs) {
+    if (numTs === null) return;
+    const lines = state.rawLines[paneId];
+    if (!lines.length) return;
+
+    let lo = 0, hi = lines.length - 1;
+    while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (lines[mid].numTs < numTs) lo = mid + 1;
+        else hi = mid;
+    }
+    if (lo > 0 && Math.abs(lines[lo - 1].numTs - numTs) < Math.abs(lines[lo].numTs - numTs)) lo--;
+
+    const logEl = document.getElementById("log-" + paneId);
+    const div   = logEl.children[lo];
+    if (!div) return;
+
+    logEl.scrollTop = Math.max(0, div.offsetTop - Math.floor(logEl.clientHeight / 3));
+    state.atBottom[paneId] = false;
+    updateJumpBtn(paneId);
+    highlightLine(paneId, div);
+}
+
+// Middle-click: always clear the filter for this pane, scroll to the line
+// in full context, and sync — the deliberate "zoom out to this moment" gesture.
+function onMiddleClick(paneId, numTs, div) {
+    const logEl = document.getElementById("log-" + paneId);
+
+    if (state.filters[paneId]) {
+        const input = document.querySelector(`.filter-input[data-pane="${paneId}"]`);
+        input.value = "";
+        state.filters[paneId] = null;
+        input.classList.remove("invalid");
+        rerenderPane(paneId);
+    }
+
+    logEl.scrollTop = div.offsetTop - Math.floor(logEl.clientHeight / 3);
+    state.atBottom[paneId] = false;
+    updateJumpBtn(paneId);
+
+    state.syncTs = numTs;
+    state.syncTabSwitch = true;
+    highlightLine(paneId, div);
+    syncPanes(paneId, numTs, div);
+}
+
+// Click handler:
+//   • filter active  → clear filter, re-render, scroll source to line in context
+//   • no filter      → source pane stays exactly where user was (no scroll)
+//   • always         → store syncTs, highlight clicked line, sync other panes in active tab
+function onLineClick(paneId, numTs, div) {
+    const logEl = document.getElementById("log-" + paneId);
+
+    if (state.filters[paneId]) {
+        const filterInput = document.querySelector(`.filter-input[data-pane="${paneId}"]`);
+        filterInput.value = "";
+        state.filters[paneId] = null;
+        filterInput.classList.remove("invalid");
+        rerenderPane(paneId);
+        logEl.scrollTop = div.offsetTop - Math.floor(logEl.clientHeight / 3);
+        state.atBottom[paneId] = false;
+        updateJumpBtn(paneId);
+    }
+
+    state.syncTs = numTs;
+    state.syncTabSwitch = true;
+    highlightLine(paneId, div);
+    syncPanes(paneId, numTs, div);
+}
+
+// Sync all OTHER panes in the active tab to numTs, mirroring the clicked
+// line's Y position within the viewport.
+function syncPanes(fromId, numTs, clickedDiv) {
+    if (state.unwrap) return;
+
+    const activePanes = TABS[state.activeTab]?.panes || [];
+    if (activePanes.length < 2) return;
+
+    const fromLogEl     = document.getElementById("log-" + fromId);
+    const clickedRelTop = clickedDiv.offsetTop - fromLogEl.scrollTop;
+
+    activePanes.forEach(toId => {
+        if (toId === fromId) return;
+        const lines = state.rawLines[toId];
+        if (!lines.length) return;
+
+        // Binary search for closest timestamp
+        let lo = 0, hi = lines.length - 1;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (lines[mid].numTs < numTs) lo = mid + 1;
+            else hi = mid;
+        }
+        if (lo > 0 && Math.abs(lines[lo - 1].numTs - numTs) < Math.abs(lines[lo].numTs - numTs)) {
+            lo--;
+        }
+
+        const logEl     = document.getElementById("log-" + toId);
+        const targetDiv = logEl.children[lo];
+        if (!targetDiv) return;
+
+        logEl.scrollTop = targetDiv.offsetTop - clickedRelTop;
+        state.atBottom[toId] = false;
+        updateJumpBtn(toId);
+        highlightLine(toId, targetDiv);
+    });
+}
+</script>
+<script>
+// ---------------------------------------------------------------------------
+// Tab bar
+// ---------------------------------------------------------------------------
+
+function renderTabBar() {
+    const bar = document.getElementById("tab-bar");
+    if (!bar) return;
+    bar.innerHTML = "";
+
+    const activeIdx = state.unwrap ? state.activePaneTab : state.activeTab;
+
+    if (state.unwrap) {
+        // One tab per pane, no "+" button
+        PANES.forEach((paneId, idx) => {
+            const btn = document.createElement("button");
+            btn.className = "tab-btn" + (idx === activeIdx ? " active" : "");
+            btn.textContent = unwrapPaneLabel(paneId);
+            btn.dataset.tabIdx = String(idx);
+            btn.addEventListener("click", () => switchTab(idx));
+            bar.appendChild(btn);
+        });
+        // Ensure correct visibility of unwrapped tab contents
+        PANES.forEach((_, idx) => {
+            const el = document.getElementById("u-tab-content-" + idx);
+            if (el) el.style.display = idx === activeIdx ? "flex" : "none";
+        });
+    } else {
+        // Original: one tab per config entry
+        TABS.forEach((tab, idx) => {
+            const btn = document.createElement("button");
+            btn.className = "tab-btn" + (idx === activeIdx ? " active" : "");
+            btn.textContent = tab.label;
+            btn.dataset.tabIdx = String(idx);
+            btn.addEventListener("click", () => switchTab(idx));
+            bar.appendChild(btn);
+        });
+        // Ensure correct visibility
+        TABS.forEach((_, idx) => {
+            const el = document.getElementById("tab-content-" + idx);
+            if (el) el.style.display = idx === activeIdx ? "flex" : "none";
+        });
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tab switching
+// ---------------------------------------------------------------------------
+
+function switchTab(newIdx) {
+    const activeIdx = state.unwrap ? state.activePaneTab : state.activeTab;
+    if (newIdx === activeIdx) return;
+
+    // Hide current tab content
+    const curId = state.unwrap ? "u-tab-content-" + activeIdx : "tab-content-" + activeIdx;
+    const cur = document.getElementById(curId);
+    if (cur) cur.style.display = "none";
+
+    if (state.unwrap) state.activePaneTab = newIdx;
+    else state.activeTab = newIdx;
+
+    // Show new tab content
+    const nextId = state.unwrap ? "u-tab-content-" + newIdx : "tab-content-" + newIdx;
+    const next = document.getElementById(nextId);
+    if (next) next.style.display = "flex";
+
+    // Scroll logic
+    const panesToScroll = state.unwrap ? [PANES[newIdx]] : TABS[newIdx]?.panes || [];
+    if (state.syncTabSwitch && state.syncTs !== null) {
+        panesToScroll.forEach(paneId => scrollPaneToTs(paneId, state.syncTs));
+    } else {
+        panesToScroll.forEach(paneId => scrollPaneToBottom(paneId));
+    }
+
+    // Update active button
+    document.querySelectorAll("#tab-bar .tab-btn[data-tab-idx]").forEach(btn => {
+        btn.classList.toggle("active", Number(btn.dataset.tabIdx) === newIdx);
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Initialise on load
+// ---------------------------------------------------------------------------
+
+renderTabBar();
+</script>
+<script>
+
+// ---------------------------------------------------------------------------
+// Tab creation
+//
+// createTabWithPanes(label, paneIds, [opts])
+//   Core function. Creates a tab containing 1 or 2 panes side-by-side.
+//   Used by ws.js (config-driven layout).
+// ---------------------------------------------------------------------------
+
+
+function createTabWithPanes(label, paneIds, { switchTo = true, paneLabels = {} } = {}) {
+    const tabIdx = TABS.length;
+
+    // ---- 1. State ----
+    TABS.push({ id: "tab-" + tabIdx, label, panes: paneIds, paneLabels: { ...paneLabels } });
+    paneIds.forEach(paneId => {
+        if (PANES.includes(paneId)) return;   // already registered
+        PANES.push(paneId);
+        state.filters[paneId]     = null;
+        state.rawLines[paneId]    = [];
+        state.atBottom[paneId]    = true;
+        state.highlighted[paneId] = null;
+        state.selected[paneId]    = new Set();
+
+    state.wrap[paneId]        = false;
+    });
+
+    // ---- 2. DOM ----
+    const container = document.getElementById("container");
+    const tc = document.createElement("div");
+    tc.className  = "tab-content";
+    tc.id         = "tab-content-" + tabIdx;
+    tc.style.display = (switchTo || tabIdx === 0) ? "flex" : "none";
+
+    const parts = [];
+    paneIds.forEach((paneId, i) => {
+        if (i > 0) parts.push('<div class="splitter"></div>');
+        parts.push(renderPaneShell(paneId, paneLabel(paneId), { showTx: true }));
+    });
+    tc.innerHTML = parts.join("\n");
+    container.appendChild(tc);
+
+    // ---- 3. Per-pane event wiring ----
+    paneIds.forEach(paneId => {
+        _linesSetupPane(paneId);
+        _uiSetupPane(paneId);
+        _uiSetupTxPane(paneId);
+        _selectionSetupPane(paneId);
+
+    });
+
+    // ---- 4. Show ----
+    renderTabBar();
+    if (switchTo) switchTab(tabIdx);
+    window.__embedLogSchedulePersist?.();
+}
+
+
+
+// ---------------------------------------------------------------------------
+// Layout rebuild — used when toggling UNWRAP mode or restoring from cache.
+// Rebuilds the entire container from TABS/PANES state without losing log data.
+// ---------------------------------------------------------------------------
+function rebuildLayout(previousUnwrap = state.unwrap) {
+    const container = document.getElementById("container");
+    if (!container) return;
+
+    const activeGroupBefore = state.activeTab;
+    const activePaneBefore = previousUnwrap
+        ? state.activePaneTab
+        : Math.max(0, PANES.indexOf(TABS[activeGroupBefore]?.panes?.[0] ?? PANES[0]));
+    container.innerHTML = "";
+
+    if (state.unwrap) {
+        // One tab per pane, full-width, no splitters
+        PANES.forEach((paneId, idx) => {
+            const tc = document.createElement("div");
+            tc.className = "tab-content";
+            tc.id = "u-tab-content-" + idx;
+            tc.style.display = idx === activePaneBefore ? "flex" : "none";
+            tc.innerHTML = renderPaneShell(paneId, unwrapPaneLabel(paneId), { showTx: true });
+
+            container.appendChild(tc);
+        });
+        state.activePaneTab = activePaneBefore < PANES.length ? activePaneBefore : 0;
+    } else {
+        const activePaneId = PANES[activePaneBefore] ?? TABS[activeGroupBefore]?.panes?.[0] ?? PANES[0];
+        const groupedIdx = TABS.findIndex(tab => tab.panes.includes(activePaneId));
+        state.activeTab = groupedIdx >= 0 ? groupedIdx : (activeGroupBefore < TABS.length ? activeGroupBefore : 0);
+
+        // Rebuild original grouped layout from TABS
+        TABS.forEach((tab, idx) => {
+            const tc = document.createElement("div");
+            tc.className = "tab-content";
+            tc.id = "tab-content-" + idx;
+            tc.style.display = idx === state.activeTab ? "flex" : "none";
+            const parts = [];
+            tab.panes.forEach((paneId, pi) => {
+                if (pi > 0) parts.push('<div class="splitter"></div>');
+                parts.push(renderPaneShell(paneId, paneLabel(paneId), { showTx: true }));
+
+            });
+            tc.innerHTML = parts.join("\n");
+            container.appendChild(tc);
+        });
+    }
+
+    // Re-wire per-pane handlers and repopulate logs
+    PANES.forEach(paneId => {
+        _linesSetupPane(paneId);
+        _uiSetupPane(paneId);
+        _uiSetupTxPane(paneId);
+        _selectionSetupPane(paneId);
+    });
+    PANES.forEach(paneId => repopulatePaneLogs(paneId));
+
+    renderTabBar();
+    const targetTab = state.unwrap
+        ? (state.activePaneTab < PANES.length ? state.activePaneTab : 0)
+        : (state.activeTab < TABS.length ? state.activeTab : 0);
+    switchTab(targetTab);
+}
+
+
+</script>
+<script>
+
+
+// ---------------------------------------------------------------------------
+// Toolbar — UNWRAP toggle
+// ---------------------------------------------------------------------------
+document.getElementById("btn-unwrap")?.addEventListener("click", () => {
+    if (PANES.length === 0) return;  // no panes loaded yet
+    const wasUnwrapped = state.unwrap;
+    state.unwrap = !state.unwrap;
+    const btn = document.getElementById("btn-unwrap");
+    if (btn) {
+        btn.classList.toggle("active", state.unwrap);
+        btn.textContent = state.unwrap ? "Wrap" : "Unwrap";
+        btn.title = state.unwrap
+            ? "Wrap single-pane tabs back into tab groups"
+            : "Unwrap multi-pane tabs into single-pane tabs";
+    }
+    rebuildLayout(wasUnwrapped);
+});
+
+// ---------------------------------------------------------------------------
+// Toolbar — timestamp mode toggle (switches between relative/absolute)
+// ---------------------------------------------------------------------------
+(function () {
+    const btn = document.getElementById("btn-timestamp-mode");
+    if (!btn) return;
+
+    function update() {
+        const current = state.timestampMode === "relative" ? "relative" : "absolute";
+        const other = current === "relative" ? "absolute" : "relative";
+        const hasLines = PANES.some(id => (state.rawLines[id] || []).length > 0);
+        const canSwitch = canDisplayTimestampMode(other) || !hasLines;
+        btn.textContent = current === "relative" ? "Relative" : "Absolute";
+        btn.title = canSwitch
+            ? `Switch timestamps to ${other}`
+            : `${other} timestamps are unavailable for the current data`;
+        btn.disabled = !canSwitch;
+        btn.classList.toggle("active", current === "relative");
+    }
+
+    btn.addEventListener("click", () => {
+        setTimestampMode(state.timestampMode === "relative" ? "absolute" : "relative");
+        update();
+    });
+
+    window.__embedLogUpdateTimestampModeUi = update;
+    update();
+})();
+// ---------------------------------------------------------------------------
+// Settings panel — clear cached session (localStorage restore cache)
+// ---------------------------------------------------------------------------
+(function () {
+    const panel = document.getElementById("settings-panel");
+    if (!panel) return;
+
+    const sep = document.createElement("span");
+    sep.className = "set-sep";
+    sep.textContent = "|";
+
+    const btn = document.createElement("button");
+    btn.id = "btn-clear-cache";
+    btn.title = "Clear refresh cache (kept logs/layout in this browser)";
+    btn.textContent = "Clear cache";
+
+    btn.addEventListener("click", () => {
+        window.__embedLogClearCache?.();
+        const prev = btn.textContent;
+        btn.textContent = "Cache cleared";
+        btn.disabled = true;
+        setTimeout(() => {
+            btn.textContent = prev;
+            btn.disabled = false;
+        }, 1200);
+    });
+
+    panel.appendChild(sep);
+    panel.appendChild(btn);
+})();
+// ---------------------------------------------------------------------------
+// Settings panel — download raw logs (merged or per pane)
+// ---------------------------------------------------------------------------
+(function () {
+    const panel = document.getElementById("settings-panel");
+    if (!panel) return;
+
+    const sep = document.createElement("span");
+    sep.className = "set-sep";
+    sep.textContent = "|";
+
+    const btn = document.createElement("button");
+    btn.id = "btn-download-raw";
+    btn.title = "Download all logs as merged raw text file";
+    btn.textContent = "Download raw";
+
+    panel.appendChild(sep);
+    panel.appendChild(btn);
+})();
+
+// ---------------------------------------------------------------------------
+// Settings panel — sessions list popup + current session links
+// Save HTML action is in the main toolbar (reused former Sync button).
+// ---------------------------------------------------------------------------
+(function () {
+    if (!window.__embedLogProfile?.capabilities?.sessionApi) return;
+    
+    const panel = document.getElementById("settings-panel");
+    if (!panel) return;
+
+    // Create panel buttons for server-side actions (formerly in toolbar)
+    const btnSave = document.createElement("button");
+    btnSave.id = "btn-save-to-server";
+    btnSave.title = "Generate/refresh session HTML on the backend";
+    btnSave.textContent = "Save HTML";
+
+    const sep1 = document.createElement("span");
+    sep1.className = "set-sep";
+    sep1.textContent = "|";
+
+    const btnCleanSession = document.createElement("button");
+    btnCleanSession.id = "btn-clean-session";
+    btnCleanSession.title = "Save current session and start a new one";
+    btnCleanSession.textContent = "New session";
+
+    const sep2 = document.createElement("span");
+    sep2.className = "set-sep";
+    sep2.textContent = "|";
+
+    const btnCurrent = document.createElement("button");
+    btnCurrent.id = "btn-current-session";
+    btnCurrent.title = "Open server-generated session HTML";
+    btnCurrent.textContent = "Open HTML";
+
+    const btn = document.createElement("button");
+    btn.id = "btn-sessions";
+    btn.title = "Browse saved sessions";
+    btn.textContent = "Sessions";
+
+    panel.appendChild(btnSave);
+    panel.appendChild(sep1);
+    panel.appendChild(btnCleanSession);
+    panel.appendChild(sep2);
+    panel.appendChild(btnCurrent);
+    panel.appendChild(btn);
+
+    const menu = document.createElement("div");
+    menu.id = "sessions-menu";
+    menu.innerHTML = `<div class="sessions-head">Saved sessions</div><div class="sessions-body">Loading…</div>`;
+    document.body.appendChild(menu);
+
+    let currentSession = null;
+
+    function updateCurrentButtons() {
+        const status = currentSession?.html_status || (currentSession?.html_ready ? "ready" : "pending");
+
+        if (btnSave) {
+            if (status === "updating") {
+                btnSave.disabled = true;
+                btnSave.textContent = "Saving…";
+            } else {
+                btnSave.disabled = false;
+                btnSave.textContent = "Save HTML";
+            }
+        }
+
+        if (btnCleanSession) {
+            btnCleanSession.disabled = status === "updating";
+            btnCleanSession.textContent = status === "updating" ? "Rotating…" : "New session";
+        }
+
+        if (currentSession?.html_ready && currentSession?.html) {
+            btnCurrent.disabled = false;
+            btnCurrent.textContent = "Open HTML";
+            btnCurrent.title = currentSession?.html_updated_at
+                ? `Open server session HTML (updated ${currentSession.html_updated_at})`
+                : "Open server session HTML";
+        } else {
+            btnCurrent.disabled = true;
+            btnCurrent.textContent = status === "error" ? "HTML error" : "No HTML yet";
+            btnCurrent.title = status === "error"
+                ? (currentSession?.html_error || "Last HTML export failed")
+                : "Generate HTML first";
+        }
+    }
+
+    async function refreshCurrentSession() {
+        try {
+            const res = await fetch("/api/session/current", { cache: "no-store" });
+            if (!res.ok) throw new Error(String(res.status));
+            currentSession = await res.json();
+            updateCurrentButtons();
+        } catch {
+            currentSession = null;
+            if (btnSave) btnSave.disabled = true;
+            btnCurrent.disabled = true;
+        }
+    }
+
+    async function saveCurrentSessionHtml() {
+        if (btnSave) {
+            btnSave.disabled = true;
+            btnSave.textContent = "Saving…";
+        }
+        try {
+            const res = await fetch("/api/session/export", {
+                method: "POST",
+                cache: "no-store",
+            });
+            if (!res.ok) throw new Error(String(res.status));
+            const data = await res.json();
+            if (data?.session) {
+                currentSession = data.session;
+            }
+        } catch {
+            const prev = btnSave ? btnSave.textContent : "Save HTML";
+            if (btnSave) btnSave.textContent = "Save failed";
+            setTimeout(() => {
+                if (btnSave) btnSave.textContent = prev;
+                updateCurrentButtons();
+            }, 1200);
+            return;
+        }
+        updateCurrentButtons();
+        if (menu.classList.contains("open")) loadSessions();
+    }
+
+    function openCurrentSessionHtml() {
+        if (!currentSession?.html_ready || !currentSession?.html) return;
+        window.open(currentSession.html, "_blank", "noopener");
+    }
+
+    async function createCleanSession() {
+        if (!window.confirm("Save current session and start a new one?")) return;
+        if (btnCleanSession) {
+            btnCleanSession.disabled = true;
+            btnCleanSession.textContent = "Rotating…";
+        }
+        try {
+            const res = await fetch("/api/session/rotate", {
+                method: "POST",
+                cache: "no-store",
+            });
+            if (!res.ok) throw new Error(String(res.status));
+            const data = await res.json();
+            if (data?.session) currentSession = data.session;
+            PANES.forEach(paneId => clearPane(paneId));
+            state.syncTs = null;
+            state.syncTabSwitch = false;
+            window.__embedLogSetSession?.(data?.session || null);
+            window.__embedLogSchedulePersist?.();
+            updateCurrentButtons();
+            if (menu.classList.contains("open")) loadSessions();
+        } catch {
+            if (btnCleanSession) {
+                btnCleanSession.textContent = "Rotate failed";
+                setTimeout(updateCurrentButtons, 1200);
+            }
+        }
+    }
+
+    btnSave?.addEventListener("click", saveCurrentSessionHtml);
+    btnCleanSession?.addEventListener("click", createCleanSession);
+    btnCurrent.addEventListener("click", openCurrentSessionHtml);
+    document.getElementById("btn-new-session")?.addEventListener("click", createCleanSession);
+
+    async function loadSessions() {
+        const body = menu.querySelector(".sessions-body");
+        body.textContent = "Loading…";
+        try {
+            const res = await fetch("/api/sessions", { cache: "no-store" });
+            if (!res.ok) throw new Error(String(res.status));
+            const data = await res.json();
+            const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+            const current = data.current || null;
+
+            if (!sessions.length) {
+                body.textContent = "No sessions found.";
+                return;
+            }
+
+            body.innerHTML = "";
+            sessions.forEach(s => {
+                const row = document.createElement("div");
+                row.className = "session-row";
+
+                const meta = document.createElement("div");
+                meta.className = "session-meta";
+                meta.textContent = s.started_at || s.id;
+
+                const tags = document.createElement("div");
+                tags.className = "session-tags";
+                if (s.id === current) {
+                    const tag = document.createElement("span");
+                    tag.className = "session-tag current";
+                    tag.textContent = "current";
+                    tags.appendChild(tag);
+                }
+                if (s.html_status && s.html_status !== "ready") {
+                    const tag = document.createElement("span");
+                    tag.className = "session-tag pending";
+                    tag.textContent = `html ${s.html_status}`;
+                    tags.appendChild(tag);
+                }
+
+                const actions = document.createElement("div");
+                actions.className = "session-actions";
+
+                const htmlLink = document.createElement("a");
+                htmlLink.target = "_blank";
+                htmlLink.rel = "noopener";
+                htmlLink.textContent = "open html";
+                if (s.html_ready && s.html) {
+                    htmlLink.href = s.html;
+                } else {
+                    htmlLink.href = "#";
+                    htmlLink.classList.add("disabled");
+                    htmlLink.addEventListener("click", ev => ev.preventDefault());
+                }
+
+                const manifestLink = document.createElement("a");
+                manifestLink.target = "_blank";
+                manifestLink.rel = "noopener";
+                manifestLink.textContent = "manifest";
+                manifestLink.href = s.manifest || "#";
+
+                actions.appendChild(htmlLink);
+                actions.appendChild(manifestLink);
+
+                row.appendChild(meta);
+                row.appendChild(tags);
+                row.appendChild(actions);
+                body.appendChild(row);
+            });
+        } catch {
+            body.textContent = "Sessions API unavailable.";
+        }
+    }
+
+    function openMenu() {
+        loadSessions();
+        const rect = btn.getBoundingClientRect();
+        menu.style.left = `${Math.max(8, rect.left)}px`;
+        menu.style.top = `${rect.bottom + 6}px`;
+        menu.classList.add("open");
+    }
+
+    function closeMenu() {
+        menu.classList.remove("open");
+    }
+
+    btn.addEventListener("click", ev => {
+        ev.stopPropagation();
+        if (menu.classList.contains("open")) closeMenu();
+        else openMenu();
+    });
+
+    document.addEventListener("click", ev => {
+        if (!menu.classList.contains("open")) return;
+        if (menu.contains(ev.target) || ev.target === btn) return;
+        closeMenu();
+    });
+
+    document.addEventListener("keydown", ev => {
+        if (ev.key === "Escape") closeMenu();
+    });
+
+    window.__embedLogOnSessionHtmlStatus = function (msg) {
+        if (!msg) return;
+        currentSession = {
+            ...(currentSession || {}),
+            ...msg,
+        };
+        updateCurrentButtons();
+        if (menu.classList.contains("open")) loadSessions();
+    };
+
+
+    refreshCurrentSession();
+})();
+
+// ---------------------------------------------------------------------------
+// Toolbar — theme toggle (light/dark quick switch)
+// Detailed palette selection lives in the settings panel.
+// ---------------------------------------------------------------------------
+(function () {
+    const btn = document.getElementById("btn-theme");
+
+    function themeMgr() {
+        return window.__embedLogTheme;
+    }
+
+    function syncIcon() {
+        const mgr = themeMgr();
+        const isDark = mgr?.isDark ? mgr.isDark() : (document.documentElement.getAttribute("data-theme") === "");
+        btn.textContent = isDark ? "☀" : "🌙";
+    }
+
+    btn.addEventListener("click", () => {
+        const mgr = themeMgr();
+        if (mgr?.toggle) mgr.toggle();
+        else {
+            const isDark = document.documentElement.getAttribute("data-theme") === "";
+            document.documentElement.setAttribute("data-theme", isDark ? "whitesand" : "");
+        }
+        syncIcon();
+    });
+
+    const tryBindThemeEvents = () => {
+        const mgr = themeMgr();
+        if (!mgr?.onChange) return false;
+        mgr.onChange(syncIcon);
+        return true;
+    };
+
+    if (!tryBindThemeEvents()) {
+        window.addEventListener("embedlog-theme-ready", () => {
+            tryBindThemeEvents();
+            syncIcon();
+        }, { once: true });
+    }
+
+    syncIcon();
+})();
+
+// ---------------------------------------------------------------------------
+// Pane swapping (dynamic layout)
+// ---------------------------------------------------------------------------
+function _findPaneLocation(paneId) {
+    for (let tabIdx = 0; tabIdx < TABS.length; tabIdx++) {
+        const paneIdx = TABS[tabIdx].panes.indexOf(paneId);
+        if (paneIdx !== -1) return { tabIdx, paneIdx };
+    }
+    return null;
+}
+
+function _rebuildTabContent(tabIdx, paneElMap) {
+    const tabContent = document.getElementById("tab-content-" + tabIdx);
+    if (!tabContent) return;
+
+    const paneIds = TABS[tabIdx].panes;
+    const paneEls = paneIds
+        .map(paneId => paneElMap[paneId] || document.getElementById("pane-" + paneId))
+        .filter(Boolean);
+
+    tabContent.innerHTML = "";
+    paneEls.forEach((paneEl, i) => {
+        if (i > 0) {
+            const splitter = document.createElement("div");
+            splitter.className = "splitter";
+            tabContent.appendChild(splitter);
+        }
+        // Reset manual split sizing so the new placement lays out cleanly.
+        paneEl.style.width = "";
+        paneEl.style.flex = "";
+        tabContent.appendChild(paneEl);
+    });
+}
+
+function _pulsePane(paneId) {
+    const el = document.getElementById("pane-" + paneId);
+    if (!el) return;
+    el.classList.remove("swap-anim");
+    // Force reflow so repeated swaps retrigger animation
+    void el.offsetWidth;
+    el.classList.add("swap-anim");
+    setTimeout(() => el.classList.remove("swap-anim"), 320);
+}
+
+function _swapPanes(a, b) {
+    if (!a || !b || a === b) return;
+    const locA = _findPaneLocation(a);
+    const locB = _findPaneLocation(b);
+    if (!locA || !locB) return;
+
+    // Snapshot pane DOM nodes BEFORE any tab content is rebuilt.
+    const paneElMap = {};
+    PANES.forEach(id => {
+        const el = document.getElementById("pane-" + id);
+        if (el) paneElMap[id] = el;
+    });
+
+    TABS[locA.tabIdx].panes[locA.paneIdx] = b;
+    TABS[locB.tabIdx].panes[locB.paneIdx] = a;
+
+    [...new Set([locA.tabIdx, locB.tabIdx])].forEach(tabIdx => _rebuildTabContent(tabIdx, paneElMap));
+    _pulsePane(a);
+    _pulsePane(b);
+    window.__embedLogSchedulePersist?.();
+}
+
+function _buildSwapTargetOptions(select, fromPaneId) {
+    select.innerHTML = "";
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "swap with…";
+    placeholder.selected = true;
+    select.appendChild(placeholder);
+
+    PANES.forEach(otherId => {
+        if (otherId === fromPaneId) return;
+        const loc = _findPaneLocation(otherId);
+        const tabLabel = loc ? TABS[loc.tabIdx].label : "?";
+        const opt = document.createElement("option");
+        opt.value = otherId;
+        opt.textContent = `${paneLabel(otherId)} · ${tabLabel}`;
+        select.appendChild(opt);
+    });
+}
+
+// Hover popup on tab labels — compact place for pane-swap controls.
+(function _setupTabSwapPopup() {
+    const tabBar = document.getElementById("tab-bar");
+    if (!tabBar) return;
+
+    const menu = document.createElement("div");
+    menu.id = "tab-swap-menu";
+    document.body.appendChild(menu);
+
+    let hideTimer = null;
+
+    function hideMenu() {
+        menu.classList.remove("open");
+    }
+
+    function scheduleHide() {
+        clearTimeout(hideTimer);
+        hideTimer = setTimeout(hideMenu, 40);
+    }
+
+    function cancelHide() {
+        clearTimeout(hideTimer);
+    }
+
+    function showForButton(btn) {
+        const tabIdx = Number(btn.dataset.tabIdx);
+        if (!Number.isInteger(tabIdx) || !TABS[tabIdx]) return;
+
+        const panes = TABS[tabIdx].panes;
+        menu.innerHTML = "";
+
+        const title = document.createElement("div");
+        title.className = "tab-swap-title";
+        title.textContent = `Swap panes in “${TABS[tabIdx].label}”`;
+        menu.appendChild(title);
+
+        panes.forEach(paneId => {
+            const row = document.createElement("div");
+            row.className = "tab-swap-row";
+
+            const name = document.createElement("span");
+            name.className = "tab-swap-pane-name";
+            name.textContent = paneLabel(paneId);
+
+            const select = document.createElement("select");
+            select.className = "tab-swap-select";
+            _buildSwapTargetOptions(select, paneId);
+            select.addEventListener("change", () => {
+                const target = select.value;
+                if (!target) return;
+                _swapPanes(paneId, target);
+                showForButton(btn); // refresh options + tab membership labels
+            });
+
+            row.appendChild(name);
+            row.appendChild(select);
+            menu.appendChild(row);
+        });
+
+        const rect = btn.getBoundingClientRect();
+        menu.style.left = `${Math.max(8, rect.left)}px`;
+        menu.style.top = `${rect.bottom + 6}px`;
+        menu.classList.add("open");
+    }
+
+    tabBar.addEventListener("mouseover", ev => {
+        const btn = ev.target.closest(".tab-btn");
+        if (!btn || btn.classList.contains("tab-add")) return;
+        cancelHide();
+        showForButton(btn);
+    });
+
+    tabBar.addEventListener("mouseout", ev => {
+        const fromBtn = ev.target.closest(".tab-btn");
+        if (!fromBtn) return;
+        if (menu.contains(ev.relatedTarget)) return;
+        scheduleHide();
+    });
+
+    menu.addEventListener("mouseenter", cancelHide);
+    menu.addEventListener("mouseleave", scheduleHide);
+})();
+
+// ---------------------------------------------------------------------------
+// Filter inputs
+// ---------------------------------------------------------------------------
+function _uiSetupPane(id) {
+    const input = document.querySelector(`.filter-input[data-pane="${id}"]`);
+    if (input) {
+        input.addEventListener("input", () => {
+            const val = input.value.trim();
+            if (!val) {
+                state.filters[id] = null;
+                input.classList.remove("invalid");
+            } else {
+                try {
+                    state.filters[id] = new RegExp(val, "i");
+                    input.classList.remove("invalid");
+                } catch {
+                    // Keep the last valid filter while showing the error —
+                    // don't clear it, so the user can fix the regex without
+                    // losing their filtering context.
+                    input.classList.add("invalid");
+                }
+            }
+            rerenderPane(id);
+        });
+    }
+
+}
+PANES.forEach(_uiSetupPane);
+
+// ---------------------------------------------------------------------------
+// Serial TX input — Enter or Send button
+// wsSend is provided by ws.js in live mode, or stubbed in static exports.
+// ---------------------------------------------------------------------------
+function sendSerial(paneId) {
+    const input = document.getElementById("input-" + paneId);
+    if (!input) return;
+    const text  = input.value.trim();
+    if (!text) return;
+    input.value = "";
+    window.wsSend?.({ cmd: "send_raw", id: paneId, data: text + "\n" });
+}
+
+function _uiSetupTxPane(id) {
+    const input = document.getElementById("input-" + id);
+    if (!input) return;
+    input.addEventListener("keydown", e => {
+        if (e.key === "Enter") { e.preventDefault(); sendSerial(id); }
+    });
+    const sendBtn = document.querySelector(`.send-btn[data-pane="${id}"]`);
+    if (sendBtn) sendBtn.addEventListener("click", () => sendSerial(id));
+}
+
+if (window.__embedLogProfile?.capabilities?.tx) {
+    PANES.forEach(_uiSetupTxPane);
+}
+
+// ---------------------------------------------------------------------------
+// Splitter drag — delegated, with pointer + mouse + touch fallback
+// (Safari/macOS trackpad friendly)
+// ---------------------------------------------------------------------------
+(function setupSplitterDrag() {
+    function findNeighborPanes(splitter) {
+        const tabContent = splitter.parentElement;
+        let paneLeft = null, paneRight = null, passed = false;
+        for (const child of tabContent.children) {
+            if (child === splitter) { passed = true; continue; }
+            if (child.classList.contains("pane")) {
+                if (!passed) paneLeft = child;
+                else if (!paneRight) paneRight = child;
+            }
+        }
+        return { tabContent, paneLeft, paneRight };
+    }
+
+    function eventX(ev) {
+        if (ev.touches && ev.touches[0]) return ev.touches[0].clientX;
+        if (ev.changedTouches && ev.changedTouches[0]) return ev.changedTouches[0].clientX;
+        return ev.clientX;
+    }
+
+    function startDrag(splitter, ev) {
+        const { tabContent, paneLeft, paneRight } = findNeighborPanes(splitter);
+        if (!paneLeft || !paneRight) return;
+
+        ev.preventDefault();
+        splitter.classList.add("dragging");
+        document.body.style.cursor = "col-resize";
+
+        const startX = eventX(ev);
+        const startLeftW = paneLeft.getBoundingClientRect().width;
+        const totalW = tabContent.getBoundingClientRect().width - splitter.offsetWidth;
+
+        function onMove(moveEv) {
+            moveEv.preventDefault();
+            const x = eventX(moveEv);
+            const newLeft = Math.min(Math.max(startLeftW + x - startX, 120), totalW - 120);
+            paneLeft.style.flex = "none";
+            paneRight.style.flex = "none";
+            paneLeft.style.width = newLeft + "px";
+            paneRight.style.width = (totalW - newLeft) + "px";
+        }
+
+        function onEnd() {
+            splitter.classList.remove("dragging");
+            document.body.style.cursor = "";
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", onEnd);
+            window.removeEventListener("pointercancel", onEnd);
+            window.removeEventListener("mousemove", onMove);
+            window.removeEventListener("mouseup", onEnd);
+            window.removeEventListener("touchmove", onMove);
+            window.removeEventListener("touchend", onEnd);
+            window.removeEventListener("touchcancel", onEnd);
+        }
+
+        // Register all move/end listeners; whichever event model fires will work.
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onEnd);
+        window.addEventListener("pointercancel", onEnd);
+        window.addEventListener("mousemove", onMove);
+        window.addEventListener("mouseup", onEnd);
+        window.addEventListener("touchmove", onMove, { passive: false });
+        window.addEventListener("touchend", onEnd);
+        window.addEventListener("touchcancel", onEnd);
+    }
+
+    document.addEventListener("pointerdown", ev => {
+        const splitter = ev.target.closest(".splitter");
+        if (!splitter) return;
+        startDrag(splitter, ev);
+    });
+
+    document.addEventListener("mousedown", ev => {
+        const splitter = ev.target.closest(".splitter");
+        if (!splitter) return;
+        startDrag(splitter, ev);
+    });
+
+    document.addEventListener("touchstart", ev => {
+        const splitter = ev.target.closest(".splitter");
+        if (!splitter) return;
+        startDrag(splitter, ev);
+    }, { passive: false });
+})();
+</script>
+<script>const STATIC_EXPORT_PROFILE =
+    typeof STATIC_PROFILE !== 'undefined' ? STATIC_PROFILE : window.__embedLogProfile;
+
+
+async function exportHtmlSnapshot(options = {}) {
+    const btn = options.button === undefined ? document.getElementById("btn-export") : options.button;
+    const prev = btn?.textContent;
+    if (btn) {
+        btn.textContent = "…";
+        btn.disabled = true;
+    }
+
+    // Escape <\/script> sequences in embedded JSON so they can't break the
+    // surrounding <\/script> tag — same issue affects any log message.
+    function _safeJson(obj) {
+        return JSON.stringify(obj).replace(/<\//g, "<\\/");
+    }
+
+    try {
+        // ------------------------------------------------------------------
+        // Fetch all frontend assets in parallel (same order as index.html).
+        // ws.js is intentionally omitted — no WebSocket in a static file.
+        // cache: "no-store" ensures we always bundle the latest files, not
+        // whatever the browser has cached from a previous page load.
+        // ------------------------------------------------------------------
+        const ASSETS = [
+            "profile.js", "renderPane.js", "renderToolbar.js", "viewer.css",
+            "state.js", "themes.js", "settings.js", "fontsize.js",
+            "ansi.js", "lines.js", "tabs.js", "tabcreate.js",
+            "ui.js", "export.js", "selection.js", "tsparse.js", "import.js",
+        ];
+
+
+        // _escJs: make a JS source string safe to embed inside <script>…<\/script>.
+        // The HTML parser ends a script block at the first <\/script it sees
+        // (case-insensitive), even inside comments or string literals.
+        const _escJs = src => src.replace(/<\/script/gi, "<\\/script");
+
+        // Strip ES module import/export syntax so JS files can be embedded as
+        // classic <script> blocks in the self-contained static HTML output.
+        function _stripModuleSyntax(src) {
+            return src
+                // Remove import statements (single-line)
+                .replace(/^import\s+.*?['"][^'"]*['"]\s*;?\r?\n?/gm, '')
+                // Remove multi-line imports (import { ... } from '...')
+                .replace(/^import\s*\{[^}]*\}\s*from\s*['"][^'"]*['"]\s*;?\s*/gm, '')
+                // Remove export keyword from declarations
+                .replace(/^export\s+(async\s+)?(function|class|const|let|var)\b/gm, '$1$2')
+                // Remove standalone export { ... } statements
+                .replace(/^export\s*\{[^}]*\}\s*(?:from\s*['"][^'"]*['"])?\s*;?\r?\n?/gm, '');
+        }
+
+        const texts = await Promise.all(ASSETS.map(async a => {
+            const r = await fetch(a, {cache: "no-store"});
+            if (!r.ok) throw new Error(`Failed to fetch ${a}: ${r.status}`);
+            const src = await r.text();
+            return a.endsWith(".js") ? _escJs(_stripModuleSyntax(src)) : src;
+        }));
+        const [profileJs, renderPaneJs, renderToolbarJs, css, stateJs, themesJs, settingsJs, fontsizeJs,
+               ansiJs, linesJs, tabsJs, tabcreateJs, uiJs, exportJs, selectionJs, tsparseJs, importJs] = texts;
+
+
+        // ------------------------------------------------------------------
+        // Capture current theme mode/palette and pass it to the exported file.
+        // Avoid hard-overriding CSS vars in <style>, because that freezes the
+        // theme toggle in static HTML.
+        // ------------------------------------------------------------------
+        const currentTheme = document.documentElement.dataset.theme || "";
+        const themeState = window.__embedLogTheme?.getState?.() || {
+            mode: currentTheme === "whitesand" ? "light" : "dark",
+            lightKey: "whitesand",
+            darkKey: "one-dark",
+        };
+
+        // ------------------------------------------------------------------
+        // Config: inject TABS + PANES + initial theme state before scripts run
+        // ------------------------------------------------------------------
+        const configJs =
+            `window.__embedLogProfile = ${_safeJson(STATIC_EXPORT_PROFILE)};\n` +
+            `window.TABS = ${_safeJson(TABS)};\n` +
+            `window.PANES = ${_safeJson(PANES)};\n` +
+            `window.PANE_LABELS = ${_safeJson(PANE_LABELS)};\n` +
+            `window.__embedLogInitialThemeState = ${_safeJson(themeState)};\n` +
+            `window.__embedLogInitialTimestampMode = ${_safeJson(state.timestampMode)};\n` +
+            `window.__embedLogFirstLogAt = ${_safeJson(state.firstLogAt)};\n` +
+            `window.__embedLogInitialFontSize = ${state.fontSize};`;
+
+
+
+        // ------------------------------------------------------------------
+        // Serialize all pane data with both timestamp representations when known.
+        // rawText may be absent on lines loaded before this session; fall back
+        // to decoding the stored HTML via a temporary element (strips tags,
+        // decodes entities) so the export always has something to render.
+        // ------------------------------------------------------------------
+        const _tmpEl = document.createElement("div");
+        function _rawOf(line) {
+            if (line.rawText !== undefined) return line.rawText;
+            _tmpEl.innerHTML = line.html;
+            return _tmpEl.textContent;
+        }
+
+        const logData = options.logData || {};
+        if (!options.logData) {
+            PANES.forEach(id => {
+                logData[id] = state.rawLines[id].map(line => ({
+                    ts: line.ts,
+                    text: _rawOf(line),
+                    isTx: line.isTx,
+                    absTs: line.absTs ?? null,
+                    absNum: Number.isFinite(line.absNum) ? line.absNum : null,
+                    relTs: line.relTs ?? null,
+                    relNum: Number.isFinite(line.relNum) ? line.relNum : null,
+                }));
+            });
+        }
+
+        // ------------------------------------------------------------------
+        // Build pane + tab HTML (mirrors merge_logs.py's _pane_html /
+        // _tab_content_html, with TX input row hidden in static mode)
+        // ------------------------------------------------------------------
+        function _paneHtml(paneId) {
+            // Read the display name from the live DOM, fall back to paneId.
+            const raw = document.querySelector(`#pane-${paneId} .pane-name`)?.textContent.trim() || paneId;
+            // TX row is hidden in the static export output.
+            return renderPaneShell(paneId, raw, { showTx: false });
+        }
+
+        const tabContentsHtml = TABS.map((tab, i) => {
+            const inner = tab.panes.map((paneId, j) =>
+                (j > 0 ? '        <div class="splitter"></div>\n' : "") + _paneHtml(paneId)
+            ).join("\n");
+            return `    <div class="tab-content" id="tab-content-${i}">\n${inner}\n    </div>`;
+        }).join("\n");
+
+        // ------------------------------------------------------------------
+        // Bootstrap: runs last, populates all panes with log data
+        // ------------------------------------------------------------------
+        const activeTabIdx = Number.isInteger(options.activeTab) ? options.activeTab : state.activeTab;
+        const bootstrapJs = `(function () {
+    "use strict";
+    window.wsSend = function () {};
+    var _logData = ${_safeJson(logData)};
+    var _markers = ${_safeJson(Object.values(state.markers).flat() || [])};
+    function _loadPane(paneId) {
+        var entries = _logData[paneId];
+        if (!entries || !entries.length) return;
+        state.atBottom[paneId] = false;
+        entries.forEach(function (e) { appendLine(paneId, e.ts, e.text, e.isTx, e); });
+        document.getElementById("log-" + paneId).scrollTop = 0;
+        state.atBottom[paneId] = false;
+        updateJumpBtn(paneId);
+    }
+    PANES.forEach(_loadPane);
+    // Load markers
+    if (_markers.length) {
+        state.markers = {};
+        _markers.forEach(function (m) {
+            if (!m.paneId) return;
+            state.markers[m.paneId] = state.markers[m.paneId] || [];
+            state.markers[m.paneId].push(m);
+        });
+        if (typeof applyMarkers === "function") applyMarkers();
+        if (typeof window.__embedLogOnMarkers === "function") window.__embedLogOnMarkers();
+    }
+    // Restore the tab that was active when the export was taken
+    if (${activeTabIdx} !== 0) switchTab(${activeTabIdx});
+    // Jump to marker from URL hash (e.g. #marker-2)
+    (function () {
+        var m = window.location.hash.match(/^#marker-(\d+)$/);
+        if (!m) return;
+        var idx = parseInt(m[1], 10);
+        if (!Number.isFinite(idx) || idx < 1) return;
+        var flat = [];
+        Object.keys(state.markers).forEach(function (pid) {
+            (state.markers[pid] || []).forEach(function (mk) {
+                flat.push({ paneId: pid, lineIdx: mk.lineIdx, numTs: mk.numTs });
+            });
+        });
+        flat.sort(function (a, b) { return (a.numTs || 0) - (b.numTs || 0); });
+        if (idx > flat.length) return;
+        var target = flat[idx - 1];
+        var div = document.querySelector('#log-' + target.paneId + ' [data-idx="' + target.lineIdx + '"]');
+        if (!div) return;
+        var logEl = document.getElementById('log-' + target.paneId);
+        if (!logEl) return;
+        logEl.scrollTop = div.offsetTop - Math.floor(logEl.clientHeight / 3);
+        state.atBottom[target.paneId] = false;
+        if (typeof onLineClick === 'function') onLineClick(target.paneId, target.numTs, div);
+        // Find the tab containing this pane and switch to it
+        var tabIdx = -1;
+        for (var t = 0; t < TABS.length; t++) {
+            if (TABS[t].panes.indexOf(target.paneId) >= 0) { tabIdx = t; break; }
+        }
+        if (tabIdx >= 0 && typeof switchTab === 'function') switchTab(tabIdx);
+    })();
+})();`
+
+        // ------------------------------------------------------------------
+        // Assemble final HTML
+        // ------------------------------------------------------------------
+        const ts    = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -1);
+        const rawTitle = options.title || TABS.map(t => t.label).join(" + ");
+        const title = rawTitle.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        const themeAttr = currentTheme ? ` data-theme="${currentTheme}"` : "";
+
+        const html = `<!DOCTYPE html>
+<html lang="en"${themeAttr}>
+<head>
+<meta charset="UTF-8">
+<title>embed-log \u2014 ${title}</title>
+<style>${css}</style>
+</head>
+<body>
+
+                ${renderToolbar(STATIC_EXPORT_PROFILE)}
+
+
+
+<div id="download-raw-menu">
+    <div class="download-raw-head">Download raw logs</div>
+    <div class="download-raw-body">
+        <button id="btn-download-merged" class="download-raw-opt">Merged (.log) — all panes interleaved</button>
+        <button id="btn-download-split" class="download-raw-opt">Per pane (.log files) — one file per source</button>
+    </div>
+</div>
+
+<div id="tab-bar"></div>
+
+<div id="container">
+${tabContentsHtml}
+</div>
+
+<script>${configJs}<\/script>
+<script>${profileJs}<\/script>
+<script>${renderPaneJs}<\/script>
+<script>${renderToolbarJs}<\/script>
+<script>${stateJs}<\/script>
+<script>${themesJs}<\/script>
+<script>${settingsJs}<\/script>
+<script>${fontsizeJs}<\/script>
+<script>${ansiJs}<\/script>
+<script>${linesJs}<\/script>
+<script>${tabsJs}<\/script>
+<script>${tabcreateJs}<\/script>
+<script>${uiJs}<\/script>
+<script>${exportJs}<\/script>
+<script>${selectionJs}<\/script>
+<script>${tsparseJs}<\/script>
+<script>${importJs}<\/script>
+<script>${bootstrapJs}<\/script>
+</body>
+</html>`;
+
+        const blob = new Blob([html], { type: "text/html" });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement("a");
+        a.href     = url;
+        a.download = `${options.filenamePrefix || "embed-log"}-${ts}.html`;
+        a.click();
+        URL.revokeObjectURL(url);
+
+    } catch (err) {
+        console.error("Export failed:", err);
+        alert("Export failed: " + err.message);
+    } finally {
+        if (btn) {
+            btn.textContent = prev;
+            btn.disabled = false;
+        }
+    }
+}
+
+async function exportToHtml() {
+    return exportHtmlSnapshot();
+}
+
+window.__embedLogExportSnapshot = exportHtmlSnapshot;
+
+if (window.__embedLogProfile?.capabilities?.exportHtml) {
+    document.getElementById("btn-export")?.addEventListener("click", exportToHtml);
+}
+// Strip ANSI escape sequences from raw text.
+function _stripAnsi(text) {
+    return text.replace(/\x1b(?:\[[0-9;]*[A-Za-z]|\][^\x07]*\x07|[^[\]])/g, "");
+}
+
+// from raw text, producing clean plain text for download.
+// Matches _snippetMessageText in selection.js.
+function _cleanMessage(rawText) {
+    let text = _stripAnsi(rawText ?? "").trim();
+    for (let i = 0; i < 4; i++) {
+        const before = text;
+        text = text
+            // Strip ISO timestamp prefix like [2026-05-24T22:59:41.773+02:00]
+            .replace(/^\[\d{4}-\d{2}-\d{2}T[^\]]+\]\s*/, "")
+            // Strip relative timestamp prefix like [T+00:00:01.234]
+            .replace(/^\[T\+\d+:\d{2}:\d{2}\.\d{3}\]\s*/, "")
+            // Strip bare short timestamp prefix like 05-24 23:05:51.109
+            .replace(/^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{3}\s*/, "")
+            // Strip bare relative timestamp prefix like T+00:00:01.234
+            .replace(/^T\+\d+:\d{2}:\d{2}\.\d{3}\s*/, "")
+            // Strip source label prefix like [SENSOR_A]
+            .replace(/^\[[A-Za-z_][A-Za-z0-9_-]*\]\s*/, "")
+            .trim();
+        if (text === before) break;
+    }
+    return text;
+}
+
+function _lineRawFull(line) {
+    return _cleanMessage(line.rawText);
+}
+
+function downloadRawMerged() {
+    const entries = [];
+    PANES.forEach(id => {
+        (state.rawLines[id] || []).forEach((line, idx) => {
+            entries.push({ paneId: id, idx, line });
+        });
+    });
+    entries.sort((a, b) =>
+        (a.line.numTs - b.line.numTs) || a.paneId.localeCompare(b.paneId) || (a.idx - b.idx)
+    );
+
+    const text = entries.map(e => {
+        return `[${e.line.ts}] [${e.paneId}] ${_lineRawFull(e.line)}`;
+    }).join("\n");
+
+    const now = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -1);
+    const blob = new Blob([text + "\n"], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `embed-log-merged-${now}.log`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+// ---------------------------------------------------------------------------
+// Download raw — popup menu (merged or per pane)
+// ---------------------------------------------------------------------------
+function downloadRawSplit() {
+    PANES.forEach(id => {
+        const lines = state.rawLines[id] || [];
+        if (!lines.length) return;
+        const text = lines.map(line => `[${line.ts}] ${_cleanMessage(line.rawText)}`).join("\n");
+        const blob = new Blob([text + "\n"], { type: "text/plain" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${id}.log`;
+        a.click();
+        URL.revokeObjectURL(url);
+    });
+}
+
+function _toggleRawMenu() {
+    const btn = document.getElementById("btn-download-raw");
+    const menu = document.getElementById("download-raw-menu");
+    if (!menu || !btn) return;
+
+    const isOpen = menu.classList.contains("open");
+    document.querySelectorAll("#clip-peek-menu.open, #sessions-menu.open").forEach(el =>
+        el.classList.remove("open")
+    );
+
+    if (isOpen) {
+        menu.classList.remove("open");
+        return;
+    }
+
+    const rect = btn.getBoundingClientRect();
+    menu.style.left = `${Math.max(8, rect.left)}px`;
+    menu.style.top = `${rect.bottom + 6}px`;
+    menu.classList.add("open");
+}
+
+function _closeRawMenu() {
+    document.getElementById("download-raw-menu")?.classList.remove("open");
+}
+
+document.getElementById("btn-download-raw")?.addEventListener("click", e => {
+    e.stopPropagation();
+    _toggleRawMenu();
+});
+
+document.getElementById("btn-download-merged")?.addEventListener("click", e => {
+    e.stopPropagation();
+    downloadRawMerged();
+    _closeRawMenu();
+});
+
+document.getElementById("btn-download-split")?.addEventListener("click", e => {
+    e.stopPropagation();
+    downloadRawSplit();
+    _closeRawMenu();
+});
+
+document.addEventListener("click", e => {
+    const menu = document.getElementById("download-raw-menu");
+    const btn = document.getElementById("btn-download-raw");
+    if (!menu?.classList.contains("open")) return;
+    if (menu.contains(e.target) || btn?.contains(e.target)) return;
+    _closeRawMenu();
+}, true);
+
+document.addEventListener("keydown", e => {
+    if (e.key === "Escape") _closeRawMenu();
+});
+</script>
+<script>// ---------------------------------------------------------------------------
+// Line selection + copy / export actions
+//
+// Two explicit scopes (toggled per-pane overlay):
+//   Exact   → only the user-selected lines in the active pane
+//   Context → selected lines + synchronized lines from all panes
+//
+// Primary actions:
+//   Copy         (respects current scope)
+//   Download raw (respects current scope)
+//
+// Secondary actions (accessible via More ··· dropdown):
+
+//
+// Keyboard Ctrl+C / Cmd+C always copies exact selection (predictable).
+// ---------------------------------------------------------------------------
+
+
+
+// ---------------------------------------------------------------------------
+// Inject per-pane selection actions (scope toggle + actions)
+// ---------------------------------------------------------------------------
+function _selectionSetupPane(id) {
+    const body = document.querySelector(`#pane-${id} .pane-body`);
+    if (!body) return;
+
+    const wrap = document.createElement("div");
+    wrap.className = "copy-actions";
+    wrap.id = "copy-actions-" + id;
+
+    // Scope toggle
+    const scopeRow = document.createElement("div");
+    scopeRow.className = "scope-row";
+
+    const scopeExact = document.createElement("button");
+    scopeExact.className = "scope-btn active";
+    scopeExact.id = "scope-exact-" + id;
+    scopeExact.textContent = "Exact";
+    scopeExact.title = "Only selected lines in this pane";
+    scopeExact.addEventListener("click", e => { e.stopPropagation(); _setScope(id, "exact"); });
+
+    const scopeContext = document.createElement("button");
+    scopeContext.className = "scope-btn";
+    scopeContext.id = "scope-context-" + id;
+    scopeContext.textContent = "All";
+    scopeContext.title = "Selected lines + synchronized lines from all panes";
+    scopeContext.addEventListener("click", e => { e.stopPropagation(); _setScope(id, "context"); });
+
+    const scopeSel = document.createElement("button");
+    scopeSel.className = "scope-btn";
+    scopeSel.id = "scope-context-selected-" + id;
+    scopeSel.textContent = "Sel…";
+    scopeSel.title = "Selected lines + only chosen panes";
+    scopeSel.addEventListener("click", e => { e.stopPropagation(); _setScope(id, "context-selected"); });
+
+    scopeRow.appendChild(scopeExact);
+    scopeRow.appendChild(scopeContext);
+    scopeRow.appendChild(scopeSel);
+
+    // Pane selector (lazily rebuilt when scope becomes context-selected)
+    const paneSelector = document.createElement("div");
+    paneSelector.className = "pane-selector";
+    paneSelector.id = "pane-selector-" + id;
+    paneSelector.style.display = "none";
+
+
+    // Primary action row
+    const actionRow = document.createElement("div");
+    actionRow.className = "action-row";
+
+    const copyBtn = document.createElement("button");
+    copyBtn.className = "copy-btn";
+    copyBtn.id = "copy-" + id;
+    copyBtn.addEventListener("click", e => { e.stopPropagation(); _copy(id); });
+
+    // More ··· toggle
+    const moreToggle = document.createElement("button");
+    moreToggle.className = "copy-btn more-toggle";
+    moreToggle.id = "more-toggle-" + id;
+    moreToggle.textContent = "\u00B7\u00B7\u00B7";
+    moreToggle.title = "More actions";
+    moreToggle.addEventListener("click", e => { e.stopPropagation(); _toggleMore(id); });
+
+    // Secondary actions dropdown
+    const moreDropdown = document.createElement("div");
+    moreDropdown.className = "more-dropdown";
+    moreDropdown.id = "more-dropdown-" + id;
+
+    const htmlBtn = document.createElement("button");
+    htmlBtn.className = "copy-btn";
+    htmlBtn.id = "export-html-" + id;
+    htmlBtn.textContent = "Export HTML";
+    htmlBtn.title = "Export selection to self-contained HTML file";
+    htmlBtn.addEventListener("click", e => { e.stopPropagation(); _exportHtml(id); });
+    moreDropdown.appendChild(htmlBtn);
+
+
+    actionRow.appendChild(copyBtn);
+    // Marker toggle (runtime only) — in the main action row
+    if (can('markers')) {
+        const markerBtn = document.createElement("button");
+        markerBtn.className = "copy-btn";
+        markerBtn.id = "marker-toggle-" + id;
+        markerBtn.textContent = "Add Note";
+        markerBtn.title = "Add a note to the selected/sync-highlighted line(s)";
+        markerBtn.addEventListener("click", e => { e.stopPropagation(); _toggleMarker(id); });
+        actionRow.appendChild(markerBtn);
+    }
+    actionRow.appendChild(moreToggle);
+    actionRow.appendChild(moreDropdown);
+
+    wrap.appendChild(scopeRow);
+    wrap.appendChild(paneSelector);
+    wrap.appendChild(actionRow);
+    body.appendChild(wrap);
+}
+
+function _rebuildPaneSelector(paneId) {
+    const container = document.getElementById('pane-selector-' + paneId);
+    if (!container) return;
+    container.innerHTML = '';
+    PANES.forEach(id => {
+        const label = document.createElement('label');
+        label.className = 'pane-checkbox';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.dataset.pane = id;
+        cb.checked = state.contextPanes[id] !== false;
+        cb.addEventListener('change', e => {
+            e.stopPropagation();
+            state.contextPanes[id] = cb.checked;
+            _syncSelectionActions(paneId);
+        });
+        label.appendChild(cb);
+        label.appendChild(document.createTextNode(' ' + unwrapPaneLabel(id)));
+        container.appendChild(label);
+    });
+}
+
+PANES.forEach(_selectionSetupPane);
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function _stripHtml(str) { return str.replace(/<[^>]+>/g, ""); }
+
+function _setScope(paneId, scope) {
+    state.selectionScope = scope;
+    if (scope === 'context-selected' && Object.keys(state.contextPanes).length === 0) {
+        PANES.forEach(id => { state.contextPanes[id] = true; });
+    }
+    PANES.forEach(id => {
+        ['exact', 'context', 'context-selected'].forEach(s => {
+            const btn = document.getElementById(`scope-${s}-${id}`);
+            if (btn) btn.classList.toggle('active', scope === s);
+        });
+        const ps = document.getElementById('pane-selector-' + id);
+        if (!ps) return;
+        if (scope === 'context-selected') {
+            _rebuildPaneSelector(id);
+            ps.style.display = '';
+        } else {
+            ps.style.display = 'none';
+        }
+    });
+    _syncSelectionActions(paneId);
+}
+
+function _toggleMore(paneId) {
+    const dd = document.getElementById("more-dropdown-" + paneId);
+    if (!dd) return;
+    const isOpen = dd.classList.contains("open");
+    PANES.forEach(id => {
+        document.getElementById("more-dropdown-" + id)?.classList.remove("open");
+    });
+    if (!isOpen) dd.classList.add("open");
+}
+
+function _closeAllMore() {
+    PANES.forEach(id => {
+        document.getElementById("more-dropdown-" + id)?.classList.remove("open");
+    });
+}
+
+function _syncSelectionActions(paneId) {
+    const wrap = document.getElementById("copy-actions-" + paneId);
+    const copyBtn = document.getElementById("copy-" + paneId);
+    if (!wrap || !copyBtn) return;
+
+    const selectedCount = state.selected[paneId].size;
+    const visible = selectedCount > 0;
+    const displayCount = state.selectionScope === "exact"
+        ? selectedCount
+        : _countRangeEntries(paneId);
+    wrap.classList.toggle("visible", visible);
+    wrap.querySelectorAll(".copy-btn, .scope-btn, .more-toggle").forEach(el =>
+        el.classList.toggle("visible", visible)
+    );
+
+    if (visible) {
+        copyBtn.textContent = `Copy (${displayCount})`;
+    }
+    // Scope-gate secondary actions: marker only in Exact, Export HTML only outside Exact
+    const htmlBtn = document.getElementById("export-html-" + paneId);
+    if (htmlBtn) {
+        htmlBtn.style.display = state.selectionScope === "exact" ? "none" : "";
+    }
+    const markerBtn = document.getElementById("marker-toggle-" + paneId);
+    if (markerBtn) {
+        markerBtn.style.display = state.selectionScope === "exact" ? "" : "none";
+    }
+}
+
+// ── Markers ──
+function _flatMarkerList() {
+    const all = [];
+    Object.keys(state.markers).forEach(paneId => {
+        (state.markers[paneId] || []).forEach(m => {
+            all.push({ paneId, ...m });
+        });
+    });
+    all.sort((a, b) => (a.numTs ?? 0) - (b.numTs ?? 0));
+    return all;
+}
+
+function _markerLineIdx(paneId) {
+    const div = state.highlighted[paneId];
+    if (div) return parseInt(div.dataset.idx, 10);
+    const sel = state.selected[paneId];
+    if (sel?.size === 1) return [...sel][0];
+    return -1;
+}
+
+function _toggleMarker(paneId) {
+    // Get indices to mark: selected lines, or fall back to highlighted line
+    const sel = state.selected[paneId];
+    const indices = sel?.size > 0
+        ? Array.from(sel)
+        : (() => {
+            const idx = _markerLineIdx(paneId);
+            return idx >= 0 ? [idx] : [];
+          })();
+    if (!indices.length) return;
+
+    const markers = state.markers[paneId] = state.markers[paneId] || [];
+    const lines = state.rawLines[paneId] || [];
+
+    // If any indices are not yet marked, show the input to add/overwrite
+    _showMarkerInput(paneId, indices, lines);
+    // We don't handle "remove existing" here anymore — the save/commit
+    // in _showMarkerInput replaces any overlapping markers.
+}
+
+
+function _showMarkerInput(paneId, indices, lines) {
+    const body = document.querySelector(`#pane-${paneId} .pane-body`);
+    if (!body) return;
+
+    // Remove any existing marker input overlay
+    document.querySelectorAll(".marker-input-overlay").forEach(el => el.remove());
+
+    const overlay = document.createElement("div");
+    overlay.className = "marker-input-overlay";
+    overlay.innerHTML =
+        '<span class="marker-input-label">Marker:</span>' +
+        '<input class="marker-input" type="text" placeholder="Describe this marker…" autofocus>' +
+        '<button class="marker-input-save">Save</button>' +
+        '<button class="marker-input-cancel">✕</button>';
+
+    const input = overlay.querySelector(".marker-input");
+    const saveBtn = overlay.querySelector(".marker-input-save");
+    const cancelBtn = overlay.querySelector(".marker-input-cancel");
+
+    const candidates = indices.map(i => ({ lineIdx: i, numTs: lines[i]?.numTs ?? 0 }));
+    // Single marker for the entire range (first → last)
+    const rangeStart = Math.min(...indices);
+    const rangeEnd = Math.max(...indices);
+    let inputActive = true;
+
+    function commit() {
+        if (!inputActive) return;
+        inputActive = false;
+        const desc = (input.value || "").trim() || "(no description)";
+        const markers = state.markers[paneId] = state.markers[paneId] || [];
+        const keep = markers.filter(m => m.lineIdx < rangeStart || m.lineIdx > rangeEnd);
+        state.markers[paneId] = keep;
+        keep.push({
+            lineIdx: rangeStart,
+            endIdx: rangeEnd,
+            numTs: lines[rangeStart]?.numTs ?? 0,
+            description: desc,
+            createdAt: new Date().toISOString(),
+        });
+        overlay.remove();
+        applyMarkers();
+        _updateMarkerNav();
+        wsSend({ cmd: "save_markers", markers: _flatMarkerList() });
+    }
+
+    function cancel() {
+        if (!inputActive) return;
+        inputActive = false;
+        overlay.remove();
+    }
+
+    saveBtn.addEventListener("click", e => { e.stopPropagation(); commit(); });
+    cancelBtn.addEventListener("click", e => { e.stopPropagation(); cancel(); });
+    input.addEventListener("keydown", e => {
+        if (e.key === "Enter") commit();
+        if (e.key === "Escape") cancel();
+    });
+
+    // Show which lines are being marked
+    const label = overlay.querySelector(".marker-input-label");
+    const count = rangeEnd - rangeStart + 1;
+    if (count > 1) label.textContent = `Marker (${count} lines):`;
+
+    // Position overlay near the copy-actions
+    const actions = body.querySelector(".copy-actions");
+    if (actions) {
+        const rect = actions.getBoundingClientRect();
+        overlay.style.position = "fixed";
+        overlay.style.left = rect.left + "px";
+        overlay.style.top = (rect.bottom + 4) + "px";
+        // Clamp so overlay doesn't extend past right edge
+        requestAnimationFrame(() => {
+            const ow = overlay.offsetWidth;
+            if (rect.left + ow > window.innerWidth) {
+                overlay.style.left = Math.max(8, window.innerWidth - ow - 8) + "px";
+                }
+            });
+        }
+    body.appendChild(overlay);
+    setTimeout(() => input.focus(), 50);
+}
+
+
+function applyMarkers() {
+    const byPane = state.markers;
+    PANES.forEach(paneId => {
+        const logEl = document.getElementById("log-" + paneId);
+        if (!logEl) return;
+        const paneMarkers = byPane[paneId] || [];
+        // Build a lookup: lineIdx → description (mark every line in a range)
+        const byLine = {};
+        paneMarkers.forEach(m => {
+            const end = m.endIdx ?? m.lineIdx;
+            for (let i = m.lineIdx; i <= end; i++) {
+                if (byLine[i] === undefined) byLine[i] = m.description;
+            }
+        });
+        Array.from(logEl.children).forEach((div, i) => {
+            const hasMarker = byLine[i] !== undefined;
+            div.classList.toggle("has-marker", hasMarker);
+            div.title = hasMarker ? "Marker: " + byLine[i] : "";
+        });
+    });
+}
+window.applyMarkers = applyMarkers;
+
+// ── Marker tooltip ──
+const _tooltipEl = document.createElement("div");
+_tooltipEl.id = "marker-tooltip";
+document.body.appendChild(_tooltipEl);
+
+document.addEventListener("mouseover", e => {
+    const line = e.target.closest(".log-line.has-marker");
+    if (!line) { _tooltipEl.classList.remove("visible"); return; }
+    const desc = line.title.replace(/^Marker:\s*/, "");
+    if (!desc) return;
+    const rect = line.getBoundingClientRect();
+    _tooltipEl.innerHTML = '<span class="mt-label">Marker</span>' + _escHtml(desc);
+    // Position above the line so it doesn't cover log text below
+    _tooltipEl.style.left = Math.max(4, rect.left) + "px";
+    _tooltipEl.style.bottom = (window.innerHeight - rect.top + 4) + "px";
+    _tooltipEl.classList.add("visible");
+});
+
+
+function _updateMarkerNav() {
+    const flat = _flatMarkerList();
+    const navEl = document.getElementById("marker-nav");
+    if (!navEl) return;
+    if (flat.length === 0) {
+        navEl.style.display = "none";
+        state.markerNavIdx = -1;
+        return;
+    }
+    navEl.style.display = "";
+    const total = document.getElementById("marker-nav-total");
+    if (total) total.textContent = String(flat.length);
+    // Clamp nav index
+    if (state.markerNavIdx < 0 || state.markerNavIdx >= flat.length) {
+        state.markerNavIdx = 0;
+    }
+    _updateMarkerNavBtn();
+}
+
+function _updateMarkerNavBtn() {
+    const el = document.getElementById("marker-nav-idx");
+    if (el) el.textContent = String(state.markerNavIdx + 1);
+}
+
+document.getElementById("marker-nav-prev")?.addEventListener("click", () => {
+    const flat = _flatMarkerList();
+    if (!flat.length) return;
+    state.markerNavIdx = (state.markerNavIdx - 1 + flat.length) % flat.length;
+    _jumpMarker(flat[state.markerNavIdx]);
+});
+
+document.getElementById("marker-nav-next")?.addEventListener("click", () => {
+    const flat = _flatMarkerList();
+    if (!flat.length) return;
+    state.markerNavIdx = (state.markerNavIdx + 1) % flat.length;
+    _jumpMarker(flat[state.markerNavIdx]);
+});
+
+function _jumpMarker(m) {
+    const paneId = m.paneId;
+    // Switch to the tab containing this pane
+    const tabIdx = TABS.findIndex(t => t.panes.includes(paneId));
+    if (tabIdx >= 0) switchTab(tabIdx);
+    const div = document.querySelector(`#log-${paneId} [data-idx="${m.lineIdx}"]`);
+    if (!div) return;
+    const logEl = document.getElementById("log-" + paneId);
+    if (!logEl) return;
+    logEl.scrollTop = div.offsetTop - Math.floor(logEl.clientHeight / 3);
+    state.atBottom[paneId] = false;
+    onLineClick(paneId, m.numTs, div);
+    _updateMarkerNavBtn();
+}
+
+function _applySelection(paneId) {
+    const logEl = document.getElementById("log-" + paneId);
+    const sel = state.selected[paneId];
+    Array.from(logEl.children).forEach((div, i) =>
+        div.classList.toggle("selected", sel.has(i))
+    );
+    _syncSelectionActions(paneId);
+}
+
+function _selectIndexRange(paneId, startIdx, endIdx) {
+    if (!Number.isFinite(startIdx) || !Number.isFinite(endIdx)) return;
+    _clearOtherSelections(paneId);
+    const lines = state.rawLines[paneId] || [];
+    const lo = Math.max(0, Math.min(startIdx, endIdx));
+    const hi = Math.min(lines.length - 1, Math.max(startIdx, endIdx));
+    const sel = new Set();
+    for (let i = lo; i <= hi; i++) sel.add(i);
+    state.selected[paneId] = sel;
+    _applySelection(paneId);
+}
+
+function _clearOtherSelections(keepPane) {
+    PANES.forEach(id => {
+        if (id === keepPane || !state.selected[id].size) return;
+        state.selected[id] = new Set();
+        _applySelection(id);
+    });
+}
+
+function _clearAllSelections() {
+    PANES.forEach(id => {
+        if (state.selected[id]?.size) {
+            state.selected[id] = new Set();
+            _applySelection(id);
+        }
+        _syncSelectionActions(id);
+    });
+}
+
+function _decodeEntities(text) {
+    const ta = document.createElement("textarea");
+    ta.innerHTML = text;
+    return ta.value;
+}
+
+function _linePlain(line) {
+    return _decodeEntities(_stripHtml(line?.html || "")).replace(/\s+/g, " ").trim();
+}
+
+function _lineRaw(line) {
+    return `${line.ts}  ${_linePlain(line)}`;
+}
+
+function _safeFilePart(str) {
+    return String(str || "snippet").replace(/[^0-9A-Za-z_.-]+/g, "-").replace(/^-+|-+$/g, "") || "snippet";
+}
+
+function _downloadText(filename, text, type = "text/plain") {
+    const blob = new Blob([text], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+function _copyText(text) {
+    if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try { document.execCommand("copy"); }
+    finally { ta.remove(); }
+    return Promise.resolve();
+}
+
+function _selectionRange(paneId) {
+    const sel = state.selected[paneId];
+    if (!sel?.size) return null;
+    const lines = state.rawLines[paneId] || [];
+    const nums = Array.from(sel)
+        .map(i => lines[i]?.numTs)
+        .filter(n => Number.isFinite(n) && n >= 0);
+    if (!nums.length) return null;
+    return { from: Math.min(...nums), to: Math.max(...nums) };
+}
+
+function _rangeTargetPanes() {
+    return state.selectionScope === 'context-selected'
+        ? PANES.filter(id => state.contextPanes[id])
+        : PANES;
+}
+
+function _countRangeEntries(paneId) {
+    const range = _selectionRange(paneId);
+    if (!range) return 0;
+    let count = 0;
+    _rangeTargetPanes().forEach(id => {
+        (state.rawLines[id] || []).forEach(line => {
+            const n = line?.numTs;
+            if (Number.isFinite(n) && n >= range.from && n <= range.to) count++;
+        });
+    });
+    return count;
+}
+
+function _collectRangeEntries(paneId) {
+    const range = _selectionRange(paneId);
+    if (!range) return [];
+    const entries = [];
+    _rangeTargetPanes().forEach(id => {
+        (state.rawLines[id] || []).forEach((line, idx) => {
+            const n = line?.numTs;
+            if (Number.isFinite(n) && n >= range.from && n <= range.to) {
+                entries.push({ paneId: id, idx, line });
+            }
+        });
+    });
+    entries.sort((a, b) =>
+        (a.line.numTs - b.line.numTs) || a.paneId.localeCompare(b.paneId) || (a.idx - b.idx)
+    );
+    return entries;
+}
+
+function _rangeBoundsLabel(entries) {
+    if (!entries.length) return "snippet";
+    const first = entries[0].line.ts;
+    const last = entries[entries.length - 1].line.ts;
+    return `${first}_to_${last}`;
+}
+
+function _rangeBoundsLabelExact(paneId) {
+    const sel = state.selected[paneId];
+    if (!sel?.size) return "snippet";
+    const lines = state.rawLines[paneId] || [];
+    const indices = Array.from(sel).sort((a, b) => a - b);
+    const first = lines[indices[0]]?.ts;
+    const last = lines[indices[indices.length - 1]]?.ts;
+    if (!first || !last) return "snippet";
+    return `${first}_to_${last}`;
+}
+
+function _escapeRegExp(str) {
+    return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function _snippetMessageText(entry) {
+    let text = _linePlain(entry.line).trim();
+    const sourcePrefix = new RegExp(`^\\[${_escapeRegExp(entry.paneId)}\\]\\s*`);
+    for (let i = 0; i < 4; i++) {
+        const before = text;
+        text = text
+            .replace(/^\[\d{4}-\d{2}-\d{2}T[^\]]+\]\s*/, "")
+            .replace(/^\[T\+\d+:\d{2}:\d{2}\.\d{3}\]\s*/, "")
+            .replace(/^T\+\d+:\d{2}:\d{2}\.\d{3}\s*/, "")
+            .replace(sourcePrefix, "")
+            .trim();
+        if (text === before) break;
+    }
+    return text;
+}
+
+function _applyMarkerAnnotations(paneId, items) {
+    const paneMarkers = state.markers[paneId] || [];
+    if (!paneMarkers.length) return items.map(i => i.text).join("\n");
+    const out = [];
+    for (const item of items) {
+        for (const m of paneMarkers) {
+            if (m.lineIdx === item.idx) {
+                out.push(`USER_MARKER_START = ${m.description}`);
+            }
+        }
+        out.push(item.text);
+        for (const m of paneMarkers) {
+            const end = m.endIdx ?? m.lineIdx;
+            if (end === item.idx) {
+                out.push("USER_MARKER_END");
+            }
+        }
+    }
+    return out.join("\n");
+}
+
+
+function _formatRangeRaw(entries) {
+    const parts = [];
+    let currentPane = null;
+    let paneItems = [];
+    function flushPane() {
+        if (paneItems.length) {
+            parts.push(_applyMarkerAnnotations(currentPane, paneItems));
+            paneItems = [];
+        }
+    }
+    entries.forEach(e => {
+        if (e.paneId !== currentPane) flushPane();
+        currentPane = e.paneId;
+        paneItems.push({
+            idx: e.idx,
+            text: `[${e.line.ts}] [${e.paneId}] ${_snippetMessageText(e)}`,
+        });
+    });
+    flushPane();
+    return parts.join("\n");
+}
+
+
+function _buildRangeLogData(entries) {
+    const logData = {};
+    PANES.forEach(id => { logData[id] = []; });
+    entries.forEach(e => {
+        if (!logData[e.paneId]) logData[e.paneId] = [];
+        logData[e.paneId].push({
+            ts: e.line.ts,
+            text: `[${e.paneId}] ${_snippetMessageText(e)}`,
+            isTx: e.line.isTx,
+            absTs: e.line.absTs ?? null,
+            absNum: Number.isFinite(e.line.absNum) ? e.line.absNum : null,
+            relTs: e.line.relTs ?? null,
+            relNum: Number.isFinite(e.line.relNum) ? e.line.relNum : null,
+        });
+    });
+    return logData;
+}
+
+function _formatSelectionBlock(paneId, indices) {
+    const lines = state.rawLines[paneId];
+    const items = indices
+        .map((idx, i) => lines[idx] ? { idx, text: `${lines[idx].ts}  [${paneId}] ${_linePlain(lines[idx])}` } : null)
+        .filter(Boolean);
+    return _applyMarkerAnnotations(paneId, items);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ---------------------------------------------------------------------------
+// Scope-aware action handlers
+// ---------------------------------------------------------------------------
+
+
+
+function _flashButton(id, text, restoreMs = 900) {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    const prev = btn.textContent;
+    btn.textContent = text;
+    setTimeout(() => { btn.textContent = prev; _syncSelectionActions(btn.id.replace(/^.+-(?=\w+$)/, "")); }, restoreMs);
+}
+
+// ---------------------------------------------------------------------------
+// Copy — scope-aware
+// ---------------------------------------------------------------------------
+function _copy(paneId) {
+    if (state.selectionScope !== "exact") return _copyContext(paneId);
+    return _copyExact(paneId);
+}
+
+function _copyExact(paneId) {
+    const sel = state.selected[paneId];
+    if (!sel.size) return;
+    const indices = Array.from(sel).sort((a, b) => a - b);
+    const text = _formatSelectionBlock(paneId, indices);
+    if (!text) return;
+    _copyText(text).then(() => {
+        const btn = document.getElementById("copy-" + paneId);
+        if (!btn) return;
+        const prev = btn.textContent;
+        btn.textContent = "Copied";
+        setTimeout(() => { btn.textContent = prev; _syncSelectionActions(paneId); }, 900);
+    }).catch(() => {});
+}
+
+function _copyContext(paneId) {
+    const entries = _collectRangeEntries(paneId);
+    const text = _formatRangeRaw(entries);
+    if (!text) return;
+    _copyText(text).then(() => {
+        const btn = document.getElementById("copy-" + paneId);
+        if (!btn) return;
+        const prev = btn.textContent;
+        btn.textContent = "Copied";
+        setTimeout(() => { btn.textContent = prev; _syncSelectionActions(paneId); }, 900);
+    }).catch(() => {});
+}
+
+// ---------------------------------------------------------------------------
+// Download raw — scope-aware
+// ---------------------------------------------------------------------------
+function _downloadRaw(paneId) {
+    if (state.selectionScope !== "exact") return _downloadRawContext(paneId);
+    return _downloadRawExact(paneId);
+}
+
+function _downloadRawExact(paneId) {
+    const sel = state.selected[paneId];
+    if (!sel.size) return;
+    const indices = Array.from(sel).sort((a, b) => a - b);
+    const text = _formatSelectionBlock(paneId, indices);
+    if (!text) return;
+    const label = _rangeBoundsLabelExact(paneId);
+    _downloadText(`embed-log-exact-${_safeFilePart(label)}.log`, text + "\n", "text/plain");
+    _saveSnippetToServer(text, [paneId], 'exact', label);
+}
+
+function _downloadRawContext(paneId) {
+    const entries = _collectRangeEntries(paneId);
+    const text = _formatRangeRaw(entries);
+    if (!text) return;
+    const label = _rangeBoundsLabel(entries);
+    _downloadText(`embed-log-snippet-${_safeFilePart(label)}.log`, text + "\n", "text/plain");
+    const panes = [...new Set(entries.map(e => e.paneId))];
+    _saveSnippetToServer(text, panes, state.selectionScope, label);
+}
+
+function _saveSnippetToServer(text, panes, scope, label) {
+    if (!window.__embedLogProfile?.capabilities?.sessionApi) return;
+    fetch('/api/session/snippet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, panes, scope, label }),
+    }).catch(() => {});
+}
+
+// ---------------------------------------------------------------------------
+// Export HTML — scope-aware (secondary action)
+// ---------------------------------------------------------------------------
+function _exportHtml(paneId) {
+    const sel = state.selected[paneId];
+    if (!sel.size) return;
+    const btn = document.getElementById("export-html-" + paneId);
+
+    if (state.selectionScope !== "exact") {
+        const entries = _collectRangeEntries(paneId);
+        if (!entries.length) return;
+        const label = _rangeBoundsLabel(entries);
+        exportHtmlSnapshot({
+            button: btn,
+            logData: _buildRangeLogData(entries),
+            filenamePrefix: `embed-log-snippet-${_safeFilePart(label)}`,
+            title: `snippet ${label}`,
+            activeTab: state.activeTab,
+        });
+    } else {
+        const indices = Array.from(sel).sort((a, b) => a - b);
+        const entries = indices.map(i => ({
+            paneId,
+            idx: i,
+            line: state.rawLines[paneId][i],
+        }));
+        const label = _rangeBoundsLabelExact(paneId);
+        exportHtmlSnapshot({
+            button: btn,
+            logData: _buildRangeLogData(entries),
+            filenamePrefix: `embed-log-exact-${_safeFilePart(label)}`,
+            title: `exact ${label}`,
+            activeTab: state.activeTab,
+        });
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Add to clipboard — scope-aware (secondary action)
+// ---------------------------------------------------------------------------
+
+
+// ---------------------------------------------------------------------------
+// Pointer drag — selection
+// ---------------------------------------------------------------------------
+let _drag = null;          // { paneId, startIdx, startY, lineEl, active }
+let _suppressClick = false;
+let _rangeAnchor = null;   // { paneId, idx } set by a normal line click for Shift+Click range selection
+let _altSelection = false; // true during an Alt-native-text-select drag
+
+
+document.addEventListener("pointerdown", e => {
+    if (e.button !== 0) return;
+    const line = e.target.closest(".log-line");
+    if (!line) return;
+    const logArea = line.closest(".log-area");
+    if (!logArea) return;
+    if (e.altKey) { _altSelection = true; return; }
+
+
+    _drag = {
+        paneId: logArea.id.slice(4),
+        startIdx: parseInt(line.dataset.idx, 10),
+        startY: e.clientY,
+        lineEl: line,
+        active: false,
+    };
+    _suppressClick = false;
+});
+
+document.addEventListener("pointermove", e => {
+    if (!_drag) return;
+    if (Math.abs(e.clientY - _drag.startY) < 6) return;
+
+    if (!_drag.active) {
+        _drag.active = true;
+        _suppressClick = true;
+
+        _clearOtherSelections(_drag.paneId);
+
+        const raw = state.rawLines[_drag.paneId][_drag.startIdx];
+        if (raw) onLineClick(_drag.paneId, raw.numTs, _drag.lineEl);
+
+        try { _drag.lineEl.setPointerCapture(e.pointerId); } catch (_) {}
+    }
+
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    if (!el) return;
+    const line = el.closest(".log-line");
+    if (!line) return;
+    const logArea = line.closest(".log-area");
+    if (!logArea || logArea.id.slice(4) !== _drag.paneId) return;
+
+    const endIdx = parseInt(line.dataset.idx, 10);
+    const lo = Math.min(_drag.startIdx, endIdx);
+    const hi = Math.max(_drag.startIdx, endIdx);
+    const sel = new Set();
+    for (let i = lo; i <= hi; i++) sel.add(i);
+    state.selected[_drag.paneId] = sel;
+    _applySelection(_drag.paneId);
+});
+
+document.addEventListener("pointerup", () => {
+    if (_altSelection) {
+        _altSelection = false;
+        const text = window.getSelection()?.toString();
+        if (text) navigator.clipboard.writeText(text).catch(() => {});
+    }
+    _drag = null;
+});
+
+document.addEventListener("click", e => {
+    if (_suppressClick) {
+        if (e.target.closest(".log-line")) {
+            _suppressClick = false;
+            e.stopPropagation();
+            return;
+        }
+        _suppressClick = false;
+    }
+
+    const clickedLine = e.target.closest(".log-line");
+    const clickedLogArea = clickedLine?.closest(".log-area");
+    if (clickedLine && clickedLogArea && !e.altKey) {
+        const paneId = clickedLogArea.id.slice(4);
+        const idx = parseInt(clickedLine.dataset.idx, 10);
+
+        if (e.shiftKey && _rangeAnchor?.paneId === paneId && Number.isFinite(idx)) {
+            e.preventDefault();
+            e.stopPropagation();
+            _selectIndexRange(paneId, _rangeAnchor.idx, idx);
+            return;
+        }
+
+        if (!e.shiftKey && Number.isFinite(idx)) {
+            _rangeAnchor = { paneId, idx };
+        }
+    }
+
+    const inSelectionUi = e.target.closest(".copy-actions");
+
+    // Close More dropdowns on click outside
+    if (!inSelectionUi) _closeAllMore();
+
+    if (!PANES.some(id => state.selected[id]?.size > 0)) return;
+    if (inSelectionUi) return;
+    _clearAllSelections();
+}, true);
+
+// ---------------------------------------------------------------------------
+// Keyboard
+// ---------------------------------------------------------------------------
+document.addEventListener("keydown", e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "c") {
+        const pane = PANES.find(id => state.selected[id].size > 0);
+        if (pane) { _copyExact(pane); e.preventDefault(); return; }
+        // No explicit selection — fall back to the sync-highlighted line.
+        const hlPane = PANES.find(id => state.highlighted[id]);
+        if (hlPane) {
+            const div = state.highlighted[hlPane];
+            const idx = parseInt(div?.dataset.idx, 10);
+            if (Number.isFinite(idx)) {
+                const text = _formatSelectionBlock(hlPane, [idx]);
+                if (text) { _copyText(text); e.preventDefault(); return; }
+            }
+        }
+        return;
+    }
+    if (e.key === "Escape") {
+        _closeAllMore();
+        _clearAllSelections();
+    }
+});
+// ── Alt key: hold to enable native text selection on log lines ──
+document.addEventListener("keydown", e => {
+    if (e.key === "Alt" && !e.ctrlKey && !e.metaKey) {
+        document.body.classList.add("alt-held");
+    }
+});
+document.addEventListener("keyup", e => {
+    if (e.key === "Alt") document.body.classList.remove("alt-held");
+});
+window.addEventListener("blur", () => document.body.classList.remove("alt-held"));
+// Update marker nav when markers arrive from server
+window.__embedLogOnMarkers = () => {
+    _updateMarkerNav();
+};
+</script>
+<script>// ---------------------------------------------------------------------------
+// Multi-format log-line timestamp parser
+//
+// Formats supported (timestamps are taken AS-IS — no timezone conversion):
+//   [YYYY-MM-DDTHH:MM:SS[.frac][Z|±HH:MM]]   server / full ISO in brackets
+//   [MM-DD HH:MM:SS[.frac]]                   short, space-sep, in brackets
+//   [MM-DDTHH:MM:SS[.frac]]                   short ISO (T-sep), in brackets
+//   [T+HH:MM:SS[.frac]]                       relative elapsed time in brackets
+//   YYYY-MM-DDTHH:MM:SS[.frac][Z|±HH:MM]      bare ISO 8601 (no brackets)
+//   YYYY-MM-DD HH:MM:SS[.frac]                space separator, no brackets
+//   T+HH:MM:SS[.frac]                         bare relative elapsed time
+//
+// Fractional seconds (any length) are truncated to 3 digits (ms).
+// Timezone suffixes are stripped — the local clock time is preserved so that
+// UART logs (the time reference) and UTC-stamped logs synchronise with a
+// constant offset that the user can reason about.
+//
+// Output timestamp format: "MM-DD HH:MM:SS.mmm" or "T+HH:MM:SS.mmm"
+// ---------------------------------------------------------------------------
+
+function _ms3(frac) {
+    if (!frac) return "000";
+    return (frac + "000").slice(0, 3);
+}
+
+// Returns { ts, data: <rest of line> } or null.
+function parseLogLine(raw) {
+    const s = raw.trimStart();
+    let m;
+
+    // [YYYY-MM-DDTHH:MM:SS[.frac][Z|±HH:MM]]
+    m = /^\[(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:[.,](\d+))?(?:Z|[+-]\d{2}:\d{2})?\]\s*(.*)/.exec(s);
+    if (m) return { ts: `${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}.${_ms3(m[7])}`, data: m[8] };
+
+    // [MM-DD HH:MM:SS[.frac]]  — space-separated, no T, no year
+    m = /^\[(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})(?:[.,](\d+))?\]\s*(.*)/.exec(s);
+    if (m) return { ts: `${m[1]}-${m[2]} ${m[3]}:${m[4]}:${m[5]}.${_ms3(m[6])}`, data: m[7] };
+
+    // [MM-DDTHH:MM:SS[.frac]]
+    m = /^\[(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:[.,](\d+))?\]\s*(.*)/.exec(s);
+    if (m) return { ts: `${m[1]}-${m[2]} ${m[3]}:${m[4]}:${m[5]}.${_ms3(m[6])}`, data: m[7] };
+
+    // [T+HH:MM:SS[.frac]]
+    m = /^\[T\+(\d+):(\d{2}):(\d{2})(?:[.,](\d+))?\]\s*(.*)/.exec(s);
+    if (m) return { ts: `T+${m[1].padStart(2, '0')}:${m[2]}:${m[3]}.${_ms3(m[4])}`, data: m[5] };
+
+    // YYYY-MM-DDTHH:MM:SS[.frac][Z|±HH:MM]
+    m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:[.,](\d+))?(?:Z|[+-]\d{2}:\d{2})?\s*(.*)/.exec(s);
+    if (m) return { ts: `${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}.${_ms3(m[7])}`, data: m[8] };
+
+    // YYYY-MM-DD HH:MM:SS[.frac]
+    m = /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})(?:[.,](\d+))?\s*(.*)/.exec(s);
+    if (m) return { ts: `${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}.${_ms3(m[7])}`, data: m[8] };
+
+    // T+HH:MM:SS[.frac]
+    m = /^T\+(\d+):(\d{2}):(\d{2})(?:[.,](\d+))?\s*(.*)/.exec(s);
+    if (m) return { ts: `T+${m[1].padStart(2, '0')}:${m[2]}:${m[3]}.${_ms3(m[4])}`, data: m[5] };
+
+    return null;
+}
+</script>
+<script>// ---------------------------------------------------------------------------
+// File import — load .log files into any pane
+//
+// • "Import" button in each pane header (opens a file picker)
+// • Drag-and-drop a .log file onto any pane body
+//
+// Expected log format (same as what the server writes):
+//   [2026-03-25T11:50:09.900+01:00] message text
+//
+// Continuation lines (no leading timestamp) are appended to the preceding
+// timestamped line so multi-line stack traces stay together.
+//
+// All lines are bulk-inserted via DocumentFragment — one DOM write per file.
+// ---------------------------------------------------------------------------
+
+function _loadTextIntoPane(paneId, text) {
+    clearPane(paneId);
+    const logEl = document.getElementById("log-" + paneId);
+    const rx    = state.filters[paneId];
+    const frag  = document.createDocumentFragment();
+
+    let pendingTs   = null;
+    let pendingData = null;
+    let count = 0;
+
+    function flush() {
+        if (pendingTs === null) return;
+        const html = parseAnsi(pendingData);
+        const timestamp = buildTimestampInfo(pendingTs);
+        const line = { ...timestamp, html, rawText: pendingData, isTx: false };
+        const idx = state.rawLines[paneId].length;
+        state.rawLines[paneId].push(line);
+
+        const div = document.createElement("div");
+        div.dataset.ts  = line.ts;
+        div.dataset.idx = idx;
+        div.className   = _lineClass(line, idx, paneId);
+
+        if (!matchesFilter(line, rx)) {
+            div.style.display = "none";
+        } else {
+            div.innerHTML = buildLineHtml(line, state.showTs, rx);
+        }
+        div.addEventListener("click",     () => onLineClick(paneId, line.numTs, div));
+        div.addEventListener("mousedown", e  => { if (e.button === 1) e.preventDefault(); });
+        div.addEventListener("auxclick",  e  => { if (e.button === 1) onMiddleClick(paneId, line.numTs, div); });
+        frag.appendChild(div);
+        count++;
+        pendingTs = null;
+    }
+
+    for (const raw of text.split("\n")) {
+        const parsed = parseLogLine(raw);
+        if (parsed) {
+            flush();
+            pendingTs   = parsed.ts;
+            pendingData = parsed.data;
+        } else if (pendingTs !== null && raw.trim()) {
+            // Continuation line — append to current entry (stack traces, etc.)
+            pendingData += " " + raw.trim();
+        }
+    }
+    flush();
+
+    const wasAtBottom = state.atBottom[paneId];
+    logEl.appendChild(frag);
+    if (wasAtBottom) {
+        logEl.scrollTop = logEl.scrollHeight;
+    }
+    updateJumpBtn(paneId);
+    return count;
+}
+
+function _importFile(paneId, file) {
+    const reader = new FileReader();
+    reader.onload = e => {
+        const count = _loadTextIntoPane(paneId, e.target.result);
+        const btn = document.getElementById("import-btn-" + paneId);
+        if (!btn) return;
+        const prev = btn.textContent;
+        btn.textContent = `✓ ${count} lines`;
+        setTimeout(() => { btn.textContent = prev; }, 2000);
+    };
+    reader.readAsText(file);
+}
+
+// ---------------------------------------------------------------------------
+// Per-pane: import button + drag-and-drop
+// ---------------------------------------------------------------------------
+function _importSetupPane(id) {
+    const header = document.querySelector(`#pane-${id} .pane-header`);
+    if (!header) return;
+
+    // Hidden file input
+    const input    = document.createElement("input");
+    input.type     = "file";
+    input.accept   = ".log,.txt";
+    input.style.display = "none";
+    input.addEventListener("change", () => {
+        if (input.files[0]) _importFile(id, input.files[0]);
+        input.value = "";   // reset so the same file can be re-imported
+    });
+
+    // Import button
+    const btn       = document.createElement("button");
+    btn.id          = "import-btn-" + id;
+    btn.className   = "import-btn";
+    btn.title       = "Import a .log file into this pane";
+    btn.textContent = "Import";
+    btn.addEventListener("click", () => input.click());
+
+    header.appendChild(input);
+    header.appendChild(btn);
+
+    // Drag-and-drop onto the pane body
+    const body = document.querySelector(`#pane-${id} .pane-body`);
+    if (!body) return;
+
+    body.addEventListener("dragover", e => {
+        e.preventDefault();
+        body.classList.add("drag-over");
+    });
+    body.addEventListener("dragleave", e => {
+        if (!body.contains(e.relatedTarget)) body.classList.remove("drag-over");
+    });
+    body.addEventListener("drop", e => {
+        e.preventDefault();
+        body.classList.remove("drag-over");
+        const file = e.dataTransfer.files[0];
+        if (file) _importFile(id, file);
+    });
+}
+
+</script>
+<script>(function () {
+    "use strict";
+
+    // No WebSocket in static mode — satisfy the reference in ui.js
+    window.wsSend = function () {};
+
+    var _logData = {"SENSOR_A": [{"ts": "05-31 10:49:42.242", "text": "[INFO] net: link up, MAC=de:ad:be:ef:01:02", "isTx": false, "absTs": "05-31 10:49:42.242", "absNum": 1780217382242, "relTs": "T+00:00:00.000", "relNum": 0}, {"ts": "05-31 10:49:42.242", "text": "[INFO] httpd: listening on 0.0.0.0:8080, awaiting commands", "isTx": false, "absTs": "05-31 10:49:42.242", "absNum": 1780217382242, "relTs": "T+00:00:00.000", "relNum": 0}, {"ts": "05-31 10:49:42.243", "text": "\u001b[32m[DEMO] Session started — SENSOR_A online\u001b[0m", "isTx": false, "absTs": "05-31 10:49:42.243", "absNum": 1780217382243, "relTs": "T+00:00:00.001", "relNum": 1}, {"ts": "05-31 10:49:42.544", "text": "[INFO] net: connection from 192.168.1.100:45012", "isTx": false, "absTs": "05-31 10:49:42.544", "absNum": 1780217382544, "relTs": "T+00:00:00.302", "relNum": 302}, {"ts": "05-31 10:49:42.544", "text": "[INFO] httpd: accepted, 1 active session", "isTx": false, "absTs": "05-31 10:49:42.544", "absNum": 1780217382544, "relTs": "T+00:00:00.302", "relNum": 302}, {"ts": "05-31 10:49:42.845", "text": "[INFO] httpd: session established, protocol REST/1.0", "isTx": false, "absTs": "05-31 10:49:42.845", "absNum": 1780217382845, "relTs": "T+00:00:00.603", "relNum": 603}, {"ts": "05-31 10:49:42.845", "text": "[INFO] sys: test mode enabled via header X-Test-Suite", "isTx": false, "absTs": "05-31 10:49:42.845", "absNum": 1780217382845, "relTs": "T+00:00:00.603", "relNum": 603}, {"ts": "05-31 10:49:43.150", "text": "[INFO] httpd: << GET /api/status", "isTx": false, "absTs": "05-31 10:49:43.150", "absNum": 1780217383150, "relTs": "T+00:00:00.908", "relNum": 908}, {"ts": "05-31 10:49:43.150", "text": "[INFO] handler: processing status request", "isTx": false, "absTs": "05-31 10:49:43.150", "absNum": 1780217383150, "relTs": "T+00:00:00.908", "relNum": 908}, {"ts": "05-31 10:49:43.455", "text": "[INFO] handler: mem_free=18324KB uptime=3600s cpu_load=12%", "isTx": false, "absTs": "05-31 10:49:43.455", "absNum": 1780217383455, "relTs": "T+00:00:01.213", "relNum": 1213}, {"ts": "05-31 10:49:43.455", "text": "[INFO] httpd: >> 200 OK  {status:ok, uptime:3600}  (12ms)", "isTx": false, "absTs": "05-31 10:49:43.455", "absNum": 1780217383455, "relTs": "T+00:00:01.213", "relNum": 1213}, {"ts": "05-31 10:49:43.455", "text": "\u001b[32m[DEMO] GET /api/status — 200 OK answered\u001b[0m", "isTx": false, "absTs": "05-31 10:49:43.455", "absNum": 1780217383455, "relTs": "T+00:00:01.213", "relNum": 1213}, {"ts": "05-31 10:49:44.057", "text": "[INFO] httpd: << GET /api/config", "isTx": false, "absTs": "05-31 10:49:44.057", "absNum": 1780217384057, "relTs": "T+00:00:01.815", "relNum": 1815}, {"ts": "05-31 10:49:44.057", "text": "[INFO] handler: reading config service endpoint", "isTx": false, "absTs": "05-31 10:49:44.057", "absNum": 1780217384057, "relTs": "T+00:00:01.815", "relNum": 1815}, {"ts": "05-31 10:49:44.362", "text": "[ERR] handler: config service not initialized", "isTx": false, "absTs": "05-31 10:49:44.362", "absNum": 1780217384362, "relTs": "T+00:00:02.120", "relNum": 2120}, {"ts": "05-31 10:49:44.362", "text": "[ERR] handler: config.json missing from flash partition", "isTx": false, "absTs": "05-31 10:49:44.362", "absNum": 1780217384362, "relTs": "T+00:00:02.120", "relNum": 2120}, {"ts": "05-31 10:49:44.362", "text": "\u001b[33m[DEMO] GET /api/config — 503 answered (expected error)\u001b[0m", "isTx": false, "absTs": "05-31 10:49:44.362", "absNum": 1780217384362, "relTs": "T+00:00:02.120", "relNum": 2120}, {"ts": "05-31 10:49:44.667", "text": "[INFO] httpd: >> 503 Service Unavailable  {error:config_unavailable}  (8ms)", "isTx": false, "absTs": "05-31 10:49:44.667", "absNum": 1780217384667, "relTs": "T+00:00:02.425", "relNum": 2425}, {"ts": "05-31 10:49:45.273", "text": "[INFO] httpd: << GET /api/health", "isTx": false, "absTs": "05-31 10:49:45.273", "absNum": 1780217385273, "relTs": "T+00:00:03.031", "relNum": 3031}, {"ts": "05-31 10:49:45.273", "text": "[INFO] handler: health check requested", "isTx": false, "absTs": "05-31 10:49:45.273", "absNum": 1780217385273, "relTs": "T+00:00:03.031", "relNum": 3031}, {"ts": "05-31 10:49:45.574", "text": "\u001b[32m[DEMO] GET /api/health — 200 OK answered\u001b[0m", "isTx": false, "absTs": "05-31 10:49:45.574", "absNum": 1780217385574, "relTs": "T+00:00:03.332", "relNum": 3332}, {"ts": "05-31 10:49:45.574", "text": "[INFO] handler: services=all_ok, last_boot=2026-05-31T10:28:04Z", "isTx": false, "absTs": "05-31 10:49:45.574", "absNum": 1780217385574, "relTs": "T+00:00:03.332", "relNum": 3332}, {"ts": "05-31 10:49:45.574", "text": "[INFO] handler: self-test — passed (mem=18240KB, disk=ok)", "isTx": false, "absTs": "05-31 10:49:45.574", "absNum": 1780217385574, "relTs": "T+00:00:03.332", "relNum": 3332}, {"ts": "05-31 10:49:45.880", "text": "[INFO] httpd: >> 200 OK  {status:healthy, uptime:3612}  (15ms)", "isTx": false, "absTs": "05-31 10:49:45.880", "absNum": 1780217385880, "relTs": "T+00:00:03.638", "relNum": 3638}, {"ts": "05-31 10:49:46.181", "text": "[INFO] httpd: session close from 192.168.1.100:45012", "isTx": false, "absTs": "05-31 10:49:46.181", "absNum": 1780217386181, "relTs": "T+00:00:03.939", "relNum": 3939}, {"ts": "05-31 10:49:46.181", "text": "[INFO] httpd: connection terminated, session count=0", "isTx": false, "absTs": "05-31 10:49:46.181", "absNum": 1780217386181, "relTs": "T+00:00:03.939", "relNum": 3939}, {"ts": "05-31 10:49:46.181", "text": "\u001b[32m[DEMO] Test suite complete — SENSOR_A done\u001b[0m", "isTx": false, "absTs": "05-31 10:49:46.181", "absNum": 1780217386181, "relTs": "T+00:00:03.939", "relNum": 3939}, {"ts": "05-31 10:49:46.485", "text": "[INFO] sys: test flag cleared, returning to normal mode", "isTx": false, "absTs": "05-31 10:49:46.485", "absNum": 1780217386485, "relTs": "T+00:00:04.243", "relNum": 4243}, {"ts": "05-31 10:49:46.788", "text": "[INFO] httpd: listening, awaiting commands", "isTx": false, "absTs": "05-31 10:49:46.788", "absNum": 1780217386788, "relTs": "T+00:00:04.546", "relNum": 4546}], "SENSOR_B": [{"ts": "05-31 10:49:42.242", "text": "[INFO] session: starting test suite — target: 192.168.1.10:8080", "isTx": false, "absTs": "05-31 10:49:42.242", "absNum": 1780217382242, "relTs": "T+00:00:00.000", "relNum": 0}, {"ts": "05-31 10:49:42.242", "text": "[INFO] session: test vector loaded — 3 test cases", "isTx": false, "absTs": "05-31 10:49:42.242", "absNum": 1780217382242, "relTs": "T+00:00:00.000", "relNum": 0}, {"ts": "05-31 10:49:42.242", "text": "\u001b[32m[DEMO] Session started — SENSOR_B online\u001b[0m", "isTx": false, "absTs": "05-31 10:49:42.242", "absNum": 1780217382242, "relTs": "T+00:00:00.000", "relNum": 0}, {"ts": "05-31 10:49:42.544", "text": "[INFO] session: connecting to DEVICE_A...", "isTx": false, "absTs": "05-31 10:49:42.544", "absNum": 1780217382544, "relTs": "T+00:00:00.302", "relNum": 302}, {"ts": "05-31 10:49:42.544", "text": "[INFO] session: connected (TCP seq=1)", "isTx": false, "absTs": "05-31 10:49:42.544", "absNum": 1780217382544, "relTs": "T+00:00:00.302", "relNum": 302}, {"ts": "05-31 10:49:42.845", "text": "[INFO] session: handshake complete, protocol REST/1.0", "isTx": false, "absTs": "05-31 10:49:42.845", "absNum": 1780217382845, "relTs": "T+00:00:00.603", "relNum": 603}, {"ts": "05-31 10:49:42.845", "text": "\u001b[36m[DEMO] GET /api/status — request sent\u001b[0m", "isTx": false, "absTs": "05-31 10:49:42.845", "absNum": 1780217382845, "relTs": "T+00:00:00.603", "relNum": 603}, {"ts": "05-31 10:49:43.150", "text": "[INFO] req: >> GET /api/status", "isTx": false, "absTs": "05-31 10:49:43.150", "absNum": 1780217383150, "relTs": "T+00:00:00.908", "relNum": 908}, {"ts": "05-31 10:49:43.150", "text": "[INFO] req: awaiting response...", "isTx": false, "absTs": "05-31 10:49:43.150", "absNum": 1780217383150, "relTs": "T+00:00:00.908", "relNum": 908}, {"ts": "05-31 10:49:43.455", "text": "[INFO] resp: << 200 OK  in 12ms", "isTx": false, "absTs": "05-31 10:49:43.455", "absNum": 1780217383455, "relTs": "T+00:00:01.213", "relNum": 1213}, {"ts": "05-31 10:49:43.455", "text": "[INFO] resp: body={status:ok, uptime:3600, mem_free:18324KB}", "isTx": false, "absTs": "05-31 10:49:43.455", "absNum": 1780217383455, "relTs": "T+00:00:01.213", "relNum": 1213}, {"ts": "05-31 10:49:43.755", "text": "[INFO] req: >> GET /api/config", "isTx": false, "absTs": "05-31 10:49:43.755", "absNum": 1780217383755, "relTs": "T+00:00:01.513", "relNum": 1513}, {"ts": "05-31 10:49:43.755", "text": "[INFO] req: awaiting response...", "isTx": false, "absTs": "05-31 10:49:43.755", "absNum": 1780217383755, "relTs": "T+00:00:01.513", "relNum": 1513}, {"ts": "05-31 10:49:43.755", "text": "\u001b[36m[DEMO] GET /api/config — request sent\u001b[0m", "isTx": false, "absTs": "05-31 10:49:43.755", "absNum": 1780217383755, "relTs": "T+00:00:01.513", "relNum": 1513}, {"ts": "05-31 10:49:44.057", "text": "[INFO] req: waiting... (2s timeout)", "isTx": false, "absTs": "05-31 10:49:44.057", "absNum": 1780217384057, "relTs": "T+00:00:01.815", "relNum": 1815}, {"ts": "05-31 10:49:44.362", "text": "[INFO] resp: << 503 Service Unavailable  in 8ms", "isTx": false, "absTs": "05-31 10:49:44.362", "absNum": 1780217384362, "relTs": "T+00:00:02.120", "relNum": 2120}, {"ts": "05-31 10:49:44.362", "text": "[INFO] resp: body={error:config_unavailable}", "isTx": false, "absTs": "05-31 10:49:44.362", "absNum": 1780217384362, "relTs": "T+00:00:02.120", "relNum": 2120}, {"ts": "05-31 10:49:44.362", "text": "[INFO] assert: status=503 — expected failure confirmed", "isTx": false, "absTs": "05-31 10:49:44.362", "absNum": 1780217384362, "relTs": "T+00:00:02.120", "relNum": 2120}, {"ts": "05-31 10:49:44.968", "text": "[INFO] req: >> GET /api/health", "isTx": false, "absTs": "05-31 10:49:44.968", "absNum": 1780217384968, "relTs": "T+00:00:02.726", "relNum": 2726}, {"ts": "05-31 10:49:44.968", "text": "[INFO] req: awaiting response...", "isTx": false, "absTs": "05-31 10:49:44.968", "absNum": 1780217384968, "relTs": "T+00:00:02.726", "relNum": 2726}, {"ts": "05-31 10:49:44.968", "text": "\u001b[36m[DEMO] GET /api/health — request sent\u001b[0m", "isTx": false, "absTs": "05-31 10:49:44.968", "absNum": 1780217384968, "relTs": "T+00:00:02.726", "relNum": 2726}, {"ts": "05-31 10:49:45.273", "text": "[INFO] req: waiting...", "isTx": false, "absTs": "05-31 10:49:45.273", "absNum": 1780217385273, "relTs": "T+00:00:03.031", "relNum": 3031}, {"ts": "05-31 10:49:45.574", "text": "[INFO] resp: << 200 OK  in 15ms", "isTx": false, "absTs": "05-31 10:49:45.574", "absNum": 1780217385574, "relTs": "T+00:00:03.332", "relNum": 3332}, {"ts": "05-31 10:49:45.574", "text": "[INFO] resp: body={status:healthy, uptime:3612, self_test:passed}", "isTx": false, "absTs": "05-31 10:49:45.574", "absNum": 1780217385574, "relTs": "T+00:00:03.332", "relNum": 3332}, {"ts": "05-31 10:49:45.574", "text": "[INFO] assert: status=healthy — OK", "isTx": false, "absTs": "05-31 10:49:45.574", "absNum": 1780217385574, "relTs": "T+00:00:03.332", "relNum": 3332}, {"ts": "05-31 10:49:45.879", "text": "[INFO] session: all requests completed", "isTx": false, "absTs": "05-31 10:49:45.879", "absNum": 1780217385879, "relTs": "T+00:00:03.637", "relNum": 3637}, {"ts": "05-31 10:49:45.879", "text": "[INFO] session: closing connection...", "isTx": false, "absTs": "05-31 10:49:45.879", "absNum": 1780217385879, "relTs": "T+00:00:03.637", "relNum": 3637}, {"ts": "05-31 10:49:46.181", "text": "[INFO] session: disconnected", "isTx": false, "absTs": "05-31 10:49:46.181", "absNum": 1780217386181, "relTs": "T+00:00:03.939", "relNum": 3939}, {"ts": "05-31 10:49:46.181", "text": "[INFO] session: test suite complete — 3/3 passed in 1.234s", "isTx": false, "absTs": "05-31 10:49:46.181", "absNum": 1780217386181, "relTs": "T+00:00:03.939", "relNum": 3939}, {"ts": "05-31 10:49:46.181", "text": "\u001b[32m[DEMO] Test suite complete — SENSOR_B done\u001b[0m", "isTx": false, "absTs": "05-31 10:49:46.181", "absNum": 1780217386181, "relTs": "T+00:00:03.939", "relNum": 3939}, {"ts": "05-31 10:49:46.485", "text": "[INFO] session: generating report...", "isTx": false, "absTs": "05-31 10:49:46.485", "absNum": 1780217386485, "relTs": "T+00:00:04.243", "relNum": 4243}, {"ts": "05-31 10:49:46.788", "text": "[INFO] session: report written to test-results/2026-05-31.xml", "isTx": false, "absTs": "05-31 10:49:46.788", "absNum": 1780217386788, "relTs": "T+00:00:04.546", "relNum": 4546}], "SENSOR_C": [{"ts": "05-31 10:49:42.242", "text": "[INFO] mon: sensor online, fw v1.9.2", "isTx": false, "absTs": "05-31 10:49:42.242", "absNum": 1780217382242, "relTs": "T+00:00:00.000", "relNum": 0}, {"ts": "05-31 10:49:42.242", "text": "[INFO] mon: monitoring ambient at 1s interval", "isTx": false, "absTs": "05-31 10:49:42.242", "absNum": 1780217382242, "relTs": "T+00:00:00.000", "relNum": 0}, {"ts": "05-31 10:49:42.243", "text": "\u001b[32m[DEMO] Session started — SENSOR_C online\u001b[0m", "isTx": false, "absTs": "05-31 10:49:42.243", "absNum": 1780217382243, "relTs": "T+00:00:00.001", "relNum": 1}, {"ts": "05-31 10:49:42.544", "text": "[INFO] mon: ambient temp=23.4C noise=-72dBm", "isTx": false, "absTs": "05-31 10:49:42.544", "absNum": 1780217382544, "relTs": "T+00:00:00.302", "relNum": 302}, {"ts": "05-31 10:49:42.846", "text": "[INFO] mon: heartbeat OK", "isTx": false, "absTs": "05-31 10:49:42.846", "absNum": 1780217382846, "relTs": "T+00:00:00.604", "relNum": 604}, {"ts": "05-31 10:49:43.151", "text": "[INFO] mon: ambient stable — no anomalies", "isTx": false, "absTs": "05-31 10:49:43.151", "absNum": 1780217383151, "relTs": "T+00:00:00.909", "relNum": 909}, {"ts": "05-31 10:49:43.455", "text": "[INFO] mon: ambient temp=23.4C noise=-71dBm", "isTx": false, "absTs": "05-31 10:49:43.455", "absNum": 1780217383455, "relTs": "T+00:00:01.213", "relNum": 1213}, {"ts": "05-31 10:49:43.755", "text": "[INFO] mon: ambient temp=23.5C noise=-72dBm", "isTx": false, "absTs": "05-31 10:49:43.755", "absNum": 1780217383755, "relTs": "T+00:00:01.513", "relNum": 1513}, {"ts": "05-31 10:49:44.057", "text": "[INFO] mon: heartbeat OK", "isTx": false, "absTs": "05-31 10:49:44.057", "absNum": 1780217384057, "relTs": "T+00:00:01.815", "relNum": 1815}, {"ts": "05-31 10:49:44.362", "text": "[INFO] mon: cross-check request received from DEVICE_A", "isTx": false, "absTs": "05-31 10:49:44.362", "absNum": 1780217384362, "relTs": "T+00:00:02.120", "relNum": 2120}, {"ts": "05-31 10:49:44.362", "text": "[INFO] mon: confirming — ambient nominal, no interference", "isTx": false, "absTs": "05-31 10:49:44.362", "absNum": 1780217384362, "relTs": "T+00:00:02.120", "relNum": 2120}, {"ts": "05-31 10:49:44.667", "text": "[INFO] mon: ambient temp=23.4C noise=-72dBm", "isTx": false, "absTs": "05-31 10:49:44.667", "absNum": 1780217384667, "relTs": "T+00:00:02.425", "relNum": 2425}, {"ts": "05-31 10:49:44.667", "text": "\u001b[36m[DEMO] Cross-check — ambient nominal during test\u001b[0m", "isTx": false, "absTs": "05-31 10:49:44.667", "absNum": 1780217384667, "relTs": "T+00:00:02.425", "relNum": 2425}, {"ts": "05-31 10:49:44.968", "text": "[INFO] mon: heartbeat OK", "isTx": false, "absTs": "05-31 10:49:44.968", "absNum": 1780217384968, "relTs": "T+00:00:02.726", "relNum": 2726}, {"ts": "05-31 10:49:45.273", "text": "[INFO] mon: ambient temp=23.4C noise=-72dBm", "isTx": false, "absTs": "05-31 10:49:45.273", "absNum": 1780217385273, "relTs": "T+00:00:03.031", "relNum": 3031}, {"ts": "05-31 10:49:45.574", "text": "[INFO] mon: ambient temp=23.5C noise=-71dBm", "isTx": false, "absTs": "05-31 10:49:45.574", "absNum": 1780217385574, "relTs": "T+00:00:03.332", "relNum": 3332}, {"ts": "05-31 10:49:45.879", "text": "[INFO] mon: heartbeat OK — all clear", "isTx": false, "absTs": "05-31 10:49:45.879", "absNum": 1780217385879, "relTs": "T+00:00:03.637", "relNum": 3637}, {"ts": "05-31 10:49:46.181", "text": "\u001b[32m[DEMO] Test suite complete — SENSOR_C done\u001b[0m", "isTx": false, "absTs": "05-31 10:49:46.181", "absNum": 1780217386181, "relTs": "T+00:00:03.939", "relNum": 3939}, {"ts": "05-31 10:49:46.182", "text": "[INFO] mon: ambient temp=23.4C noise=-72dBm", "isTx": false, "absTs": "05-31 10:49:46.182", "absNum": 1780217386182, "relTs": "T+00:00:03.940", "relNum": 3940}, {"ts": "05-31 10:49:46.485", "text": "[INFO] mon: device under test activity complete", "isTx": false, "absTs": "05-31 10:49:46.485", "absNum": 1780217386485, "relTs": "T+00:00:04.243", "relNum": 4243}, {"ts": "05-31 10:49:46.789", "text": "[INFO] mon: continuing normal monitoring", "isTx": false, "absTs": "05-31 10:49:46.789", "absNum": 1780217386789, "relTs": "T+00:00:04.547", "relNum": 4547}], "SENSOR_D": [{"ts": "05-31 10:49:42.242", "text": "\u001b[32m[DEMO] Session started — SENSOR_D online\u001b[0m", "isTx": false, "absTs": "05-31 10:49:42.242", "absNum": 1780217382242, "relTs": "T+00:00:00.000", "relNum": 0}, {"ts": "05-31 10:49:42.242", "text": "[STEP] test_suite_init — loading test vectors...", "isTx": false, "absTs": "05-31 10:49:42.242", "absNum": 1780217382242, "relTs": "T+00:00:00.000", "relNum": 0}, {"ts": "05-31 10:49:42.242", "text": "[STEP] test_suite_init — fixture setup: http_client, device_session", "isTx": false, "absTs": "05-31 10:49:42.242", "absNum": 1780217382242, "relTs": "T+00:00:00.000", "relNum": 0}, {"ts": "05-31 10:49:42.544", "text": "[STEP] test_suite_init — connecting to DEVICE_A@192.168.1.10:8080", "isTx": false, "absTs": "05-31 10:49:42.544", "absNum": 1780217382544, "relTs": "T+00:00:00.302", "relNum": 302}, {"ts": "05-31 10:49:42.544", "text": "[STEP] ✓ setup fixture 'device_session' — connected", "isTx": false, "absTs": "05-31 10:49:42.544", "absNum": 1780217382544, "relTs": "T+00:00:00.302", "relNum": 302}, {"ts": "05-31 10:49:42.845", "text": "[PASS] test_01_get_status — test case started", "isTx": false, "absTs": "05-31 10:49:42.845", "absNum": 1780217382845, "relTs": "T+00:00:00.603", "relNum": 603}, {"ts": "05-31 10:49:42.846", "text": "\u001b[36m[DEMO] test_01_get_status — starting\u001b[0m", "isTx": false, "absTs": "05-31 10:49:42.846", "absNum": 1780217382846, "relTs": "T+00:00:00.604", "relNum": 604}, {"ts": "05-31 10:49:43.150", "text": "[STEP] test_01_get_status — sending GET /api/status", "isTx": false, "absTs": "05-31 10:49:43.150", "absNum": 1780217383150, "relTs": "T+00:00:00.908", "relNum": 908}, {"ts": "05-31 10:49:43.150", "text": "[STEP] test_01_get_status — awaiting response", "isTx": false, "absTs": "05-31 10:49:43.150", "absNum": 1780217383150, "relTs": "T+00:00:00.908", "relNum": 908}, {"ts": "05-31 10:49:43.455", "text": "[STEP] test_01_get_status — assert response.status == 200", "isTx": false, "absTs": "05-31 10:49:43.455", "absNum": 1780217383455, "relTs": "T+00:00:01.213", "relNum": 1213}, {"ts": "05-31 10:49:43.455", "text": "[STEP] test_01_get_status — assert response.body.status == 'ok'", "isTx": false, "absTs": "05-31 10:49:43.455", "absNum": 1780217383455, "relTs": "T+00:00:01.213", "relNum": 1213}, {"ts": "05-31 10:49:43.455", "text": "[PASS] ✓ test_01_get_status — PASSED (0.342s)", "isTx": false, "absTs": "05-31 10:49:43.455", "absNum": 1780217383455, "relTs": "T+00:00:01.213", "relNum": 1213}, {"ts": "05-31 10:49:43.455", "text": "\u001b[32m[DEMO] ✓ test_01_get_status PASSED\u001b[0m", "isTx": false, "absTs": "05-31 10:49:43.455", "absNum": 1780217383455, "relTs": "T+00:00:01.213", "relNum": 1213}, {"ts": "05-31 10:49:43.755", "text": "\u001b[36m[DEMO] test_02_get_config — starting\u001b[0m", "isTx": false, "absTs": "05-31 10:49:43.755", "absNum": 1780217383755, "relTs": "T+00:00:01.513", "relNum": 1513}, {"ts": "05-31 10:49:43.755", "text": "[PASS] test_02_get_config — test case started", "isTx": false, "absTs": "05-31 10:49:43.755", "absNum": 1780217383755, "relTs": "T+00:00:01.513", "relNum": 1513}, {"ts": "05-31 10:49:43.755", "text": "[STEP] test_02_get_config — sending GET /api/config", "isTx": false, "absTs": "05-31 10:49:43.755", "absNum": 1780217383755, "relTs": "T+00:00:01.513", "relNum": 1513}, {"ts": "05-31 10:49:43.755", "text": "[STEP] test_02_get_config — expecting: 503 Service Unavailable", "isTx": false, "absTs": "05-31 10:49:43.755", "absNum": 1780217383755, "relTs": "T+00:00:01.513", "relNum": 1513}, {"ts": "05-31 10:49:44.057", "text": "[STEP] test_02_get_config — awaiting response", "isTx": false, "absTs": "05-31 10:49:44.057", "absNum": 1780217384057, "relTs": "T+00:00:01.815", "relNum": 1815}, {"ts": "05-31 10:49:44.362", "text": "[STEP] test_02_get_config — assert response.status == 503", "isTx": false, "absTs": "05-31 10:49:44.362", "absNum": 1780217384362, "relTs": "T+00:00:02.120", "relNum": 2120}, {"ts": "05-31 10:49:44.362", "text": "[STEP] test_02_get_config — assert response.body.error == 'config_unavailable'", "isTx": false, "absTs": "05-31 10:49:44.362", "absNum": 1780217384362, "relTs": "T+00:00:02.120", "relNum": 2120}, {"ts": "05-31 10:49:44.362", "text": "[PASS] ✓ test_02_get_config — PASSED (0.156s)", "isTx": false, "absTs": "05-31 10:49:44.362", "absNum": 1780217384362, "relTs": "T+00:00:02.120", "relNum": 2120}, {"ts": "05-31 10:49:44.362", "text": "[STEP] ✓ expected failure confirmed — error handling verified", "isTx": false, "absTs": "05-31 10:49:44.362", "absNum": 1780217384362, "relTs": "T+00:00:02.120", "relNum": 2120}, {"ts": "05-31 10:49:44.363", "text": "\u001b[32m[DEMO] ✓ test_02_get_config PASSED (expected failure)\u001b[0m", "isTx": false, "absTs": "05-31 10:49:44.363", "absNum": 1780217384363, "relTs": "T+00:00:02.121", "relNum": 2121}, {"ts": "05-31 10:49:44.968", "text": "\u001b[36m[DEMO] test_03_get_health — starting\u001b[0m", "isTx": false, "absTs": "05-31 10:49:44.968", "absNum": 1780217384968, "relTs": "T+00:00:02.726", "relNum": 2726}, {"ts": "05-31 10:49:44.968", "text": "[PASS] test_03_get_health — test case started", "isTx": false, "absTs": "05-31 10:49:44.968", "absNum": 1780217384968, "relTs": "T+00:00:02.726", "relNum": 2726}, {"ts": "05-31 10:49:44.968", "text": "[STEP] test_03_get_health — sending GET /api/health", "isTx": false, "absTs": "05-31 10:49:44.968", "absNum": 1780217384968, "relTs": "T+00:00:02.726", "relNum": 2726}, {"ts": "05-31 10:49:45.273", "text": "[STEP] test_03_get_health — awaiting response", "isTx": false, "absTs": "05-31 10:49:45.273", "absNum": 1780217385273, "relTs": "T+00:00:03.031", "relNum": 3031}, {"ts": "05-31 10:49:45.574", "text": "[STEP] test_03_get_health — assert response.status == 200", "isTx": false, "absTs": "05-31 10:49:45.574", "absNum": 1780217385574, "relTs": "T+00:00:03.332", "relNum": 3332}, {"ts": "05-31 10:49:45.574", "text": "[STEP] test_03_get_health — assert response.body.status == 'healthy'", "isTx": false, "absTs": "05-31 10:49:45.574", "absNum": 1780217385574, "relTs": "T+00:00:03.332", "relNum": 3332}, {"ts": "05-31 10:49:45.574", "text": "[PASS] ✓ test_03_get_health — PASSED (0.089s)", "isTx": false, "absTs": "05-31 10:49:45.574", "absNum": 1780217385574, "relTs": "T+00:00:03.332", "relNum": 3332}, {"ts": "05-31 10:49:45.574", "text": "\u001b[32m[DEMO] ✓ test_03_get_health PASSED\u001b[0m", "isTx": false, "absTs": "05-31 10:49:45.574", "absNum": 1780217385574, "relTs": "T+00:00:03.332", "relNum": 3332}, {"ts": "05-31 10:49:45.880", "text": "[STEP] test_suite_teardown — closing device session", "isTx": false, "absTs": "05-31 10:49:45.880", "absNum": 1780217385880, "relTs": "T+00:00:03.638", "relNum": 3638}, {"ts": "05-31 10:49:45.880", "text": "[STEP] ✓ fixture 'device_session' — disconnected cleanly", "isTx": false, "absTs": "05-31 10:49:45.880", "absNum": 1780217385880, "relTs": "T+00:00:03.638", "relNum": 3638}, {"ts": "05-31 10:49:46.181", "text": "\u001b[32m[DEMO] Test suite complete — SENSOR_D done\u001b[0m", "isTx": false, "absTs": "05-31 10:49:46.181", "absNum": 1780217386181, "relTs": "T+00:00:03.939", "relNum": 3939}, {"ts": "05-31 10:49:46.182", "text": "[PASS] ========== 3 passed in 1.234s ==========", "isTx": false, "absTs": "05-31 10:49:46.182", "absNum": 1780217386182, "relTs": "T+00:00:03.940", "relNum": 3940}, {"ts": "05-31 10:49:46.485", "text": "[INFO] test report: tests=3 passed=3 failed=0 duration=1.234s", "isTx": false, "absTs": "05-31 10:49:46.485", "absNum": 1780217386485, "relTs": "T+00:00:04.243", "relNum": 4243}, {"ts": "05-31 10:49:46.789", "text": "[INFO] test report: written to test-results/2026-05-31.xml", "isTx": false, "absTs": "05-31 10:49:46.789", "absNum": 1780217386789, "relTs": "T+00:00:04.547", "relNum": 4547}], "SENSOR_CBOR": [{"ts": "05-31 10:49:42.243", "text": "kind=sync msg=diagnostic channel ready src=DIAG state=INIT", "isTx": false, "absTs": "05-31 10:49:42.243", "absNum": 1780217382243, "relTs": "T+00:00:00.001", "relNum": 1}, {"ts": "05-31 10:49:42.243", "text": "kind=test_suite name=device_api_test src=DIAG version=2.1.0", "isTx": false, "absTs": "05-31 10:49:42.243", "absNum": 1780217382243, "relTs": "T+00:00:00.001", "relNum": 1}, {"ts": "05-31 10:49:42.544", "text": "dst_host=DEVICE_A kind=connection src=DIAG src_host=HOST status=connected", "isTx": false, "absTs": "05-31 10:49:42.544", "absNum": 1780217382544, "relTs": "T+00:00:00.302", "relNum": 302}, {"ts": "05-31 10:49:42.846", "text": "kind=test_case method=GET name=test_01_get_status path=/api/status src=DIAG", "isTx": false, "absTs": "05-31 10:49:42.846", "absNum": 1780217382846, "relTs": "T+00:00:00.604", "relNum": 604}, {"ts": "05-31 10:49:43.151", "text": "kind=request method=GET path=/api/status seq=1 src=DIAG", "isTx": false, "absTs": "05-31 10:49:43.151", "absNum": 1780217383151, "relTs": "T+00:00:00.909", "relNum": 909}, {"ts": "05-31 10:49:43.455", "text": "duration_ms=12 kind=response method=GET path=/api/status src=DIAG status=200", "isTx": false, "absTs": "05-31 10:49:43.455", "absNum": 1780217383455, "relTs": "T+00:00:01.213", "relNum": 1213}, {"ts": "05-31 10:49:43.455", "text": "duration_ms=342 kind=test_result name=test_01_get_status result=PASSED src=DIAG", "isTx": false, "absTs": "05-31 10:49:43.455", "absNum": 1780217383455, "relTs": "T+00:00:01.213", "relNum": 1213}, {"ts": "05-31 10:49:43.755", "text": "expected_status=503 kind=test_case method=GET name=test_02_get_config path=/api/config src=DIAG", "isTx": false, "absTs": "05-31 10:49:43.755", "absNum": 1780217383755, "relTs": "T+00:00:01.513", "relNum": 1513}, {"ts": "05-31 10:49:44.057", "text": "kind=request method=GET path=/api/config seq=2 src=DIAG", "isTx": false, "absTs": "05-31 10:49:44.057", "absNum": 1780217384057, "relTs": "T+00:00:01.815", "relNum": 1815}, {"ts": "05-31 10:49:44.362", "text": "duration_ms=8 error=config_unavailable kind=response method=GET path=/api/config src=DIAG status=503", "isTx": false, "absTs": "05-31 10:49:44.362", "absNum": 1780217384362, "relTs": "T+00:00:02.120", "relNum": 2120}, {"ts": "05-31 10:49:44.363", "text": "duration_ms=156 expected_failure=True kind=test_result name=test_02_get_config result=PASSED src=DIAG", "isTx": false, "absTs": "05-31 10:49:44.363", "absNum": 1780217384363, "relTs": "T+00:00:02.121", "relNum": 2121}, {"ts": "05-31 10:49:44.968", "text": "kind=test_case method=GET name=test_03_get_health path=/api/health src=DIAG", "isTx": false, "absTs": "05-31 10:49:44.968", "absNum": 1780217384968, "relTs": "T+00:00:02.726", "relNum": 2726}, {"ts": "05-31 10:49:45.273", "text": "kind=request method=GET path=/api/health seq=3 src=DIAG", "isTx": false, "absTs": "05-31 10:49:45.273", "absNum": 1780217385273, "relTs": "T+00:00:03.031", "relNum": 3031}, {"ts": "05-31 10:49:45.574", "text": "duration_ms=15 kind=response method=GET path=/api/health src=DIAG status=200", "isTx": false, "absTs": "05-31 10:49:45.574", "absNum": 1780217385574, "relTs": "T+00:00:03.332", "relNum": 3332}, {"ts": "05-31 10:49:45.574", "text": "duration_ms=89 kind=test_result name=test_03_get_health result=PASSED src=DIAG", "isTx": false, "absTs": "05-31 10:49:45.574", "absNum": 1780217385574, "relTs": "T+00:00:03.332", "relNum": 3332}, {"ts": "05-31 10:49:45.879", "text": "dst_host=DEVICE_A kind=connection src=DIAG src_host=HOST status=disconnected", "isTx": false, "absTs": "05-31 10:49:45.879", "absNum": 1780217385879, "relTs": "T+00:00:03.637", "relNum": 3637}, {"ts": "05-31 10:49:46.181", "text": "duration_ms=1234 failed=0 kind=summary passed=3 src=DIAG tests=3", "isTx": false, "absTs": "05-31 10:49:46.181", "absNum": 1780217386181, "relTs": "T+00:00:03.939", "relNum": 3939}, {"ts": "05-31 10:49:46.485", "text": "kind=sync src=DIAG state=COMPLETE", "isTx": false, "absTs": "05-31 10:49:46.485", "absNum": 1780217386485, "relTs": "T+00:00:04.243", "relNum": 4243}, {"ts": "05-31 10:49:46.789", "text": "kind=sync src=DIAG state=IDLE", "isTx": false, "absTs": "05-31 10:49:46.789", "absNum": 1780217386789, "relTs": "T+00:00:04.547", "relNum": 4547}]};
+
+    function _loadPane(paneId) {
+        var entries = _logData[paneId];
+        if (!entries || entries.length === 0) return;
+        state.atBottom[paneId] = false;
+        entries.forEach(function (e) {
+            appendLine(paneId, e.ts, e.text, e.isTx, e);
+        });
+        document.getElementById("log-" + paneId).scrollTop = 0;
+        state.atBottom[paneId] = false;
+        updateJumpBtn(paneId);
+    }
+
+    PANES.forEach(_loadPane);
+})();</script>
+</body>
+</html>

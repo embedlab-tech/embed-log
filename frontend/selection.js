@@ -100,6 +100,14 @@ export function _selectionSetupPane(id) {
     htmlBtn.addEventListener("click", e => { e.stopPropagation(); _exportHtml(id); });
     moreDropdown.appendChild(htmlBtn);
 
+    const rawBtn = document.createElement("button");
+    rawBtn.className = "copy-btn";
+    rawBtn.id = "download-raw-" + id;
+    rawBtn.textContent = "Download raw";
+    rawBtn.title = "Download selected lines as raw .log file";
+    rawBtn.addEventListener("click", e => { e.stopPropagation(); _downloadRaw(id); });
+    moreDropdown.appendChild(rawBtn);
+
 
     actionRow.appendChild(copyBtn);
     // Marker toggle (runtime only) — in the main action row

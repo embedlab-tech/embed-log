@@ -13,8 +13,8 @@ from pathlib import Path
 
 
 # Ports used by the demo setup
-INJECT_PORTS = [5001, 5002, 5003]
-UDP_PORTS = [6000, 6001, 6002, 6003]
+INJECT_PORTS = [5001, 5002, 5003, 5004]
+UDP_PORTS = [6000, 6001, 6002, 6003, 6004]
 WS_PORT = 8080
 ALL_PORTS = INJECT_PORTS + UDP_PORTS + [WS_PORT]
 
@@ -136,7 +136,7 @@ class DemoRunner:
             if self.args.inject_interval is None:
                 self.args.inject_interval = 1.0
             if self.args.tick_ms is None:
-                self.args.tick_ms = 20
+                self.args.tick_ms = 50
         else:
             if self.args.interval_min is None:
                 self.args.interval_min = 5.0
@@ -145,14 +145,16 @@ class DemoRunner:
             if self.args.inject_interval is None:
                 self.args.inject_interval = 5.0
             if self.args.tick_ms is None:
-                self.args.tick_ms = 100
+                self.args.tick_ms = 300
 
         # ── Start traffic ──
         profile = self.args.profile
         if profile == "random":
             self._start_random_traffic()
         elif profile == "test" or profile == "deterministic":
-            self._start_deterministic_traffic()
+            self._start_deterministic_traffic(content_mode="test")
+        elif profile == "curated":
+            self._start_deterministic_traffic(content_mode="curated")
         else:
             print(f"Unknown profile: {profile}", file=sys.stderr)
             self._cleanup()
@@ -192,6 +194,7 @@ class DemoRunner:
             "--target", "127.0.0.1:6000",
             "--target", "127.0.0.1:6001",
             "--target", "127.0.0.1:6002",
+            "--target", "127.0.0.1:6004",
             "--interval-min", str(self.args.interval_min),
             "--interval-max", str(self.args.interval_max),
         ]
@@ -205,6 +208,7 @@ class DemoRunner:
                 "--inject", "SENSOR_A", "5001",
                 "--inject", "SENSOR_B", "5002",
                 "--inject", "SENSOR_C", "5003",
+                "--inject", "SENSOR_D", "5004",
                 "--interval", str(self.args.inject_interval),
                 "--duration", "0",
                 "--source", "demo",
@@ -224,8 +228,8 @@ class DemoRunner:
             print("Starting CBOR demo traffic (tick 500ms)...")
             self._processes.append(subprocess.Popen(cbor_cmd))
 
-    def _start_deterministic_traffic(self) -> None:
-        """Start deterministic demo traffic for UI tests."""
+    def _start_deterministic_traffic(self, content_mode: str = "test") -> None:
+        """Start deterministic demo traffic (test or curated content)."""
         deterministic_script = DEMO_UTILS / "deterministic_demo_traffic.py"
         if not deterministic_script.is_file():
             print(f"Traffic script not found: {deterministic_script}", file=sys.stderr)
@@ -233,23 +237,27 @@ class DemoRunner:
 
         cmd = [
             sys.executable, str(deterministic_script),
+            "--content", content_mode,
             "--udp", "SENSOR_A=127.0.0.1:6000",
             "--udp", "SENSOR_B=127.0.0.1:6001",
             "--udp", "SENSOR_C=127.0.0.1:6002",
+            "--udp", "SENSOR_D=127.0.0.1:6004",
             "--tick-ms", str(self.args.tick_ms),
             "--cycles", "0",
         ]
-        print(f"Starting deterministic demo traffic (tick {self.args.tick_ms}ms)...")
+        label = "curated demo" if content_mode == "curated" else "deterministic test"
+        print(f"Starting {label} traffic (tick {self.args.tick_ms}ms)...")
         self._processes.append(subprocess.Popen(cmd))
 
         cbor_cmd = [
             sys.executable, str(deterministic_script),
+            "--content", content_mode,
             "--cbor",
             "--udp", "SENSOR_CBOR=127.0.0.1:6003",
             "--tick-ms", str(self.args.tick_ms),
             "--cycles", "0",
         ]
-        print(f"Starting CBOR deterministic demo traffic (tick {self.args.tick_ms}ms)...")
+        print(f"Starting CBOR {label} traffic (tick {self.args.tick_ms}ms)...")
         self._processes.append(subprocess.Popen(cbor_cmd))
 
     def _cleanup(self) -> None:
@@ -302,16 +310,16 @@ def add_subparser(subparsers) -> None:
         epilog=(
             "Examples:\n"
             "  embed-log demo\n"
-            "  embed-log demo --profile test\n"
-            "  embed-log demo --profile random --no-browser\n"
+            "  embed-log demo --fast\n"
             "  embed-log demo --profile deterministic --fast\n"
+            "  embed-log demo --profile random --no-browser\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument(
-        "--profile", choices=["random", "test", "deterministic"],
-        default="random",
-        help="traffic profile (default: random)",
+        "--profile", choices=["random", "test", "deterministic", "curated"],
+        default="curated",
+        help="traffic profile (default: curated). Use 'deterministic' for UI tests, 'random' for varied traffic.",
     )
     p.add_argument(
         "--no-browser", action="store_true",
@@ -331,7 +339,7 @@ def add_subparser(subparsers) -> None:
     )
     p.add_argument(
         "--tick-ms", type=int, default=None,
-        help="deterministic profile tick interval in ms (default: 100, fast: 20)",
+        help="tick interval in ms for curated/deterministic profiles (default: 300, fast: 50)",
     )
     p.add_argument(
         "--interval-min", type=float, default=None,

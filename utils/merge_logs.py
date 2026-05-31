@@ -400,6 +400,7 @@ def _render_toolbar() -> str:
     static_actions = [
         ("btn-download-raw", "Download raw", "Download all logs as merged raw text file"),
         ("btn-unwrap",       "Unwrap",       "Unwrap multi-pane tabs into single-pane tabs"),
+        ("btn-timestamp-mode", "Absolute",   "Switch timestamps"),
     ]
     sep_done = False
     for btn_id, label, title in static_actions:

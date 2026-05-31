@@ -12,6 +12,12 @@ test.describe('drag selection UX', () => {
     expect(errors).toEqual([]);
   });
 
+// Scenario: Drag-select creates contiguous selection only in active pane and shows copy actions
+//   Given the user drags from line 1 to line 5 in SENSOR_A
+//   When  the drag ends
+//   Then  selected lines are contiguous
+//   And   no lines are selected in SENSOR_B (inactive pane)
+//   And   copy actions are visible for SENSOR_A
   test('drag-select creates contiguous selection only in active pane and shows copy actions', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });

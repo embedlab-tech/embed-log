@@ -20,6 +20,8 @@ function currentHtmlButton(page) {
   return page.locator('#settings-panel button').filter({ hasText: /Open HTML|No HTML yet|HTML error/ }).first();
 }
 
+// Feature: session workflows — End-to-end tests for session management including HTML export, clean session rotation, and sessions popup
+//
 test.describe('session workflows', () => {
   let errors;
 
@@ -31,6 +33,11 @@ test.describe('session workflows', () => {
     expect(errors).toEqual([]);
   });
 
+// Scenario: Current HTML button opens backend session export with correct pane data
+//   Given an active session with a saved HTML export
+//   When  the user clicks the "Open HTML" button in settings
+//   Then  a new browser page opens the session export showing correct pane tabs and log content
+//
   test('Current HTML opens backend session export with panes and logs', async ({ page, browser }) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
@@ -60,12 +67,17 @@ test.describe('session workflows', () => {
     await expect(exported.getByRole('button', { name: 'DevA', exact: true })).toBeVisible();
     await expect(exported.getByRole('button', { name: 'DevB', exact: true })).toBeVisible();
     await exported.getByRole('button', { name: 'DevA', exact: true }).click();
-    await expect(exported.locator('.pane-name', { hasText: 'READER' }).first()).toBeVisible();
-    await expect(exported.locator('.pane-name', { hasText: 'CONTROLLER' })).toBeVisible();
+    await expect(exported.locator('.pane-name', { hasText: 'DEVICE_A' }).first()).toBeVisible();
+    await expect(exported.locator('.pane-name', { hasText: 'HOST' })).toBeVisible();
     await expect(exported.locator('.log-area', { hasText: 'TEST src=SENSOR_A' }).first()).toBeVisible();
     await exported.close();
   });
 
+// Scenario: Clean session rotates session id and receives new logs
+//   Given an active session with existing log lines
+//   When  the user clicks "Clean session" and confirms the dialog
+//   Then  the session id changes, old log lines disappear, and new test lines arrive
+//
   test('Clean session rotates session id and receives new logs', async ({ page, request }) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
@@ -84,6 +96,11 @@ test.describe('session workflows', () => {
     await waitForSourceTestLine(page, 'SENSOR_A');
   });
 
+// Scenario: Sessions popup marks current session and exposes manifest/open-html links
+//   Given a saved session
+//   When  the user opens the sessions popup
+//   Then  the current session row is tagged as current and contains manifest.json and session.html links
+//
   test('Sessions popup marks current session and exposes manifest/open-html links', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });

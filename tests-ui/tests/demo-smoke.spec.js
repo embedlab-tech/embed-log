@@ -30,6 +30,12 @@ test.describe('embed-log deterministic demo smoke', () => {
     expect(errors).toEqual([]);
   });
 
+// Scenario: Connects to backend WS and receives deterministic logs with correct pane labels
+//   Given the user navigates to the app
+//   When  the WebSocket connects
+//   Then  SENSOR_A, SENSOR_B, SENSOR_C, SENSOR_CBOR, and SENSOR_D panes appear with correct labels (DEVICE_A, HOST, AUX, CBOR, PYTEST)
+//   And   each pane receives test log lines
+
   test('connects to backend and receives deterministic demo logs', async ({ page }) => {
     await page.goto('/');
 
@@ -37,20 +43,29 @@ test.describe('embed-log deterministic demo smoke', () => {
     await expect(page.locator('#pane-SENSOR_A')).toBeVisible();
     await expect(page.locator('#pane-SENSOR_B')).toBeVisible();
     await expect(page.locator('#pane-SENSOR_C')).toBeAttached();
-    await expect(page.locator('#pane-SENSOR_A .pane-name')).toHaveText('READER');
-    await expect(page.locator('#pane-SENSOR_B .pane-name')).toHaveText('CONTROLLER');
+    await expect(page.locator('#pane-SENSOR_A .pane-name')).toHaveText('DEVICE_A');
+    await expect(page.locator('#pane-SENSOR_B .pane-name')).toHaveText('HOST');
 
     await waitForSourceTestLine(page, 'SENSOR_A');
     await waitForSourceTestLine(page, 'SENSOR_B');
 
     await page.getByRole('button', { name: 'DevB', exact: true }).click();
-    await expect(page.locator('#pane-SENSOR_C .pane-name')).toHaveText('READER');
+    await expect(page.locator('#pane-SENSOR_C .pane-name')).toHaveText('AUX');
     await waitForSourceTestLine(page, 'SENSOR_C');
 
     await page.getByRole('button', { name: 'cbor-tab', exact: true }).click();
     await expect(page.locator('#pane-SENSOR_CBOR .pane-name')).toHaveText('CBOR');
     await waitForLineContaining(page, 'SENSOR_CBOR', 'kind=sync');
+    await page.getByRole('button', { name: 'PYTEST', exact: true }).click();
+    await expect(page.locator('#pane-SENSOR_D .pane-name')).toHaveText('PYTEST');
+    await waitForSourceTestLine(page, 'SENSOR_D');
   });
+
+// Scenario: Page does not load external network assets
+//   Given the page loads
+//   When  the app starts
+//   Then  all HTTP/HTTPS requests originate from the app's own origin
+//   And   no external network assets are requested
 
   test('startup does not depend on external network assets', async ({ page }) => {
     const requests = [];
@@ -69,6 +84,11 @@ test.describe('embed-log deterministic demo smoke', () => {
     expect(externalRequests).toEqual([]);
   });
 
+// Scenario: Per-pane download button triggers raw .log file with expected filename
+//   Given the SENSOR_A pane has received log lines
+//   When  the user clicks the pane-download-btn
+//   Then  a file named SENSOR_A.log is downloaded containing TEST src=SENSOR_A and kind=sync
+
   test('per-pane download button triggers raw .log download', async ({ page }, testInfo) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
@@ -84,6 +104,11 @@ test.describe('embed-log deterministic demo smoke', () => {
     expect(text).toContain('TEST src=SENSOR_A');
     expect(text).toContain('kind=sync');
   });
+
+// Scenario: Shift-click selects a range and per-pane download still works
+//   Given the user shift-clicks to select a range of lines in SENSOR_A
+//   When  they click the per-pane download button
+//   Then  the downloaded SENSOR_A.log contains the selected range content including kind=prefix-cleanup
 
   test('shift-click selects a deterministic range and per-pane download still works', async ({ page }, testInfo) => {
     await page.goto('/');
@@ -111,6 +136,12 @@ test.describe('embed-log deterministic demo smoke', () => {
     expect(text).toContain('kind=prefix-cleanup');
   });
 
+// Scenario: HTML snippet export uses the regular embed-log exported UI structure
+//   Given the user selects a range in SENSOR_A
+//   When  they export the HTML snippet
+//   Then  the resulting HTML contains the standard embed-log structure (toolbar, tab-bar, _logData)
+//   And   the snippet contains the selected content
+
   test('HTML snippet uses the regular embed-log exported UI', async ({ page }, testInfo) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
@@ -135,6 +166,12 @@ test.describe('embed-log deterministic demo smoke', () => {
     expect(html).toMatch(/\[SENSOR_A\]/);
     expect(html).not.toContain('<h1>embed-log snippet</h1>');
   });
+
+// Scenario: Live DOM keeps full pane history while tailing without clearing
+//   Given SENSOR_A and SENSOR_B have initial log lines
+//   When  a UDP burst of 220 lines is sent to each pane
+//   Then  each pane shows >200 lines
+//   And   the first lines are still present (no DOM clearing)
 
 test('live DOM keeps full pane history while tailing', async ({ page }) => {
   await page.goto('/');
@@ -161,6 +198,11 @@ test('live DOM keeps full pane history while tailing', async ({ page }) => {
   await expect(page.locator('#log-SENSOR_B')).toContainText('burst-b-219');
 });
 
+// Scenario: Settings panel has working font-size controls
+//   Given the user opens the settings panel
+//   When  they click the font-increase button, then the font-reset button
+//   Then  the font size changes after increase and returns to original after reset
+
 test('runtime settings panel exposes working font-size controls', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
@@ -186,6 +228,11 @@ test('runtime settings panel exposes working font-size controls', async ({ page 
   }).toBe(before);
 });
 
+// Scenario: Marker rendering, tooltip display, and navigation
+//   Given the user sends a save_markers command with a marker on a SENSOR_A line
+//   When  the marker is created, hovered, and navigated
+//   Then  the marked line has the has-marker class, a tooltip shows the description, and navigation buttons work
+//   And   removing all markers hides the marker navigation UI
   test('marker rendering, tooltip, and navigation', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });

@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
-Deterministic demo traffic generator for embed-log UI/E2E tests.
+Demo traffic generator for embed-log.
 
-This tool sends predictable UDP log lines and optional inject markers to the
-standard demo sources. It is intended for Playwright tests where random demo
-traffic would make assertions flaky.
+Generates simulated UDP log traffic for demo and test scenarios.
+Two content modes:
+  test    — TEST-prefixed deterministic patterns for Playwright UI tests
+  curated — realistic REST API testing story for the website demo
 
-Example:
+--content test example:
     python utils/deterministic_demo_traffic.py \
+        --content test \
         --udp SENSOR_A=127.0.0.1:6000 \
         --udp SENSOR_B=127.0.0.1:6001 \
         --udp SENSOR_C=127.0.0.1:6002 \
@@ -17,16 +19,18 @@ Example:
         --tick-ms 100 \
         --cycles 0
 
+--content curated example (default):
+    python utils/deterministic_demo_traffic.py \
+        --udp SENSOR_A=127.0.0.1:6000 \
+        --udp SENSOR_B=127.0.0.1:6001 \
+        --udp SENSOR_C=127.0.0.1:6002 \
+        --udp SENSOR_D=127.0.0.1:6004 \
+        --tick-ms 300 \
+        --cycles 16
+
 When --cbor is given, datagrams are encoded as CBOR maps instead of text
 lines.  Each CBOR map is sent as one datagram and can be consumed by a
 UDP source with parser type ``cbor-datagram``.
-
-Example:
-    python utils/deterministic_demo_traffic.py \\
-        --cbor \\
-        --udp SENSOR_A=127.0.0.1:6000 \\
-        --tick-ms 500 \\
-        --cycles 5
 """
 
 from __future__ import annotations
@@ -120,6 +124,12 @@ def parse_args() -> argparse.Namespace:
         "--cbor",
         action="store_true",
         help="Encode datagrams as CBOR maps instead of text lines.",
+    )
+    parser.add_argument(
+        "--content",
+        choices=["test", "curated"],
+        default="curated",
+        help="Content mode: 'test' for UI test patterns, 'curated' for REST API demo story (default: curated).",
     )
     return parser.parse_args()
 
@@ -256,12 +266,147 @@ def build_cbor_records(src: str, tick: int, seq_start: int) -> tuple[list[dict],
     return records, seq
 
 
+# ═══════════════════════════════════════════════════════════════════
+# Curated content — REST API testing story
+# ═══════════════════════════════════════════════════════════════════
+
+CURATED_DEVICE_A: dict[int, list[str]] = {
+    1: ["[INFO] net: link up, MAC=de:ad:be:ef:01:02", "[INFO] httpd: listening on 0.0.0.0:8080, awaiting commands"],
+    2: ["[INFO] net: connection from 192.168.1.100:45012", "[INFO] httpd: accepted, 1 active session"],
+    3: ["[INFO] httpd: session established, protocol REST/1.0", "[INFO] sys: test mode enabled via header X-Test-Suite"],
+    4: ["[INFO] httpd: << GET /api/status", "[INFO] handler: processing status request"],
+    5: ["[INFO] handler: mem_free=18324KB uptime=3600s cpu_load=12%", "[INFO] httpd: >> 200 OK  {status:ok, uptime:3600}  (12ms)"],
+    6: [],
+    7: ["[INFO] httpd: << GET /api/config", "[INFO] handler: reading config service endpoint"],
+    8: ["[ERR] handler: config service not initialized", "[ERR] handler: config.json missing from flash partition"],
+    9: ["[INFO] httpd: >> 503 Service Unavailable  {error:config_unavailable}  (8ms)"],
+    10: [],
+    11: ["[INFO] httpd: << GET /api/health", "[INFO] handler: health check requested"],
+    12: ["[INFO] handler: services=all_ok, last_boot=2026-05-31T10:28:04Z", "[INFO] handler: self-test — passed (mem=18240KB, disk=ok)"],
+    13: ["[INFO] httpd: >> 200 OK  {status:healthy, uptime:3612}  (15ms)"],
+    14: ["[INFO] httpd: session close from 192.168.1.100:45012", "[INFO] httpd: connection terminated, session count=0"],
+    15: ["[INFO] sys: test flag cleared, returning to normal mode"],
+    16: ["[INFO] httpd: listening, awaiting commands"],
+}
+
+CURATED_HOST: dict[int, list[str]] = {
+    1: ["[INFO] session: starting test suite — target: 192.168.1.10:8080", "[INFO] session: test vector loaded — 3 test cases"],
+    2: ["[INFO] session: connecting to DEVICE_A...", "[INFO] session: connected (TCP seq=1)"],
+    3: ["[INFO] session: handshake complete, protocol REST/1.0"],
+    4: ["[INFO] req: >> GET /api/status", "[INFO] req: awaiting response..."],
+    5: ["[INFO] resp: << 200 OK  in 12ms", "[INFO] resp: body={status:ok, uptime:3600, mem_free:18324KB}"],
+    6: ["[INFO] req: >> GET /api/config", "[INFO] req: awaiting response..."],
+    7: ["[INFO] req: waiting... (2s timeout)"],
+    8: ["[INFO] resp: << 503 Service Unavailable  in 8ms", "[INFO] resp: body={error:config_unavailable}", "[INFO] assert: status=503 — expected failure confirmed"],
+    9: [],
+    10: ["[INFO] req: >> GET /api/health", "[INFO] req: awaiting response..."],
+    11: ["[INFO] req: waiting..."],
+    12: ["[INFO] resp: << 200 OK  in 15ms", "[INFO] resp: body={status:healthy, uptime:3612, self_test:passed}", "[INFO] assert: status=healthy — OK"],
+    13: ["[INFO] session: all requests completed", "[INFO] session: closing connection..."],
+    14: ["[INFO] session: disconnected", "[INFO] session: test suite complete — 3/3 passed in 1.234s"],
+    15: ["[INFO] session: generating report..."],
+    16: ["[INFO] session: report written to test-results/2026-05-31.xml"],
+}
+
+CURATED_AUX: dict[int, list[str]] = {
+    1: ["[INFO] mon: sensor online, fw v1.9.2", "[INFO] mon: monitoring ambient at 1s interval"],
+    2: ["[INFO] mon: ambient temp=23.4C noise=-72dBm"],
+    3: ["[INFO] mon: heartbeat OK"],
+    4: ["[INFO] mon: ambient stable — no anomalies"],
+    5: ["[INFO] mon: ambient temp=23.4C noise=-71dBm"],
+    6: ["[INFO] mon: ambient temp=23.5C noise=-72dBm"],
+    7: ["[INFO] mon: heartbeat OK"],
+    8: ["[INFO] mon: cross-check request received from DEVICE_A", "[INFO] mon: confirming — ambient nominal, no interference"],
+    9: ["[INFO] mon: ambient temp=23.4C noise=-72dBm"],
+    10: ["[INFO] mon: heartbeat OK"],
+    11: ["[INFO] mon: ambient temp=23.4C noise=-72dBm"],
+    12: ["[INFO] mon: ambient temp=23.5C noise=-71dBm"],
+    13: ["[INFO] mon: heartbeat OK — all clear"],
+    14: ["[INFO] mon: ambient temp=23.4C noise=-72dBm"],
+    15: ["[INFO] mon: device under test activity complete"],
+    16: ["[INFO] mon: continuing normal monitoring"],
+}
+
+CURATED_PYTEST: dict[int, list[str]] = {
+    1: ["[STEP] test_suite_init — loading test vectors...", "[STEP] test_suite_init — fixture setup: http_client, device_session"],
+    2: ["[STEP] test_suite_init — connecting to DEVICE_A@192.168.1.10:8080", "[STEP] ✓ setup fixture 'device_session' — connected"],
+    3: ["[PASS] test_01_get_status — test case started"],
+    4: ["[STEP] test_01_get_status — sending GET /api/status", "[STEP] test_01_get_status — awaiting response"],
+    5: ["[STEP] test_01_get_status — assert response.status == 200", "[STEP] test_01_get_status — assert response.body.status == 'ok'", "[PASS] ✓ test_01_get_status — PASSED (0.342s)"],
+    6: ["[PASS] test_02_get_config — test case started", "[STEP] test_02_get_config — sending GET /api/config", "[STEP] test_02_get_config — expecting: 503 Service Unavailable"],
+    7: ["[STEP] test_02_get_config — awaiting response"],
+    8: ["[STEP] test_02_get_config — assert response.status == 503", "[STEP] test_02_get_config — assert response.body.error == 'config_unavailable'", "[PASS] ✓ test_02_get_config — PASSED (0.156s)", "[STEP] ✓ expected failure confirmed — error handling verified"],
+    9: [],
+    10: ["[PASS] test_03_get_health — test case started", "[STEP] test_03_get_health — sending GET /api/health"],
+    11: ["[STEP] test_03_get_health — awaiting response"],
+    12: ["[STEP] test_03_get_health — assert response.status == 200", "[STEP] test_03_get_health — assert response.body.status == 'healthy'", "[PASS] ✓ test_03_get_health — PASSED (0.089s)"],
+    13: ["[STEP] test_suite_teardown — closing device session", "[STEP] ✓ fixture 'device_session' — disconnected cleanly"],
+    14: ["[PASS] ========== 3 passed in 1.234s =========="],
+    15: ["[INFO] test report: tests=3 passed=3 failed=0 duration=1.234s"],
+    16: ["[INFO] test report: written to test-results/2026-05-31.xml"],
+}
+
+CURATED_CBOR: dict[int, list[dict]] = {
+    1: [{"src": "DIAG", "kind": "sync", "state": "INIT", "msg": "diagnostic channel ready"}, {"src": "DIAG", "kind": "test_suite", "name": "device_api_test", "version": "2.1.0"}],
+    2: [{"src": "DIAG", "kind": "connection", "src_host": "HOST", "dst_host": "DEVICE_A", "status": "connected"}],
+    3: [{"src": "DIAG", "kind": "test_case", "name": "test_01_get_status", "method": "GET", "path": "/api/status"}],
+    4: [{"src": "DIAG", "kind": "request", "method": "GET", "path": "/api/status", "seq": 1}],
+    5: [{"src": "DIAG", "kind": "response", "method": "GET", "path": "/api/status", "status": 200, "duration_ms": 12}, {"src": "DIAG", "kind": "test_result", "name": "test_01_get_status", "result": "PASSED", "duration_ms": 342}],
+    6: [{"src": "DIAG", "kind": "test_case", "name": "test_02_get_config", "method": "GET", "path": "/api/config", "expected_status": 503}],
+    7: [{"src": "DIAG", "kind": "request", "method": "GET", "path": "/api/config", "seq": 2}],
+    8: [{"src": "DIAG", "kind": "response", "method": "GET", "path": "/api/config", "status": 503, "error": "config_unavailable", "duration_ms": 8}, {"src": "DIAG", "kind": "test_result", "name": "test_02_get_config", "result": "PASSED", "expected_failure": True, "duration_ms": 156}],
+    9: [],
+    10: [{"src": "DIAG", "kind": "test_case", "name": "test_03_get_health", "method": "GET", "path": "/api/health"}],
+    11: [{"src": "DIAG", "kind": "request", "method": "GET", "path": "/api/health", "seq": 3}],
+    12: [{"src": "DIAG", "kind": "response", "method": "GET", "path": "/api/health", "status": 200, "duration_ms": 15}, {"src": "DIAG", "kind": "test_result", "name": "test_03_get_health", "result": "PASSED", "duration_ms": 89}],
+    13: [{"src": "DIAG", "kind": "connection", "src_host": "HOST", "dst_host": "DEVICE_A", "status": "disconnected"}],
+    14: [{"src": "DIAG", "kind": "summary", "tests": 3, "passed": 3, "failed": 0, "duration_ms": 1234}],
+    15: [{"src": "DIAG", "kind": "sync", "state": "COMPLETE"}],
+    16: [{"src": "DIAG", "kind": "sync", "state": "IDLE"}],
+}
+
+# Source name → content dict mapping for curated mode
+CURATED_LINES: dict[str, dict[int, list[str]]] = {
+    "SENSOR_A": CURATED_DEVICE_A,
+    "SENSOR_B": CURATED_HOST,
+    "SENSOR_C": CURATED_AUX,
+    "SENSOR_D": CURATED_PYTEST,
+}
+
+CURATED_MARKERS: list[tuple[int, str, str, str]] = [
+    (1,  "*",       "Session started — {name} online", "green"),
+    (3,  "SENSOR_D", "test_01_get_status — starting", "cyan"),
+    (3,  "SENSOR_B", "GET /api/status — request sent", "cyan"),
+    (5,  "SENSOR_A", "GET /api/status — 200 OK answered", "green"),
+    (5,  "SENSOR_D", "✓ test_01_get_status PASSED", "green"),
+    (6,  "SENSOR_D", "test_02_get_config — starting", "cyan"),
+    (6,  "SENSOR_B", "GET /api/config — request sent", "cyan"),
+    (8,  "SENSOR_A", "GET /api/config — 503 answered (expected error)", "yellow"),
+    (8,  "SENSOR_D", "✓ test_02_get_config PASSED (expected failure)", "green"),
+    (9,  "SENSOR_C", "Cross-check — ambient nominal during test", "cyan"),
+    (10, "SENSOR_D", "test_03_get_health — starting", "cyan"),
+    (10, "SENSOR_B", "GET /api/health — request sent", "cyan"),
+    (12, "SENSOR_A", "GET /api/health — 200 OK answered", "green"),
+    (12, "SENSOR_D", "✓ test_03_get_health PASSED", "green"),
+    (14, "*",       "Test suite complete — {name} done", "green"),
+]
+
+def build_curated_udp_lines(src: str, tick: int) -> list[str]:
+    """Return pre-defined lines for one source/tick in curated mode."""
+    src_lines = CURATED_LINES.get(src, {})
+    return src_lines.get(tick, [])
+
+def build_curated_cbor_records(tick: int) -> list[dict]:
+    """Return pre-defined CBOR records for one tick in curated mode."""
+    return CURATED_CBOR.get(tick, [])
+
+
 class InjectFanout:
-    def __init__(self, targets: list[Target], connect_timeout: float):
+    def __init__(self, targets: list[Target], connect_timeout: float, source: str = "TEST"):
         self._clients: dict[str, LogClient] = {}
         self._connect_timeout = connect_timeout
         for t in targets:
-            client = LogClient(t.host, t.port, source="TEST", connect_timeout=connect_timeout)
+            client = LogClient(t.host, t.port, source=source, connect_timeout=connect_timeout)
             client.connect()
             self._clients[t.name] = client
             print(f"[det-demo] connected inject {t.name} at {t.host}:{t.port}")
@@ -285,17 +430,21 @@ def run(args: argparse.Namespace) -> int:
     if args.cycles < 0:
         raise ValueError("--cycles must be >= 0")
 
-    print("[det-demo] UDP targets:")
+    is_curated = args.content == "curated"
+    mode_label = "curated" if is_curated else "test"
+
+    print(f"[det-demo] content={mode_label} UDP targets:")
     for t in args.udp:
         print(f"  - {t.name} -> {t.host}:{t.port}")
     if args.inject:
-        print("[det-demo] inject targets:")
+        print(f"[det-demo] content={mode_label} inject targets:")
         for t in args.inject:
             print(f"  - {t.name} -> {t.host}:{t.port}")
     print(f"[det-demo] tick_ms={args.tick_ms:g} cycles={'infinite' if args.cycles == 0 else args.cycles}{' mode=CBOR' if args.cbor else ''}")
 
+    inject_source = "DEMO" if is_curated else "TEST"
     seq_by_src = {t.name: 1 for t in args.udp}
-    inject = InjectFanout(args.inject, args.connect_timeout) if args.inject else None
+    inject = InjectFanout(args.inject, args.connect_timeout, source=inject_source) if args.inject else None
     tick_interval = args.tick_ms / 1000.0
     per_source_offset = min(0.005, tick_interval / max(1, len(args.udp) * 4))
 
@@ -313,26 +462,55 @@ def run(args: argparse.Namespace) -> int:
                 for index, target in enumerate(args.udp):
                     if index > 0 and per_source_offset > 0:
                         time.sleep(per_source_offset)
-                    if args.cbor:
-                        records, next_seq = build_cbor_records(target.name, tick, seq_by_src[target.name])
-                        seq_by_src[target.name] = next_seq
-                        for rec in records:
-                            udp_sock.sendto(cbor2.dumps(rec), (target.host, target.port))
-                    else:
-                        lines, next_seq = build_udp_lines(target.name, tick, seq_by_src[target.name])
-                        seq_by_src[target.name] = next_seq
-                        payload = ("\n".join(lines) + "\n").encode("utf-8")
-                        udp_sock.sendto(payload, (target.host, target.port))
 
-                if inject is not None and tick % 10 == 0:
-                    for target in args.udp:
-                        seq = seq_by_src[target.name]
-                        seq_by_src[target.name] = seq + 1
-                        inject.marker(
-                            target.name,
-                            _msg(target.name, tick, seq, "inject", f"inject marker for {target.name}"),
-                            color="cyan",
-                        )
+                    if is_curated:
+                        # Curated mode: look up pre-defined content
+                        if args.cbor:
+                            records = build_curated_cbor_records(tick)
+                            for rec in records:
+                                udp_sock.sendto(cbor2.dumps(rec), (target.host, target.port))
+                        else:
+                            lines = build_curated_udp_lines(target.name, tick)
+                            if lines:
+                                payload = ("\n".join(lines) + "\n").encode("utf-8")
+                                udp_sock.sendto(payload, (target.host, target.port))
+                    else:
+                        # Test mode: generate on-the-fly with tick%N patterns
+                        if args.cbor:
+                            records, next_seq = build_cbor_records(target.name, tick, seq_by_src[target.name])
+                            seq_by_src[target.name] = next_seq
+                            for rec in records:
+                                udp_sock.sendto(cbor2.dumps(rec), (target.host, target.port))
+                        else:
+                            lines, next_seq = build_udp_lines(target.name, tick, seq_by_src[target.name])
+                            seq_by_src[target.name] = next_seq
+                            payload = ("\n".join(lines) + "\n").encode("utf-8")
+                            udp_sock.sendto(payload, (target.host, target.port))
+
+                # Inject markers
+                if inject is not None:
+                    if is_curated:
+                        for m_tick, m_src, m_msg, m_color in CURATED_MARKERS:
+                            if m_tick == tick:
+                                if m_src == "*":
+                                    for target in args.udp:
+                                        client = inject._clients.get(target.name)
+                                        if client:
+                                            client.marker(m_msg.format(name=target.name), color=m_color)
+                                else:
+                                    client = inject._clients.get(m_src)
+                                    if client:
+                                        client.marker(m_msg, color=m_color)
+                    else:
+                        if tick % 10 == 0:
+                            for target in args.udp:
+                                seq = seq_by_src[target.name]
+                                seq_by_src[target.name] = seq + 1
+                                inject.marker(
+                                    target.name,
+                                    _msg(target.name, tick, seq, "inject", f"inject marker for {target.name}"),
+                                    color="cyan",
+                                )
 
                 if tick == 1 or tick % 25 == 0:
                     print(f"[det-demo] sent tick={tick:03d}")
