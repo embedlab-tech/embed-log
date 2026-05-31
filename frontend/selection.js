@@ -524,6 +524,7 @@ function _copyText(text) {
     finally { ta.remove(); }
     return Promise.resolve();
 }
+const RANGE_MARGIN_MS = 10;
 
 function _selectionRange(paneId) {
     const sel = state.selected[paneId];
@@ -533,7 +534,13 @@ function _selectionRange(paneId) {
         .map(i => lines[i]?.numTs)
         .filter(n => Number.isFinite(n) && n >= 0);
     if (!nums.length) return null;
-    return { from: Math.min(...nums), to: Math.max(...nums) };
+    const from = Math.min(...nums);
+    const to = Math.max(...nums);
+    if (state.selectionScope === 'exact') return { from, to };
+    // In context or context-selected mode, pad range slightly to capture
+    // sibling pane data whose timestamps may be offset by a few ms due to
+    // source-level message delivery timing differences.
+    return { from: from - RANGE_MARGIN_MS, to: to + RANGE_MARGIN_MS };
 }
 
 function _rangeTargetPanes() {

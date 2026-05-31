@@ -102,7 +102,10 @@ test.describe('scope-aware selection actions', () => {
         .filter(n => Number.isFinite(n) && n >= 0);
       if (!nums.length) return 0;
 
-      const range = { from: Math.min(...nums), to: Math.max(...nums) };
+      const range = state.selectionScope === 'exact'
+        ? { from: Math.min(...nums), to: Math.max(...nums) }
+        // Must match RANGE_MARGIN_MS in frontend/selection.js (10ms)
+        : { from: Math.min(...nums) - 10, to: Math.max(...nums) + 10 };
       const targetPanes = state.selectionScope === 'context-selected'
         ? PANES.filter(id => state.contextPanes[id])
         : PANES;
