@@ -413,8 +413,13 @@ def _render_toolbar() -> str:
     # Theme toggle
     parts.append('    <div class="sep"></div>')
     parts.append('    <button id="btn-theme" title="Toggle light / dark theme">&#x1F319;</button>')
-    # No ws-status in static mode
 
+    # Marker navigation (hidden by default, shown when markers are present)
+    parts.append('</div>')
+    parts.append('<div id="marker-nav" class="marker-nav" style="display:none">')
+    parts.append('    <button id="marker-nav-prev" title="Previous marker">&#x25C0;</button>')
+    parts.append('    <span id="marker-nav-idx">1</span>/<span id="marker-nav-total">0</span>')
+    parts.append('    <button id="marker-nav-next" title="Next marker">&#x25B6;</button>')
     parts.append('</div>')
     return '\n'.join(parts)
 
