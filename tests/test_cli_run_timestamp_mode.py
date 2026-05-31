@@ -1,5 +1,7 @@
+import io
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import patch
 
@@ -40,6 +42,17 @@ tabs:
 
         self.assertEqual(rc, 0)
         self.assertEqual("relative", run_app.call_args.kwargs["timestamp_mode"])
+    def test_no_sources_message_points_to_sample_config(self):
+        parser = build_parser()
+        args = parser.parse_args(["run"])
+        stderr = io.StringIO()
+
+        with redirect_stderr(stderr):
+            rc = _run_run(args)
+
+        self.assertEqual(rc, 1)
+        self.assertIn("embed-log sample-config", stderr.getvalue())
+        self.assertNotIn("embed-log create-config", stderr.getvalue())
 
 
 if __name__ == "__main__":

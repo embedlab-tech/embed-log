@@ -26,6 +26,9 @@ class InjectServer:
         self._on_client_connect = on_client_connect
         self._on_client_disconnect = on_client_disconnect
         self._on_json_line = on_json_line
+        self._srv: socket.socket | None = None
+        self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
 
     def start(self) -> None:
         srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -37,7 +40,25 @@ class InjectServer:
         except OSError:
             srv.close()
             raise
-        threading.Thread(target=self._loop, args=(srv,), daemon=True, name=f"{self._name}-inject").start()
+        thread = threading.Thread(target=self._loop, args=(srv,), daemon=True, name=f"{self._name}-inject")
+        with self._lock:
+            self._srv = srv
+            self._thread = thread
+        thread.start()
+
+    def stop(self) -> None:
+        with self._lock:
+            srv = self._srv
+            thread = self._thread
+            self._srv = None
+            self._thread = None
+        if srv is not None:
+            try:
+                srv.close()
+            except OSError:
+                pass
+        if thread and thread.is_alive():
+            thread.join(timeout=2.0)
 
     def _loop(self, srv: socket.socket) -> None:
         with srv:
@@ -46,6 +67,10 @@ class InjectServer:
                     conn, addr = srv.accept()
                 except socket.timeout:
                     continue
+                except OSError:
+                    if self._stop.is_set() or srv.fileno() < 0:
+                        break
+                    raise
                 logging.info("[%s] inject client connected: %s:%s", self._name, addr[0], addr[1])
                 self._on_client_connect(conn)
                 threading.Thread(

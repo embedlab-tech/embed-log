@@ -14,6 +14,7 @@ class RawUartSource(RawLogSource):
         self.baudrate = baudrate
         self._ser: serial.SerialBase | None = None
         self._ser_lock = threading.Lock()
+        self._thread: threading.Thread | None = None
 
     @property
     def supports_write(self) -> bool:
@@ -26,12 +27,27 @@ class RawUartSource(RawLogSource):
             self._ser.write(data)
 
     def start(self, on_chunk, on_boundary, stop, name) -> None:
-        threading.Thread(
+        thread = threading.Thread(
             target=self._run,
             args=(on_chunk, on_boundary, stop, name),
             daemon=True,
             name=f"{name}-uart",
-        ).start()
+        )
+        self._thread = thread
+        thread.start()
+
+    def close(self) -> None:
+        with self._ser_lock:
+            ser = self._ser
+        if ser is not None:
+            try:
+                ser.close()
+            except serial.SerialException:
+                pass
+        thread = self._thread
+        self._thread = None
+        if thread and thread.is_alive():
+            thread.join(timeout=2.0)
 
     def _run(self, on_chunk, on_boundary, stop, name) -> None:
         while not stop.is_set():
@@ -52,5 +68,7 @@ class RawUartSource(RawLogSource):
                             self._ser = None
                         on_boundary()
             except serial.SerialException as exc:
+                if stop.is_set():
+                    break
                 logging.warning("[%s] serial error: %s — retrying in 3 s", name, exc)
                 stop.wait(3)

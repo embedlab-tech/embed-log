@@ -10,6 +10,9 @@ from .raw_base import RawLogSource
 class RawUdpSource(RawLogSource):
     def __init__(self, port: int):
         self.port = port
+        self._sock: socket.socket | None = None
+        self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
 
     def start(self, on_chunk, on_boundary, stop: threading.Event, name: str) -> None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -19,12 +22,30 @@ class RawUdpSource(RawLogSource):
         except OSError:
             sock.close()
             raise
-        threading.Thread(
+        thread = threading.Thread(
             target=self._run,
             args=(sock, on_chunk, on_boundary, stop, name),
             daemon=True,
             name=f"{name}-udp",
-        ).start()
+        )
+        with self._lock:
+            self._sock = sock
+            self._thread = thread
+        thread.start()
+
+    def close(self) -> None:
+        with self._lock:
+            sock = self._sock
+            thread = self._thread
+            self._sock = None
+            self._thread = None
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
+        if thread and thread.is_alive():
+            thread.join(timeout=2.0)
 
     def _run(self, sock: socket.socket, on_chunk, on_boundary, stop: threading.Event, name: str) -> None:
         with sock:
@@ -37,3 +58,7 @@ class RawUdpSource(RawLogSource):
                     on_boundary()
                 except socket.timeout:
                     continue
+                except OSError:
+                    if stop.is_set() or sock.fileno() < 0:
+                        break
+                    raise
