@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { collectPageErrors, waitForSourceTestLine } from './helpers.js';
 
+// Feature: timestamp mode toggle — Live viewer toggles between absolute and relative timestamp formats
+//
 test.describe('timestamp mode toggle', () => {
   let errors;
 
@@ -12,6 +14,11 @@ test.describe('timestamp mode toggle', () => {
     expect(errors).toEqual([]);
   });
 
+// Scenario: Live viewer toggles between absolute (MM-DD HH:MM:SS.mmm) and relative (T+HH:MM:SS.mmm) timestamps
+//   Given the live log viewer
+//   When  the user clicks the timestamp mode toggle in settings
+//   Then  timestamps switch between relative (T+HH:MM:SS.mmm) and absolute (MM-DD HH:MM:SS.mmm) formats
+//
   test('live viewer toggles between absolute and relative timestamps', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });

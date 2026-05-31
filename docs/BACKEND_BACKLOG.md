@@ -4,39 +4,36 @@ Prioritized backend backlog distilled from existing notes.
 
 ## High priority
 
-1. Bounded queues + backpressure/drop counters
-   - make pressure visible instead of silently degrading
-   - add metrics for dropped lines and queue saturation
+1. ~~Bounded queues + backpressure/drop counters~~ **Done**
+   - `TrackedQueue` in `backend/core/queue.py` with saturation tracking, `QueueStats` dataclass, and `test_queue_stats`.
 
-2. Per-source UART baudrate support
-   - allow different baudrates across UART sources in one config
-   - keep global `baudrate` as an optional default, not a hard constraint
-   - validate config clearly when a UART source omits both per-source and global baudrate
-   - verify mixed-baud deployments work without affecting UDP sources or session metadata
+2. ~~Health/stats endpoints~~ **Done**
+   - `/api/health` — simple `{"status": "ok"}`
+   - `/api/stats` — per-source queue stats + totals
 
-3. Health/stats endpoints
-   - `/health`
-   - `/stats`
-   - useful for CI and unattended runs
+3. ~~Time handling correctness~~ **Done**
+   - `SessionClock` in `backend/core/clock.py` supporting absolute and relative (`T+HH:MM:SS.mmm`) modes.
+   - SessionClock origin set on first observe, tested via `test_runtime_timestamp_mode`.
 
-4. Session/export contract cleanup
-   - finish documenting current session HTML status/event/API behavior
-   - keep live UI and static export behavior aligned
+4. Per-source UART baudrate support
+   - `SourceConfig.baudrate: int | None` already exists in `backend/config/models.py`.
+   - Validate config clearly when a UART source omits both per-source and global baudrate.
+   - Verify mixed-baud deployments work without affecting UDP sources or session metadata.
 
-5. Time handling correctness
-   - define canonical time model clearly
-   - keep session APIs/export consistent across platforms/timezones
+5. Session/export contract cleanup
+   - Finish documenting current session HTML status/event/API behavior.
+   - Keep live UI and static export behavior aligned.
 
 ## Medium priority
 
 6. Optional server-side replay/retention window
-   - useful for reconnecting clients and recent-history visibility
+   - Useful for reconnecting clients and recent-history visibility.
 
 7. Configurable default settings contract
-   - YAML-driven defaults where backend must provide authoritative values to UI
+   - YAML-driven defaults where backend must provide authoritative values to UI.
 
 8. Export naming consistency
-   - unify app/session-based naming for artifacts and downloads where backend participates
+   - Unify app/session-based naming for artifacts and downloads where backend participates.
 
 ## Lower priority / future work
 
@@ -46,6 +43,6 @@ Prioritized backend backlog distilled from existing notes.
 
 ## Performance/benchmark-specific backlog
 
-- tighten benchmark pass/fail semantics around data integrity
-- verify all documented benchmark modes are real
-- establish repeatable baseline scenarios for regression comparison
+- Tighten benchmark pass/fail semantics around data integrity.
+- Verify all documented benchmark modes are real.
+- Establish repeatable baseline scenarios for regression comparison.

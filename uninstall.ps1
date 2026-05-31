@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
-    embed-log uninstaller for Windows (PowerShell)
+    embed-log uninstaller for Windows (PowerShell 7+)
 .DESCRIPTION
-    Uninstalls embed-log from a pipx-managed global install.
+    Uninstalls embed-log from a pipx-managed global install. Requires PowerShell 7+.
     Run from PowerShell:
         iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/krezolekcoder/embed-log/main/uninstall.ps1'))
 #>

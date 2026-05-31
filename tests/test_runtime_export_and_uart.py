@@ -46,6 +46,7 @@ class RuntimeExportTests(unittest.TestCase):
             server = LogServer.__new__(LogServer)
             server._export_lock = threading.Lock()
             server._rotate_lock = threading.Lock()
+            server._session_lock = threading.Lock()
             server._managers = [_DummyManager(), _DummyManager()]
             server._session = _DummySession(html_path)
             server._exporter = _DummyExporter(True)

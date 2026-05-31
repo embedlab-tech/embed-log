@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from .models import AppConfig, LogsConfig, ParserConfig, ServerConfig, SourceConfig, TabConfig
 
 
 class ConfigError(ValueError):
@@ -42,19 +43,19 @@ def _require_choice(value: Any, field: str, choices: set[str]) -> str:
     return s
 
 
-def _load_parser_config(value: Any, field: str) -> dict:
+def _load_parser_config(value: Any, field: str) -> ParserConfig:
     if value is None:
-        return {"type": "text"}
+        return ParserConfig()
 
     parser = _require_dict(value, field)
     parser_type = _require_choice(parser.get("type"), f"{field}.type", {"text", "cbor-datagram"})
     extra_fields = sorted(key for key in parser if key != "type")
     if extra_fields:
         raise ConfigError(f"{field}.{extra_fields[0]} unsupported for parser type {parser_type!r}")
-    return {"type": parser_type}
+    return ParserConfig(type=parser_type)
 
 
-def load_config(path: str | Path) -> dict:
+def load_config(path: str | Path) -> AppConfig:
     p = Path(path)
     if not p.is_file():
         raise ConfigError(f"config file not found: {p}")
@@ -86,7 +87,7 @@ def load_config(path: str | Path) -> dict:
 
     source_names: set[str] = set()
     source_labels: dict[str, str] = {}
-    sources: list[dict] = []
+    sources: list[SourceConfig] = []
     injects: list[tuple[str, int]] = []
     forwards: list[tuple[str, int]] = []
 
@@ -99,20 +100,22 @@ def load_config(path: str | Path) -> dict:
 
         src_type = _require_str(src.get("type"), f"sources[{i}].type").lower()
         parser = _load_parser_config(src.get("parser"), f"sources[{i}].parser")
-        if parser["type"] == "cbor-datagram" and src_type != "udp":
+        if parser.type == "cbor-datagram" and src_type != "udp":
             raise ConfigError(
                 f"sources[{i}].parser.type 'cbor-datagram' is only valid for UDP sources "
                 f"(got source type {src_type!r})"
             )
-        source_config = {"name": name, "type": src_type, "parser": parser}
 
         if src_type == "uart":
-            source_config["port"] = _require_str(src.get("port"), f"sources[{i}].port")
+            port: str | int = _require_str(src.get("port"), f"sources[{i}].port")
             baud = src.get("baudrate")
-            if baud is not None:
-                source_config["baudrate"] = _as_int(baud, f"sources[{i}].baudrate")
+            baudrate = _as_int(baud, f"sources[{i}].baudrate") if baud is not None else None
+            source_config = SourceConfig(
+                name=name, type=src_type, port=port, parser=parser, baudrate=baudrate
+            )
         elif src_type == "udp":
-            source_config["port"] = _as_int(src.get("port"), f"sources[{i}].port")
+            port = _as_int(src.get("port"), f"sources[{i}].port")
+            source_config = SourceConfig(name=name, type=src_type, port=port, parser=parser)
         else:
             raise ConfigError(f"sources[{i}].type unsupported: {src_type!r} (use 'uart' or 'udp')")
 
@@ -135,7 +138,7 @@ def load_config(path: str | Path) -> dict:
                 forwards.append((name, _as_int(fp, f"sources[{i}].forward_ports[{j}]")))
 
     tabs_raw = _require_list(cfg.get("tabs", []), "tabs")
-    tabs: list[list[str]] = []
+    tabs: list[TabConfig] = []
 
     for i, item in enumerate(tabs_raw):
         tab = _require_dict(item, f"tabs[{i}]")
@@ -151,46 +154,57 @@ def load_config(path: str | Path) -> dict:
                 raise ConfigError(f"tabs[{i}].panes[{j}] unknown source: {pane_name!r}")
             pane_names.append(pane_name)
 
-        tabs.append([label, *pane_names])
+        tabs.append(TabConfig(label=label, panes=pane_names))
 
-    out = {
-        "sources": sources,
-        "source_labels": source_labels,
-        "injects": injects,
-        "forwards": forwards,
-        "tabs": tabs,
-        "logs": logs,
-    }
-
+    server_kwargs: dict[str, Any] = {}
     if "host" in server:
-        out["host"] = _require_str(server.get("host"), "server.host")
+        server_kwargs["host"] = _require_str(server.get("host"), "server.host")
     if "ws_port" in server:
-        out["ws_port"] = _as_int(server.get("ws_port"), "server.ws_port")
+        server_kwargs["ws_port"] = _as_int(server.get("ws_port"), "server.ws_port")
     if "ws_ui" in server:
-        out["ws_ui"] = _require_str(server.get("ws_ui"), "server.ws_ui")
+        server_kwargs["ws_ui"] = _require_str(server.get("ws_ui"), "server.ws_ui")
     if "app_name" in server:
-        out["app_name"] = _require_str(server.get("app_name"), "server.app_name")
+        server_kwargs["app_name"] = _require_str(server.get("app_name"), "server.app_name")
     if "open_browser" in server:
-        out["open_browser"] = bool(server.get("open_browser"))
+        server_kwargs["open_browser"] = bool(server.get("open_browser"))
     if "verbosity" in server:
-        out["verbosity"] = _require_choice(server.get("verbosity"), "server.verbosity", {"quiet", "events", "full"})
+        server_kwargs["verbosity"] = _require_choice(
+            server.get("verbosity"), "server.verbosity", {"quiet", "events", "full"}
+        )
     if "verbose" in server:
-        out["verbose"] = bool(server.get("verbose"))
+        server_kwargs["verbose"] = bool(server.get("verbose"))
     if "job_id" in server:
-        out["job_id"] = _require_str(server.get("job_id"), "server.job_id")
+        server_kwargs["job_id"] = _require_str(server.get("job_id"), "server.job_id")
     if "default_light_theme" in server:
-        out["default_light_theme"] = _require_str(server.get("default_light_theme"), "server.default_light_theme")
+        server_kwargs["default_light_theme"] = _require_str(
+            server.get("default_light_theme"), "server.default_light_theme"
+        )
     if "default_dark_theme" in server:
-        out["default_dark_theme"] = _require_str(server.get("default_dark_theme"), "server.default_dark_theme")
+        server_kwargs["default_dark_theme"] = _require_str(
+            server.get("default_dark_theme"), "server.default_dark_theme"
+        )
     if "timestamp_mode" in server:
-        out["timestamp_mode"] = _require_choice(server.get("timestamp_mode"), "server.timestamp_mode", {"absolute", "relative"})
+        server_kwargs["timestamp_mode"] = _require_choice(
+            server.get("timestamp_mode"), "server.timestamp_mode", {"absolute", "relative"}
+        )
     if "queue_size" in server:
-        out["queue_size"] = _as_int(server.get("queue_size"), "server.queue_size")
+        server_kwargs["queue_size"] = _as_int(server.get("queue_size"), "server.queue_size")
 
+    logs_kwargs: dict[str, Any] = {}
     if "dir" in logs:
-        out["log_dir"] = _require_str(logs.get("dir"), "logs.dir")
+        logs_kwargs["dir"] = _require_str(logs.get("dir"), "logs.dir")
+
+    app_config = AppConfig(
+        sources=sources,
+        source_labels=source_labels,
+        injects=injects,
+        forwards=forwards,
+        tabs=tabs,
+        server=ServerConfig(**server_kwargs),
+        logs=LogsConfig(**logs_kwargs),
+    )
 
     if "baudrate" in cfg:
-        out["baudrate"] = _as_int(cfg.get("baudrate"), "baudrate")
+        app_config.baudrate = _as_int(cfg.get("baudrate"), "baudrate")
 
-    return out
+    return app_config

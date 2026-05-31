@@ -11,6 +11,11 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../..');
 const mergeScript = path.join(repoRoot, 'utils', 'merge_logs.py');
 
+// Scenario: Merged static replay toggles between T+... and MM-DD... timestamps
+//   Given a static replay with merged log data and a known absolute origin
+//   When  the user clicks the timestamp mode toggle
+//   Then  timestamps switch between relative (T+...) and absolute (MM-DD...) formats
+//
 test('merged static replay toggles between relative and absolute timestamps', async ({ browser }) => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'embed-log-relative-'));
   const logPath = path.join(tmpDir, 'sensor.log');
@@ -60,6 +65,11 @@ test('merged static replay toggles between relative and absolute timestamps', as
   }
 });
 
+// Scenario: Relative-only static replay shows hint when absolute origin is unavailable
+//   Given a static replay with relative timestamps but no --first-log-at origin
+//   When  the user inspects the timestamp mode button
+//   Then  the button is disabled with a title explaining absolute mode is unavailable
+//
 test('relative-only static replay shows hint when absolute origin is unavailable', async ({ browser }) => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'embed-log-relative-no-origin-'));
   const logPath = path.join(tmpDir, 'sensor.log');
@@ -85,9 +95,8 @@ test('relative-only static replay shows hint when absolute origin is unavailable
 
   const page = await openHtmlFile(browser, htmlPath);
   try {
-    await page.locator('#btn-settings').click();
     await expect(page.locator('#btn-timestamp-mode')).toBeDisabled();
-    await expect(page.locator('#timestamp-mode-hint')).toContainText('Absolute view unavailable');
+    await expect(page.locator('#btn-timestamp-mode')).toHaveAttribute('title', 'absolute timestamps are unavailable for the current data');
   } finally {
     await page.close();
     fs.rmSync(tmpDir, { recursive: true, force: true });

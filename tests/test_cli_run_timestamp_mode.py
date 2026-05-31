@@ -3,7 +3,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from backend import cli
+from backend.cli.parser import build_parser
+from backend.cli.run import _run_run
 
 
 class RunTimestampModeTests(unittest.TestCase):
@@ -25,7 +26,7 @@ tabs:
             cfg_path = Path(td) / "embed-log.yml"
             cfg_path.write_text(cfg_text, encoding="utf-8")
 
-            parser = cli._build_parser()
+            parser = build_parser()
             args = parser.parse_args([
                 "run",
                 "--config",
@@ -34,8 +35,8 @@ tabs:
                 "relative",
             ])
 
-            with patch("backend.cli.run_app", return_value=0) as run_app:
-                rc = cli._run_run(args)
+            with patch("backend.cli.run.run_app", return_value=0) as run_app:
+                rc = _run_run(args)
 
         self.assertEqual(rc, 0)
         self.assertEqual("relative", run_app.call_args.kwargs["timestamp_mode"])

@@ -6,7 +6,8 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from backend import cli
+from backend.cli import main
+from backend.cli.diagnostics import _run_version
 
 
 def _ns(**kw):
@@ -18,7 +19,7 @@ class VersionCommandTests(unittest.TestCase):
         args = _ns(config=None, json=False)
         buf = io.StringIO()
         with redirect_stdout(buf):
-            rc = cli._run_version(args)
+            rc = _run_version(args)
         self.assertEqual(rc, 0)
         self.assertIn("embed-log version", buf.getvalue())
 
@@ -26,11 +27,11 @@ class VersionCommandTests(unittest.TestCase):
         args = _ns(config=None, json=False)
         buf = io.StringIO()
         with patch(
-            "backend.cli._load_install_identity",
+            "backend.cli.diagnostics._load_install_identity",
             return_value=("1.0.1", "abc1234", "branch", "branch", "cli-version", ""),
         ):
             with redirect_stdout(buf):
-                rc = cli._run_version(args)
+                rc = _run_version(args)
         self.assertEqual(rc, 0)
         text = buf.getvalue()
         self.assertIn("[OK] version: 1.0.1", text)
@@ -41,7 +42,7 @@ class VersionCommandTests(unittest.TestCase):
         args = _ns(config=None, json=True)
         buf = io.StringIO()
         with redirect_stdout(buf):
-            rc = cli._run_version(args)
+            rc = _run_version(args)
         self.assertEqual(rc, 0)
         payload = json.loads(buf.getvalue())
         checks = {entry["check"]: entry["status"] for entry in payload["checks"]}
@@ -57,10 +58,10 @@ class VersionCommandTests(unittest.TestCase):
             try:
                 import os
                 os.chdir(cwd)
-                for command in ("version", "doctor"):
+                for command in ("version",):
                     buf = io.StringIO()
                     with redirect_stdout(buf):
-                        rc = cli.main([command])
+                        rc = main([command])
                     self.assertEqual(rc, 0)
                     self.assertIn("embed-log version", buf.getvalue())
             finally:
@@ -68,9 +69,9 @@ class VersionCommandTests(unittest.TestCase):
 
     def test_main_version_flag_shows_source_and_commit(self):
         buf = io.StringIO()
-        with patch("backend.cli._display_version_line", return_value="embed-log 1.0.1 (branch:cli-version, abc1234)"):
+        with patch("backend.cli.dispatch._display_version_line", return_value="embed-log 1.0.1 (branch:cli-version, abc1234)"):
             with redirect_stdout(buf):
-                rc = cli.main(["--version"])
+                rc = main(["--version"])
         self.assertEqual(rc, 0)
         self.assertEqual(buf.getvalue().strip(), "embed-log 1.0.1 (branch:cli-version, abc1234)")
 

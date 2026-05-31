@@ -5,12 +5,13 @@ This client is intentionally focused on TX only. For marker/log injection and
 stream subscription use backend.log_client.LogClient.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import socket
 import threading
 import time
-from typing import Optional
 
 
 class TxClient:
@@ -29,7 +30,7 @@ class TxClient:
         self._source = source
         self._auto_reconnect = auto_reconnect
         self._connect_timeout = connect_timeout
-        self._sock: Optional[socket.socket] = None
+        self._sock: socket.socket | None = None
         self._lock = threading.Lock()
 
     def __enter__(self) -> "TxClient":
@@ -100,7 +101,7 @@ class TxClient:
                 else:
                     raise
 
-    def send(self, data: str | bytes, *, source: Optional[str] = None) -> None:
+    def send(self, data: str | bytes, *, source: str | None = None) -> None:
         """Send raw bytes or text to serial TX."""
         if isinstance(data, bytes):
             data = data.decode("utf-8", errors="replace")
@@ -113,6 +114,6 @@ class TxClient:
             self._send_locked(payload)
 
     def sendline(self, text: str, *, eol: str = "\r\n",
-                 source: Optional[str] = None) -> None:
+                 source: str | None = None) -> None:
         """Send one line to serial TX."""
         self.send(text + eol, source=source)

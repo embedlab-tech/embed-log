@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Optional
 
 import serial
 
@@ -13,7 +12,7 @@ class RawUartSource(RawLogSource):
     def __init__(self, port: str, baudrate: int = 115200):
         self.port = port
         self.baudrate = baudrate
-        self._ser: Optional[serial.SerialBase] = None
+        self._ser: serial.SerialBase | None = None
         self._ser_lock = threading.Lock()
 
     @property

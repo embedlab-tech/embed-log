@@ -22,7 +22,7 @@ On macOS this is typically one step. On Linux, if `pipx` is not already installe
 curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.sh | bash
 ```
 
-**Windows (PowerShell):**
+**Windows (PowerShell 7+):**
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.ps1'))
@@ -123,7 +123,7 @@ macOS / Linux:
 curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/uninstall.sh | bash
 ```
 
-Windows (PowerShell):
+Windows (PowerShell 7+):
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/krezolekcoder/embed-log/main/uninstall.ps1'))

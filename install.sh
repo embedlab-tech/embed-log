@@ -4,10 +4,17 @@
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.sh | bash
-#   ./install.sh
+#   ./install.sh                          install latest release
+#   ./install.sh --main                   install latest commit from main branch
+#   ./install.sh --develop                install latest commit from develop branch
 #
 # Installs embed-log globally via pipx.  Requires Python >= 3.10.
 # Works on macOS, Linux, and (via WSL/Git-Bash) Windows.
+#
+# Environment overrides (take precedence over CLI args):
+#   EMBED_LOG_REF_TYPE  release|branch|tag|commit  (default: release)
+#   EMBED_LOG_REF       ref value                   (default: latest)
+#   EMBED_LOG_REPO      fork/other repo             (default: krezolekcoder/embed-log)
 
 set -euo pipefail
 
@@ -17,14 +24,25 @@ set -euo pipefail
 
 INSTALL_TMPDIR=""
 REPO="krezolekcoder/embed-log"
-BRANCH="main"
 REPO_URL="https://github.com/${REPO}.git"
 MIN_PY="3.10"
-INSTALL_REF_TYPE="${EMBED_LOG_REF_TYPE:-branch}"
-INSTALL_REF="${EMBED_LOG_REF:-$BRANCH}"
+INSTALL_REF_TYPE="${EMBED_LOG_REF_TYPE:-release}"
+INSTALL_REF="${EMBED_LOG_REF:-latest}"
 OVERRIDE_REPO="${EMBED_LOG_REPO:-$REPO}"
 OVERRIDE_REPO_URL="${EMBED_LOG_REPO_URL:-https://github.com/${OVERRIDE_REPO}.git}"
+
 INSTALLER_VERSION="1.0.0"
+# If a --<branch> argument is passed, treat it as a branch install.
+# Environment variables take precedence, so only parse if they're unset.
+if [ $# -ge 1 ] && [ -z "${EMBED_LOG_REF_TYPE+x}" ] && [ -z "${EMBED_LOG_REF+x}" ]; then
+  case "$1" in
+    --*)
+      INSTALL_REF_TYPE="branch"
+      INSTALL_REF="${1#--}"
+      shift
+      ;;
+  esac
+fi
 
 # ─────────────────────────────────────────────────────────────────
 # Helpers
@@ -305,27 +323,6 @@ if [ -n "$INSTALL_TMPDIR" ] && [ -d "$INSTALL_TMPDIR" ]; then
   rm -rf "$INSTALL_TMPDIR"
 fi
 
-# ── Optional: install JetBrains Mono font for the best UI appearance ──
-case "$(uname -s)" in
-    Darwin)
-        if have_cmd brew && ! ls ~/Library/Fonts/JetBrains* /Library/Fonts/JetBrains* >/dev/null 2>&1; then
-            print_info "Installing JetBrains Mono font (optional)..."
-            brew tap homebrew/cask-fonts 2>/dev/null || true
-            if brew install --cask font-jetbrains-mono 2>/dev/null; then
-                print_ok "JetBrains Mono font installed."
-            else
-                print_warn "JetBrains Mono not installed (cask-fonts tap may be unavailable)."
-            fi
-        fi
-        ;;
-    Linux)
-        if ! fc-list 2>/dev/null | grep -qi "JetBrains Mono"; then
-            print_info "JetBrains Mono font not found."
-            echo "  For the best UI appearance, download from: https://www.jetbrains.com/lp/mono/"
-        fi
-        ;;
-esac
-
 # ─────────────────────────────────────────────────────────────────
 # Done
 # ─────────────────────────────────────────────────────────────────
@@ -339,7 +336,7 @@ echo "    embed-log --help"
 echo ""
 echo "  Quick start:"
 echo ""
-echo "    embed-log init"
+echo "    embed-log create-config"
 echo "    embed-log run --config embed-log.yml"
 echo ""
 echo "  If the command is not found, open a new terminal (PATH refresh)."

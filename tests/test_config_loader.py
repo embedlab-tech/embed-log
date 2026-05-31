@@ -2,7 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from backend.config import ConfigError, load_config
+from backend.config import AppConfig, ConfigError, load_config
+
 
 
 class ConfigLoaderTests(unittest.TestCase):
@@ -41,22 +42,23 @@ tabs:
             p.write_text(cfg_text, encoding="utf-8")
             cfg = load_config(p)
 
-        self.assertEqual(cfg["host"], "127.0.0.1")
-        self.assertEqual(cfg["ws_port"], 8080)
-        self.assertEqual(cfg["app_name"], "demo")
-        self.assertTrue(cfg["open_browser"])
-        self.assertEqual(cfg["verbosity"], "events")
-        self.assertEqual(cfg["timestamp_mode"], "relative")
-        self.assertEqual(cfg["job_id"], "CI-42")
-        self.assertEqual(cfg["queue_size"], 32768)
-        self.assertEqual(cfg["log_dir"], "logs/")
-        self.assertEqual(len(cfg["sources"]), 2)
-        self.assertEqual(len(cfg["injects"]), 1)
-        self.assertEqual(len(cfg["forwards"]), 2)
-        self.assertEqual(len(cfg["tabs"]), 1)
-        self.assertEqual(cfg["source_labels"], {"UART_A": "READER", "UDP_A": "CONTROLLER"})
-        self.assertEqual(cfg["sources"][0]["parser"], {"type": "text"})
-        self.assertEqual(cfg["sources"][1]["parser"], {"type": "text"})
+        self.assertIsInstance(cfg, AppConfig)
+        self.assertEqual(cfg.server.host, "127.0.0.1")
+        self.assertEqual(cfg.server.ws_port, 8080)
+        self.assertEqual(cfg.server.app_name, "demo")
+        self.assertTrue(cfg.server.open_browser)
+        self.assertEqual(cfg.server.verbosity, "events")
+        self.assertEqual(cfg.server.timestamp_mode, "relative")
+        self.assertEqual(cfg.server.job_id, "CI-42")
+        self.assertEqual(cfg.server.queue_size, 32768)
+        self.assertEqual(cfg.logs.dir, "logs/")
+        self.assertEqual(len(cfg.sources), 2)
+        self.assertEqual(len(cfg.injects), 1)
+        self.assertEqual(len(cfg.forwards), 2)
+        self.assertEqual(len(cfg.tabs), 1)
+        self.assertEqual(cfg.source_labels, {"UART_A": "READER", "UDP_A": "CONTROLLER"})
+        self.assertEqual(cfg.sources[0].parser.type, "text")
+        self.assertEqual(cfg.sources[1].parser.type, "text")
 
     def test_invalid_verbosity_fails(self):
         cfg_text = """
@@ -122,7 +124,7 @@ sources:
             p.write_text(cfg_text, encoding="utf-8")
             cfg = load_config(p)
 
-        self.assertEqual(cfg["sources"][0]["parser"], {"type": "text"})
+        self.assertEqual(cfg.sources[0].parser.type, "text")
 
     def test_unsupported_parser_type_fails(self):
         cfg_text = """
@@ -155,7 +157,7 @@ sources:
             p.write_text(cfg_text, encoding="utf-8")
             cfg = load_config(p)
 
-        self.assertEqual(cfg["sources"][0]["parser"], {"type": "cbor-datagram"})
+        self.assertEqual(cfg.sources[0].parser.type, "cbor-datagram")
 
     def test_cbor_datagram_parser_rejected_on_uart(self):
         """cbor-datagram is only valid for UDP (datagram-oriented)."""

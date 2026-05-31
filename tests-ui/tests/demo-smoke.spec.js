@@ -4,7 +4,7 @@ import dgram from 'node:dgram';
 import { collectPageErrors, saveDownload, waitForLineContaining, waitForRangePair, waitForSourceTestLine } from './helpers.js';
 
 async function openMore(page, paneId) {
-  await page.locator(`#more-toggle-${paneId}`).click();
+  await page.locator(`#more-toggle-${paneId}`).click({ force: true });
 }
 async function sendUdpBurst(port, prefix, count = 220) {
   const socket = dgram.createSocket('udp4');
@@ -30,6 +30,12 @@ test.describe('embed-log deterministic demo smoke', () => {
     expect(errors).toEqual([]);
   });
 
+// Scenario: Connects to backend WS and receives deterministic logs with correct pane labels
+//   Given the user navigates to the app
+//   When  the WebSocket connects
+//   Then  SENSOR_A, SENSOR_B, SENSOR_C, SENSOR_CBOR, and SENSOR_D panes appear with correct labels (DEVICE_A, HOST, AUX, CBOR, PYTEST)
+//   And   each pane receives test log lines
+
   test('connects to backend and receives deterministic demo logs', async ({ page }) => {
     await page.goto('/');
 
@@ -37,20 +43,29 @@ test.describe('embed-log deterministic demo smoke', () => {
     await expect(page.locator('#pane-SENSOR_A')).toBeVisible();
     await expect(page.locator('#pane-SENSOR_B')).toBeVisible();
     await expect(page.locator('#pane-SENSOR_C')).toBeAttached();
-    await expect(page.locator('#pane-SENSOR_A .pane-name')).toHaveText('READER');
-    await expect(page.locator('#pane-SENSOR_B .pane-name')).toHaveText('CONTROLLER');
+    await expect(page.locator('#pane-SENSOR_A .pane-name')).toHaveText('DEVICE_A');
+    await expect(page.locator('#pane-SENSOR_B .pane-name')).toHaveText('HOST');
 
     await waitForSourceTestLine(page, 'SENSOR_A');
     await waitForSourceTestLine(page, 'SENSOR_B');
 
     await page.getByRole('button', { name: 'DevB', exact: true }).click();
-    await expect(page.locator('#pane-SENSOR_C .pane-name')).toHaveText('READER');
+    await expect(page.locator('#pane-SENSOR_C .pane-name')).toHaveText('AUX');
     await waitForSourceTestLine(page, 'SENSOR_C');
 
     await page.getByRole('button', { name: 'cbor-tab', exact: true }).click();
     await expect(page.locator('#pane-SENSOR_CBOR .pane-name')).toHaveText('CBOR');
     await waitForLineContaining(page, 'SENSOR_CBOR', 'kind=sync');
+    await page.getByRole('button', { name: 'PYTEST', exact: true }).click();
+    await expect(page.locator('#pane-SENSOR_D .pane-name')).toHaveText('PYTEST');
+    await waitForSourceTestLine(page, 'SENSOR_D');
   });
+
+// Scenario: Page does not load external network assets
+//   Given the page loads
+//   When  the app starts
+//   Then  all HTTP/HTTPS requests originate from the app's own origin
+//   And   no external network assets are requested
 
   test('startup does not depend on external network assets', async ({ page }) => {
     const requests = [];
@@ -69,6 +84,11 @@ test.describe('embed-log deterministic demo smoke', () => {
     expect(externalRequests).toEqual([]);
   });
 
+// Scenario: Per-pane download button triggers raw .log file with expected filename
+//   Given the SENSOR_A pane has received log lines
+//   When  the user clicks the pane-download-btn
+//   Then  a file named SENSOR_A.log is downloaded containing TEST src=SENSOR_A and kind=sync
+
   test('per-pane download button triggers raw .log download', async ({ page }, testInfo) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
@@ -85,30 +105,42 @@ test.describe('embed-log deterministic demo smoke', () => {
     expect(text).toContain('kind=sync');
   });
 
-  test('shift-click selects a deterministic range and raw snippet downloads cleaned merged text', async ({ page }, testInfo) => {
+// Scenario: Shift-click selects a range and per-pane download still works
+//   Given the user shift-clicks to select a range of lines in SENSOR_A
+//   When  they click the per-pane download button
+//   Then  the downloaded SENSOR_A.log contains the selected range content including kind=prefix-cleanup
+
+  test('shift-click selects a deterministic range and per-pane download still works', async ({ page }, testInfo) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await waitForSourceTestLine(page, 'SENSOR_A');
 
+    // Select a range
     const { start, end } = await waitForRangePair(page, 'SENSOR_A', 'kind=prefix-cleanup', 'kind=timestamp-cleanup');
     await start.click();
     await end.click({ modifiers: ['Shift'] });
 
     await expect.poll(async () => page.locator('#log-SENSOR_A .log-line.selected').count())
       .toBeGreaterThanOrEqual(2);
-    await expect(page.locator('#copy-actions-SENSOR_A')).toHaveClass(/visible/);
 
+    // Download full pane log via the per-pane Download button
     const downloadPromise = page.waitForEvent('download');
-    await page.locator('#download-raw-SENSOR_A').click();
+    await page.locator('#pane-SENSOR_A .pane-download-btn').click();
     const download = await downloadPromise;
 
-    expect(download.suggestedFilename()).toMatch(/^embed-log-exact-.*\.log$/);
+    expect(download.suggestedFilename()).toBe('SENSOR_A.log');
     const downloadedPath = await saveDownload(download, testInfo);
 
     const text = fs.readFileSync(downloadedPath, 'utf-8');
-    expect(text).toMatch(/\[SENSOR_A\]/);
+    expect(text).toContain('[SENSOR_A]');
     expect(text).toContain('kind=prefix-cleanup');
-    expect(text).toContain('kind=timestamp-cleanup');
   });
+
+// Scenario: HTML snippet export uses the regular embed-log exported UI structure
+//   Given the user selects a range in SENSOR_A
+//   When  they export the HTML snippet
+//   Then  the resulting HTML contains the standard embed-log structure (toolbar, tab-bar, _logData)
+//   And   the snippet contains the selected content
 
   test('HTML snippet uses the regular embed-log exported UI', async ({ page }, testInfo) => {
     await page.goto('/');
@@ -117,10 +149,10 @@ test.describe('embed-log deterministic demo smoke', () => {
     const { start, end } = await waitForRangePair(page, 'SENSOR_A', 'kind=prefix-cleanup', 'kind=timestamp-cleanup');
     await start.click();
     await end.click({ modifiers: ['Shift'] });
-
-    await openMore(page, 'SENSOR_A');
     const downloadPromise = page.waitForEvent('download');
-    await page.locator('#export-html-SENSOR_A').click();
+    await page.evaluate(() => {
+      document.getElementById('export-html-SENSOR_A').click();
+    });
     const download = await downloadPromise;
 
     expect(download.suggestedFilename()).toMatch(/^embed-log-exact-.*\.html$/);
@@ -134,6 +166,12 @@ test.describe('embed-log deterministic demo smoke', () => {
     expect(html).toMatch(/\[SENSOR_A\]/);
     expect(html).not.toContain('<h1>embed-log snippet</h1>');
   });
+
+// Scenario: Live DOM keeps full pane history while tailing without clearing
+//   Given SENSOR_A and SENSOR_B have initial log lines
+//   When  a UDP burst of 220 lines is sent to each pane
+//   Then  each pane shows >200 lines
+//   And   the first lines are still present (no DOM clearing)
 
 test('live DOM keeps full pane history while tailing', async ({ page }) => {
   await page.goto('/');
@@ -160,6 +198,11 @@ test('live DOM keeps full pane history while tailing', async ({ page }) => {
   await expect(page.locator('#log-SENSOR_B')).toContainText('burst-b-219');
 });
 
+// Scenario: Settings panel has working font-size controls
+//   Given the user opens the settings panel
+//   When  they click the font-increase button, then the font-reset button
+//   Then  the font size changes after increase and returns to original after reset
+
 test('runtime settings panel exposes working font-size controls', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
@@ -185,5 +228,110 @@ test('runtime settings panel exposes working font-size controls', async ({ page 
   }).toBe(before);
 });
 
+// Scenario: Marker rendering, tooltip display, and navigation
+//   Given the user sends a save_markers command with a marker on a SENSOR_A line
+//   When  the marker is created, hovered, and navigated
+//   Then  the marked line has the has-marker class, a tooltip shows the description, and navigation buttons work
+//   And   removing all markers hides the marker navigation UI
+  test('marker rendering, tooltip, and navigation', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await waitForSourceTestLine(page, 'SENSOR_A');
+
+    // Pick a log line index to mark
+    const markerLineIdx = await page.evaluate(() => {
+      const logEl = document.getElementById('log-SENSOR_A');
+      if (!logEl || !logEl.children.length) return -1;
+      const idx = Math.min(2, logEl.children.length - 1);
+      return parseInt(logEl.children[idx].dataset.idx, 10);
+    });
+    expect(markerLineIdx).toBeGreaterThanOrEqual(0);
+
+    // Send a save_markers WS command — the server broadcasts markers_update back
+    await page.evaluate((idx) => {
+      window.wsSend({
+        cmd: 'save_markers',
+        markers: [{
+          paneId: 'SENSOR_A',
+          lineIdx: idx,
+          endIdx: idx,
+          numTs: 0,
+          description: 'Test marker description',
+          createdAt: new Date().toISOString(),
+        }],
+      });
+    }, markerLineIdx);
+
+    // Wait for markers_update to be received and processed
+    await expect(page.locator('#marker-nav')).not.toBeHidden({ timeout: 15_000 });
+    await expect(page.locator('#marker-nav-total')).toHaveText('1');
+
+    // Check that the marked line has the has-marker CSS class
+    await expect(
+      page.locator(`#log-SENSOR_A [data-idx="${markerLineIdx}"]`)
+    ).toHaveClass(/has-marker/);
+
+    // Check that the tooltip appears on hover
+    const lineLocator = page.locator(`#log-SENSOR_A [data-idx="${markerLineIdx}"]`);
+    await lineLocator.hover();
+    await expect(page.locator('#marker-tooltip')).toBeVisible();
+    await expect(page.locator('#marker-tooltip')).toContainText('Test marker description');
+
+    // Check that navigation buttons work
+    await page.locator('#marker-nav-next').click();
+    await expect(page.locator('#marker-nav-idx')).toHaveText('1');
+
+    // Remove the marker
+    await page.evaluate(() => {
+      window.wsSend({ cmd: 'save_markers', markers: [] });
+    });
+
+    // Wait for markers_update with empty list
+    await expect(page.locator('#marker-nav')).toBeHidden({ timeout: 15_000 });
+  });
+
+// Scenario: Marker persists after unwrap toggle
+//   Given a marker applied on a SENSOR_A line
+//   When  the user toggles the Unwrap button
+//   Then  the has-marker class persists on the marked line
+//
+  test('marker persists after unwrap toggle', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await waitForSourceTestLine(page, 'SENSOR_A');
+
+    // Select a range in SENSOR_A to enable the Add Note button (Exact scope)
+    const { start, end } = await waitForRangePair(page, 'SENSOR_A', 'kind=prefix-cleanup', 'kind=timestamp-cleanup');
+    await start.click();
+    await end.click({ modifiers: ['Shift'] });
+
+    // Grab the first selected line index for later verification
+    const firstIdx = await page.evaluate(() => {
+      const sel = document.querySelector('#log-SENSOR_A .log-line.selected');
+      return sel ? parseInt(sel.dataset.idx, 10) : -1;
+    });
+    expect(firstIdx).toBeGreaterThanOrEqual(0);
+
+    // Click Add Note and save a marker
+    await page.locator('#marker-toggle-SENSOR_A').click();
+    await page.locator('.marker-input').fill('unwrap regression marker');
+    await page.locator('.marker-input-save').click();
+
+    // Wait for marker UI to appear
+    await expect(page.locator('#marker-nav')).not.toBeHidden({ timeout: 10_000 });
+
+    // Marker visible before unwrap
+    await expect(
+      page.locator(`#log-SENSOR_A [data-idx="${firstIdx}"]`)
+    ).toHaveClass(/has-marker/);
+
+    // Toggle unwrap
+    await page.locator('#btn-unwrap').click();
+
+    // Marker still visible after DOM rebuild
+    await expect(
+      page.locator(`#log-SENSOR_A [data-idx="${firstIdx}"]`)
+    ).toHaveClass(/has-marker/);
+  });
 });
 

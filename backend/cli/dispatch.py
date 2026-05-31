@@ -1,0 +1,103 @@
+"""Main CLI entry point dispatcher for embed-log."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+from .parser import build_parser
+
+from .sessions import _run_sessions
+from .skill import _run_skill
+from .diagnostics import _display_version_line, _run_ports, _run_version
+from .run import _run_merge, _run_run
+from .demo import _run_demo
+from .sample_config import _run_sample_config
+from ..file_tail_udp import run_tail_file
+from ..parse import run_parse
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Parse CLI arguments and dispatch to the appropriate handler."""
+    argv = list(sys.argv[1:] if argv is None else argv)
+
+    # ── No arguments → show guided message ──
+    if not argv:
+        cfg_path = Path("embed-log.yml")
+        if cfg_path.exists():
+            print("Config found: embed-log.yml")
+            print("")
+            print("  embed-log run --config embed-log.yml")
+            print("")
+            print("  embed-log --help             all options")
+        else:
+            print("embed-log — collect UART/UDP logs with a browser UI")
+            print("")
+            print("Quick start:")
+            print("")
+            print(
+                "  embed-log run --config embed-log.yml    (if you already have a config)"
+            )
+            print("")
+            print("")
+            print("  embed-log --help                        all options")
+            print("")
+            print("Development (run from source):")
+            print("  python3 -m backend.server <command>")
+        return 0
+
+    # ── skill uses its own internal sub-sub-parsers ──
+    if argv[0] == "skill":
+        return _run_skill(argv[1:])
+
+    # ── sessions uses its own internal sub-sub-parsers ──
+    if argv[0] == "sessions":
+        return _run_sessions(argv[1:])
+    # ── Version requested ──
+    if argv[0] in {"--version", "-V"}:
+        print(_display_version_line())
+        return 0
+
+    # ── Help requested ──
+    if argv[0] in {"-h", "--help"}:
+        parser = build_parser()
+        parser.print_help()
+        return 0
+
+    # ── Backward compat: bare flags → run subcommand ──
+    if argv[0].startswith("-"):
+        # Bare flags → run subcommand
+        parser = build_parser()
+        run_argv = ["run"] + argv
+        args = parser.parse_args(run_argv)
+        return _run_run(args)
+
+    # ── Parse with subparser tree ──
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    # Dispatch based on parsed subcommand
+    match args.command:
+        case "run":
+            return _run_run(args)
+        case "demo":
+            return _run_demo(args)
+        case "sample-config":
+            return _run_sample_config(args)
+        case "merge":
+            return _run_merge(args)
+        case "parse":
+            return run_parse(argv[1:])  # keep old parse signature
+        case "tail-file":
+            return run_tail_file(args)
+        case "version":
+            return _run_version(args)
+        case "ports":
+            return _run_ports(args)
+        case "sessions":
+            return _run_sessions(argv[1:])
+        case "skill":
+            return _run_skill(argv[1:])
+        case _:
+            parser.print_help()
+            return 0

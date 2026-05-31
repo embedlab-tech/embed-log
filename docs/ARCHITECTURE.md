@@ -7,7 +7,8 @@ This is the shortest accurate end-to-end description of how `embed-log` works to
 `embed-log` is a backend-first system.
 
 The backend owns:
-- source ingestion,
+- source ingestion (UART, UDP, TCP inject),
+- configurable stream parsing (text, CBOR datagram),
 - log timestamping and persistence,
 - session lifecycle,
 - UI layout definition,
@@ -19,10 +20,16 @@ The frontend is a thin browser client that renders what the backend describes.
 ## End-to-end flow
 
 ```text
-UART / UDP sources
+UART / UDP / TCP-inject sources
         |
         v
 backend/sources/*
+  raw_uart.py / raw_udp.py         byte-stream or datagram transport
+  parsed.py                        wraps raw source + StreamParser
+        |
+        v
+backend/parsers/*
+  text.py / cbor_datagram.py       decode bytes → str lines
         |
         v
 backend/core/runtime.py
@@ -38,6 +45,8 @@ logs/<session_id>/*         backend/net/ws_server.py
   - source logs              - GET /
   - manifest.json            - GET /api/session/current
   - session.html             - GET /api/sessions
+                             - GET /api/health
+                             - GET /api/stats
                              - GET /sessions/<id>/<file>
                              - WS /ws
                                       |
@@ -52,25 +61,38 @@ logs/<session_id>/*         backend/net/ws_server.py
 
 ### 1. Sources
 
-- `backend/sources/uart.py`
-- `backend/sources/udp.py`
+- `backend/sources/uart.py` / `backend/sources/udp.py` — convenience wrappers.
+- `backend/sources/raw_uart.py` / `backend/sources/raw_udp.py` — byte-stream / datagram transport.
+- `backend/sources/parsed.py` — adapter that wraps a raw source + parser into a `LogSource`.
+- `backend/sources/base.py` / `raw_base.py` — ABCs for `LogSource` and `RawLogSource`.
 
-They read incoming data and feed runtime-managed flow.
+They read incoming data and feed it through parsers into the runtime-managed flow.
 
-### 2. Runtime
+### 2. Parsers
+
+- `backend/parsers/text.py` — default newline-delimited UTF-8 decoder.
+- `backend/parsers/cbor_datagram.py` — CBOR map → key=value text (UDP only).
+- `backend/parsers/factory.py` — `create_parser()` dispatches by config type.
+
+### 3. Runtime
 
 - `backend/core/runtime.py`
 
-This is the operational center.
-
-It coordinates:
+This is the operational center. It coordinates:
 - `SourceManager` instances,
 - session creation and rotation,
 - manifest updates,
 - backend `session.html` export,
 - live WebSocket broadcasting.
 
-### 3. Session artifacts
+Supporting modules:
+- `backend/core/queue.py` — `TrackedQueue` (bounded queue with saturation tracking).
+- `backend/core/clock.py` — `SessionClock` (absolute / relative timestamp modes).
+- `backend/core/models.py` — `LogEntry`, `QueueStats` dataclasses.
+- `backend/core/naming.py` — `slugify()`.
+- `backend/core/ansi.py` — ANSI color codes.
+
+### 4. Session artifacts
 
 - `backend/session/manager.py`
 - `backend/session/exporter.py`
@@ -78,19 +100,37 @@ It coordinates:
 Each session directory contains:
 - raw source log files,
 - `manifest.json`,
-- `session.html`.
+- `session.html`,
+- `markers.json` (if any),
+- `snippets/` (if any).
 
-### 4. HTTP + WebSocket server
+### 5. HTTP + WebSocket server
 
 - `backend/net/ws_server.py`
 
 Serves:
 - browser assets,
 - session APIs,
+- health/stats endpoints,
 - session artifact files,
 - `/ws` live stream.
 
-### 5. Frontend
+### 6. CLI package
+
+- `backend/cli/` — package replacing the old monolithic `cli.py`.
+
+Dispatch:
+- `dispatch.py` — `main()` dispatcher, match/case routing.
+- `parser.py` — argparse construction for all subcommands.
+- `run.py` — `run` / `validate` / `merge`.
+- `wizard.py` — `create-config` interactive wizard.
+- `diagnostics.py` — `version` / `doctor` / `ports`.
+- `update.py` — self-update logic.
+- `skill.py` — built-in skill system.
+- `demo.py` — demo utility commands.
+- `sessions/` — subpackage for all `sessions` subcommands.
+
+### 7. Frontend
 
 - `frontend/*`
 
@@ -99,7 +139,8 @@ Plain JS modules, no build step.
 The frontend:
 - builds tabs/panes from backend `config`,
 - renders live logs,
-- manages filters, selection, export/import, cache, sessions UI.
+- manages filters, selection, export/import, cache, sessions UI,
+- supports themes, font size, pane wrapping/unwrapping, and pane swap persistence.
 
 ## Session lifecycle
 
@@ -110,10 +151,11 @@ On startup the backend creates a session directory and session metadata.
 ### Live operation
 
 Incoming lines are:
-1. timestamped,
-2. written to session logs,
-3. sent to WebSocket clients,
-4. available for later export.
+1. parsed (text decode or CBOR),
+2. timestamped,
+3. written to session logs,
+4. sent to WebSocket clients,
+5. available for later export.
 
 ### Save HTML
 
@@ -146,8 +188,10 @@ Layout is config-driven.
 - Exported HTML reuses the same logical tab/pane model.
 
 Current deterministic demo layout:
-- `DevA` → `SENSOR_A`, `SENSOR_B`
-- `DevB` → `SENSOR_C`
+- `DevA` → `DEVICE_A` (DUT), `HOST` (test controller)
+- `DevB` → `AUX`
+- `PYTEST` → `PYTEST`
+- `cbor-tab` → `CBOR` (structured diagnostics)
 
 ## Important invariants
 
@@ -168,6 +212,10 @@ Current deterministic demo layout:
   - config loader,
   - websocket config payload,
   - `frontend/state.js`, `tabcreate.js`, `tabs.js`
+- Parser changes touch:
+  - `backend/parsers/*`
+  - `backend/sources/parsed.py`
+  - backend config loader
 - UI export/replay work touches:
   - `frontend/export.js`
   - `backend/session/exporter.py`

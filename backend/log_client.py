@@ -39,13 +39,15 @@ Robot Framework usage
     Library    log_client.LogClient    127.0.0.1    5001    source=robot
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import select
 import socket
 import threading
 import time
-from typing import Callable, Optional
+from typing import Callable
 
 
 class LogClient:
@@ -81,7 +83,7 @@ class LogClient:
         self._source = source
         self._auto_reconnect = auto_reconnect
         self._connect_timeout = connect_timeout
-        self._sock: Optional[socket.socket] = None
+        self._sock: socket.socket | None = None
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -155,8 +157,8 @@ class LogClient:
         self,
         message: str,
         *,
-        color: Optional[str] = None,
-        source: Optional[str] = None,
+        color: str | None = None,
+        source: str | None = None,
     ) -> None:
         """
         Write a single marker line to the source log.
@@ -263,8 +265,8 @@ class LogClient:
                         entry = json.loads(raw)
                         if "message" in entry:
                             callback(entry)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logging.debug("log client callback error: %s", exc)
 
         t = threading.Thread(target=_reader, daemon=daemon,
                              name="LogClient-subscriber")
