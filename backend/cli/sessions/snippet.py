@@ -73,6 +73,8 @@ def _run_sessions_snippet(log_dir: Path, args) -> int:
                 )
                 return 1
             idx = args.index - 1
+        elif args.last:
+            idx = len(snippets) - 1
         else:
             idx = len(snippets) - 1
 

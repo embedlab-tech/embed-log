@@ -18,7 +18,7 @@ Sessions are directories under `<log-dir>/<session-id>/` containing:
 
 Each session has a full ID (`2026-01-01_00-00-00`) and a short alias (`31f0`). Either form is accepted wherever a `session-id` is required.
 
----
+
 
 ## Common workflows
 
@@ -57,6 +57,33 @@ embed-log sessions delete 31f0 --yes
 embed-log sessions delete --older-than 7d --yes
 ```
 
+### Search workflows
+
+```bash
+# Find a session by app name or job ID
+embed-log sessions list --search build-123
+
+# Find sessions with markers but no HTML export
+embed-log sessions list --with-markers --no-html
+
+# Search one session for an error string
+embed-log sessions logs 31f0 --grep "timeout"
+
+# Filter logs to one pane and one time range
+embed-log sessions logs 31f0 --pane SENSOR_A --after 5m --before 1m
+
+# Regex search within a session
+embed-log sessions logs 31f0 --regex "temp=.*[5-9][0-9]"
+
+# Case-insensitive search with bounded output
+embed-log sessions logs 31f0 --grep "error" --ignore-case --tail 50
+
+# Search markers by description
+embed-log sessions marker list 31f0 --search timeout
+
+# Filter markers by pane
+embed-log sessions marker list 31f0 --pane SENSOR_A
+
 ---
 
 ## Subcommands
@@ -70,6 +97,10 @@ embed-log sessions list
 embed-log sessions list --sort name
 embed-log sessions list --limit 5
 embed-log sessions list --json
+embed-log sessions list --search build-123
+embed-log sessions list --with-markers
+embed-log sessions list --app demo --limit 10
+embed-log sessions list --after 2026-05-01 --before 2026-05-30
 ```
 
 | Flag | Default | Description |
@@ -77,6 +108,13 @@ embed-log sessions list --json
 | `--sort` | `date` | `date` or `name` |
 | `--limit` | — | Max number of sessions to show |
 | `--json` | `false` | Machine-readable JSON output |
+| `--search` | — | Free-text match against session ID, alias, app name, job ID, config path |
+| `--app` | — | Filter by app name |
+| `--with-markers` | `false` | Only sessions that have markers |
+| `--no-html` | `false` | Only sessions without HTML export |
+| `--html-ready` | `false` | Only sessions with ready HTML export |
+| `--after` | — | Only sessions started after this date/ISO time |
+| `--before` | — | Only sessions started before this date/ISO time |
 
 The table includes a `MRK` column showing the marker count.
 
@@ -91,6 +129,7 @@ embed-log sessions info <session-id> --json
 
 Output includes: session ID, alias, app name, start time, job ID, config path, HTML export status, sources with line counts, and tabs.
 
+
 ### logs
 
 Print session log file contents to stdout.
@@ -98,11 +137,24 @@ Print session log file contents to stdout.
 ```
 embed-log sessions logs <session-id>
 embed-log sessions logs <session-id> --pane SENSOR_A
+embed-log sessions logs <session-id> --grep "timeout"
+embed-log sessions logs <session-id> --grep "error" --ignore-case --tail 50
+embed-log sessions logs <session-id> --regex "temp=.*[5-9][0-9]"
+embed-log sessions logs <session-id> --after 5m --before 1m --grep "reset"
+embed-log sessions logs <session-id> --grep "panic" --context 3
 ```
 
 | Flag | Description |
 |---|---|
 | `--pane` | Filter by pane/source name |
+| `--grep` | Search for text in log lines (substring, or regex with `--regex`) |
+| `--regex` | Treat `--grep` as a Python regex |
+| `--ignore-case` | Case-insensitive search |
+| `--tail` | Show only last N matching lines |
+| `--head` | Show only first N matching lines. Mutually exclusive with `--tail` |
+| `--context` | Show N lines of context around matches (requires `--grep`) |
+| `--after` | Only lines after this time (relative: 5m, 2h, 30s or ISO timestamp) |
+| `--before` | Only lines before this time (relative or ISO) |
 
 ### export
 
@@ -177,7 +229,7 @@ embed-log sessions marker show <session-id> 2
 
 | Subcommand | Arguments | Description |
 |---|---|---|
-| `list` | `session-id` | List all markers with index, pane, lines, description |
+| `list` | `session-id` | List markers. Supports `--search TEXT` (filter by description) and `--pane NAME` (filter by pane) |
 | `show` | `session-id`, `marker-index` | Detailed view of one marker (pane, lines, description, timestamp, created-at) |
 
 Marker index is 1-based from the `list` output.
@@ -201,7 +253,6 @@ embed-log sessions snippet delete <session-id> --all
 | `show` | `session-id` `[snippet-id]` | Print snippet content. Omitting `snippet-id` shows the most recent. Use `--index N` for Nth from list, or pass a filename/prefix |
 | `delete` | `session-id` | Delete by `--index N` or `--all` |
 
----
 
 ## Shared flags
 
@@ -210,7 +261,8 @@ All subcommands accept:
 | Flag | Default | Description |
 |---|---|---|
 | `--log-dir` | `logs/` | Path to the log directory tree |
-| `--json` | `false` | Machine-readable JSON output |
+
+The `--json` flag is available on these subcommands only: `list`, `info`, `snippet list`.
 
 ---
 
@@ -219,5 +271,10 @@ All subcommands accept:
 - Session IDs can be shortened to the unique 4-character alias shown in `list` output
 - The `--log-dir` flag must point to the root of the log tree, not to an individual session directory
 - `marker` and `snippet` commands operate on data already written to disk by the server at runtime
-- The `--json` flag works with `list`, `info`, and `export` commands
-- Confirmation (`--yes`) is required for destructive `delete` operations; without it the command prompts interactively
+- `--yes` / `-y` skips the confirmation prompt on `delete`; without it the command prompts interactively before removing anything
+- `--yes` is not required — it only suppresses the prompt
+- `sessions export --missing` only works with `--format html` (not raw)
+- `sessions export --first-log-at` only affects HTML export (ignored in raw mode)
+- `sessions open` requires the session HTML to already exist; run `sessions export <id>` first if it does not
+- `sessions snippet show` defaults to the most recent snippet when no `snippet-id`, `--index`, or `--last` is given
+- `sessions snippet show <filename>` matches by suffix and substring containment; if multiple files match the command fails and lists them

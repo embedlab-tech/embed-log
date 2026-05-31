@@ -20,9 +20,6 @@ def _run_sessions(argv: list[str]) -> int:
     shared.add_argument(
         "--log-dir", default="logs/", help="log directory (default: logs/)"
     )
-    shared.add_argument(
-        "--json", action="store_true", help="machine-readable JSON output"
-    )
 
     parser = argparse.ArgumentParser(
         prog="embed-log sessions",
@@ -49,14 +46,29 @@ def _run_sessions(argv: list[str]) -> int:
     p_list = sub.add_parser("list", parents=[shared], help="list recorded sessions")
     p_list.add_argument("--sort", choices=["date", "name"], default="date")
     p_list.add_argument("--limit", type=int, default=None)
+    p_list.add_argument("--json", action="store_true", help="machine-readable JSON output")
+    p_list.add_argument("--search", default=None, help="free-text search session id, alias, app name, job id, config path")
+    p_list.add_argument("--with-markers", action="store_true", help="only sessions with markers")
+    p_list.add_argument("--no-html", action="store_true", help="only sessions without HTML export")
+    p_list.add_argument("--html-ready", action="store_true", help="only sessions with ready HTML export")
+    p_list.add_argument("--app", default=None, help="filter by app name")
+    p_list.add_argument("--after", default=None, help="only sessions started after this time (ISO or date)")
+    p_list.add_argument("--before", default=None, help="only sessions started before this time (ISO or date)")
 
     p_info = sub.add_parser("info", parents=[shared], help="show session details")
     p_info.add_argument("session_id")
-
+    p_info.add_argument("--json", action="store_true", help="machine-readable JSON output")
     p_logs = sub.add_parser("logs", parents=[shared], help="print session log files")
     p_logs.add_argument("session_id")
     p_logs.add_argument("--pane", default=None, help="filter by pane name")
-
+    p_logs.add_argument("--grep", default=None, help="search for text in log lines (substring or regex)")
+    p_logs.add_argument("--regex", action="store_true", help="treat --grep as a Python regex")
+    p_logs.add_argument("--ignore-case", action="store_true", help="case-insensitive search")
+    p_logs.add_argument("--tail", type=int, default=None, help="show only last N matching lines")
+    p_logs.add_argument("--head", type=int, default=None, help="show only first N matching lines")
+    p_logs.add_argument("--context", type=int, default=None, help="show N lines of context around matches (requires --grep)")
+    p_logs.add_argument("--after", default=None, help="only lines after this time (relative: 5m, 2h, 30s or ISO timestamp)")
+    p_logs.add_argument("--before", default=None, help="only lines before this time (relative or ISO)")
     p_export = sub.add_parser(
         "export",
         parents=[shared],
@@ -180,6 +192,8 @@ def _run_sessions(argv: list[str]) -> int:
         "list", parents=[shared], help="list all markers for a session"
     )
     p_marker_list.add_argument("session_id")
+    p_marker_list.add_argument("--search", default=None, help="filter markers by description text")
+    p_marker_list.add_argument("--pane", default=None, help="filter markers by pane name")
 
     p_marker_show = p_marker_sub.add_parser(
         "show", parents=[shared], help="show a specific marker"
@@ -211,6 +225,7 @@ def _run_sessions(argv: list[str]) -> int:
         "list", parents=[shared], help="list all snippets for a session"
     )
     p_snip_list.add_argument("session_id")
+    p_snip_list.add_argument("--json", action="store_true", help="machine-readable JSON output")
 
     p_snip_show = p_snip_sub.add_parser(
         "show", parents=[shared], help="print snippet content to stdout"

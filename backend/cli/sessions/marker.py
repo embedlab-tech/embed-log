@@ -35,16 +35,38 @@ def _run_sessions_marker(log_dir: Path, args) -> int:
         if not markers:
             print(f"No markers for session {args.session_id}")
             return 0
+
+        # Apply filters
+        filtered = markers
+        if getattr(args, 'pane', None):
+            filtered = [m for m in filtered if m.get("paneId") == args.pane]
+        if getattr(args, 'search', None):
+            q = args.search.lower()
+            filtered = [m for m in filtered if q in (m.get("description") or "").lower()]
+
+        if not filtered:
+            print(f"No matching markers for session {args.session_id}")
+            return 0
+
+        show = markers
+        marker_count = len(markers)
+        if len(filtered) != marker_count:
+            show = filtered
+
         print(f"Session: {data.get('session_id', args.session_id)}")
-        print(f"Markers: {len(markers)}")
+
+        label = f"Markers: {len(show)} (filtered from {marker_count})" if len(show) != marker_count else f"Markers: {marker_count}"
+        print(label)
         print()
-        for i, m in enumerate(markers, 1):
+        for m in show:
+            # Use original index (1-based) so marker show N works for filtered results
+            orig_idx = markers.index(m) + 1
             start = m.get("lineIdx", "?")
             end = m.get("endIdx", start)
             desc = m.get("description", "")
             pane = m.get("paneId", "?")
             line_range = f"line {start}" if start == end else f"lines {start}-{end}"
-            print(f"  {i}. [{pane}] {line_range}")
+            print(f"  {orig_idx}. [{pane}] {line_range}")
             print(f"     {desc}")
             ts = m.get("numTs")
             if ts is not None:

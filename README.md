@@ -215,10 +215,16 @@ embed-log update --branch main  # specific branch
 
 ```bash
 embed-log sessions list
-embed-log sessions list --json
+embed-log sessions list --search build-123
+embed-log sessions list --with-markers --app demo
 embed-log sessions info <session-id>
+embed-log sessions logs <session-id> --grep "timeout"
+embed-log sessions logs <session-id> --pane SENSOR_A --grep "error" --tail 20
 embed-log sessions export <session-id>
+embed-log sessions marker list <session-id> --search boot
 ```
+
+Full documentation with all flags and examples is at `docs/SESSIONS_CLI_SKILL.md`.
 
 
 ## Testing
