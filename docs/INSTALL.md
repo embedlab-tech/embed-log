@@ -31,8 +31,9 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; iex ((New-Object Sys
 After install:
 
 ```bash
-embed-log create-config
+embed-log sample-config
 embed-log run --config embed-log.yml
+embed-log demo --no-open-browser
 ```
 
 The default UI is at `http://127.0.0.1:8080/`.
@@ -79,23 +80,22 @@ pip install -e .
 ```
 
 Then use:
-
 ```bash
-embed-log create-config
+embed-log sample-config
 embed-log validate --config embed-log.yml
 embed-log run --config embed-log.yml
+embed-log demo --no-open-browser
 ```
 
 If `embed-log` is not on your PATH in the venv, use:
-
 ```bash
-python3 -m backend.server create-config
+python3 -m backend.server sample-config
 python3 -m backend.server validate --config embed-log.yml
 python3 -m backend.server run --config embed-log.yml
+python3 -m backend.server demo --no-open-browser
 ```
 
-Run the bundled demo:
-
+For deterministic or random demo traffic from a repo checkout:
 ```bash
 ./run_demo.sh
 # optional: avoid auto-opening browser

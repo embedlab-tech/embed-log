@@ -24,6 +24,9 @@ packages = ["backend"]
 "frontend" = "frontend"
 "utils" = "utils"
 "backend/skills" = "backend/skills"
+"config-samples" = "backend/resources/config-samples"
+"examples/embed-log.yml" = "backend/resources/examples/embed-log.yml"
+"embed-log.demo.yml" = "backend/resources/embed-log.demo.yml"
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -31,6 +34,7 @@ include = [
     "frontend/**",
     "utils/**",
     "examples/**",
+    "embed-log.demo.yml",
     "README.md",
     "LICENSE",
     "pyproject.toml",

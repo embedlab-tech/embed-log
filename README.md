@@ -43,8 +43,9 @@ cd embed-log
 After install, `embed-log` is available globally (no venv activation needed):
 
 ```bash
-embed-log create-config
+embed-log sample-config
 embed-log run --config embed-log.yml
+embed-log demo --no-open-browser
 ```
 
 Uninstall:
@@ -98,7 +99,15 @@ http://127.0.0.1:8080/
 
 ## Configuration
 
-See the `config-samples/` directory for ready-to-use examples:
+Write the bundled example into the current directory with:
+
+```bash
+embed-log sample-config
+```
+
+See the `config-samples/` directory for additional ready-to-use examples.
+
+The UI layout supports 1 or 2 panes per tab. A three-source setup therefore uses two tabs below.
 
 | File | What it shows |
 |---|---|
@@ -149,7 +158,26 @@ sources:
 ### `run`
 
 ```bash
+# write bundled starter config
+embed-log sample-config --output embed-log.yml
+
+# or pick a template from config-samples/
+embed-log sample-config --sample single-tab-dual-pane.yml --output embed-log.yml
+
+# validate config
+embed-log validate --config embed-log.yml
+
+# run app
 embed-log run --config embed-log.yml
+
+# run bundled demo config from any directory
+embed-log demo --no-open-browser
+
+# deterministic fast demo for local UI testing (repo checkout)
+./run_demo.sh --profile test --fast --no-browser
+
+# faster random demo traffic for manual testing (repo checkout)
+./run_demo.sh --profile random --fast --no-browser
 ```
 
 See `config-samples/` for example config files.
