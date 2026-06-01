@@ -3,6 +3,7 @@ import {
     lineHasTimestampMode,
 } from './state.js';
 import { parseAnsi } from './ansi.js';
+import { analyzeLinePlugins, getLinePluginTooltip, getConfiguredPanePlugins } from './pluginRuntime.js';
 
 // ---------------------------------------------------------------------------
 // Line rendering
@@ -25,6 +26,24 @@ function _lineTagClass(html) {
     }
 }
 
+export function buildStoredLine(paneId, ts, rawText, isTx, meta = null) {
+    const html = parseAnsi(rawText);
+    const line = {
+        paneId,
+        ...buildTimestampInfo(ts, typeof meta === "object" && meta !== null
+            ? meta
+            : (Number.isFinite(meta) ? { numTs: meta } : {})),
+        html,
+        rawText,
+        isTx,
+        pluginData: null,
+        pluginFilterText: "",
+        pluginClassNames: [],
+    };
+    analyzeLinePlugins(paneId, line);
+    return line;
+}
+
 export function buildLineHtml(line, showTs, filterRx) {
     const tsClass = "ts" + (showTs ? "" : " hidden");
     let content = line.html;
@@ -36,16 +55,57 @@ export function buildLineHtml(line, showTs, filterRx) {
 
 // Build the full className string for a log-line div, preserving selection state.
 export function _lineClass(line, idx, paneId) {
+    const pluginClasses = Array.isArray(line.pluginClassNames) && line.pluginClassNames.length
+        ? " " + line.pluginClassNames.join(" ")
+        : "";
     return "log-line"
         + (line.isTx ? " tx-line" : "")
         + _lineTagClass(line.html)
+        + pluginClasses
         + (state.selected[paneId].has(idx) ? " selected" : "");
 }
 
 export function matchesFilter(line, rx) {
     if (!rx) return true;
-    const plain = line.html.replace(/<[^>]+>/g, "") + " " + line.ts;
+    const plain = line.html.replace(/<[^>]+>/g, "") + " " + line.ts + " " + (line.pluginFilterText || "");
     return rx.test(plain);
+}
+const _pluginTooltipEl = document.createElement("div");
+_pluginTooltipEl.id = "plugin-tooltip";
+document.body.appendChild(_pluginTooltipEl);
+
+function _showPluginTooltip(lineDiv) {
+    const text = lineDiv?.dataset?.pluginTooltip || "";
+    if (!text) {
+        _pluginTooltipEl.classList.remove("visible");
+        return;
+    }
+    const rect = lineDiv.getBoundingClientRect();
+    _pluginTooltipEl.textContent = text;
+    _pluginTooltipEl.style.left = Math.max(4, rect.left) + "px";
+    _pluginTooltipEl.style.bottom = (window.innerHeight - rect.top + 4) + "px";
+    _pluginTooltipEl.classList.add("visible");
+}
+
+function _hidePluginTooltip() {
+    _pluginTooltipEl.classList.remove("visible");
+}
+
+export function applyLineDom(div, line, paneId, idx, filterRx) {
+    div.className = _lineClass(line, idx, paneId);
+    const tooltip = getLinePluginTooltip(line);
+    if (tooltip) {
+        div.dataset.pluginTooltip = tooltip;
+    } else {
+        delete div.dataset.pluginTooltip;
+    }
+    if (!matchesFilter(line, filterRx)) {
+        div.style.display = "none";
+        div.innerHTML = "";
+        return;
+    }
+    div.style.display = "";
+    div.innerHTML = buildLineHtml(line, state.showTs, filterRx);
 }
 
 export function appendLine(paneId, ts, rawText, isTx, meta = null) {
@@ -59,15 +119,7 @@ export function appendLineBatch(entries) {
     entries.forEach(({ paneId, ts, rawText, isTx, meta = null }) => {
         if (!state.rawLines[paneId]) return;
 
-        const html = parseAnsi(rawText);
-        const line = {
-            ...buildTimestampInfo(ts, typeof meta === "object" && meta !== null
-                ? meta
-                : (Number.isFinite(meta) ? { numTs: meta } : {})),
-            html,
-            rawText,
-            isTx,
-        };
+        const line = buildStoredLine(paneId, ts, rawText, isTx, meta);
         state.rawLines[paneId].push(line);
 
         const logEl = document.getElementById("log-" + paneId);
@@ -77,14 +129,9 @@ export function appendLineBatch(entries) {
         const div = document.createElement("div");
         div.dataset.ts = line.ts;
         div.dataset.idx = idx;
-        div.className = _lineClass(line, idx, paneId);
 
         const rx = state.filters[paneId];
-        if (!matchesFilter(line, rx)) {
-            div.style.display = "none";
-        } else {
-            div.innerHTML = buildLineHtml(line, state.showTs, rx);
-        }
+        applyLineDom(div, line, paneId, idx, rx);
 
         if (!fragments.has(paneId)) fragments.set(paneId, document.createDocumentFragment());
         fragments.get(paneId).appendChild(div);
@@ -117,13 +164,7 @@ export function rerenderPane(paneId) {
         const line = lines[i];
         const div  = divs[i];
         if (!div) continue;
-        div.className = _lineClass(line, i, paneId);
-        if (!matchesFilter(line, rx)) {
-            div.style.display = "none";
-        } else {
-            div.style.display = "";
-            div.innerHTML = buildLineHtml(line, state.showTs, rx);
-        }
+        applyLineDom(div, line, paneId, i, rx);
     }
     if (state.atBottom[paneId]) logEl.scrollTop = logEl.scrollHeight;
 }
@@ -200,6 +241,15 @@ export function _linesSetupPane(id) {
         if (!line) return;
         onMiddleClick(id, line.numTs, lineDiv);
     });
+    logEl.addEventListener("mousemove", e => {
+        const lineDiv = e.target.closest(".log-line");
+        if (!lineDiv || !logEl.contains(lineDiv)) {
+            _hidePluginTooltip();
+            return;
+        }
+        _showPluginTooltip(lineDiv);
+    });
+    logEl.addEventListener("mouseleave", _hidePluginTooltip);
     document.getElementById("jump-" + id).addEventListener("click", () => {
         state.syncTabSwitch = false;
         scrollPaneToBottom(id);
@@ -234,10 +284,39 @@ export function _linesSetupPane(id) {
             URL.revokeObjectURL(url);
         });
     }
+
+    // Plugin indicator — shown when this pane has plugins enabled
+    const header = document.querySelector(`#pane-${id} .pane-header`);
+    if (header) {
+        const indicator = document.createElement("span");
+        indicator.className = "pane-plugin-indicator";
+        indicator.id = "plugin-indicator-" + id;
+        header.appendChild(indicator);
+        _refreshPluginIndicator(id);
+    }
 }
 PANES.forEach(_linesSetupPane);
 
-// ---------------------------------------------------------------------------
+// ── Plugin indicator helpers ───────────────────────────────────────
+
+function _refreshPluginIndicator(paneId) {
+    const el = document.getElementById("plugin-indicator-" + paneId);
+    if (!el) return;
+    const panePlugins = getConfiguredPanePlugins();
+    const refs = panePlugins[paneId];
+    if (!refs || !refs.length) {
+        el.style.display = "none";
+        return;
+    }
+    el.style.display = "";
+    el.textContent = "\u26A1";  // ⚡
+    el.title = refs.map(r => r.name).join("\n");
+}
+export function refreshPluginIndicators() {
+    PANES.forEach(_refreshPluginIndicator);
+}
+window.__embedLogRefreshPluginIndicators = refreshPluginIndicators;
+
 // Clear
 // ---------------------------------------------------------------------------
 
@@ -246,6 +325,7 @@ export function clearPane(paneId) {
     state.selected[paneId] = new Set();
     document.getElementById("log-" + paneId).innerHTML = "";
     highlightLine(paneId, null);
+    _hidePluginTooltip();
     state.atBottom[paneId] = true;
     updateJumpBtn(paneId);
     // Hide copy-selection actions if selection.js has added them
@@ -273,12 +353,7 @@ export function repopulatePaneLogs(paneId) {
         const div = document.createElement("div");
         div.dataset.ts  = line.ts;
         div.dataset.idx = idx;
-        div.className   = _lineClass(line, idx, paneId);
-        if (matchesFilter(line, rx)) {
-            div.innerHTML = buildLineHtml(line, state.showTs, rx);
-        } else {
-            div.style.display = "none";
-        }
+        applyLineDom(div, line, paneId, idx, rx);
 
         logEl.appendChild(div);
     });

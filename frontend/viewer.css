@@ -367,6 +367,17 @@ button.active { background: var(--selection); border-color: var(--accent); color
 .pane-header button { padding: 2px 6px; font-size: 11px; }
 .pane-header button.active { border-color: var(--accent); }
 
+.pane-plugin-indicator {
+    font-size: 13px;
+    cursor: default;
+    opacity: 0.7;
+    margin-left: 4px;
+    user-select: none;
+}
+.pane-plugin-indicator:hover {
+    opacity: 1;
+}
+
 /* Pane swap feedback animation */
 .pane.swap-anim {
     animation: pane-swap-pulse 0.32s ease-out;
@@ -694,7 +705,31 @@ mark.hl {
     border-radius: 2px;
 }
 
-/* ── Marker tooltip ── */
+/* ── Plugin tooltip ── */
+#plugin-tooltip {
+    position: fixed;
+    z-index: 9998;
+    background: var(--panel);
+    backdrop-filter: blur(10px) saturate(1.1);
+    -webkit-backdrop-filter: blur(10px) saturate(1.1);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border: 1px solid color-mix(in srgb, var(--accent, #4a8) 45%, transparent);
+    border-left: 3px solid var(--accent, #4a8);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    line-height: 1.55;
+    max-width: 440px;
+    white-space: pre-wrap;
+    pointer-events: none;
+    display: none;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.18), 0 0 0 1px rgba(0,0,0,0.04);
+}
+#plugin-tooltip.visible { display: block; }
+/* ── Log-line plugin match indicators — intentionally subtle, no box-shadow ── */
+.log-line.line-plugin-match { }
+.log-line.line-plugin-coap { }
 #marker-tooltip {
     position: fixed;
     z-index: 9999;

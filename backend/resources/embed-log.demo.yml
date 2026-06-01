@@ -16,6 +16,10 @@ server:
   default_dark_theme: one-dark
   verbose: false
   timestamp_mode: relative
+frontend_plugins:
+  hex-coap:
+    builtin: hex-coap
+
 
 logs:
   dir: logs/
@@ -45,6 +49,14 @@ sources:
     port: 6004
     inject_port: 5004
 
+
+  - name: SENSOR_COAP
+    label: CoAP
+    type: udp
+    port: 6005
+    inject_port: 5005
+
+
   - name: SENSOR_CBOR
     label: CBOR
     type: udp
@@ -52,9 +64,14 @@ sources:
     parser:
       type: cbor-datagram
 
+
+
 tabs:
   - label: DevA
-    panes: [SENSOR_A, SENSOR_B]
+    panes:
+      - source: SENSOR_A
+        plugins: [hex-coap]
+      - SENSOR_B
 
   - label: DevB
     panes: [SENSOR_C]
@@ -64,3 +81,8 @@ tabs:
 
   - label: cbor-tab
     panes: [SENSOR_CBOR]
+
+  - label: CoAP
+    panes:
+      - source: SENSOR_COAP
+        plugins: [hex-coap]

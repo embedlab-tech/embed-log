@@ -1,8 +1,7 @@
-import { state, PANES, buildTimestampInfo } from './state.js';
-import { parseAnsi } from './ansi.js';
+import { state, PANES } from './state.js';
 import { parseLogLine } from './tsparse.js';
 import {
-    clearPane, _lineClass, matchesFilter, buildLineHtml,
+    clearPane, applyLineDom, buildStoredLine,
     onLineClick, onMiddleClick, updateJumpBtn,
 } from './lines.js';
 
@@ -24,34 +23,26 @@ import {
 function _loadTextIntoPane(paneId, text) {
     clearPane(paneId);
     const logEl = document.getElementById("log-" + paneId);
-    const rx    = state.filters[paneId];
-    const frag  = document.createDocumentFragment();
+    const rx = state.filters[paneId];
+    const frag = document.createDocumentFragment();
 
-    let pendingTs   = null;
+    let pendingTs = null;
     let pendingData = null;
     let count = 0;
 
     function flush() {
         if (pendingTs === null) return;
-        const html = parseAnsi(pendingData);
-        const timestamp = buildTimestampInfo(pendingTs);
-        const line = { ...timestamp, html, rawText: pendingData, isTx: false };
+        const line = buildStoredLine(paneId, pendingTs, pendingData, false);
         const idx = state.rawLines[paneId].length;
         state.rawLines[paneId].push(line);
 
         const div = document.createElement("div");
-        div.dataset.ts  = line.ts;
+        div.dataset.ts = line.ts;
         div.dataset.idx = idx;
-        div.className   = _lineClass(line, idx, paneId);
-
-        if (!matchesFilter(line, rx)) {
-            div.style.display = "none";
-        } else {
-            div.innerHTML = buildLineHtml(line, state.showTs, rx);
-        }
-        div.addEventListener("click",     () => onLineClick(paneId, line.numTs, div));
-        div.addEventListener("mousedown", e  => { if (e.button === 1) e.preventDefault(); });
-        div.addEventListener("auxclick",  e  => { if (e.button === 1) onMiddleClick(paneId, line.numTs, div); });
+        applyLineDom(div, line, paneId, idx, rx);
+        div.addEventListener("click", () => onLineClick(paneId, line.numTs, div));
+        div.addEventListener("mousedown", e => { if (e.button === 1) e.preventDefault(); });
+        div.addEventListener("auxclick", e => { if (e.button === 1) onMiddleClick(paneId, line.numTs, div); });
         frag.appendChild(div);
         count++;
         pendingTs = null;
@@ -61,7 +52,7 @@ function _loadTextIntoPane(paneId, text) {
         const parsed = parseLogLine(raw);
         if (parsed) {
             flush();
-            pendingTs   = parsed.ts;
+            pendingTs = parsed.ts;
             pendingData = parsed.data;
         } else if (pendingTs !== null && raw.trim()) {
             // Continuation line — append to current entry (stack traces, etc.)
@@ -100,9 +91,9 @@ export function _importSetupPane(id) {
     if (!header) return;
 
     // Hidden file input
-    const input    = document.createElement("input");
-    input.type     = "file";
-    input.accept   = ".log,.txt";
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".log,.txt";
     input.style.display = "none";
     input.addEventListener("change", () => {
         if (input.files[0]) _importFile(id, input.files[0]);
@@ -110,10 +101,10 @@ export function _importSetupPane(id) {
     });
 
     // Import button
-    const btn       = document.createElement("button");
-    btn.id          = "import-btn-" + id;
-    btn.className   = "import-btn";
-    btn.title       = "Import a .log file into this pane";
+    const btn = document.createElement("button");
+    btn.id = "import-btn-" + id;
+    btn.className = "import-btn";
+    btn.title = "Import a .log file into this pane";
     btn.textContent = "Import";
     btn.addEventListener("click", () => input.click());
 
@@ -123,19 +114,17 @@ export function _importSetupPane(id) {
     // Drag-and-drop onto the pane body
     const body = document.querySelector(`#pane-${id} .pane-body`);
     if (!body) return;
-
     body.addEventListener("dragover", e => {
         e.preventDefault();
-        body.classList.add("drag-over");
+        body.classList.add("dragover");
     });
-    body.addEventListener("dragleave", e => {
-        if (!body.contains(e.relatedTarget)) body.classList.remove("drag-over");
-    });
+    body.addEventListener("dragleave", () => body.classList.remove("dragover"));
     body.addEventListener("drop", e => {
         e.preventDefault();
-        body.classList.remove("drag-over");
-        const file = e.dataTransfer.files[0];
+        body.classList.remove("dragover");
+        const file = e.dataTransfer?.files?.[0];
         if (file) _importFile(id, file);
     });
 }
 
+PANES.forEach(_importSetupPane);

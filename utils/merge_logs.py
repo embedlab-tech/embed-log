@@ -478,6 +478,9 @@ def generate_html(
     timestamp_mode: str = "absolute",
     first_log_at: str | None = None,
     markers_file: str | None = None,
+    frontend_plugins: dict[str, dict] | None = None,
+    pane_plugins: dict[str, list[dict]] | None = None,
+    plugin_scripts: dict[str, str] | None = None,
 ) -> str:
     """
     tab_specs: [
@@ -486,6 +489,10 @@ def generate_html(
     ]
     Returns a complete self-contained HTML string.
     """
+    frontend_plugins = frontend_plugins or {}
+    pane_plugins = pane_plugins or {}
+    plugin_scripts = plugin_scripts or {}
+
     log_data: dict[str, list] = {}
     for tab in tab_specs:
         for pane_id, pane_label, file_path in tab["panes"]:
@@ -512,31 +519,29 @@ def generate_html(
     def _js(filename: str) -> str:
         return _esc_script_text(_strip_module_syntax(_read_asset(filename)))
 
-    css              = _read_asset("viewer.css")
-    profile_js       = _js("profile.js")
-    render_pane_js   = _js("renderPane.js")
+    css = _read_asset("viewer.css")
+    profile_js = _js("profile.js")
+    render_pane_js = _js("renderPane.js")
     render_toolbar_js = _js("renderToolbar.js")
-    state_js         = _js("state.js")
-    themes_js        = _js("themes.js")
-    settings_js      = _js("settings.js")
-    fontsize_js      = _js("fontsize.js")
-    ansi_js          = _js("ansi.js")
-    lines_js         = _js("lines.js")
-    tabs_js          = _js("tabs.js")
-    tabcreate_js     = _js("tabcreate.js")
-    ui_js            = _js("ui.js")
-    export_js        = _js("export.js")
-    selection_js     = _js("selection.js")
-    tsparse_js       = _js("tsparse.js")
-    import_js        = _js("import.js")
-
+    plugin_runtime_js = _js("pluginRuntime.js")
+    state_js = _js("state.js")
+    themes_js = _js("themes.js")
+    settings_js = _js("settings.js")
+    fontsize_js = _js("fontsize.js")
+    ansi_js = _js("ansi.js")
+    lines_js = _js("lines.js")
+    tabs_js = _js("tabs.js")
+    tabcreate_js = _js("tabcreate.js")
+    ui_js = _js("ui.js")
+    export_js = _js("export.js")
+    selection_js = _js("selection.js")
+    tsparse_js = _js("tsparse.js")
+    import_js = _js("import.js")
 
     # ws.js intentionally omitted — no WebSocket in static mode
 
-    # Build JS structures
     tabs_json = json.dumps([
-        {"id": f"tab-{i}", "label": tab["label"],
-         "panes": [p[0] for p in tab["panes"]]}
+        {"id": f"tab-{i}", "label": tab["label"], "panes": [p[0] for p in tab["panes"]]}
         for i, tab in enumerate(tab_specs)
     ], ensure_ascii=False)
 
@@ -549,6 +554,38 @@ def generate_html(
                 seen.add(pane_id)
     panes_json = json.dumps(all_pane_ids, ensure_ascii=False)
     pane_labels_json = json.dumps({pane_id: pane_label for tab in tab_specs for pane_id, pane_label, _ in tab["panes"]}, ensure_ascii=False)
+
+    active_plugin_names: list[str] = []
+    active_seen: set[str] = set()
+    for refs in pane_plugins.values():
+        if not isinstance(refs, list):
+            continue
+        for ref in refs:
+            if not isinstance(ref, dict):
+                continue
+            name = ref.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            if name in active_seen:
+                continue
+            if name not in frontend_plugins or name not in plugin_scripts:
+                continue
+            active_seen.add(name)
+            active_plugin_names.append(name)
+
+    plugin_scripts_json = json.dumps(
+        {name: plugin_scripts[name] for name in active_plugin_names},
+        ensure_ascii=False,
+    )
+    frontend_plugins_json = json.dumps(
+        {name: frontend_plugins[name] for name in active_plugin_names},
+        ensure_ascii=False,
+    )
+    pane_plugins_json = json.dumps(pane_plugins, ensure_ascii=False)
+    plugin_script_tags = "\n".join(
+        f"<script>{_esc_script_text(plugin_scripts[name])}</script>"
+        for name in active_plugin_names
+    )
 
     # Build container HTML
     tab_contents = "\n".join(
@@ -582,6 +619,9 @@ def generate_html(
         f"window.TABS = {tabs_json};\n"
         f"window.PANES = {panes_json};\n"
         f"window.PANE_LABELS = {pane_labels_json};\n"
+        f"window.__embedLogFrontendPlugins = {frontend_plugins_json};\n"
+        f"window.__embedLogPanePlugins = {pane_plugins_json};\n"
+        f"window.__embedLogPluginScripts = {plugin_scripts_json};\n"
         f"window.__embedLogInitialTimestampMode = {json.dumps(timestamp_mode)};\n"
         f"window.__embedLogFirstLogAt = {json.dumps(effective_first_log_at)};\n"
         f"window.__embedLogInitialFontSize = 14;"
@@ -657,6 +697,8 @@ def generate_html(
 <script>{profile_js}</script>
 <script>{render_pane_js}</script>
 <script>{render_toolbar_js}</script>
+<script>{plugin_runtime_js}</script>
+{plugin_script_tags}
 <script>{state_js}</script>
 <script>{themes_js}</script>
 <script>{settings_js}</script>
@@ -773,7 +815,34 @@ def main():
         default=None,
         help="Path to markers.json; embedded markers will be navigable in the exported viewer",
     )
+    parser.add_argument(
+        "--frontend-plugins-json",
+        default=None,
+        help="JSON object mapping frontend plugin names to metadata",
+    )
+    parser.add_argument(
+        "--pane-plugins-json",
+        default=None,
+        help="JSON object mapping pane ids to active frontend plugins",
+    )
+    parser.add_argument(
+        "--plugin-scripts-json",
+        default=None,
+        help="JSON object mapping frontend plugin names to plain JS source",
+    )
     args = parser.parse_args()
+
+    def _json_arg(name: str) -> dict:
+        raw_value = getattr(args, name)
+        if not raw_value:
+            return {}
+        try:
+            value = json.loads(raw_value)
+        except json.JSONDecodeError as exc:
+            parser.error(f"--{name.replace('_', '-')} must be valid JSON: {exc}")
+        if not isinstance(value, dict):
+            parser.error(f"--{name.replace('_', '-')} must decode to a JSON object")
+        return value
 
     tab_specs = []
     for raw in args.tab:
@@ -799,6 +868,9 @@ def main():
         timestamp_mode=args.timestamp_mode,
         first_log_at=args.first_log_at,
         markers_file=args.markers_file,
+        frontend_plugins=_json_arg("frontend_plugins_json"),
+        pane_plugins=_json_arg("pane_plugins_json"),
+        plugin_scripts=_json_arg("plugin_scripts_json"),
     )
 
     with open(args.output, "w", encoding="utf-8") as fh:

@@ -20,6 +20,9 @@ class SessionManagerTests(unittest.TestCase):
                 tabs=[{"label": "T", "panes": ["A"]}],
                 source_files=source_files,
                 source_labels={"A": "READER"},
+                frontend_plugins={"hex-coap": {"kind": "line", "sha256": "abc"}},
+                pane_plugins={"A": [{"name": "hex-coap", "options": {}}]},
+                plugin_scripts={"hex-coap": "(function(){})()"},
                 started_at="2026-01-01T00:00:00+00:00",
                 config_path="embed-log.yml",
                 job_id="CI-1",
@@ -50,6 +53,9 @@ class SessionManagerTests(unittest.TestCase):
             self.assertEqual(manifest["last_export_reason"], "signal")
             self.assertEqual("pending", manifest["html_status"])
             self.assertTrue(str(mgr.html_path).endswith("session.html"))
+            self.assertEqual(manifest["frontend_plugins"], {"hex-coap": {"kind": "line", "sha256": "abc"}})
+            self.assertEqual(manifest["pane_plugins"], {"A": [{"name": "hex-coap", "options": {}}]})
+            self.assertEqual(manifest["plugin_scripts"], {"hex-coap": "(function(){})()"})
 
 
 class SessionExporterTests(unittest.TestCase):
@@ -65,6 +71,9 @@ class SessionExporterTests(unittest.TestCase):
                 source_files={"A": str(td_path / "A.log")},
                 tabs=[{"label": "Tab", "panes": ["A"]}],
                 source_labels={"A": "READER"},
+                frontend_plugins={"hex-coap": {"kind": "line", "sha256": "abc"}},
+                pane_plugins={"A": [{"name": "hex-coap", "options": {}}]},
+                plugin_scripts={"hex-coap": "(function(){})()"},
                 timestamp_mode="relative",
                 first_log_at="2026-01-01T00:00:01.234+00:00",
                 merge_script=merge_script,
@@ -88,6 +97,9 @@ class SessionExporterTests(unittest.TestCase):
             self.assertIn("A=READER", args)
             self.assertIn("--output", args)
 
+            self.assertIn("--frontend-plugins-json", args)
+            self.assertIn("--pane-plugins-json", args)
+            self.assertIn("--plugin-scripts-json", args)
     def test_export_failure_nonzero(self):
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
@@ -99,6 +111,9 @@ class SessionExporterTests(unittest.TestCase):
                 source_files={"A": str(td_path / "A.log")},
                 tabs=[{"label": "Tab", "panes": ["A"]}],
                 source_labels={"A": "READER"},
+                frontend_plugins={"hex-coap": {"kind": "line", "sha256": "abc"}},
+                pane_plugins={"A": [{"name": "hex-coap", "options": {}}]},
+                plugin_scripts={"hex-coap": "(function(){})()"},
                 timestamp_mode="absolute",
                 merge_script=merge_script,
                 python_executable="python3",
@@ -125,6 +140,9 @@ class SessionSnippetTests(unittest.TestCase):
             tabs=[{"label": "T", "panes": ["A", "B"]}],
             source_files={"A": str(self.session_dir / "A.log"), "B": str(self.session_dir / "B.log")},
             source_labels={"A": "READER", "B": "CONTROLLER"},
+            frontend_plugins={},
+            pane_plugins={},
+            plugin_scripts={},
             started_at="2026-01-01T00:00:00+00:00",
             config_path=None,
             job_id=None,

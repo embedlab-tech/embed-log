@@ -13,8 +13,8 @@ from pathlib import Path
 
 
 # Ports used by the demo setup
-INJECT_PORTS = [5001, 5002, 5003, 5004]
-UDP_PORTS = [6000, 6001, 6002, 6003, 6004]
+INJECT_PORTS = [5001, 5002, 5003, 5004, 5005]
+UDP_PORTS = [6000, 6001, 6002, 6003, 6004, 6005]
 WS_PORT = 8080
 ALL_PORTS = INJECT_PORTS + UDP_PORTS + [WS_PORT]
 
@@ -275,6 +275,7 @@ class DemoRunner:
             "--udp", "SENSOR_B=127.0.0.1:6001",
             "--udp", "SENSOR_C=127.0.0.1:6002",
             "--udp", "SENSOR_D=127.0.0.1:6004",
+            "--udp", "SENSOR_COAP=127.0.0.1:6005",
             "--tick-ms", str(self.args.tick_ms),
             "--cycles", str(self._content_cycles(content_mode)),
         ]

@@ -4,7 +4,6 @@ import { exportHtmlSnapshot } from './export.js';
 import { can } from './profile.js';
 import { switchTab } from './tabs.js';
 import { _escHtml } from './renderPane.js';
-// ---------------------------------------------------------------------------
 // Line selection + copy / export actions
 //
 // Two explicit scopes (toggled per-pane overlay):
@@ -107,8 +106,6 @@ export function _selectionSetupPane(id) {
     rawBtn.title = "Download selected lines as raw .log file";
     rawBtn.addEventListener("click", e => { e.stopPropagation(); _downloadRaw(id); });
     moreDropdown.appendChild(rawBtn);
-
-
     actionRow.appendChild(copyBtn);
     // Marker toggle (runtime only) — in the main action row
     if (can('markers')) {
@@ -224,8 +221,6 @@ function _syncSelectionActions(paneId) {
         markerBtn.style.display = state.selectionScope === "exact" ? "" : "none";
     }
 }
-
-// ── Markers ──
 function _flatMarkerList() {
     const all = [];
     Object.keys(state.markers).forEach(paneId => {
@@ -366,7 +361,11 @@ export function applyMarkers() {
         Array.from(logEl.children).forEach((div, i) => {
             const hasMarker = byLine[i] !== undefined;
             div.classList.toggle("has-marker", hasMarker);
-            div.title = hasMarker ? "Marker: " + byLine[i] : "";
+            if (hasMarker) {
+                div.dataset.markerTooltip = byLine[i];
+            } else {
+                delete div.dataset.markerTooltip;
+            }
         });
     });
 }
@@ -380,7 +379,7 @@ document.body.appendChild(_tooltipEl);
 document.addEventListener("mouseover", e => {
     const line = e.target.closest(".log-line.has-marker");
     if (!line) { _tooltipEl.classList.remove("visible"); return; }
-    const desc = line.title.replace(/^Marker:\s*/, "");
+    const desc = line.dataset.markerTooltip || "";
     if (!desc) return;
     const rect = line.getBoundingClientRect();
     _tooltipEl.innerHTML = '<span class="mt-label">Marker</span>' + _escHtml(desc);
@@ -935,6 +934,17 @@ document.addEventListener("click", e => {
 
         if (!e.shiftKey && Number.isFinite(idx)) {
             _rangeAnchor = { paneId, idx };
+
+            // Single-click: select this line (replaces any previous selection)
+            const add = e.ctrlKey || e.metaKey;
+            if (!add) _clearOtherSelections(paneId);
+            const sel = new Set(add ? (state.selected[paneId] || []) : []);
+            if (add && sel.has(idx)) sel.delete(idx);
+            else sel.add(idx);
+            state.selected[paneId] = sel;
+            _applySelection(paneId);
+            _closeAllMore();
+            return;
         }
     }
 

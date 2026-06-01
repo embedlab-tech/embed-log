@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-MAX_SNIPPETS = 50
 
+MAX_SNIPPETS = 50
 
 
 class SessionManager:
@@ -16,6 +16,9 @@ class SessionManager:
         tabs: list,
         source_files: dict[str, str],
         source_labels: dict[str, str],
+        frontend_plugins: dict[str, dict] | None = None,
+        pane_plugins: dict[str, list[dict]] | None = None,
+        plugin_scripts: dict[str, str] | None = None,
         started_at: str,
         config_path: str | None,
         job_id: str | None,
@@ -28,6 +31,9 @@ class SessionManager:
         self.tabs = tabs
         self.source_files = source_files
         self.source_labels = source_labels
+        self.frontend_plugins = frontend_plugins or {}
+        self.pane_plugins = pane_plugins or {}
+        self.plugin_scripts = plugin_scripts or {}
         self.started_at = started_at
         self.config_path = config_path
         self.job_id = job_id
@@ -58,7 +64,6 @@ class SessionManager:
             encoding="utf-8",
         )
 
-
     def build_session_info(self) -> dict:
         html_ready = self.html_path.is_file()
         html_updated_at = None
@@ -85,6 +90,8 @@ class SessionManager:
             "first_log_at": self.first_log_at,
             "tabs": self.tabs,
             "pane_labels": self.source_labels,
+            "frontend_plugins": self.frontend_plugins,
+            "pane_plugins": self.pane_plugins,
             "sources": [
                 {"name": name, "label": self.source_labels.get(name, name), "log": f"/sessions/{self.session_id}/{Path(path).name}"}
                 for name, path in self.source_files.items()
@@ -111,6 +118,9 @@ class SessionManager:
             "first_log_at": self.first_log_at,
             "tabs": self.tabs,
             "pane_labels": self.source_labels,
+            "frontend_plugins": self.frontend_plugins,
+            "pane_plugins": self.pane_plugins,
+            "plugin_scripts": self.plugin_scripts,
             "source_files": self.source_files,
             "session_html": str(self.html_path) if exported_html else None,
             "last_export_reason": reason if exported_html else None,
@@ -126,51 +136,36 @@ class SessionManager:
         *,
         panes: list[str],
         scope: str,
-        label: str = "",
+        label: str | None = None,
     ) -> str | None:
-        """Save a snippet to the session's snippets/ directory.
-        Returns the relative URL path, or None if limit exceeded or text empty.
-        """
-        if not text.strip():
-            return None
-
-        manifest = self._read_manifest()
-        snippets = manifest.get("snippets", [])
-        if len(snippets) >= MAX_SNIPPETS:
-            return None
-
         self.snippets_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        safe_label = ""
+        if label:
+            safe_label = "_" + "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in label)[:48]
+        filename = f"snippet_{ts}{safe_label}.txt"
+        path = self.snippets_dir / filename
+        path.write_text(text, encoding="utf-8")
 
-        now = datetime.now(timezone.utc)
-        ts = now.strftime("%Y-%m-%d_%H-%M-%S")
-        label_part = label or scope
-        safe_label = "".join(c if c.isalnum() or c in "-_." else "_" for c in label_part)
-        filename = f"{ts}-{safe_label}.log"
-        filepath = self.snippets_dir / filename
-
-        filepath.write_text(text + "\n", encoding="utf-8")
-
-        snippet_entry = {
-            "file": f"snippets/{filename}",
-            "label": label or scope,
-            "scope": scope,
-            "panes": panes,
-            "line_count": text.count("\n") + 1,
-            "saved_at": now.isoformat(timespec="seconds"),
-        }
-        snippets.append(snippet_entry)
-        manifest["snippets"] = snippets
-        self._write_manifest(manifest)
-
-        return f"/sessions/{self.session_id}/snippets/{filename}"
-
-    def _read_manifest(self) -> dict:
+        manifest = {}
         if self.manifest_path.is_file():
             try:
-                return json.loads(self.manifest_path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                pass
-        return {}
-
-    def _write_manifest(self, manifest: dict) -> None:
+                manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                manifest = {}
+        snippets = manifest.get("snippets", [])
+        snippets.append({
+            "filename": filename,
+            "path": str(path),
+            "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "panes": panes,
+            "scope": scope,
+            "label": label,
+            "lines": len([ln for ln in text.splitlines() if ln.strip()]),
+            "bytes": len(text.encode("utf-8")),
+        })
+        if len(snippets) > MAX_SNIPPETS:
+            snippets = snippets[-MAX_SNIPPETS:]
+        manifest["snippets"] = snippets
         self.manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        return str(path)

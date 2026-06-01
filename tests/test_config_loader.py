@@ -56,6 +56,8 @@ tabs:
         self.assertEqual(len(cfg.injects), 1)
         self.assertEqual(len(cfg.forwards), 2)
         self.assertEqual(len(cfg.tabs), 1)
+        self.assertEqual(cfg.tabs[0].panes[0].source, "UART_A")
+        self.assertEqual(cfg.tabs[0].panes[1].source, "UDP_A")
         self.assertEqual(cfg.source_labels, {"UART_A": "READER", "UDP_A": "CONTROLLER"})
         self.assertEqual(cfg.sources[0].parser.type, "text")
         self.assertEqual(cfg.sources[1].parser.type, "text")
@@ -193,6 +195,90 @@ sources:
             p.write_text(cfg_text, encoding="utf-8")
             with self.assertRaises(ConfigError):
                 load_config(p)
+    def test_frontend_plugin_config_is_loaded(self):
+        cfg_text = """
+version: 1
+frontend_plugins:
+  hex-coap:
+    builtin: hex-coap
+sources:
+  - name: UDP_A
+    type: udp
+    port: 6000
+tabs:
+  - label: Devices
+    panes:
+      - source: UDP_A
+        plugins:
+          - name: hex-coap
+            options:
+              protocol: coap
+""".strip()
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "cfg.yml"
+            p.write_text(cfg_text, encoding="utf-8")
+            cfg = load_config(p)
+
+        self.assertIn("hex-coap", cfg.frontend_plugins)
+        pane = cfg.tabs[0].panes[0]
+        self.assertEqual(pane.source, "UDP_A")
+        self.assertEqual(len(pane.plugins), 1)
+        self.assertEqual(pane.plugins[0].name, "hex-coap")
+        self.assertEqual(pane.plugins[0].options, {"protocol": "coap"})
+
+    def test_unknown_frontend_plugin_reference_fails(self):
+        cfg_text = """
+version: 1
+sources:
+  - name: UDP_A
+    type: udp
+    port: 6000
+tabs:
+  - label: Devices
+    panes:
+      - source: UDP_A
+        plugins:
+          - missing-plugin
+""".strip()
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "cfg.yml"
+            p.write_text(cfg_text, encoding="utf-8")
+            with self.assertRaises(ConfigError):
+                load_config(p)
+
+    def test_conflicting_plugin_sets_for_same_source_fail(self):
+        cfg_text = """
+version: 1
+frontend_plugins:
+  hex-coap:
+    builtin: hex-coap
+sources:
+  - name: UDP_A
+    type: udp
+    port: 6000
+tabs:
+  - label: Devices
+    panes:
+      - source: UDP_A
+        plugins: [hex-coap]
+  - label: Alt
+    panes:
+      - source: UDP_A
+""".strip()
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "cfg.yml"
+            p.write_text(cfg_text, encoding="utf-8")
+            with self.assertRaises(ConfigError):
+                load_config(p)
+    def test_bundled_demo_config_enables_hex_coap_for_sensor_a(self):
+        demo_cfg = Path(__file__).resolve().parents[1] / "backend" / "resources" / "embed-log.demo.yml"
+        cfg = load_config(demo_cfg)
+
+        self.assertIn("hex-coap", cfg.frontend_plugins)
+        dev_a = cfg.tabs[0]
+        self.assertEqual(dev_a.label, "DevA")
+        self.assertEqual(dev_a.panes[0].source, "SENSOR_A")
+        self.assertEqual([plugin.name for plugin in dev_a.panes[0].plugins], ["hex-coap"])
 
 if __name__ == "__main__":
     unittest.main()

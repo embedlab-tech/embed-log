@@ -280,6 +280,9 @@ def _run_sessions_export(log_dir: Path, args: argparse.Namespace) -> int:
         source_files=source_files,
         tabs=tabs,
         source_labels=source_labels,
+        frontend_plugins=manifest.get("frontend_plugins") or {},
+        pane_plugins=manifest.get("pane_plugins") or {},
+        plugin_scripts=manifest.get("plugin_scripts") or {},
         timestamp_mode=timestamp_mode,
         first_log_at=first_log_at,
     )

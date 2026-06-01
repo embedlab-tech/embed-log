@@ -1,6 +1,7 @@
 import { state, TABS, PANES, PANE_LABELS, setTimestampContext } from './state.js';
 import { appendLineBatch, clearPane, rerenderPane, setTimestampMode } from './lines.js';
 import { createTabWithPanes } from './tabcreate.js';
+import { configurePanePlugins, resetPanePlugins } from './pluginRuntime.js';
 
 import { switchTab } from './tabs.js';
 
@@ -11,6 +12,7 @@ const wsStatus = document.getElementById("ws-status");
 let currentSessionId = null;
 let pendingLogMessages = [];
 let pendingLogFlush = false;
+let configReady = false;
 const LOG_FLUSH_MAX_LINES = 1000;
 
 function resetLayoutForNewSession() {
@@ -30,11 +32,12 @@ function resetLayoutForNewSession() {
     state.highlighted = {};
     state.selected = {};
     Object.keys(PANE_LABELS).forEach(key => delete PANE_LABELS[key]);
+    resetPanePlugins();
 }
 
 function wsSetStatus(cls, text) {
-    wsStatus.className    = cls;
-    wsStatus.textContent  = "WS: " + text;
+    wsStatus.className = cls;
+    wsStatus.textContent = "WS: " + text;
 }
 
 export function wsSend(obj) {
@@ -59,12 +62,16 @@ function clearAllPaneContents() {
 
 function enqueueLogMessage(entry) {
     pendingLogMessages.push(entry);
-    if (pendingLogFlush) return;
+    if (pendingLogFlush || !configReady) return;
     pendingLogFlush = true;
     requestAnimationFrame(flushLogMessages);
 }
 
 function flushLogMessages() {
+    if (!configReady) {
+        pendingLogFlush = false;
+        return;
+    }
     const batch = pendingLogMessages.splice(0, LOG_FLUSH_MAX_LINES);
     if (batch.length > 0) appendLineBatch(batch);
 
@@ -73,6 +80,76 @@ function flushLogMessages() {
     } else {
         pendingLogFlush = false;
     }
+}
+
+async function _handleConfigMessage(msg) {
+    if (typeof msg.app_name === "string" && msg.app_name.trim()) {
+        const appNameEl = document.querySelector("#toolbar .app-name");
+        if (appNameEl) appNameEl.textContent = msg.app_name.trim();
+    }
+    window.__embedLogTheme?.applyDefaults?.(msg.theme_defaults);
+
+    const sessionId = msg.session?.id || null;
+    const isSessionChange = currentSessionId && sessionId && currentSessionId !== sessionId;
+    if (isSessionChange) {
+        resetLayoutForNewSession();
+    }
+    currentSessionId = sessionId || currentSessionId;
+
+    configReady = false;
+    try {
+        await configurePanePlugins(
+            msg.frontend_plugins && typeof msg.frontend_plugins === "object" ? msg.frontend_plugins : {},
+            msg.pane_plugins && typeof msg.pane_plugins === "object" ? msg.pane_plugins : {},
+            msg.plugin_scripts && typeof msg.plugin_scripts === "object" ? msg.plugin_scripts : {},
+        );
+    } catch (err) {
+        console.error("embed-log: failed to configure pane plugins", err);
+        alert(`Failed to load pane plugins: ${err.message}`);
+        resetPanePlugins();
+    }
+
+    setTimestampContext({
+        mode: msg.session?.timestamp_mode || "absolute",
+        firstLogAt: msg.session?.first_log_at,
+        resetMode: isSessionChange || (TABS.length === 0 && PANES.length === 0),
+    });
+    if (isSessionChange || (TABS.length === 0 && PANES.length === 0)) {
+        setTimestampMode(state.timestampMode);
+    }
+    window.__embedLogUpdateTimestampModeUi?.();
+
+    window.__embedLogSetSession?.(msg.session || null);
+    window.__embedLogOnSessionHtmlStatus?.({
+        ...msg.session,
+        type: "session_html_status",
+    });
+    const paneLabels = msg.pane_labels && typeof msg.pane_labels === "object" ? msg.pane_labels : {};
+    Object.keys(PANE_LABELS).forEach(key => delete PANE_LABELS[key]);
+    Object.assign(PANE_LABELS, paneLabels);
+    if (TABS.length === 0 && msg.tabs && msg.tabs.length > 0) {
+        msg.tabs.forEach(tab =>
+            createTabWithPanes(tab.label, tab.panes, { switchTo: false, paneLabels: tab.pane_labels || paneLabels })
+        );
+        switchTab(0);
+    }
+    // Apply markers from config if present
+    if (msg.markers && Array.isArray(msg.markers)) {
+        state.markers = {};
+        msg.markers.forEach(m => {
+            if (!m.paneId) return;
+            state.markers[m.paneId] = state.markers[m.paneId] || [];
+            state.markers[m.paneId].push(m);
+        });
+        window.applyMarkers?.();
+        window.__embedLogOnMarkers?.();
+    }
+    configReady = true;
+    if (pendingLogMessages.length > 0 && !pendingLogFlush) {
+        pendingLogFlush = true;
+        requestAnimationFrame(flushLogMessages);
+    }
+    window.__embedLogAfterConfig?.(msg.tabs || []);
 }
 
 function wsConnect() {
@@ -87,62 +164,14 @@ function wsConnect() {
         wsRetryDelay = 1000;
     });
 
-    ws.addEventListener("message", e => {
+    ws.addEventListener("message", async e => {
         let msg;
         try { msg = JSON.parse(e.data); } catch { return; }
 
         // Config message — server tells us the tab/pane layout upfront.
         // Create all tabs before any log data arrives.
         if (msg.type === "config") {
-            if (typeof msg.app_name === "string" && msg.app_name.trim()) {
-                const appNameEl = document.querySelector("#toolbar .app-name");
-                if (appNameEl) appNameEl.textContent = msg.app_name.trim();
-            }
-            window.__embedLogTheme?.applyDefaults?.(msg.theme_defaults);
-
-            const sessionId = msg.session?.id || null;
-            const isSessionChange = currentSessionId && sessionId && currentSessionId !== sessionId;
-            if (isSessionChange) {
-                resetLayoutForNewSession();
-            }
-            currentSessionId = sessionId || currentSessionId;
-
-            setTimestampContext({
-                mode: msg.session?.timestamp_mode || "absolute",
-                firstLogAt: msg.session?.first_log_at,
-                resetMode: isSessionChange || (TABS.length === 0 && PANES.length === 0),
-            });
-            if (isSessionChange || (TABS.length === 0 && PANES.length === 0)) {
-                setTimestampMode(state.timestampMode);
-            }
-            window.__embedLogUpdateTimestampModeUi?.();
-
-            window.__embedLogSetSession?.(msg.session || null);
-            window.__embedLogOnSessionHtmlStatus?.({
-                ...msg.session,
-                type: "session_html_status",
-            });
-            const paneLabels = msg.pane_labels && typeof msg.pane_labels === "object" ? msg.pane_labels : {};
-            Object.keys(PANE_LABELS).forEach(key => delete PANE_LABELS[key]);
-            Object.assign(PANE_LABELS, paneLabels);
-            if (TABS.length === 0 && msg.tabs && msg.tabs.length > 0) {
-                msg.tabs.forEach(tab =>
-                    createTabWithPanes(tab.label, tab.panes, { switchTo: false, paneLabels: tab.pane_labels || paneLabels })
-                );
-                switchTab(0);
-            }
-            // Apply markers from config if present
-            if (msg.markers && Array.isArray(msg.markers)) {
-                state.markers = {};
-                msg.markers.forEach(m => {
-                    if (!m.paneId) return;
-                    state.markers[m.paneId] = state.markers[m.paneId] || [];
-                    state.markers[m.paneId].push(m);
-                });
-                window.applyMarkers?.();
-                window.__embedLogOnMarkers?.();
-            }
-            window.__embedLogAfterConfig?.(msg.tabs || []);
+            await _handleConfigMessage(msg);
             return;
         }
 
@@ -217,6 +246,7 @@ function wsConnect() {
     });
 
     ws.addEventListener("close", () => {
+        configReady = false;
         wsSetStatus("disconnected", `reconnecting in ${wsRetryDelay / 1000}s…`);
         setTimeout(() => {
             wsRetryDelay = Math.min(wsRetryDelay * 2, WS_MAX_DELAY);

@@ -144,16 +144,134 @@ def _embedded_timestamp(tick: int) -> str:
     base = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
     ts = base.replace(second=tick % 60).isoformat(timespec="milliseconds").replace("+00:00", "Z")
     return ts
+# ── CoAP message hex generator ─────────────────────────────────────────
+# Encodes valid CoAP packets as space-separated hex strings so the
+# frontend hex-coap plugin can detect and decode them.
 
+def _coap_option(delta: int, value_bytes: bytes) -> bytes:
+    """Encode a single CoAP option (header + value)."""
+    length = len(value_bytes)
+    if delta < 13:
+        delta_init = delta
+        delta_ext = b''
+    elif delta < 269:
+        delta_init = 13
+        delta_ext = bytes([delta - 13])
+    else:
+        delta_init = 14
+        delta_ext = (delta - 269).to_bytes(2, 'big')
+
+    if length < 13:
+        len_init = length
+        len_ext = b''
+    elif length < 269:
+        len_init = 13
+        len_ext = bytes([length - 13])
+    else:
+        len_init = 14
+        len_ext = (length - 269).to_bytes(2, 'big')
+
+    first_byte = (delta_init << 4) | len_init
+    return first_byte.to_bytes(1, 'big') + delta_ext + len_ext + value_bytes
+
+
+# CoAP message types (RFC 7252 §3)
+_TYPE_CON = 0
+_TYPE_NON = 1
+_TYPE_ACK = 2
+_TYPE_RST = 3
+
+
+def _gen_coap_hex(
+    type_val: int,
+    code: int,
+    msg_id: int,
+    *,
+    token: bytes = b'',
+    uri_paths: list[str] | None = None,
+    uri_queries: list[str] | None = None,
+    payload: bytes = b'',
+    extra_options: list[tuple[int, bytes]] | None = None,
+) -> str:
+    """Build a CoAP message and return a space-separated uppercased hex string."""
+    parts = bytearray()
+    first_byte = (1 << 6) | (type_val << 4) | (len(token) & 0x0F)
+    parts.append(first_byte)
+    parts.append(code)
+    parts.append((msg_id >> 8) & 0xFF)
+    parts.append(msg_id & 0xFF)
+    parts.extend(token)
+
+    # Collect all options, sort by number (CoAP requires ascending order)
+    opts: list[tuple[int, bytes]] = []
+    for path in (uri_paths or []):
+        opts.append((11, path.encode('utf-8')))
+    for query in (uri_queries or []):
+        opts.append((15, query.encode('utf-8')))
+    for opt_num, opt_val in (extra_options or []):
+        opts.append((opt_num, opt_val))
+    opts.sort(key=lambda x: x[0])
+
+    prev = 0
+    for opt_num, opt_val in opts:
+        parts.extend(_coap_option(opt_num - prev, opt_val))
+        prev = opt_num
+
+    if payload:
+        parts.append(0xFF)
+        parts.extend(payload)
+
+    return ' '.join(f'{b:02X}' for b in parts)
+
+
+# Pre-generated test messages (15 variants; loops every 15 ticks)
+COAP_DEMO_HEX_LIST: list[str] = [
+    _gen_coap_hex(_TYPE_CON, 1, 0x1234, uri_paths=['foo', 'bar']),
+    _gen_coap_hex(_TYPE_CON, 1, 0x5678, uri_paths=['temp']),
+    _gen_coap_hex(_TYPE_NON, 2, 0x9ABC, uri_paths=['sensors', 'temperature'], payload=b'23.5'),
+    _gen_coap_hex(_TYPE_ACK, 69, 0x1111, payload=b'OK'),
+    _gen_coap_hex(_TYPE_CON, 1, 0x2222, uri_queries=['type=sensor']),
+    _gen_coap_hex(_TYPE_RST, 0, 0x3333),
+    _gen_coap_hex(_TYPE_CON, 2, 0x4444, token=b'\xAB\xCD', uri_paths=['cfg'], payload=b'{"rate":100}'),
+    _gen_coap_hex(_TYPE_NON, 1, 0x5555, uri_paths=['.well-known', 'core']),
+    _gen_coap_hex(_TYPE_CON, 4, 0x6666, uri_paths=['sessions', '42']),
+    _gen_coap_hex(_TYPE_ACK, 132, 0x7777),
+    # New: options from extensions
+    _gen_coap_hex(_TYPE_CON, 1, 0x4488, uri_paths=['temp'], extra_options=[(6, b'\x2A')]),
+    _gen_coap_hex(_TYPE_CON, 1, 0x5599, uri_paths=['data'], extra_options=[(23, b'\x02')]),
+    _gen_coap_hex(_TYPE_CON, 1, 0x66AA, uri_paths=['sensor'], extra_options=[(9, b'\xDE\xAD\xBE\xEF')], payload=b'\x01\x02\x03'),
+    _gen_coap_hex(_TYPE_CON, 1, 0x77BB, extra_options=[(4, b'\xA1\xB2\xC3\xD4')], uri_paths=['cfg']),
+    _gen_coap_hex(_TYPE_ACK, 69, 0x88CC, extra_options=[(14, b'\x00\x78')], payload=b'ok'),
+]
 
 def build_udp_lines(src: str, tick: int, seq_start: int) -> tuple[list[str], int]:
     """Return deterministic lines for one source/tick and next sequence value."""
     seq = seq_start
     lines: list[str] = []
 
-
     lines.append(_msg(src, tick, seq, "sync", f"{src} synchronized step {tick:03d}"))
     seq += 1
+
+    if src == "SENSOR_A" and tick % 8 == 4:
+        hex_msg = COAP_DEMO_HEX_LIST[tick % len(COAP_DEMO_HEX_LIST)]
+        lines.append(_msg(src, tick, seq, "coap-demo", f"coap rx: frame AA 55 payload {hex_msg}"))
+        seq += 1
+
+    # ── SENSOR_COAP sends bare hex lines (no TEST envelope) for the
+    #     dedicated CoAP tab where the plugin acts on the hex directly.
+    if src == "SENSOR_COAP":
+        hex_msg = COAP_DEMO_HEX_LIST[(tick - 1) % len(COAP_DEMO_HEX_LIST)]
+        lines.append(f"coap {hex_msg}")
+        seq += 1
+        if tick % 3 == 0:
+            hex_msg2 = COAP_DEMO_HEX_LIST[(tick + 3) % len(COAP_DEMO_HEX_LIST)]
+            lines.append(f"coap {hex_msg2}")
+            seq += 1
+        # every 5th tick also send a compact (no-spaces) variant
+        if tick % 5 == 0:
+            compact = COAP_DEMO_HEX_LIST[(tick + 7) % len(COAP_DEMO_HEX_LIST)].replace(' ', '')
+            lines.append(f"coap-compact {compact}")
+            seq += 1
 
     if tick % 5 == 0:
         lines.append("<wrn> " + _msg(src, tick, seq, "warning", f"{src} warning at tick {tick:03d}"))
@@ -274,8 +392,8 @@ CURATED_DEVICE_A: dict[int, list[str]] = {
     1: ["<inf> net: link up, MAC=de:ad:be:ef:01:02", "<inf> httpd: listening on 0.0.0.0:8080, awaiting commands"],
     2: ["<inf> net: connection from 192.168.1.100:45012", "<inf> httpd: accepted, 1 active session"],
     3: ["<inf> httpd: session established, protocol REST/1.0", "<inf> sys: test mode enabled via header X-Test-Suite"],
-    4: ["<inf> httpd: << GET /api/status", "<inf> handler: processing status request"],
-    5: ["<inf> handler: mem_free=18324KB uptime=3600s cpu_load=12%", "<inf> httpd: >> 200 OK  {status:ok, uptime:3600}  (12ms)"],
+    4: ["<inf> httpd: << GET /api/status", f"<inf> coap rx: frame AA 55 payload {COAP_DEMO_HEX_LIST[0]}"],
+    5: ["<inf> handler: processing status request", "<inf> handler: mem_free=18324KB uptime=3600s cpu_load=12%", "<inf> httpd: >> 200 OK  {status:ok, uptime:3600}  (12ms)"],
     6: ["<wrn> sys: cpu temperature at 87C — approaching throttle threshold"],
     7: ["<inf> httpd: << GET /api/config", "<inf> handler: reading config service endpoint"],
     8: ["<err> handler: config service not initialized", "<err> handler: config.json missing from flash partition"],
