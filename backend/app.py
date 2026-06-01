@@ -5,7 +5,7 @@ from pathlib import Path
 
 from .core.naming import slugify
 from .parsers import create_parser
-from .sources import LogSource, ParsedSource, RawUartSource, RawUdpSource, UartSource, UdpSource
+from .sources import LogSource, ParsedSource, RawUartSource, RawUdpSource, RawFileSource, UartSource, UdpSource, FileSource
 
 DEFAULT_WS_UI = str((Path(__file__).resolve().parents[1] / "frontend" / "index.html").resolve())
 
@@ -56,8 +56,19 @@ def parse_source_config(name: str, spec: str, default_baudrate: int) -> dict:
                 f"--source {name!r}: udp port must be an integer, got {arg!r}"
             )
 
+    if kind == "file":
+        path = arg
+        if not path:
+            raise ValueError(f"--source {name!r}: file path must not be empty")
+        return {
+            "name": name,
+            "type": "file",
+            "port": path,
+            "parser": {"type": "text"},
+        }
+
     raise ValueError(
-        f"--source {name!r}: invalid spec {spec!r}. Use uart:/dev/path[@baud] or udp:PORT"
+        f"--source {name!r}: invalid spec {spec!r}. Use uart:/dev/path[@baud], udp:PORT, or file:/path/to/file.log"
     )
 
 
@@ -69,11 +80,15 @@ def build_source(source_config: dict) -> LogSource:
         return UartSource(source_config["port"], source_config.get("baudrate", 115200))
     if source_type == "udp" and parser_config == {"type": "text"}:
         return UdpSource(source_config["port"])
+    if source_type == "file" and parser_config == {"type": "text"}:
+        return FileSource(source_config["port"])
 
     if source_type == "uart":
         raw_source = RawUartSource(source_config["port"], source_config.get("baudrate", 115200))
     elif source_type == "udp":
         raw_source = RawUdpSource(source_config["port"])
+    elif source_type == "file":
+        raw_source = RawFileSource(source_config["port"])
     else:
         raise ValueError(f"source {source_config.get('name', '?')!r}: unsupported type {source_type!r}")
 

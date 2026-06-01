@@ -12,7 +12,7 @@ class ParserConfig:
 @dataclass
 class SourceConfig:
     name: str
-    type: str  # "uart" or "udp"
+    type: str  # "uart", "udp", or "file"
     port: str | int  # str for uart, int for udp
     parser: ParserConfig = field(default_factory=ParserConfig)
     baudrate: int | None = None
