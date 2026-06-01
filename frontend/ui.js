@@ -638,11 +638,126 @@ function sendSerial(paneId) {
 export function _uiSetupTxPane(id) {
     const input = document.getElementById("input-" + id);
     if (!input) return;
-    input.addEventListener("keydown", e => {
-        if (e.key === "Enter") { e.preventDefault(); sendSerial(id); }
+
+    const commands = window.__embedLogPaneCommands?.[id] || [];
+    const row = input.closest(".input-row");
+    const hint = document.createElement("span");
+    hint.className = "tx-hint";
+    hint.setAttribute("aria-live", "polite");
+    if (row) row.appendChild(hint);
+
+    // per-pane send history (most recent last)
+    if (!window.__embedLogTxHistory) window.__embedLogTxHistory = {};
+    if (!window.__embedLogTxHistIdx) window.__embedLogTxHistIdx = {};
+    const histKey = id;
+
+    let matches = [];       // indexes into commands[] matching typed prefix
+    let hintIdx = 0;        // which match the ghost hint shows
+
+    function fuzzyMatch(typed) {
+        if (!typed || !commands.length) return [];
+        const lower = typed.toLowerCase();
+        return commands
+            .map((cmd, i) => ({ cmd, i, score: cmd.toLowerCase().indexOf(lower) }))
+            .filter(m => m.score >= 0)
+            .sort((a, b) => a.score - b.score || a.cmd.length - b.cmd.length)
+            .map(m => m.i);
+    }
+
+    function showHint() {
+        if (hintIdx >= 0 && hintIdx < matches.length) {
+            hint.textContent = commands[matches[hintIdx]];
+            hint.classList.add("visible");
+        } else {
+            hint.classList.remove("visible");
+        }
+    }
+
+    function resetHistoryIndex() {
+        window.__embedLogTxHistIdx[histKey] = -1;
+    }
+
+    // ── typing → fuzzy match saved commands, show ghost hint ──────
+    input.addEventListener("input", () => {
+        const typed = input.value;
+        matches = fuzzyMatch(typed);
+        hintIdx = matches.length > 0 ? 0 : -1;
+        showHint();
+        resetHistoryIndex();
     });
+
+    // ── keydown ───────────────────────────────────────────────────
+    input.addEventListener("keydown", e => {
+        const history = window.__embedLogTxHistory[histKey] || [];
+
+        // Escape → hide hint
+        if (e.key === "Escape") {
+            hintIdx = -1; matches = []; showHint();
+            return;
+        }
+
+        // Tab → accept ghost-hint suggestion
+        if (e.key === "Tab" && hintIdx >= 0 && hintIdx < matches.length) {
+            e.preventDefault();
+            input.value = commands[matches[hintIdx]];
+            matches = []; hintIdx = -1; showHint();
+            resetHistoryIndex();
+            return;
+        }
+
+        // ↓/↑ → history navigation
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            if (!history.length) return;
+
+            let idx = window.__embedLogTxHistIdx[histKey];
+            // If no history navigation in progress, start now
+            if (idx < 0) {
+                idx = e.key === "ArrowUp" ? history.length - 1 : 0;
+            } else {
+                const step = e.key === "ArrowDown" ? 1 : -1;
+                idx += step;
+                if (idx >= history.length) idx = 0;
+                if (idx < 0) idx = history.length - 1;
+            }
+            e.preventDefault();
+            window.__embedLogTxHistIdx[histKey] = idx;
+            input.value = history[idx];
+            matches = []; hintIdx = -1; showHint();
+            // Place cursor at end
+            input.setSelectionRange(input.value.length, input.value.length);
+            return;
+        }
+
+        // Any other key resets history navigation
+        resetHistoryIndex();
+    });
+
+    // ── send ─────────────────────────────────────────────────────
+    function sendCurrent() {
+        const text = input.value.trim();
+        if (!text) return;
+        input.value = "";
+        matches = []; hintIdx = -1; showHint(); resetHistoryIndex();
+
+        // Record in history (dedup consecutive, cap at 50)
+        const history = window.__embedLogTxHistory[histKey] || [];
+        if (!history.length || history[history.length - 1] !== text) {
+            history.push(text);
+            if (history.length > 50) history.shift();
+        }
+        window.__embedLogTxHistory[histKey] = history;
+
+        window.wsSend?.({ cmd: "send_raw", id, data: text + "\n" });
+    }
+
+    // Enter → send
+    input.addEventListener("keydown", e => {
+        if (e.key === "Enter") { e.preventDefault(); sendCurrent(); }
+    });
+
+    // Send button
     const sendBtn = document.querySelector(`.send-btn[data-pane="${id}"]`);
-    if (sendBtn) sendBtn.addEventListener("click", () => sendSerial(id));
+    if (sendBtn) sendBtn.addEventListener("click", sendCurrent);
 }
 
 if (window.__embedLogProfile?.capabilities?.tx) {

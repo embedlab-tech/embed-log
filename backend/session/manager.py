@@ -19,6 +19,8 @@ class SessionManager:
         frontend_plugins: dict[str, dict] | None = None,
         pane_plugins: dict[str, list[dict]] | None = None,
         plugin_scripts: dict[str, str] | None = None,
+        pane_kinds: dict[str, str] | None = None,
+        pane_commands: dict[str, list[str]] | None = None,
         started_at: str,
         config_path: str | None,
         job_id: str | None,
@@ -34,6 +36,8 @@ class SessionManager:
         self.frontend_plugins = frontend_plugins or {}
         self.pane_plugins = pane_plugins or {}
         self.plugin_scripts = plugin_scripts or {}
+        self.pane_kinds = pane_kinds or {}
+        self.pane_commands = pane_commands or {}
         self.started_at = started_at
         self.config_path = config_path
         self.job_id = job_id
@@ -92,6 +96,8 @@ class SessionManager:
             "pane_labels": self.source_labels,
             "frontend_plugins": self.frontend_plugins,
             "pane_plugins": self.pane_plugins,
+            "pane_kinds": self.pane_kinds,
+            "pane_commands": self.pane_commands,
             "sources": [
                 {"name": name, "label": self.source_labels.get(name, name), "log": f"/sessions/{self.session_id}/{Path(path).name}"}
                 for name, path in self.source_files.items()
@@ -120,6 +126,8 @@ class SessionManager:
             "pane_labels": self.source_labels,
             "frontend_plugins": self.frontend_plugins,
             "pane_plugins": self.pane_plugins,
+            "pane_kinds": self.pane_kinds,
+            "pane_commands": self.pane_commands,
             "plugin_scripts": self.plugin_scripts,
             "source_files": self.source_files,
             "session_html": str(self.html_path) if exported_html else None,

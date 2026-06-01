@@ -11,6 +11,7 @@ from ..app import DEFAULT_WS_UI, build_source, parse_source, run_app
 from ..config import AppConfig, ConfigError, load_config
 from ..frontend_plugins import resolve_frontend_plugin
 from ..sources import LogSource
+import yaml
 
 
 def _run_merge(args: argparse.Namespace) -> int:
@@ -221,6 +222,26 @@ def _run_run(args: argparse.Namespace) -> int:
                         return 1
             tabs.append({"label": tab.label, "panes": panes, "pane_labels": pane_labels})
 
+    # Load per-source TX command suggestions (embed-log.commands.yml)
+    pane_commands: dict[str, list[str]] = {}
+    commands_candidates = []
+    if args.config:
+        cf = Path(args.config)
+        commands_candidates.append(str(cf.parent / f"{cf.stem}.commands.yml"))
+    commands_candidates.append("embed-log.commands.yml")
+    for cmdfile in commands_candidates:
+        try:
+            data = yaml.safe_load(Path(cmdfile).read_text())
+            srcs = data.get("sources", {}) if isinstance(data, dict) else {}
+            for name in source_names:
+                cmds = srcs.get(name)
+                if isinstance(cmds, list):
+                    pane_commands[name] = [str(c) for c in cmds if isinstance(c, str) and c]
+            if pane_commands:
+                break
+        except (OSError, yaml.YAMLError, AttributeError):
+            continue
+
     return run_app(
         source_names=source_names,
         source_objects=source_objects,
@@ -230,6 +251,7 @@ def _run_run(args: argparse.Namespace) -> int:
         tabs=tabs,
         frontend_plugins=frontend_plugins,
         pane_plugins=pane_plugins,
+        pane_commands=pane_commands,
         plugin_scripts=plugin_scripts,
         logs_root=logs_root,
         host=host,

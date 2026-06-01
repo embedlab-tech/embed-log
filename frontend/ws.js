@@ -125,6 +125,8 @@ async function _handleConfigMessage(msg) {
         type: "session_html_status",
     });
     const paneLabels = msg.pane_labels && typeof msg.pane_labels === "object" ? msg.pane_labels : {};
+    window.__embedLogPaneKinds = msg.pane_kinds && typeof msg.pane_kinds === "object" ? msg.pane_kinds : {};
+    window.__embedLogPaneCommands = msg.pane_commands && typeof msg.pane_commands === "object" ? msg.pane_commands : {};
     Object.keys(PANE_LABELS).forEach(key => delete PANE_LABELS[key]);
     Object.assign(PANE_LABELS, paneLabels);
     if (TABS.length === 0 && msg.tabs && msg.tabs.length > 0) {

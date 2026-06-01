@@ -635,6 +635,7 @@ mark.hl {
     background: var(--panel);
     border-top: 1px solid var(--border);
     flex-shrink: 0;
+    position: relative;
 }
 .serial-input {
     flex: 1;
@@ -649,6 +650,29 @@ mark.hl {
 }
 .serial-input:focus { border-color: var(--accent); }
 .send-btn { padding: 4px 12px; flex-shrink: 0; }
+
+/* Inline autocomplete hint below the TX input */
+.tx-hint {
+    position: absolute;
+    top: calc(100% + 1px);
+    left: 8px;
+    right: 8px;
+    padding: 2px 8px;
+    background: var(--panel);
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.12s;
+    border-bottom: 1px solid var(--accent);
+}
+.tx-hint.visible {
+    opacity: 1;
+}
 
 /* ---- Splitter ---- */
 .splitter {

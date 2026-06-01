@@ -43,6 +43,8 @@ class WebSocketBroadcaster:
         app_name: str = "embed-log",
         theme_defaults: dict | None = None,
         source_labels: dict[str, str] | None = None,
+        pane_kinds: dict[str, str] | None = None,
+        pane_commands: dict[str, list[str]] | None = None,
         frontend_plugins: dict[str, dict] | None = None,
         pane_plugins: dict[str, list[dict]] | None = None,
         plugin_scripts: dict[str, str] | None = None,
@@ -74,6 +76,8 @@ class WebSocketBroadcaster:
         self._app_name = app_name
         self._theme_defaults = theme_defaults or {}
         self._source_labels = source_labels or {}
+        self._pane_kinds = pane_kinds or {}
+        self._pane_commands = pane_commands or {}
         self._frontend_plugins = frontend_plugins or {}
         self._pane_plugins = pane_plugins or {}
         self._plugin_scripts = plugin_scripts or {}
@@ -352,6 +356,8 @@ class WebSocketBroadcaster:
             "type": "config",
             "tabs": self._tabs,
             "pane_labels": self._source_labels,
+            "pane_kinds": self._pane_kinds,
+            "pane_commands": self._pane_commands,
             "session": self._session_info,
             "app_name": self._app_name,
             "theme_defaults": self._theme_defaults,

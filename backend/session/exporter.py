@@ -19,6 +19,7 @@ class SessionExporter:
         frontend_plugins: dict[str, dict] | None = None,
         pane_plugins: dict[str, list[dict]] | None = None,
         plugin_scripts: dict[str, str] | None = None,
+        pane_kinds: dict[str, str] | None = None,
         timestamp_mode: str = "absolute",
         first_log_at: str | None = None,
         merge_script: str | Path | None = None,
@@ -31,6 +32,7 @@ class SessionExporter:
         self._frontend_plugins = frontend_plugins or {}
         self._pane_plugins = pane_plugins or {}
         self._plugin_scripts = plugin_scripts or {}
+        self._pane_kinds = pane_kinds or {}
         self._timestamp_mode = timestamp_mode
         self._first_log_at = first_log_at
         self._merge_script = Path(merge_script) if merge_script else (Path(__file__).resolve().parents[2] / "utils" / "merge_logs.py")

@@ -106,6 +106,7 @@ def run_app(
     app_name: str,
     default_light_theme: str | None,
     default_dark_theme: str | None,
+    pane_commands: dict[str, list[str]] | None = None,
     queue_maxsize: int = 20000,
     timestamp_mode: str = "absolute",
 ) -> int:
@@ -163,6 +164,7 @@ def run_app(
         source_labels=source_labels,
         frontend_plugins=frontend_plugins,
         pane_plugins=pane_plugins,
+        pane_commands=pane_commands or {},
         plugin_scripts=plugin_scripts,
         queue_maxsize=queue_maxsize,
         timestamp_mode=timestamp_mode,
