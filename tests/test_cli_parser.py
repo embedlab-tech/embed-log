@@ -23,7 +23,7 @@ class ParserStructureTests(unittest.TestCase):
         """All expected subcommands must be registered."""
         expected = {
             "run", "demo", "sessions", "merge", "parse",
-            "tail-file", "version", "ports", "sample-config",
+            "version", "ports", "sample-config",
         }
         # subparsers are stored in the _subparsers action
         subparser_actions = [
@@ -179,26 +179,6 @@ class ParseSubcommandTests(unittest.TestCase):
         self.assertIsNone(args.output)
 
 
-class TailFileSubcommandTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.parser = build_parser()
-
-    def test_tail_file_defaults(self):
-        args = self.parser.parse_args([
-            "tail-file", "app.log", "127.0.0.1:6000"
-        ])
-        self.assertEqual(args.path, "app.log")
-        self.assertEqual(args.target, ("127.0.0.1", 6000))
-        self.assertFalse(args.from_start)
-        self.assertAlmostEqual(args.poll_interval, 0.2)
-        self.assertEqual(args.encoding, "utf-8")
-
-    def test_tail_file_from_start(self):
-        args = self.parser.parse_args([
-            "tail-file", "app.log", "127.0.0.1:6000", "--from-start"
-        ])
-        self.assertTrue(args.from_start)
 
 
 class VersionSubcommandTests(unittest.TestCase):
