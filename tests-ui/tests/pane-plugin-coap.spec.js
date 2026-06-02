@@ -165,7 +165,6 @@ tabs:
     await expect(page.locator('#plugin-tooltip')).toBeHidden();
     const hoverCard = page.locator('#pane-plugin-hover-card');
     const pluginIndicator = page.locator('#plugin-indicator-COAP_UDP');
-    const pluginMenu = page.locator('#pane-plugin-menu');
     const tooltip = page.locator('#plugin-tooltip');
 
     // Hover icon → hover card shows current state (disabled)
@@ -176,37 +175,19 @@ tabs:
     await expect(hoverCard).toContainText('Disabled');
     await expect(hoverCard).toContainText('Render decoded CoAP summaries inline for matching lines in this pane.');
 
-    // Close hover card before interacting with menu
-    await page.mouse.move(10, 10);
-    await expect(hoverCard).toBeHidden();
-
-    // Use the menu to enable all-logs mode
-    await pluginIndicator.click();
-    await expect(pluginMenu).toBeVisible();
-    const pluginMenuBox = await pluginMenu.boundingBox();
-    const viewport = page.viewportSize();
-    expect(pluginMenuBox).not.toBeNull();
-    expect(viewport).not.toBeNull();
-    expect(pluginMenuBox.x).toBeGreaterThanOrEqual(8);
-    expect(pluginMenuBox.x + pluginMenuBox.width).toBeLessThanOrEqual(viewport.width - 8);
-    await expect(pluginMenu).toContainText('COAP plugin settings');
-    await expect(pluginMenu).toContainText('All logs');
-
-    const allLogsCheckbox = pluginMenu.locator('input[type="checkbox"]').first();
+    // Move cursor onto hover card and enable all-logs
+    await hoverCard.hover();
+    const allLogsCheckbox = hoverCard.locator('input[type="checkbox"]').first();
     await allLogsCheckbox.check();
 
-    // Close menu before interacting with lines (menu overlay blocks lines)
-    await pluginIndicator.click();
-    await expect(pluginMenu).toBeHidden();
-    // Dismiss hover card that appeared from focus event on the indicator
-    await pluginIndicator.blur();
-    await page.evaluate(() => window.__embedLogHidePluginOverlays?.());
+    // Move cursor away to dismiss
+    await page.mouse.move(10, 10);
     await expect(hoverCard).toBeHidden();
     // Now verify all-logs mode is active
     await expect(firstLine).toContainText(inlineSummary);
     await expect(secondLine).toContainText(inlineSummary);
-    await expect(firstLine).not.toContainText('AABBCC');
-    await expect(secondLine).not.toContainText('99 88 77 66');
+    await expect(firstLine).toContainText('AABBCC');
+    await expect(secondLine).toContainText('99 88 77 66');
     await expect(thirdLine).toContainText('plain log without any packet');
 
     // All-logs mode disables the line tooltip
@@ -229,12 +210,18 @@ tabs:
     const copied = await readClipboard(page);
     expect(copied).toContain(inlineSummary);
     expect(copied).not.toContain(coapHex);
-    expect(copied).not.toContain('AABBCC');
+    expect(copied).toContain('AABBCC');
 
-    // Reopen menu and disable all-logs
-    await pluginIndicator.click();
-    await expect(pluginMenu).toBeVisible();
-    await allLogsCheckbox.uncheck();
+
+
+    // Hover indicator and disable all-logs
+    await pluginIndicator.hover();
+    await expect(hoverCard).toBeVisible();
+    await hoverCard.hover();
+    const disableCheckbox = hoverCard.locator('input[type="checkbox"]').first();
+    await disableCheckbox.uncheck();
+    await page.mouse.move(10, 10);
+    await expect(hoverCard).toBeHidden();
     await expect(firstLine).toContainText('AABBCC');
     await expect(secondLine).toContainText('99 88 77 66');
     await expect(thirdLine).toContainText('plain log without any packet');
@@ -294,10 +281,14 @@ tabs:
     const lines = page.locator('#log-COAP_UDP .log-line');
     await expect(lines).toHaveCount(2);
 
-    await page.locator('#plugin-indicator-COAP_UDP').click();
-    const pluginMenu = page.locator('#pane-plugin-menu');
-    const allLogsCheckbox = pluginMenu.locator('input[type="checkbox"]').first();
-    await allLogsCheckbox.check();
+    const indicator = page.locator('#plugin-indicator-COAP_UDP');
+    await indicator.hover();
+    const liveHoverCard = page.locator('#pane-plugin-hover-card');
+    await expect(liveHoverCard).toBeVisible();
+    await liveHoverCard.hover();
+    const liveCheckbox = liveHoverCard.locator('input[type="checkbox"]').first();
+    await liveCheckbox.check();
+    await page.mouse.move(10, 10);
     await expect(lines.nth(0)).toContainText(inlineSummary);
 
     const downloadPromise = page.waitForEvent('download');
@@ -313,8 +304,12 @@ tabs:
       await expect(exportedLines.nth(0)).toContainText(inlineSummary);
       await expect(exportedLines.nth(1)).toContainText('plain log without any packet');
 
-      await exported.locator('#plugin-indicator-COAP_UDP').click();
-      const exportedCheckbox = exported.locator('#pane-plugin-menu input[type="checkbox"]').first();
+      const exportedIndicator = exported.locator('#plugin-indicator-COAP_UDP');
+      await exportedIndicator.hover();
+      const exportedHoverCard = exported.locator('#pane-plugin-hover-card');
+      await expect(exportedHoverCard).toBeVisible();
+      await exportedHoverCard.hover();
+      const exportedCheckbox = exportedHoverCard.locator('input[type="checkbox"]').first();
       await expect(exportedCheckbox).toBeChecked();
     } finally {
       await exported.close();

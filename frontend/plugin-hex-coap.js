@@ -87,12 +87,14 @@
     }
 
     function _findCandidates(rawText) {
-        const matches = [];
+        const map = new Map();
         const separated = rawText.match(/[0-9A-Fa-f][0-9A-Fa-f\s:,_|.-]{7,}/g) || [];
-        separated.forEach(match => matches.push(match));
+        separated.forEach(m => { if (!map.has(m)) map.set(m, rawText.indexOf(m)); });
         const compact = rawText.match(/\b[0-9a-fA-F]{8,}\b/g) || [];
-        compact.forEach(match => matches.push(match));
-        return [...new Set(matches)].sort((a, b) => b.length - a.length);
+        compact.forEach(m => { if (!map.has(m)) map.set(m, rawText.indexOf(m)); });
+        return [...map.entries()]
+            .map(([text, index]) => ({ text, index }))
+            .sort((a, b) => b.text.length - a.text.length);
     }
 
     function _readExtended(bytes, index, nibble) {
@@ -176,6 +178,7 @@
 
     function _inlineCodeText(code) {
         if (REQUEST_CODES[code]) return REQUEST_CODES[code];
+        if (RESPONSE_CODES[code]) return RESPONSE_CODES[code];
         const cls = code >> 5;
         const detail = code & 0x1f;
         return `${cls}.${String(detail).padStart(2, '0')}`;
@@ -283,11 +286,23 @@
             const parsed = _parseCoap(bytes, start / 2, options);
             if (!parsed) continue;
             if (!best || parsed.score > best.score) {
+                parsed._hexStart = start;
                 best = parsed;
             }
         }
         if (best) delete best.score;
         return best;
+    }
+
+    function _hexOffsetInCandidate(candidate, hexCharOffset) {
+        let seen = 0;
+        for (let i = 0; i < candidate.length; i++) {
+            if (/[0-9a-fA-F]/.test(candidate[i])) {
+                if (seen === hexCharOffset) return i;
+                seen++;
+            }
+        }
+        return candidate.length;
     }
 
     window.EmbedLogPlugins.register({
@@ -305,10 +320,21 @@
             },
         ],
         analyzeLine(ctx) {
-            const candidates = _findCandidates(ctx.rawText || '');
+            const rawText = ctx.rawText || '';
+            const candidates = _findCandidates(rawText);
             for (let i = 0; i < candidates.length; i += 1) {
-                const parsed = _findCoapInCandidate(candidates[i], ctx.options || {});
-                if (parsed) return parsed;
+                const parsed = _findCoapInCandidate(candidates[i].text, ctx.options || {});
+                if (!parsed) continue;
+                const coapIdx = candidates[i].index + _hexOffsetInCandidate(candidates[i].text, parsed._hexStart);
+                delete parsed._hexStart;
+                if (coapIdx > 0) {
+                    const prefix = rawText.slice(0, coapIdx);
+                    if (parsed.inlineText) {
+                        parsed.inlineText = prefix + parsed.inlineText;
+                        parsed.filterText = `coap ${parsed.summary} ${parsed.inlineText}`;
+                    }
+                }
+                return parsed;
             }
             return null;
         },

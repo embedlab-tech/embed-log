@@ -148,7 +148,7 @@ function _hidePluginInfo() {
     _pluginInfoAnchorEl = null;
 }
 
-function _schedulePluginInfoHide(delay = 140) {
+function _schedulePluginInfoHide(delay = 400) {
     _cancelPluginInfoHide();
     _pluginInfoHideTimer = window.setTimeout(() => {
         _pluginInfoHideTimer = null;
@@ -157,10 +157,6 @@ function _schedulePluginInfoHide(delay = 140) {
 }
 
 function _renderPluginInfo(paneId, anchor) {
-    if (_hasAnySelection()) {
-        _hidePluginInfo();
-        return false;
-    }
     const plugins = getPanePluginSettings(paneId);
     if (!plugins.length) {
         _hidePluginInfo();
@@ -233,6 +229,9 @@ window.addEventListener("resize", () => {
     if (_pluginInfoEl.classList.contains("visible") && _pluginInfoAnchorEl) {
         _positionPluginInfo(_pluginInfoAnchorEl);
     }
+});
+document.addEventListener("keydown", ev => {
+    if (ev.key === "Escape") _hidePluginInfo();
 });
 
 export function hidePluginOverlays() {
