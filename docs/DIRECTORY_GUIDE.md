@@ -19,7 +19,6 @@ Short, practical map of this repository for humans and coding agents.
       - `run.py` — `run` / `validate` / `merge`.
       - `diagnostics.py` — `version` / `doctor` / `ports`.
       - `update.py` — self-update logic.
-      - `skill.py` — built-in skill system (`skill list`, `skill show`).
       - `demo.py` — demo utility commands.
       - `sessions/` — subpackage for all `sessions` subcommands.
     - `config/loader.py` — YAML config parsing/validation.
@@ -45,7 +44,6 @@ Short, practical map of this repository for humans and coding agents.
     - `session/manager.py` — session metadata/manifest.
     - `session/exporter.py` — HTML export orchestration.
     - `sinks/` — output sink abstractions (extensible).
-    - `skills/` — built-in skill markdown files (`sessions.md`).
     - `log_client.py` — marker injection + stream subscription client.
     - `tx_client.py` — TX-only client.
     - `parse.py` — parse exported HTML back to raw logs.

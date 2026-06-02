@@ -197,26 +197,6 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    # ── skill ──
-    p = sub.add_parser(
-        "skill",
-        help="list and export built-in skills for agent workflows",
-        description=(
-            "List and export built-in skill markdown files.\n"
-            "\n"
-            "Skills describe workflows an agent or user can follow.\n"
-            "Use `skill show <name>` to print the markdown to stdout.\n"
-            "\n"
-            "Agents: capture the output of `skill show <name>`\n"
-            "and inject it as context — no source checkout needed."
-        ),
-        epilog=(
-            "Examples:\n"
-            "  embed-log skill list\n"
-            "  embed-log skill show sessions\n"
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
 
     # ── sample-config ──
     from .sample_config import add_subparser as add_sample_config_subparser

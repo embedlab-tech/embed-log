@@ -29,7 +29,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; iex ((New-Object Sys
 Install a specific version:
 
 ```bash
-EMBED_LOG_REF_TYPE=release EMBED_LOG_REF=v1.1.4 curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.sh | bash
+EMBED_LOG_REF_TYPE=release EMBED_LOG_REF=v1.1.5 curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.sh | bash
 ```
 
 Install the **latest** `main` branch — clone and run the installer locally:
@@ -240,7 +240,7 @@ embed-log ports --json
 
 ```bash
 embed-log update                # update to latest release
-embed-log update --tag v1.1.4   # specific tag
+embed-log update --tag v1.1.5   # specific tag
 embed-log update --branch main  # specific branch
 ```
 
@@ -257,7 +257,7 @@ embed-log sessions export <session-id>
 embed-log sessions marker list <session-id> --search boot
 ```
 
-Full documentation with all flags and examples is at `backend/skills/sessions.md` (also available via `read skill://sessions`).
+Use `embed-log sessions --help` and `embed-log sessions <subcommand> --help` for the full flag reference.
 
 
 ## Testing

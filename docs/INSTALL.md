@@ -58,13 +58,18 @@ No venv activation is needed. The pipx install is isolated and can be uninstalle
 
 ## Alternative: install from a local clone
 
-If you already have the repository cloned, run the installer from the repo root:
+If you already have the repository cloned, supported local install flows from the repo root are:
 
 ```bash
 ./install.sh
+# or
+pipx install .
+# or
+python3 -m build
+pipx install dist/embed_log-*.whl
 ```
 
-The script auto-detects the local `pyproject.toml` and installs from the local source instead of fetching from GitHub.
+`./install.sh` auto-detects the local `pyproject.toml` and installs from the checkout instead of fetching from GitHub.
 
 ---
 
@@ -109,7 +114,7 @@ For deterministic or random demo traffic from a repo checkout:
 ```bash
 pipx reinstall embed-log          # reinstall from current pipx cache
 # or
-pipx install --force .            # reinstall from local directory
+pipx install --force .            # reinstall directly from the local checkout
 # or
 python3 -m build
 pipx install --force dist/embed_log-*.whl
