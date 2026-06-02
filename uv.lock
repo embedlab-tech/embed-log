@@ -220,11 +220,7 @@ wheels = [
 
 [[package]]
 name = "embed-log"
-<<<<<<< HEAD
 version = "1.1.5"
-=======
-version = "1.1.4"
->>>>>>> f3efd7a (updated coap plugin)
 source = { virtual = "." }
 dependencies = [
     { name = "aiohttp" },
