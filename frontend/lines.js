@@ -3,7 +3,7 @@ import {
     lineHasTimestampMode,
 } from './state.js';
 import { parseAnsi } from './ansi.js';
-import { analyzeLinePlugins, getLinePluginTooltip, getConfiguredPanePlugins } from './pluginRuntime.js';
+import { analyzeLinePlugins, getLinePluginTooltip, getConfiguredPanePlugins, getPanePluginSettings, setPanePluginSetting } from './pluginRuntime.js';
 
 // ---------------------------------------------------------------------------
 // Line rendering
@@ -25,6 +25,13 @@ function _lineTagClass(html) {
         default: return "";
     }
 }
+function _escapeHtml(text) {
+    return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+}
 
 export function buildStoredLine(paneId, ts, rawText, isTx, meta = null) {
     const html = parseAnsi(rawText);
@@ -39,6 +46,7 @@ export function buildStoredLine(paneId, ts, rawText, isTx, meta = null) {
         pluginData: null,
         pluginFilterText: "",
         pluginClassNames: [],
+        pluginInlineText: "",
     };
     analyzeLinePlugins(paneId, line);
     return line;
@@ -46,7 +54,7 @@ export function buildStoredLine(paneId, ts, rawText, isTx, meta = null) {
 
 export function buildLineHtml(line, showTs, filterRx) {
     const tsClass = "ts" + (showTs ? "" : " hidden");
-    let content = line.html;
+    let content = line.pluginInlineText ? _escapeHtml(line.pluginInlineText) : line.html;
     if (filterRx) {
         content = content.replace(filterRx, m => `<mark class="hl">${m}</mark>`);
     }
@@ -67,12 +75,26 @@ export function _lineClass(line, idx, paneId) {
 
 export function matchesFilter(line, rx) {
     if (!rx) return true;
-    const plain = line.html.replace(/<[^>]+>/g, "") + " " + line.ts + " " + (line.pluginFilterText || "");
+    const rendered = line.pluginInlineText || line.html.replace(/<[^>]+>/g, "");
+    const rawText = typeof line.rawText === "string" ? line.rawText : "";
+    const plain = `${rendered} ${rawText} ${line.ts} ${line.pluginFilterText || ""}`;
     return rx.test(plain);
 }
 const _pluginTooltipEl = document.createElement("div");
 _pluginTooltipEl.id = "plugin-tooltip";
 document.body.appendChild(_pluginTooltipEl);
+
+const _pluginInfoEl = document.createElement("div");
+_pluginInfoEl.id = "pane-plugin-hover-card";
+document.body.appendChild(_pluginInfoEl);
+
+let _pluginInfoHideTimer = null;
+let _pluginInfoPaneId = null;
+let _pluginInfoAnchorEl = null;
+
+function _hasAnySelection() {
+    return PANES.some(id => state.selected[id]?.size > 0);
+}
 
 function _showPluginTooltip(lineDiv) {
     const text = lineDiv?.dataset?.pluginTooltip || "";
@@ -91,6 +113,133 @@ function _hidePluginTooltip() {
     _pluginTooltipEl.classList.remove("visible");
 }
 
+function _cancelPluginInfoHide() {
+    if (_pluginInfoHideTimer !== null) {
+        clearTimeout(_pluginInfoHideTimer);
+        _pluginInfoHideTimer = null;
+    }
+}
+
+function _positionPluginInfo(anchor) {
+    const margin = 8;
+    const gap = 8;
+    const rect = anchor.getBoundingClientRect();
+    _pluginInfoEl.style.visibility = "hidden";
+    _pluginInfoEl.classList.add("visible");
+    const width = _pluginInfoEl.offsetWidth;
+    const height = _pluginInfoEl.offsetHeight;
+    const maxLeft = Math.max(margin, window.innerWidth - width - margin);
+    const left = Math.min(Math.max(margin, rect.right - width), maxLeft);
+    const belowTop = rect.bottom + gap;
+    const aboveTop = rect.top - gap - height;
+    const maxTop = Math.max(margin, window.innerHeight - height - margin);
+    const top = belowTop <= maxTop
+        ? belowTop
+        : Math.max(margin, aboveTop >= margin ? aboveTop : maxTop);
+    _pluginInfoEl.style.left = `${left}px`;
+    _pluginInfoEl.style.top = `${top}px`;
+    _pluginInfoEl.style.visibility = "";
+}
+
+function _hidePluginInfo() {
+    _cancelPluginInfoHide();
+    _pluginInfoEl.classList.remove("visible");
+    _pluginInfoPaneId = null;
+    _pluginInfoAnchorEl = null;
+}
+
+function _schedulePluginInfoHide(delay = 140) {
+    _cancelPluginInfoHide();
+    _pluginInfoHideTimer = window.setTimeout(() => {
+        _pluginInfoHideTimer = null;
+        _hidePluginInfo();
+    }, delay);
+}
+
+function _renderPluginInfo(paneId, anchor) {
+    if (_hasAnySelection()) {
+        _hidePluginInfo();
+        return false;
+    }
+    const plugins = getPanePluginSettings(paneId);
+    if (!plugins.length) {
+        _hidePluginInfo();
+        return false;
+    }
+
+    _pluginInfoEl.innerHTML = "";
+    plugins.forEach(plugin => {
+        const section = document.createElement("section");
+        section.className = "pane-plugin-hover-section";
+
+        const title = document.createElement("div");
+        title.className = "pane-plugin-hover-title";
+        title.textContent = plugin.displayName;
+        section.appendChild(title);
+
+        plugin.settings.forEach(setting => {
+            if (setting.type !== "boolean") return;
+
+            const row = document.createElement("label");
+            row.className = "pane-plugin-hover-toggle";
+
+            const input = document.createElement("input");
+            input.type = "checkbox";
+            input.checked = setting.value === true;
+            input.addEventListener("change", ev => {
+                ev.stopPropagation();
+                if (!setPanePluginSetting(paneId, plugin.name, setting.key, input.checked)) return;
+                reanalyzePanePlugins(paneId);
+                window.__embedLogSchedulePersist?.();
+                _renderPluginInfo(paneId, anchor);
+            });
+            row.appendChild(input);
+
+            const textWrap = document.createElement("span");
+            textWrap.className = "pane-plugin-hover-copy";
+
+            const label = document.createElement("span");
+            label.className = "pane-plugin-hover-label";
+            label.textContent = setting.label;
+            textWrap.appendChild(label);
+
+            const desc = document.createElement("div");
+            desc.className = "pane-plugin-hover-desc";
+            desc.textContent = `${input.checked ? "Enabled" : "Disabled"} — ${setting.description || setting.label}`;
+            textWrap.appendChild(desc);
+
+            row.appendChild(textWrap);
+            section.appendChild(row);
+        });
+
+        _pluginInfoEl.appendChild(section);
+    });
+
+    _pluginInfoPaneId = paneId;
+    _pluginInfoAnchorEl = anchor;
+    _positionPluginInfo(anchor);
+    return true;
+}
+
+function _showPluginInfo(paneId, anchor) {
+    _cancelPluginInfoHide();
+    _renderPluginInfo(paneId, anchor);
+}
+
+_pluginInfoEl.addEventListener("mouseenter", _cancelPluginInfoHide);
+_pluginInfoEl.addEventListener("mouseleave", () => _schedulePluginInfoHide());
+
+window.addEventListener("resize", () => {
+    if (_pluginInfoEl.classList.contains("visible") && _pluginInfoAnchorEl) {
+        _positionPluginInfo(_pluginInfoAnchorEl);
+    }
+});
+
+export function hidePluginOverlays() {
+    _hidePluginTooltip();
+    _hidePluginInfo();
+}
+window.__embedLogHidePluginOverlays = hidePluginOverlays;
 export function applyLineDom(div, line, paneId, idx, filterRx) {
     div.className = _lineClass(line, idx, paneId);
     const tooltip = getLinePluginTooltip(line);
@@ -168,6 +317,11 @@ export function rerenderPane(paneId) {
     }
     if (state.atBottom[paneId]) logEl.scrollTop = logEl.scrollHeight;
 }
+export function reanalyzePanePlugins(paneId) {
+    const lines = state.rawLines[paneId] || [];
+    lines.forEach(line => analyzeLinePlugins(paneId, line));
+    rerenderPane(paneId);
+}
 export function setTimestampMode(mode) {
     const nextMode = mode === "relative" ? "relative" : "absolute";
     if (state.timestampMode === nextMode) return;
@@ -229,6 +383,7 @@ export function _linesSetupPane(id) {
         const idx = parseInt(lineDiv.dataset.idx, 10);
         const line = state.rawLines[id] ? state.rawLines[id][idx] : null;
         if (!line) return;
+        hidePluginOverlays();
         onLineClick(id, line.numTs, lineDiv);
     });
     logEl.addEventListener("mousedown", e => { if (e.button === 1) e.preventDefault(); });
@@ -288,11 +443,13 @@ export function _linesSetupPane(id) {
     // Plugin indicator — shown when this pane has plugins enabled
     const header = document.querySelector(`#pane-${id} .pane-header`);
     if (header) {
-        const indicator = document.createElement("span");
+        const indicator = document.createElement("button");
+        indicator.type = "button";
         indicator.className = "pane-plugin-indicator";
         indicator.id = "plugin-indicator-" + id;
         header.appendChild(indicator);
         _refreshPluginIndicator(id);
+        if (_pluginInfoPaneId === id && _hasAnySelection()) _hidePluginInfo();
     }
 }
 PANES.forEach(_linesSetupPane);
@@ -306,11 +463,22 @@ function _refreshPluginIndicator(paneId) {
     const refs = panePlugins[paneId];
     if (!refs || !refs.length) {
         el.style.display = "none";
+        if (_pluginInfoPaneId === paneId) _hidePluginInfo();
         return;
     }
+    const configurable = getPanePluginSettings(paneId).length > 0;
     el.style.display = "";
     el.textContent = "\u26A1";  // ⚡
-    el.title = refs.map(r => r.name).join("\n");
+    el.title = refs.map(r => r.name).join("\n") + (configurable ? "\n\nClick to configure" : "");
+    el.classList.toggle("configurable", configurable);
+    el.tabIndex = configurable ? 0 : -1;
+    el.setAttribute("aria-label", configurable ? "Configure pane plugins" : "Active pane plugins");
+    if (el.dataset.hoverBound === "1") return;
+    el.dataset.hoverBound = "1";
+    el.addEventListener("mouseenter", () => _showPluginInfo(paneId, el));
+    el.addEventListener("mouseleave", () => _schedulePluginInfoHide());
+    el.addEventListener("focus", () => _showPluginInfo(paneId, el));
+    el.addEventListener("blur", () => _schedulePluginInfoHide(0));
 }
 export function refreshPluginIndicators() {
     PANES.forEach(_refreshPluginIndicator);
@@ -325,7 +493,7 @@ export function clearPane(paneId) {
     state.selected[paneId] = new Set();
     document.getElementById("log-" + paneId).innerHTML = "";
     highlightLine(paneId, null);
-    _hidePluginTooltip();
+    hidePluginOverlays();
     state.atBottom[paneId] = true;
     updateJumpBtn(paneId);
     // Hide copy-selection actions if selection.js has added them

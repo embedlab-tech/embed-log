@@ -66,6 +66,9 @@
         60: 'Size1',
         // OSCORE (RFC 8613)
         9:  'OSCORE',
+        // Echo / Request-Tag (RFC 9175)
+        252: 'Echo',
+        292: 'Request-Tag',
         // No-Response (RFC 7967)
         258: 'No-Response',
     };
@@ -118,6 +121,10 @@
         return bytes.map(value => value.toString(16).padStart(2, '0')).join(' ');
     }
 
+    function _bytesToCompactHex(bytes) {
+        return bytes.map(value => value.toString(16).padStart(2, '0')).join('');
+    }
+
     function _uintFromBytes(valueBytes) {
         let acc = 0;
         for (let i = 0; i < valueBytes.length; i++) acc = (acc << 8) | valueBytes[i];
@@ -134,9 +141,12 @@
             const size = 1 << (szx + 4);
             return `NUM=${num} M=${m} SZX=${szx} (${size}B block)`;
         }
-        // OSCORE, ETag, If-Match — opaque, show as hex
+        // Opaque options that read best as hex.
         if (number === 1 || number === 4 || number === 9) {
             return _bytesToHex(valueBytes);
+        }
+        if (number === 252 || number === 292) {
+            return `0x${_bytesToCompactHex(valueBytes)}`;
         }
         // If-None-Match — typically empty
         if (number === 5) {
@@ -164,6 +174,13 @@
         return `${cls}.${String(detail).padStart(2, '0')}`;
     }
 
+    function _inlineCodeText(code) {
+        if (REQUEST_CODES[code]) return REQUEST_CODES[code];
+        const cls = code >> 5;
+        const detail = code & 0x1f;
+        return `${cls}.${String(detail).padStart(2, '0')}`;
+    }
+
     function _looksLikeCoapCode(code) {
         if (REQUEST_CODES[code]) return true;
         if (RESPONSE_CODES[code]) return true;
@@ -171,7 +188,7 @@
         return code === 0 || cls === 2 || cls === 4 || cls === 5;
     }
 
-    function _parseCoap(bytes, startOffset) {
+    function _parseCoap(bytes, startOffset, options) {
         if (!bytes || bytes.length < 4) return null;
         const first = bytes[0];
         const version = first >> 6;
@@ -188,7 +205,7 @@
         index += tokenLength;
 
         let optionNumber = 0;
-        const options = [];
+        const parsedOptions = [];
         let payload = [];
         while (index < bytes.length) {
             const byte = bytes[index++];
@@ -206,38 +223,43 @@
             if (index + lengthInfo.value > bytes.length) return null;
             const valueBytes = bytes.slice(index, index + lengthInfo.value);
             index += lengthInfo.value;
-            options.push({
+            parsedOptions.push({
                 number: optionNumber,
                 name: OPTION_NAMES[optionNumber] || `Option-${optionNumber}`,
                 value: _optionValue(optionNumber, valueBytes),
             });
         }
 
-        const path = options.filter(opt => opt.number === 11).map(opt => opt.value).join('/');
-        const query = options.filter(opt => opt.number === 15).map(opt => opt.value).join('&');
+        const path = parsedOptions.filter(opt => opt.number === 11).map(opt => opt.value).join('/');
+        const query = parsedOptions.filter(opt => opt.number === 15).map(opt => opt.value).join('&');
         const uri = `${path ? '/' + path : ''}${query ? '?' + query : ''}` || '/';
         const codeText = _codeText(code);
         const isRequest = !!REQUEST_CODES[code];
         const summary = isRequest
             ? `${codeText} ${uri}`
             : `${codeText}${path || query ? ' ' + uri : ''}`;
+        const tokenText = token.length ? _bytesToCompactHex(token) : '';
+        const messageIdText = messageId.toString(16).padStart(4, '0');
+        const optionsText = parsedOptions.length
+            ? parsedOptions.map(opt => `${opt.name}:${opt.value}`).join(', ')
+            : '(none)';
+        const inlineText = `v:${version} t:${TYPE_NAMES[type] || 'UNKNOWN'} c:${_inlineCodeText(code)} i:${messageIdText} {${tokenText}} [${optionsText === '(none)' ? '' : optionsText}] :: data len ${payload.length}`;
 
         const details = [
+            `Version: ${version}`,
             `Type: ${TYPE_NAMES[type] || 'UNKNOWN'}`,
             `Code: ${codeText}`,
-            `Message ID: 0x${messageId.toString(16).padStart(4, '0')}`,
+            `Message ID: 0x${messageIdText}`,
             `Offset: byte ${startOffset}`,
+            `Token: ${token.length ? tokenText : '(none)'}`,
+            `Options: ${optionsText}`,
+            `Data len: ${payload.length}`,
         ];
-        if (token.length) details.push(`Token: ${_bytesToHex(token)}`);
-        options.forEach(opt => details.push(`${opt.name}: ${opt.value}`));
-        if (payload.length) {
-            details.push(`Payload (${payload.length} B): ${_bytesToHex(payload)}`);
-        }
 
         let score = 0;
         if (isRequest) score += 100;
         if (path || query) score += 40;
-        if (options.length) score += Math.min(options.length, 8);
+        if (parsedOptions.length) score += Math.min(parsedOptions.length, 8);
         if (token.length) score += 2;
         if (payload.length) score += 1;
 
@@ -245,18 +267,20 @@
             label: 'CoAP',
             summary,
             details,
-            filterText: `coap ${summary}`,
+            inlineText: options?.allLogs ? inlineText : '',
+            disableTooltip: options?.allLogs === true,
+            filterText: `coap ${summary} ${inlineText}`,
             classNames: ['line-plugin-match', 'line-plugin-coap'],
             score,
         };
     }
 
-    function _findCoapInCandidate(candidate) {
+    function _findCoapInCandidate(candidate, options) {
         const clean = _cleanHexCandidate(candidate);
         let best = null;
         for (let start = 0; start <= clean.length - 8; start += 2) {
             const bytes = _hexToBytes(clean.slice(start));
-            const parsed = _parseCoap(bytes, start / 2);
+            const parsed = _parseCoap(bytes, start / 2, options);
             if (!parsed) continue;
             if (!best || parsed.score > best.score) {
                 best = parsed;
@@ -270,10 +294,20 @@
         apiVersion: 1,
         kind: 'line',
         name: 'hex-coap',
+        displayName: 'CoAP',
+        settings: [
+            {
+                key: 'allLogs',
+                type: 'boolean',
+                label: 'All logs',
+                description: 'Render decoded CoAP summaries inline for matching lines in this pane.',
+                defaultValue: false,
+            },
+        ],
         analyzeLine(ctx) {
             const candidates = _findCandidates(ctx.rawText || '');
             for (let i = 0; i < candidates.length; i += 1) {
-                const parsed = _findCoapInCandidate(candidates[i]);
+                const parsed = _findCoapInCandidate(candidates[i], ctx.options || {});
                 if (parsed) return parsed;
             }
             return null;

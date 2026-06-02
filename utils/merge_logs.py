@@ -622,6 +622,7 @@ def generate_html(
         f"window.__embedLogFrontendPlugins = {frontend_plugins_json};\n"
         f"window.__embedLogPanePlugins = {pane_plugins_json};\n"
         f"window.__embedLogPluginScripts = {plugin_scripts_json};\n"
+        f"window.__embedLogInitialPanePluginUiState = {{}};\n"
         f"window.__embedLogInitialTimestampMode = {json.dumps(timestamp_mode)};\n"
         f"window.__embedLogFirstLogAt = {json.dumps(effective_first_log_at)};\n"
         f"window.__embedLogInitialFontSize = 14;"

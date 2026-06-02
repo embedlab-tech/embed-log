@@ -1,5 +1,5 @@
 import { state, TABS, PANES, paneLabel, unwrapPaneLabel } from './state.js';
-import { onLineClick } from './lines.js';
+import { onLineClick, hidePluginOverlays } from './lines.js';
 import { exportHtmlSnapshot } from './export.js';
 import { can } from './profile.js';
 import { switchTab } from './tabs.js';
@@ -491,6 +491,12 @@ function _decodeEntities(text) {
 function _linePlain(line) {
     return _decodeEntities(_stripHtml(line?.html || "")).replace(/\s+/g, " ").trim();
 }
+function _lineRenderedPlain(line) {
+    const inlineText = typeof line?.pluginInlineText === "string"
+        ? line.pluginInlineText.replace(/\s+/g, " ").trim()
+        : "";
+    return inlineText || _linePlain(line);
+}
 
 function _lineRaw(line) {
     return `${line.ts}  ${_linePlain(line)}`;
@@ -601,8 +607,8 @@ function _escapeRegExp(str) {
     return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function _snippetMessageText(entry) {
-    let text = _linePlain(entry.line).trim();
+function _snippetMessageText(entry, useRendered = false) {
+    let text = (useRendered ? _lineRenderedPlain(entry.line) : _linePlain(entry.line)).trim();
     const sourcePrefix = new RegExp(`^\\[${_escapeRegExp(entry.paneId)}\\]\\s*`);
     for (let i = 0; i < 4; i++) {
         const before = text;
@@ -639,7 +645,7 @@ function _applyMarkerAnnotations(paneId, items) {
 }
 
 
-function _formatRangeRaw(entries) {
+function _formatRangeRaw(entries, useRendered = false) {
     const parts = [];
     let currentPane = null;
     let paneItems = [];
@@ -654,7 +660,7 @@ function _formatRangeRaw(entries) {
         currentPane = e.paneId;
         paneItems.push({
             idx: e.idx,
-            text: `[${e.line.ts}] [${e.paneId}] ${_snippetMessageText(e)}`,
+            text: `[${e.line.ts}] [${e.paneId}] ${_snippetMessageText(e, useRendered)}`,
         });
     });
     flushPane();
@@ -680,10 +686,12 @@ function _buildRangeLogData(entries) {
     return logData;
 }
 
-function _formatSelectionBlock(paneId, indices) {
+function _formatSelectionBlock(paneId, indices, useRendered = false) {
     const lines = state.rawLines[paneId];
     const items = indices
-        .map((idx, i) => lines[idx] ? { idx, text: `${lines[idx].ts}  [${paneId}] ${_linePlain(lines[idx])}` } : null)
+        .map(idx => lines[idx]
+            ? { idx, text: `${lines[idx].ts}  [${paneId}] ${(useRendered ? _lineRenderedPlain(lines[idx]) : _linePlain(lines[idx]))}` }
+            : null)
         .filter(Boolean);
     return _applyMarkerAnnotations(paneId, items);
 }
@@ -736,7 +744,7 @@ function _copyExact(paneId) {
     const sel = state.selected[paneId];
     if (!sel.size) return;
     const indices = Array.from(sel).sort((a, b) => a - b);
-    const text = _formatSelectionBlock(paneId, indices);
+    const text = _formatSelectionBlock(paneId, indices, true);
     if (!text) return;
     _copyText(text).then(() => {
         const btn = document.getElementById("copy-" + paneId);
@@ -749,7 +757,7 @@ function _copyExact(paneId) {
 
 function _copyContext(paneId) {
     const entries = _collectRangeEntries(paneId);
-    const text = _formatRangeRaw(entries);
+    const text = _formatRangeRaw(entries, true);
     if (!text) return;
     _copyText(text).then(() => {
         const btn = document.getElementById("copy-" + paneId);
@@ -856,6 +864,7 @@ document.addEventListener("pointerdown", e => {
     const logArea = line.closest(".log-area");
     if (!logArea) return;
     if (e.altKey) { _altSelection = true; return; }
+    hidePluginOverlays();
 
 
     _drag = {
@@ -971,7 +980,7 @@ document.addEventListener("keydown", e => {
             const div = state.highlighted[hlPane];
             const idx = parseInt(div?.dataset.idx, 10);
             if (Number.isFinite(idx)) {
-                const text = _formatSelectionBlock(hlPane, [idx]);
+                const text = _formatSelectionBlock(hlPane, [idx], true);
                 if (text) { _copyText(text); e.preventDefault(); return; }
             }
         }

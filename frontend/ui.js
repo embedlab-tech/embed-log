@@ -1,6 +1,8 @@
 import { state, TABS, PANES, paneLabel } from './state.js';
-import { clearPane, rerenderPane, setTimestampMode, canDisplayTimestampMode } from './lines.js';
+import { clearPane, rerenderPane, reanalyzePanePlugins, setTimestampMode, canDisplayTimestampMode, hidePluginOverlays } from './lines.js';
 import { rebuildLayout } from './tabcreate.js';
+import { getPanePluginSettings, setPanePluginSetting } from './pluginRuntime.js';
+
 
 
 
@@ -49,6 +51,126 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
 
     window.__embedLogUpdateTimestampModeUi = update;
     update();
+})();
+// ---------------------------------------------------------------------------
+// Pane plugin settings popup
+// ---------------------------------------------------------------------------
+(function () {
+    const menu = document.createElement("div");
+    menu.id = "pane-plugin-menu";
+    document.body.appendChild(menu);
+
+    let openPaneId = null;
+    let anchorEl = null;
+    function _positionMenu(anchor) {
+        const margin = 8;
+        const gap = 6;
+        const rect = anchor.getBoundingClientRect();
+        menu.style.visibility = "hidden";
+        menu.classList.add("open");
+        const width = menu.offsetWidth;
+        const height = menu.offsetHeight;
+        const maxLeft = Math.max(margin, window.innerWidth - width - margin);
+        const left = Math.min(Math.max(margin, rect.left), maxLeft);
+        const belowTop = rect.bottom + gap;
+        const aboveTop = rect.top - gap - height;
+        const maxTop = Math.max(margin, window.innerHeight - height - margin);
+        const top = belowTop <= maxTop
+            ? belowTop
+            : Math.max(margin, aboveTop >= margin ? aboveTop : maxTop);
+        menu.style.left = `${left}px`;
+        menu.style.top = `${top}px`;
+        menu.style.visibility = "";
+    }
+
+    function closeMenu() {
+        menu.classList.remove("open");
+        openPaneId = null;
+        anchorEl = null;
+    }
+
+    function renderMenu(paneId, anchor) {
+        hidePluginOverlays();
+        const plugins = getPanePluginSettings(paneId);
+        if (!plugins.length) {
+            closeMenu();
+            return;
+        }
+
+        menu.innerHTML = "";
+        const head = document.createElement("div");
+        head.className = "pane-plugin-menu-head";
+        head.textContent = `${paneLabel(paneId)} plugin settings`;
+        menu.appendChild(head);
+
+        plugins.forEach(plugin => {
+            const section = document.createElement("div");
+            section.className = "pane-plugin-menu-section";
+
+            const title = document.createElement("div");
+            title.className = "pane-plugin-menu-title";
+            title.textContent = plugin.displayName;
+            section.appendChild(title);
+
+            plugin.settings.forEach(setting => {
+                const row = document.createElement("label");
+                row.className = "pane-checkbox pane-plugin-menu-checkbox";
+
+                const input = document.createElement("input");
+                input.type = "checkbox";
+                input.checked = setting.value === true;
+                input.addEventListener("change", () => {
+                    if (!setPanePluginSetting(paneId, plugin.name, setting.key, input.checked)) return;
+                    reanalyzePanePlugins(paneId);
+                    window.__embedLogSchedulePersist?.();
+                });
+                row.appendChild(input);
+
+                const textWrap = document.createElement("span");
+                const label = document.createElement("span");
+                label.textContent = setting.label;
+                textWrap.appendChild(label);
+
+                if (setting.description) {
+                    const desc = document.createElement("div");
+                    desc.className = "pane-plugin-menu-desc";
+                    desc.textContent = setting.description;
+                    textWrap.appendChild(desc);
+                }
+
+                row.appendChild(textWrap);
+                section.appendChild(row);
+            });
+
+            menu.appendChild(section);
+        });
+
+        _positionMenu(anchor);
+        openPaneId = paneId;
+        anchorEl = anchor;
+    }
+
+    window.__embedLogTogglePanePluginMenu = function __embedLogTogglePanePluginMenu(paneId, anchor) {
+        if (menu.classList.contains("open") && openPaneId === paneId) {
+            closeMenu();
+            return;
+        }
+        renderMenu(paneId, anchor);
+    };
+    window.addEventListener("resize", () => {
+        if (!menu.classList.contains("open") || !anchorEl) return;
+        _positionMenu(anchorEl);
+    });
+
+    document.addEventListener("click", ev => {
+        if (!menu.classList.contains("open")) return;
+        if (menu.contains(ev.target) || anchorEl?.contains?.(ev.target)) return;
+        closeMenu();
+    });
+
+    document.addEventListener("keydown", ev => {
+        if (ev.key === "Escape") closeMenu();
+    });
 })();
 // ---------------------------------------------------------------------------
 // Settings panel — clear cached session (localStorage restore cache)
@@ -619,6 +741,20 @@ export function _uiSetupPane(id) {
         });
     }
 
+    const indicator = document.getElementById("plugin-indicator-" + id);
+    if (indicator && indicator.dataset.menuBound !== "1") {
+        indicator.dataset.menuBound = "1";
+        indicator.addEventListener("click", ev => {
+            ev.stopPropagation();
+            window.__embedLogTogglePanePluginMenu?.(id, indicator);
+        });
+        indicator.addEventListener("keydown", ev => {
+            if (ev.key !== "Enter" && ev.key !== " ") return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            window.__embedLogTogglePanePluginMenu?.(id, indicator);
+        });
+    }
 }
 PANES.forEach(_uiSetupPane);
 

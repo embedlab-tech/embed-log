@@ -275,6 +275,43 @@ button.active { background: var(--selection); border-color: var(--accent); color
     text-decoration: none;
 }
 #sessions-menu .session-actions a:hover { text-decoration: underline; }
+#pane-plugin-menu {
+    position: fixed;
+    z-index: 1100;
+    min-width: 280px;
+    max-width: 360px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+    display: none;
+}
+#pane-plugin-menu.open { display: block; }
+#pane-plugin-menu .pane-plugin-menu-head {
+    font-size: 12px;
+    color: var(--accent);
+    margin-bottom: 8px;
+}
+#pane-plugin-menu .pane-plugin-menu-section + .pane-plugin-menu-section {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--border);
+}
+#pane-plugin-menu .pane-plugin-menu-title {
+    font-size: 11px;
+    color: var(--ansi-0);
+    margin-bottom: 6px;
+}
+#pane-plugin-menu .pane-plugin-menu-checkbox {
+    align-items: flex-start;
+    white-space: normal;
+}
+#pane-plugin-menu .pane-plugin-menu-desc {
+    margin-top: 2px;
+    font-size: 11px;
+    color: var(--ansi-0);
+}
 #sessions-menu .session-actions a.disabled {
 
     color: var(--ansi-0);
@@ -373,9 +410,71 @@ button.active { background: var(--selection); border-color: var(--accent); color
     opacity: 0.7;
     margin-left: 4px;
     user-select: none;
+    background: none;
+    border: none;
+    color: var(--accent);
+    padding: 0 2px;
+    line-height: 1;
+}
+.pane-plugin-indicator.configurable {
+    cursor: pointer;
 }
 .pane-plugin-indicator:hover {
     opacity: 1;
+}
+.pane-plugin-indicator:focus-visible {
+    opacity: 1;
+    outline: 1px solid var(--accent);
+    border-radius: 4px;
+}
+#pane-plugin-hover-card {
+    position: fixed;
+    z-index: 9997;
+    min-width: 260px;
+    max-width: 340px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+    color: var(--fg);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+    display: none;
+}
+#pane-plugin-hover-card.visible { display: block; }
+#pane-plugin-hover-card .pane-plugin-hover-section + .pane-plugin-hover-section {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--border);
+}
+#pane-plugin-hover-card .pane-plugin-hover-title {
+    font-size: 11px;
+    color: var(--accent);
+    margin-bottom: 6px;
+}
+#pane-plugin-hover-card .pane-plugin-hover-toggle {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    cursor: pointer;
+}
+#pane-plugin-hover-card .pane-plugin-hover-toggle input {
+    margin: 2px 0 0;
+    cursor: pointer;
+}
+#pane-plugin-hover-card .pane-plugin-hover-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+#pane-plugin-hover-card .pane-plugin-hover-label {
+    font-size: 12px;
+    color: var(--fg);
+}
+#pane-plugin-hover-card .pane-plugin-hover-desc {
+    font-size: 11px;
+    color: var(--ansi-0);
+    white-space: normal;
+    line-height: 1.4;
 }
 
 /* Pane swap feedback animation */

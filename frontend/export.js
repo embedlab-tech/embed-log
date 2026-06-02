@@ -2,7 +2,7 @@ import { STATIC_PROFILE } from './profile.js';
 import { renderPaneShell } from './renderPane.js';
 import { renderToolbar } from './renderToolbar.js';
 import {
-    getConfiguredFrontendPlugins, getConfiguredPanePlugins, getConfiguredPluginScripts,
+    getConfiguredFrontendPlugins, getConfiguredPanePlugins, getConfiguredPluginScripts, getPanePluginUiState,
 } from './pluginRuntime.js';
 const STATIC_EXPORT_PROFILE =
     typeof STATIC_PROFILE !== 'undefined' ? STATIC_PROFILE : window.__embedLogProfile;
@@ -78,6 +78,7 @@ export async function exportHtmlSnapshot(options = {}) {
             lightKey: "whitesand",
             darkKey: "one-dark",
         };
+        const panePluginUiState = getPanePluginUiState();
         const frontendPlugins = getConfiguredFrontendPlugins();
         const panePlugins = getConfiguredPanePlugins();
         const existingPluginScripts = getConfiguredPluginScripts();
@@ -108,6 +109,7 @@ export async function exportHtmlSnapshot(options = {}) {
             `window.__embedLogFrontendPlugins = ${_safeJson(Object.fromEntries(activePluginNames.map(name => [name, frontendPlugins[name]])))};\n` +
             `window.__embedLogPanePlugins = ${_safeJson(panePlugins)};\n` +
             `window.__embedLogPluginScripts = ${_safeJson(pluginScripts)};\n` +
+            `window.__embedLogInitialPanePluginUiState = ${_safeJson(panePluginUiState)};\n` +
             `window.__embedLogInitialThemeState = ${_safeJson(themeState)};\n` +
             `window.__embedLogInitialTimestampMode = ${_safeJson(state.timestampMode)};\n` +
             `window.__embedLogFirstLogAt = ${_safeJson(state.firstLogAt)};\n` +
