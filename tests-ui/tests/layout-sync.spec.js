@@ -152,10 +152,9 @@ test('UNWRAP toggle creates one tab per pane with pane names as labels', async (
   // Click UNWRAP
   await page.locator('#btn-unwrap').click();
   await expect(page.locator('#btn-unwrap')).toHaveClass(/active/);
-
   // Now tabs are pane names
-  await expect(page.locator('#tab-bar .tab-btn')).toHaveText(['DEVICE_A-DevA', 'HOST-DevA', 'AUX-DevB', 'PYTEST-PYTEST', 'CBOR-cbor-tab']);
-  for (let i = 0; i < 5; i++) {
+  await expect(page.locator('#tab-bar .tab-btn')).toHaveText(['DEVICE_A-DevA', 'HOST-DevA', 'AUX-DevB', 'PYTEST-PYTEST', 'CBOR-cbor-tab', 'CoAP-CoAP', 'DUT-UART', 'DEBUG-UART']);
+  for (let i = 0; i < 8; i++) {
     await page.locator('#tab-bar .tab-btn').nth(i).click();
   }
 

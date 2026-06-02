@@ -52,13 +52,19 @@ class RawUartSource(RawLogSource):
     def _run(self, on_chunk, on_boundary, stop, name) -> None:
         while not stop.is_set():
             try:
-                with serial.serial_for_url(self.port, baudrate=self.baudrate, timeout=0.01) as ser:
+                with serial.serial_for_url(self.port, baudrate=self.baudrate, timeout=0.2) as ser:
                     logging.info("[%s] opened serial %s @ %d", name, self.port, self.baudrate)
                     with self._ser_lock:
                         self._ser = ser
                     try:
                         while not stop.is_set():
-                            raw = ser.read(65536)
+                            try:
+                                raw = ser.read(65536)
+                            except serial.SerialException:
+                                # macOS PTY quirk: select reports readable but os.read
+                                # returns empty bytes. Treat as transient — brief pause.
+                                stop.wait(0.01)
+                                continue
                             if raw:
                                 on_chunk(raw)
                             else:

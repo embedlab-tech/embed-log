@@ -1,10 +1,9 @@
 import { state, TABS, PANES, paneLabel, unwrapPaneLabel } from './state.js';
-import { onLineClick } from './lines.js';
+import { onLineClick, hidePluginOverlays } from './lines.js';
 import { exportHtmlSnapshot } from './export.js';
 import { can } from './profile.js';
 import { switchTab } from './tabs.js';
 import { _escHtml } from './renderPane.js';
-// ---------------------------------------------------------------------------
 // Line selection + copy / export actions
 //
 // Two explicit scopes (toggled per-pane overlay):
@@ -107,8 +106,15 @@ export function _selectionSetupPane(id) {
     rawBtn.title = "Download selected lines as raw .log file";
     rawBtn.addEventListener("click", e => { e.stopPropagation(); _downloadRaw(id); });
     moreDropdown.appendChild(rawBtn);
-
-
+    if (can('sessionApi')) {
+        const snippetBtn = document.createElement("button");
+        snippetBtn.className = "copy-btn";
+        snippetBtn.id = "save-snippet-" + id;
+        snippetBtn.textContent = "Save snippet";
+        snippetBtn.title = "Save selected lines to the session for later review";
+        snippetBtn.addEventListener("click", e => { e.stopPropagation(); _saveSnippet(id); });
+        moreDropdown.appendChild(snippetBtn);
+    }
     actionRow.appendChild(copyBtn);
     // Marker toggle (runtime only) — in the main action row
     if (can('markers')) {
@@ -224,8 +230,6 @@ function _syncSelectionActions(paneId) {
         markerBtn.style.display = state.selectionScope === "exact" ? "" : "none";
     }
 }
-
-// ── Markers ──
 function _flatMarkerList() {
     const all = [];
     Object.keys(state.markers).forEach(paneId => {
@@ -366,7 +370,11 @@ export function applyMarkers() {
         Array.from(logEl.children).forEach((div, i) => {
             const hasMarker = byLine[i] !== undefined;
             div.classList.toggle("has-marker", hasMarker);
-            div.title = hasMarker ? "Marker: " + byLine[i] : "";
+            if (hasMarker) {
+                div.dataset.markerTooltip = byLine[i];
+            } else {
+                delete div.dataset.markerTooltip;
+            }
         });
     });
 }
@@ -380,7 +388,7 @@ document.body.appendChild(_tooltipEl);
 document.addEventListener("mouseover", e => {
     const line = e.target.closest(".log-line.has-marker");
     if (!line) { _tooltipEl.classList.remove("visible"); return; }
-    const desc = line.title.replace(/^Marker:\s*/, "");
+    const desc = line.dataset.markerTooltip || "";
     if (!desc) return;
     const rect = line.getBoundingClientRect();
     _tooltipEl.innerHTML = '<span class="mt-label">Marker</span>' + _escHtml(desc);
@@ -492,6 +500,12 @@ function _decodeEntities(text) {
 function _linePlain(line) {
     return _decodeEntities(_stripHtml(line?.html || "")).replace(/\s+/g, " ").trim();
 }
+function _lineRenderedPlain(line) {
+    const inlineText = typeof line?.pluginInlineText === "string"
+        ? line.pluginInlineText.replace(/\s+/g, " ").trim()
+        : "";
+    return inlineText || _linePlain(line);
+}
 
 function _lineRaw(line) {
     return `${line.ts}  ${_linePlain(line)}`;
@@ -602,8 +616,8 @@ function _escapeRegExp(str) {
     return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function _snippetMessageText(entry) {
-    let text = _linePlain(entry.line).trim();
+function _snippetMessageText(entry, useRendered = false) {
+    let text = (useRendered ? _lineRenderedPlain(entry.line) : _linePlain(entry.line)).trim();
     const sourcePrefix = new RegExp(`^\\[${_escapeRegExp(entry.paneId)}\\]\\s*`);
     for (let i = 0; i < 4; i++) {
         const before = text;
@@ -640,7 +654,7 @@ function _applyMarkerAnnotations(paneId, items) {
 }
 
 
-function _formatRangeRaw(entries) {
+function _formatRangeRaw(entries, useRendered = false) {
     const parts = [];
     let currentPane = null;
     let paneItems = [];
@@ -655,7 +669,7 @@ function _formatRangeRaw(entries) {
         currentPane = e.paneId;
         paneItems.push({
             idx: e.idx,
-            text: `[${e.line.ts}] [${e.paneId}] ${_snippetMessageText(e)}`,
+            text: `[${e.line.ts}] [${e.paneId}] ${_snippetMessageText(e, useRendered)}`,
         });
     });
     flushPane();
@@ -681,10 +695,12 @@ function _buildRangeLogData(entries) {
     return logData;
 }
 
-function _formatSelectionBlock(paneId, indices) {
+function _formatSelectionBlock(paneId, indices, useRendered = false) {
     const lines = state.rawLines[paneId];
     const items = indices
-        .map((idx, i) => lines[idx] ? { idx, text: `${lines[idx].ts}  [${paneId}] ${_linePlain(lines[idx])}` } : null)
+        .map(idx => lines[idx]
+            ? { idx, text: `${lines[idx].ts}  [${paneId}] ${(useRendered ? _lineRenderedPlain(lines[idx]) : _linePlain(lines[idx]))}` }
+            : null)
         .filter(Boolean);
     return _applyMarkerAnnotations(paneId, items);
 }
@@ -737,7 +753,7 @@ function _copyExact(paneId) {
     const sel = state.selected[paneId];
     if (!sel.size) return;
     const indices = Array.from(sel).sort((a, b) => a - b);
-    const text = _formatSelectionBlock(paneId, indices);
+    const text = _formatSelectionBlock(paneId, indices, true);
     if (!text) return;
     _copyText(text).then(() => {
         const btn = document.getElementById("copy-" + paneId);
@@ -750,7 +766,7 @@ function _copyExact(paneId) {
 
 function _copyContext(paneId) {
     const entries = _collectRangeEntries(paneId);
-    const text = _formatRangeRaw(entries);
+    const text = _formatRangeRaw(entries, true);
     if (!text) return;
     _copyText(text).then(() => {
         const btn = document.getElementById("copy-" + paneId);
@@ -797,6 +813,23 @@ function _saveSnippetToServer(text, panes, scope, label) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, panes, scope, label }),
     }).catch(() => {});
+}
+
+function _saveSnippet(paneId) {
+    const sel = state.selected[paneId];
+    if (!sel.size) return;
+    const indices = Array.from(sel).sort((a, b) => a - b);
+    const text = _formatSelectionBlock(paneId, indices, true);
+    if (!text) return;
+    const label = _rangeBoundsLabelExact(paneId);
+    const panes = [paneId];
+    _saveSnippetToServer(text, panes, 'exact', label);
+    const btn = document.getElementById("save-snippet-" + paneId);
+    if (btn) {
+        const prev = btn.textContent;
+        btn.textContent = "Saved";
+        setTimeout(() => { btn.textContent = prev; }, 900);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -857,6 +890,7 @@ document.addEventListener("pointerdown", e => {
     const logArea = line.closest(".log-area");
     if (!logArea) return;
     if (e.altKey) { _altSelection = true; return; }
+    hidePluginOverlays();
 
 
     _drag = {
@@ -935,6 +969,17 @@ document.addEventListener("click", e => {
 
         if (!e.shiftKey && Number.isFinite(idx)) {
             _rangeAnchor = { paneId, idx };
+
+            // Single-click: select this line (replaces any previous selection)
+            const add = e.ctrlKey || e.metaKey;
+            if (!add) _clearOtherSelections(paneId);
+            const sel = new Set(add ? (state.selected[paneId] || []) : []);
+            if (add && sel.has(idx)) sel.delete(idx);
+            else sel.add(idx);
+            state.selected[paneId] = sel;
+            _applySelection(paneId);
+            _closeAllMore();
+            return;
         }
     }
 
@@ -961,7 +1006,7 @@ document.addEventListener("keydown", e => {
             const div = state.highlighted[hlPane];
             const idx = parseInt(div?.dataset.idx, 10);
             if (Number.isFinite(idx)) {
-                const text = _formatSelectionBlock(hlPane, [idx]);
+                const text = _formatSelectionBlock(hlPane, [idx], true);
                 if (text) { _copyText(text); e.preventDefault(); return; }
             }
         }

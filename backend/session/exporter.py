@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import subprocess
 import sys
@@ -15,6 +16,10 @@ class SessionExporter:
         source_files: dict[str, str],
         tabs: list,
         source_labels: dict[str, str],
+        frontend_plugins: dict[str, dict] | None = None,
+        pane_plugins: dict[str, list[dict]] | None = None,
+        plugin_scripts: dict[str, str] | None = None,
+        pane_kinds: dict[str, str] | None = None,
         timestamp_mode: str = "absolute",
         first_log_at: str | None = None,
         merge_script: str | Path | None = None,
@@ -24,6 +29,10 @@ class SessionExporter:
         self._source_files = source_files
         self._tabs = tabs
         self._source_labels = source_labels
+        self._frontend_plugins = frontend_plugins or {}
+        self._pane_plugins = pane_plugins or {}
+        self._plugin_scripts = plugin_scripts or {}
+        self._pane_kinds = pane_kinds or {}
         self._timestamp_mode = timestamp_mode
         self._first_log_at = first_log_at
         self._merge_script = Path(merge_script) if merge_script else (Path(__file__).resolve().parents[2] / "utils" / "merge_logs.py")
@@ -32,7 +41,6 @@ class SessionExporter:
 
     def set_first_log_at(self, first_log_at: str | None) -> None:
         self._first_log_at = first_log_at
-
 
     def export_html(self, reason: str) -> bool:
         with self._lock:
@@ -49,6 +57,12 @@ class SessionExporter:
                 cmd.extend(["--timestamp-mode", self._timestamp_mode])
             if self._first_log_at:
                 cmd.extend(["--first-log-at", self._first_log_at])
+            if self._frontend_plugins:
+                cmd.extend(["--frontend-plugins-json", json.dumps(self._frontend_plugins, ensure_ascii=False)])
+            if self._pane_plugins:
+                cmd.extend(["--pane-plugins-json", json.dumps(self._pane_plugins, ensure_ascii=False)])
+            if self._plugin_scripts:
+                cmd.extend(["--plugin-scripts-json", json.dumps(self._plugin_scripts, ensure_ascii=False)])
             for tab in tabs_for_export:
                 cmd.extend(["--tab", tab["label"]])
                 pane_labels = tab.get("pane_labels", {})

@@ -17,6 +17,8 @@ def _build_html(
     *,
     include_markers: bool = True,
     include_pane_labels: bool = True,
+    include_frontend_plugins: bool = True,
+    include_pane_plugins: bool = True,
     include_ts_mode: bool = True,
     include_first_log: bool = True,
     include_logdata: bool = True,
@@ -39,6 +41,8 @@ def _build_html(
     pane_labels = {"left": "UART", "right": "System"}
     ts_mode = "absolute"
     first_log_at = "2025-05-30T19:07:20.000+00:00"
+    frontend_plugins = {"hex-coap": {"kind": "line", "sha256": "abc"}}
+    pane_plugins = {"uart0": [{"name": "hex-coap", "options": {}}]}
 
     parts = ["<html><body><script>"]
     if include_logdata:
@@ -48,6 +52,10 @@ def _build_html(
     parts.append(f"window.TABS = {json.dumps(tabs)};")
     if include_pane_labels:
         parts.append(f"window.PANE_LABELS = {json.dumps(pane_labels)};")
+    if include_frontend_plugins:
+        parts.append(f"window.__embedLogFrontendPlugins = {json.dumps(frontend_plugins)};")
+    if include_pane_plugins:
+        parts.append(f"window.__embedLogPanePlugins = {json.dumps(pane_plugins)};")
     if include_ts_mode:
         parts.append(f'window.__embedLogInitialTimestampMode = {json.dumps(ts_mode)};')
     if include_first_log:
@@ -111,6 +119,8 @@ class RunParseFullDataTests(unittest.TestCase):
         self.assertIn("tabs", manifest)
         self.assertEqual(manifest["tabs"], [{"name": "uart0", "source": "uart0"}])
         self.assertEqual(manifest["pane_labels"], {"left": "UART", "right": "System"})
+        self.assertEqual(manifest["frontend_plugins"], {"hex-coap": {"kind": "line", "sha256": "abc"}})
+        self.assertEqual(manifest["pane_plugins"], {"uart0": [{"name": "hex-coap", "options": {}}]})
         self.assertIn("source_files", manifest)
         self.assertIn("uart0", manifest["source_files"])
         self.assertIn("sys", manifest["source_files"])
@@ -204,6 +214,8 @@ class RunParseMinimalTests(unittest.TestCase):
         html = _build_html(
             include_markers=False,
             include_pane_labels=False,
+            include_frontend_plugins=False,
+            include_pane_plugins=False,
             include_ts_mode=False,
             include_first_log=False,
         )
@@ -225,6 +237,8 @@ class RunParseMinimalTests(unittest.TestCase):
         self.assertIsNone(manifest["timestamp_mode"])
         self.assertIsNone(manifest["first_log_at"])
         self.assertIsNone(manifest["pane_labels"])
+        self.assertIsNone(manifest["frontend_plugins"])
+        self.assertIsNone(manifest["pane_plugins"])
         # falls back to first_ts from log data (absNum)
         self.assertEqual(manifest["started_at"], "2025-05-30T18:50:41.955+00:00")
 

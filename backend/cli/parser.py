@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 
-from ..file_tail_udp import parse_udp_target
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -219,35 +218,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("html", help="embed-log session.html file")
     p.add_argument("--output", "-o", default=None, help="output session directory")
 
-    # ── tail-file ──
-    p = sub.add_parser(
-        "tail-file",
-        help="tail a file and forward lines to UDP",
-        description="Tail a file and forward each appended line to a UDP port.",
-        epilog=(
-            "Examples:\n"
-            "  embed-log tail-file app.log 127.0.0.1:6000\n"
-            "  embed-log tail-file app.log 127.0.0.1:6000 --from-start\n"
-            "  embed-log tail-file C:\\logs\\service.log 127.0.0.1:6000 --poll-interval 0.5\n"
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    p.add_argument("path", help="file to tail")
-    p.add_argument("target", type=parse_udp_target, help="UDP target as HOST:PORT")
-    p.add_argument(
-        "--from-start",
-        action="store_true",
-        help="read the existing file contents first instead of starting at EOF",
-    )
-    p.add_argument(
-        "--poll-interval",
-        type=float,
-        default=0.2,
-        help="seconds between file polls (default: 0.2)",
-    )
-    p.add_argument("--encoding", default="utf-8", help="file encoding (default: utf-8)")
-
     # ── version ──
+
     p = sub.add_parser(
         "version",
         help="show version and environment information",

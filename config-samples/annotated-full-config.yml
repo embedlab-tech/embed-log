@@ -48,10 +48,16 @@ sources:
     parser:
       type: cbor-datagram          # decodes each UDP datagram as CBOR map
 
+frontend_plugins:
+  # Built-in line plugin that scans each pane line for embedded CoAP packets
+  hex-coap:
+    builtin: hex-coap
 tabs:
-  # Single-pane tab
+  # Single-pane tab with a per-pane frontend plugin
   - label: DUT
-    panes: [DUT_UART]
+    panes:
+      - source: DUT_UART
+        plugins: [hex-coap]
 
   # Dual-pane tab
   - label: Debug

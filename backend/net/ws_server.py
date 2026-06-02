@@ -33,16 +33,21 @@ class WebSocketBroadcaster:
         tabs: list,
         session_info: dict | None = None,
         sessions_root: str | None = None,
-        on_all_clients_disconnected: Callable[[], None] | None = None,
+        on_all_clients_disconnected: Callable[[], bool | None] | None = None,
 
         on_export_session_html: Callable[[], bool] | None = None,
         on_rotate_session: Callable[[], dict] | None = None,
-        on_save_snippet: Callable[[str, list[str], str], str | None] | None = None,
+        on_save_snippet: Callable[[str, list[str], str, str | None], str | None] | None = None,
         on_save_markers: Callable[[list[dict]], None] | None = None,
         open_browser: bool = False,
         app_name: str = "embed-log",
         theme_defaults: dict | None = None,
         source_labels: dict[str, str] | None = None,
+        pane_kinds: dict[str, str] | None = None,
+        pane_commands: dict[str, list[str]] | None = None,
+        frontend_plugins: dict[str, dict] | None = None,
+        pane_plugins: dict[str, list[dict]] | None = None,
+        plugin_scripts: dict[str, str] | None = None,
     ):
         self._html_path = Path(html_path)
         self._host = host
@@ -71,6 +76,11 @@ class WebSocketBroadcaster:
         self._app_name = app_name
         self._theme_defaults = theme_defaults or {}
         self._source_labels = source_labels or {}
+        self._pane_kinds = pane_kinds or {}
+        self._pane_commands = pane_commands or {}
+        self._frontend_plugins = frontend_plugins or {}
+        self._pane_plugins = pane_plugins or {}
+        self._plugin_scripts = plugin_scripts or {}
 
     def register_source(self, name: str, mgr) -> None:
         self._source_map[name] = mgr
@@ -346,9 +356,14 @@ class WebSocketBroadcaster:
             "type": "config",
             "tabs": self._tabs,
             "pane_labels": self._source_labels,
+            "pane_kinds": self._pane_kinds,
+            "pane_commands": self._pane_commands,
             "session": self._session_info,
             "app_name": self._app_name,
             "theme_defaults": self._theme_defaults,
+            "frontend_plugins": self._frontend_plugins,
+            "pane_plugins": self._pane_plugins,
+            "plugin_scripts": self._plugin_scripts,
             "markers": self._session_info.get("markers", []),
         }))
         self._clients.add(ws)

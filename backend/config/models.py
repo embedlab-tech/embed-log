@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -11,16 +12,34 @@ class ParserConfig:
 @dataclass
 class SourceConfig:
     name: str
-    type: str  # "uart" or "udp"
+    type: str  # "uart", "udp", or "file"
     port: str | int  # str for uart, int for udp
     parser: ParserConfig = field(default_factory=ParserConfig)
     baudrate: int | None = None
 
 
 @dataclass
+class FrontendPluginDefinition:
+    builtin: str | None = None
+    path: str | None = None
+
+
+@dataclass
+class PanePluginConfig:
+    name: str
+    options: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class PaneConfig:
+    source: str
+    plugins: list[PanePluginConfig] = field(default_factory=list)
+
+
+@dataclass
 class TabConfig:
     label: str
-    panes: list[str]
+    panes: list[PaneConfig]
 
 
 @dataclass
@@ -50,6 +69,7 @@ class AppConfig:
     source_labels: dict[str, str] = field(default_factory=dict)
     injects: list[tuple[str, int]] = field(default_factory=list)
     forwards: list[tuple[str, int]] = field(default_factory=list)
+    frontend_plugins: dict[str, FrontendPluginDefinition] = field(default_factory=dict)
     tabs: list[TabConfig] = field(default_factory=list)
     server: ServerConfig = field(default_factory=ServerConfig)
     logs: LogsConfig = field(default_factory=LogsConfig)

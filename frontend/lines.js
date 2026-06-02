@@ -3,6 +3,7 @@ import {
     lineHasTimestampMode,
 } from './state.js';
 import { parseAnsi } from './ansi.js';
+import { analyzeLinePlugins, getLinePluginTooltip, getConfiguredPanePlugins, getPanePluginSettings, setPanePluginSetting } from './pluginRuntime.js';
 
 // ---------------------------------------------------------------------------
 // Line rendering
@@ -24,10 +25,36 @@ function _lineTagClass(html) {
         default: return "";
     }
 }
+function _escapeHtml(text) {
+    return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+}
+
+export function buildStoredLine(paneId, ts, rawText, isTx, meta = null) {
+    const html = parseAnsi(rawText);
+    const line = {
+        paneId,
+        ...buildTimestampInfo(ts, typeof meta === "object" && meta !== null
+            ? meta
+            : (Number.isFinite(meta) ? { numTs: meta } : {})),
+        html,
+        rawText,
+        isTx,
+        pluginData: null,
+        pluginFilterText: "",
+        pluginClassNames: [],
+        pluginInlineText: "",
+    };
+    analyzeLinePlugins(paneId, line);
+    return line;
+}
 
 export function buildLineHtml(line, showTs, filterRx) {
     const tsClass = "ts" + (showTs ? "" : " hidden");
-    let content = line.html;
+    let content = line.pluginInlineText ? _escapeHtml(line.pluginInlineText) : line.html;
     if (filterRx) {
         content = content.replace(filterRx, m => `<mark class="hl">${m}</mark>`);
     }
@@ -36,16 +63,211 @@ export function buildLineHtml(line, showTs, filterRx) {
 
 // Build the full className string for a log-line div, preserving selection state.
 export function _lineClass(line, idx, paneId) {
+    const pluginClasses = Array.isArray(line.pluginClassNames) && line.pluginClassNames.length
+        ? " " + line.pluginClassNames.join(" ")
+        : "";
     return "log-line"
         + (line.isTx ? " tx-line" : "")
         + _lineTagClass(line.html)
+        + pluginClasses
         + (state.selected[paneId].has(idx) ? " selected" : "");
 }
 
 export function matchesFilter(line, rx) {
     if (!rx) return true;
-    const plain = line.html.replace(/<[^>]+>/g, "") + " " + line.ts;
+    const rendered = line.pluginInlineText || line.html.replace(/<[^>]+>/g, "");
+    const rawText = typeof line.rawText === "string" ? line.rawText : "";
+    const plain = `${rendered} ${rawText} ${line.ts} ${line.pluginFilterText || ""}`;
     return rx.test(plain);
+}
+const _pluginTooltipEl = document.createElement("div");
+_pluginTooltipEl.id = "plugin-tooltip";
+document.body.appendChild(_pluginTooltipEl);
+
+const _pluginInfoEl = document.createElement("div");
+_pluginInfoEl.id = "pane-plugin-hover-card";
+document.body.appendChild(_pluginInfoEl);
+
+let _pluginInfoHideTimer = null;
+let _pluginInfoPaneId = null;
+let _pluginInfoAnchorEl = null;
+let _pluginInfoPinned = false;
+let _pluginInfoClickInside = false;
+function _hasAnySelection() {
+    return PANES.some(id => state.selected[id]?.size > 0);
+}
+
+function _showPluginTooltip(lineDiv) {
+    const text = lineDiv?.dataset?.pluginTooltip || "";
+    if (!text) {
+        _pluginTooltipEl.classList.remove("visible");
+        return;
+    }
+    const rect = lineDiv.getBoundingClientRect();
+    _pluginTooltipEl.textContent = text;
+    _pluginTooltipEl.style.left = Math.max(4, rect.left) + "px";
+    _pluginTooltipEl.style.bottom = (window.innerHeight - rect.top + 4) + "px";
+    _pluginTooltipEl.classList.add("visible");
+}
+
+function _hidePluginTooltip() {
+    _pluginTooltipEl.classList.remove("visible");
+}
+
+function _cancelPluginInfoHide() {
+    if (_pluginInfoHideTimer !== null) {
+        clearTimeout(_pluginInfoHideTimer);
+        _pluginInfoHideTimer = null;
+    }
+}
+
+function _positionPluginInfo(anchor) {
+    const margin = 8;
+    const gap = 8;
+    const rect = anchor.getBoundingClientRect();
+    _pluginInfoEl.style.visibility = "hidden";
+    _pluginInfoEl.classList.add("visible");
+    const width = _pluginInfoEl.offsetWidth;
+    const height = _pluginInfoEl.offsetHeight;
+    const maxLeft = Math.max(margin, window.innerWidth - width - margin);
+    const left = Math.min(Math.max(margin, rect.right - width), maxLeft);
+    const belowTop = rect.bottom + gap;
+    const aboveTop = rect.top - gap - height;
+    const maxTop = Math.max(margin, window.innerHeight - height - margin);
+    const top = belowTop <= maxTop
+        ? belowTop
+        : Math.max(margin, aboveTop >= margin ? aboveTop : maxTop);
+    _pluginInfoEl.style.left = `${left}px`;
+    _pluginInfoEl.style.top = `${top}px`;
+    _pluginInfoEl.style.visibility = "";
+}
+
+function _hidePluginInfo() {
+    _cancelPluginInfoHide();
+    _pluginInfoEl.classList.remove("visible");
+    _pluginInfoPaneId = null;
+    _pluginInfoAnchorEl = null;
+    _pluginInfoPinned = false;
+}
+
+function _schedulePluginInfoHide(delay = 400) {
+    if (_pluginInfoPinned) return;
+    _cancelPluginInfoHide();
+    _pluginInfoHideTimer = window.setTimeout(() => {
+        _pluginInfoHideTimer = null;
+        _hidePluginInfo();
+    }, delay);
+}
+
+function _renderPluginInfo(paneId, anchor) {
+    const plugins = getPanePluginSettings(paneId);
+    if (!plugins.length) {
+        _hidePluginInfo();
+        return false;
+    }
+
+    _pluginInfoEl.innerHTML = "";
+    plugins.forEach(plugin => {
+        const section = document.createElement("section");
+        section.className = "pane-plugin-hover-section";
+
+        const title = document.createElement("div");
+        title.className = "pane-plugin-hover-title";
+        title.textContent = plugin.displayName;
+        section.appendChild(title);
+
+        plugin.settings.forEach(setting => {
+            if (setting.type !== "boolean") return;
+
+            const row = document.createElement("label");
+            row.className = "pane-plugin-hover-toggle";
+
+            const input = document.createElement("input");
+            input.type = "checkbox";
+            input.checked = setting.value === true;
+            input.addEventListener("change", ev => {
+                ev.stopPropagation();
+                if (!setPanePluginSetting(paneId, plugin.name, setting.key, input.checked)) return;
+                reanalyzePanePlugins(paneId);
+                window.__embedLogSchedulePersist?.();
+                _renderPluginInfo(paneId, anchor);
+            });
+            row.appendChild(input);
+
+            const textWrap = document.createElement("span");
+            textWrap.className = "pane-plugin-hover-copy";
+
+            const label = document.createElement("span");
+            label.className = "pane-plugin-hover-label";
+            label.textContent = setting.label;
+            textWrap.appendChild(label);
+
+            const desc = document.createElement("div");
+            desc.className = "pane-plugin-hover-desc";
+            desc.textContent = `${input.checked ? "Enabled" : "Disabled"} — ${setting.description || setting.label}`;
+            textWrap.appendChild(desc);
+
+            row.appendChild(textWrap);
+            section.appendChild(row);
+        });
+
+        _pluginInfoEl.appendChild(section);
+    });
+
+    _pluginInfoPaneId = paneId;
+    _pluginInfoAnchorEl = anchor;
+    _positionPluginInfo(anchor);
+    return true;
+}
+
+function _showPluginInfo(paneId, anchor) {
+    _cancelPluginInfoHide();
+    _renderPluginInfo(paneId, anchor);
+}
+
+_pluginInfoEl.addEventListener("mouseenter", _cancelPluginInfoHide);
+_pluginInfoEl.addEventListener("mouseleave", () => _schedulePluginInfoHide());
+_pluginInfoEl.addEventListener("mousedown", () => { _pluginInfoClickInside = true; });
+
+document.addEventListener("click", ev => {
+    if (_pluginInfoClickInside) {
+        _pluginInfoClickInside = false;
+        return;
+    }
+    if (!_pluginInfoPinned) return;
+    if (_pluginInfoAnchorEl?.contains(ev.target)) return;
+    _hidePluginInfo();
+});
+
+window.addEventListener("resize", () => {
+    if (_pluginInfoEl.classList.contains("visible") && _pluginInfoAnchorEl) {
+        _positionPluginInfo(_pluginInfoAnchorEl);
+    }
+});
+document.addEventListener("keydown", ev => {
+    if (ev.key === "Escape") _hidePluginInfo();
+});
+
+export function hidePluginOverlays() {
+    _hidePluginTooltip();
+    _hidePluginInfo();
+}
+window.__embedLogHidePluginOverlays = hidePluginOverlays;
+export function applyLineDom(div, line, paneId, idx, filterRx) {
+    div.className = _lineClass(line, idx, paneId);
+    const tooltip = getLinePluginTooltip(line);
+    if (tooltip) {
+        div.dataset.pluginTooltip = tooltip;
+    } else {
+        delete div.dataset.pluginTooltip;
+    }
+    if (!matchesFilter(line, filterRx)) {
+        div.style.display = "none";
+        div.innerHTML = "";
+        return;
+    }
+    div.style.display = "";
+    div.innerHTML = buildLineHtml(line, state.showTs, filterRx);
 }
 
 export function appendLine(paneId, ts, rawText, isTx, meta = null) {
@@ -59,15 +281,7 @@ export function appendLineBatch(entries) {
     entries.forEach(({ paneId, ts, rawText, isTx, meta = null }) => {
         if (!state.rawLines[paneId]) return;
 
-        const html = parseAnsi(rawText);
-        const line = {
-            ...buildTimestampInfo(ts, typeof meta === "object" && meta !== null
-                ? meta
-                : (Number.isFinite(meta) ? { numTs: meta } : {})),
-            html,
-            rawText,
-            isTx,
-        };
+        const line = buildStoredLine(paneId, ts, rawText, isTx, meta);
         state.rawLines[paneId].push(line);
 
         const logEl = document.getElementById("log-" + paneId);
@@ -77,14 +291,9 @@ export function appendLineBatch(entries) {
         const div = document.createElement("div");
         div.dataset.ts = line.ts;
         div.dataset.idx = idx;
-        div.className = _lineClass(line, idx, paneId);
 
         const rx = state.filters[paneId];
-        if (!matchesFilter(line, rx)) {
-            div.style.display = "none";
-        } else {
-            div.innerHTML = buildLineHtml(line, state.showTs, rx);
-        }
+        applyLineDom(div, line, paneId, idx, rx);
 
         if (!fragments.has(paneId)) fragments.set(paneId, document.createDocumentFragment());
         fragments.get(paneId).appendChild(div);
@@ -117,15 +326,14 @@ export function rerenderPane(paneId) {
         const line = lines[i];
         const div  = divs[i];
         if (!div) continue;
-        div.className = _lineClass(line, i, paneId);
-        if (!matchesFilter(line, rx)) {
-            div.style.display = "none";
-        } else {
-            div.style.display = "";
-            div.innerHTML = buildLineHtml(line, state.showTs, rx);
-        }
+        applyLineDom(div, line, paneId, i, rx);
     }
     if (state.atBottom[paneId]) logEl.scrollTop = logEl.scrollHeight;
+}
+export function reanalyzePanePlugins(paneId) {
+    const lines = state.rawLines[paneId] || [];
+    lines.forEach(line => analyzeLinePlugins(paneId, line));
+    rerenderPane(paneId);
 }
 export function setTimestampMode(mode) {
     const nextMode = mode === "relative" ? "relative" : "absolute";
@@ -188,6 +396,7 @@ export function _linesSetupPane(id) {
         const idx = parseInt(lineDiv.dataset.idx, 10);
         const line = state.rawLines[id] ? state.rawLines[id][idx] : null;
         if (!line) return;
+        hidePluginOverlays();
         onLineClick(id, line.numTs, lineDiv);
     });
     logEl.addEventListener("mousedown", e => { if (e.button === 1) e.preventDefault(); });
@@ -200,6 +409,15 @@ export function _linesSetupPane(id) {
         if (!line) return;
         onMiddleClick(id, line.numTs, lineDiv);
     });
+    logEl.addEventListener("mousemove", e => {
+        const lineDiv = e.target.closest(".log-line");
+        if (!lineDiv || !logEl.contains(lineDiv)) {
+            _hidePluginTooltip();
+            return;
+        }
+        _showPluginTooltip(lineDiv);
+    });
+    logEl.addEventListener("mouseleave", _hidePluginTooltip);
     document.getElementById("jump-" + id).addEventListener("click", () => {
         state.syncTabSwitch = false;
         scrollPaneToBottom(id);
@@ -234,10 +452,58 @@ export function _linesSetupPane(id) {
             URL.revokeObjectURL(url);
         });
     }
+
+    // Plugin indicator — shown when this pane has plugins enabled
+    const header = document.querySelector(`#pane-${id} .pane-header`);
+    if (header) {
+        const indicator = document.createElement("button");
+        indicator.type = "button";
+        indicator.className = "pane-plugin-indicator";
+        indicator.id = "plugin-indicator-" + id;
+        header.appendChild(indicator);
+        _refreshPluginIndicator(id);
+        if (_pluginInfoPaneId === id && _hasAnySelection()) _hidePluginInfo();
+    }
 }
 PANES.forEach(_linesSetupPane);
 
-// ---------------------------------------------------------------------------
+// ── Plugin indicator helpers ───────────────────────────────────────
+
+function _refreshPluginIndicator(paneId) {
+    const el = document.getElementById("plugin-indicator-" + paneId);
+    if (!el) return;
+    const panePlugins = getConfiguredPanePlugins();
+    const refs = panePlugins[paneId];
+    if (!refs || !refs.length) {
+        el.style.display = "none";
+        if (_pluginInfoPaneId === paneId) _hidePluginInfo();
+        return;
+    }
+    const configurable = getPanePluginSettings(paneId).length > 0;
+    el.style.display = "";
+    el.textContent = "\u26A1";  // ⚡
+    el.title = refs.map(r => r.name).join("\n") + (configurable ? "\n\nHover or click to configure" : "");
+    el.classList.toggle("configurable", configurable);
+    el.tabIndex = configurable ? 0 : -1;
+    el.setAttribute("aria-label", configurable ? "Configure pane plugins" : "Active pane plugins");
+    if (el.dataset.hoverBound === "1") return;
+    el.dataset.hoverBound = "1";
+    el.addEventListener("mouseenter", () => _showPluginInfo(paneId, el));
+    el.addEventListener("mouseleave", () => _schedulePluginInfoHide());
+    el.addEventListener("focus", () => _showPluginInfo(paneId, el));
+    el.addEventListener("blur", () => _schedulePluginInfoHide(0));
+    el.addEventListener("click", ev => {
+        ev.stopPropagation();
+        _cancelPluginInfoHide();
+        _showPluginInfo(paneId, el);
+        _pluginInfoPinned = !_pluginInfoPinned;
+    });
+}
+export function refreshPluginIndicators() {
+    PANES.forEach(_refreshPluginIndicator);
+}
+window.__embedLogRefreshPluginIndicators = refreshPluginIndicators;
+
 // Clear
 // ---------------------------------------------------------------------------
 
@@ -246,6 +512,7 @@ export function clearPane(paneId) {
     state.selected[paneId] = new Set();
     document.getElementById("log-" + paneId).innerHTML = "";
     highlightLine(paneId, null);
+    hidePluginOverlays();
     state.atBottom[paneId] = true;
     updateJumpBtn(paneId);
     // Hide copy-selection actions if selection.js has added them
@@ -273,12 +540,7 @@ export function repopulatePaneLogs(paneId) {
         const div = document.createElement("div");
         div.dataset.ts  = line.ts;
         div.dataset.idx = idx;
-        div.className   = _lineClass(line, idx, paneId);
-        if (matchesFilter(line, rx)) {
-            div.innerHTML = buildLineHtml(line, state.showTs, rx);
-        } else {
-            div.style.display = "none";
-        }
+        applyLineDom(div, line, paneId, idx, rx);
 
         logEl.appendChild(div);
     });

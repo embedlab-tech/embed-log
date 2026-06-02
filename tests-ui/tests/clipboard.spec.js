@@ -29,8 +29,8 @@ test.describe('clipboard UX', () => {
     expect(errors).toEqual([]);
   });
 
-// Scenario: Context copy matches raw file content character-for-character
-//   Given the user selects a range in SENSOR_A and switches to context scope
+// Scenario: Context copy matches downloaded raw file content character-for-character
+//   Given the user selects a range in SENSOR_A with default line rendering
 //   When  they click the copy button
 //   Then  the clipboard text matches the downloaded raw context file content exactly
 

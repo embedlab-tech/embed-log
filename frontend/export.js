@@ -1,6 +1,9 @@
 import { STATIC_PROFILE } from './profile.js';
 import { renderPaneShell } from './renderPane.js';
 import { renderToolbar } from './renderToolbar.js';
+import {
+    getConfiguredFrontendPlugins, getConfiguredPanePlugins, getConfiguredPluginScripts, getPanePluginUiState,
+} from './pluginRuntime.js';
 const STATIC_EXPORT_PROFILE =
     typeof STATIC_PROFILE !== 'undefined' ? STATIC_PROFILE : window.__embedLogProfile;
 
@@ -29,7 +32,7 @@ export async function exportHtmlSnapshot(options = {}) {
         // ------------------------------------------------------------------
         const ASSETS = [
             "profile.js", "renderPane.js", "renderToolbar.js", "viewer.css",
-            "state.js", "themes.js", "settings.js", "fontsize.js",
+            "pluginRuntime.js", "state.js", "themes.js", "settings.js", "fontsize.js",
             "ansi.js", "lines.js", "tabs.js", "tabcreate.js",
             "ui.js", "export.js", "selection.js", "tsparse.js", "import.js",
         ];
@@ -60,7 +63,7 @@ export async function exportHtmlSnapshot(options = {}) {
             const src = await r.text();
             return a.endsWith(".js") ? _escJs(_stripModuleSyntax(src)) : src;
         }));
-        const [profileJs, renderPaneJs, renderToolbarJs, css, stateJs, themesJs, settingsJs, fontsizeJs,
+        const [profileJs, renderPaneJs, renderToolbarJs, css, pluginRuntimeJs, stateJs, themesJs, settingsJs, fontsizeJs,
                ansiJs, linesJs, tabsJs, tabcreateJs, uiJs, exportJs, selectionJs, tsparseJs, importJs] = texts;
 
 
@@ -75,6 +78,25 @@ export async function exportHtmlSnapshot(options = {}) {
             lightKey: "whitesand",
             darkKey: "one-dark",
         };
+        const panePluginUiState = getPanePluginUiState();
+        const frontendPlugins = getConfiguredFrontendPlugins();
+        const panePlugins = getConfiguredPanePlugins();
+        const existingPluginScripts = getConfiguredPluginScripts();
+        const activePluginNames = [...new Set(Object.values(panePlugins)
+            .flatMap(refs => Array.isArray(refs) ? refs : [])
+            .map(ref => ref?.name)
+            .filter(name => typeof name === "string" && name && frontendPlugins[name]))];
+        const pluginScripts = {};
+        for (const name of activePluginNames) {
+            if (typeof existingPluginScripts[name] === "string" && existingPluginScripts[name]) {
+                pluginScripts[name] = existingPluginScripts[name];
+            }
+        }
+        const pluginScriptTags = activePluginNames
+            .map(name => pluginScripts[name])
+            .filter(Boolean)
+            .map(src => `<script>${_escJs(src)}</script>`)
+            .join("\n");
 
         // ------------------------------------------------------------------
         // Config: inject TABS + PANES + initial theme state before scripts run
@@ -84,6 +106,10 @@ export async function exportHtmlSnapshot(options = {}) {
             `window.TABS = ${_safeJson(TABS)};\n` +
             `window.PANES = ${_safeJson(PANES)};\n` +
             `window.PANE_LABELS = ${_safeJson(PANE_LABELS)};\n` +
+            `window.__embedLogFrontendPlugins = ${_safeJson(Object.fromEntries(activePluginNames.map(name => [name, frontendPlugins[name]])))};\n` +
+            `window.__embedLogPanePlugins = ${_safeJson(panePlugins)};\n` +
+            `window.__embedLogPluginScripts = ${_safeJson(pluginScripts)};\n` +
+            `window.__embedLogInitialPanePluginUiState = ${_safeJson(panePluginUiState)};\n` +
             `window.__embedLogInitialThemeState = ${_safeJson(themeState)};\n` +
             `window.__embedLogInitialTimestampMode = ${_safeJson(state.timestampMode)};\n` +
             `window.__embedLogFirstLogAt = ${_safeJson(state.firstLogAt)};\n` +
@@ -239,6 +265,8 @@ ${tabContentsHtml}
 <script>${profileJs}</script>
 <script>${renderPaneJs}</script>
 <script>${renderToolbarJs}</script>
+<script>${pluginRuntimeJs}</script>
+${pluginScriptTags}
 <script>${stateJs}</script>
 <script>${themesJs}</script>
 <script>${settingsJs}</script>

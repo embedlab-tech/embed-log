@@ -12,7 +12,6 @@ from .diagnostics import _display_version_line, _run_ports, _run_version
 from .run import _run_merge, _run_run
 from .demo import _run_demo
 from .sample_config import _run_sample_config
-from ..file_tail_udp import run_tail_file
 from ..parse import run_parse
 
 
@@ -83,8 +82,6 @@ def main(argv: list[str] | None = None) -> int:
             return _run_merge(args)
         case "parse":
             return run_parse(argv[1:])  # keep old parse signature
-        case "tail-file":
-            return run_tail_file(args)
         case "version":
             return _run_version(args)
         case "ports":

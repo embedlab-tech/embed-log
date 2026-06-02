@@ -393,6 +393,10 @@ class LogServer:
         app_name: str = "embed-log",
         theme_defaults: dict | None = None,
         source_labels: dict[str, str] | None = None,
+        frontend_plugins: dict[str, dict] | None = None,
+        pane_plugins: dict[str, list[dict]] | None = None,
+        plugin_scripts: dict[str, str] | None = None,
+        pane_commands: dict[str, list[str]] | None = None,
         queue_maxsize: int = 20000,
         timestamp_mode: str = TIMESTAMP_MODE_ABSOLUTE,
     ):
@@ -405,7 +409,17 @@ class LogServer:
         self._app_name = app_name
         self._theme_defaults = theme_defaults or {}
         self._source_labels = source_labels or {s["name"]: s.get("label", s["name"]) for s in sources}
+        self._source_configs = sources   # keep for kind lookup
+        self._pane_kinds = {}
+        for s in sources:
+            src = s["source"]
+            kind = "uart" if src.supports_write else type(src).__name__.lower().replace("source", "")
+            self._pane_kinds[s["name"]] = kind
+        self._frontend_plugins = frontend_plugins or {}
+        self._pane_plugins = pane_plugins or {}
+        self._plugin_scripts = plugin_scripts or {}
         self._queue_maxsize = queue_maxsize
+        self._pane_commands = pane_commands or {}
         self._timestamp_mode = timestamp_mode if timestamp_mode in TIMESTAMP_MODES else TIMESTAMP_MODE_ABSOLUTE
         self._rotate_lock = threading.Lock()
         self._export_lock = threading.Lock()
@@ -419,6 +433,11 @@ class LogServer:
             tabs=self._tabs,
             source_files=self._source_files,
             source_labels=self._source_labels,
+            frontend_plugins=self._frontend_plugins,
+            pane_plugins=self._pane_plugins,
+            plugin_scripts=self._plugin_scripts,
+            pane_kinds=self._pane_kinds,
+            pane_commands=self._pane_commands,
             started_at=self._started_at,
             config_path=config_path,
             job_id=self._job_id,
@@ -440,6 +459,10 @@ class LogServer:
             source_files=self._source_files,
             tabs=self._tabs,
             source_labels=self._source_labels,
+            frontend_plugins=self._frontend_plugins,
+            pane_plugins=self._pane_plugins,
+            plugin_scripts=self._plugin_scripts,
+            pane_kinds=self._pane_kinds,
             timestamp_mode=self._timestamp_mode,
             first_log_at=self._session.first_log_at,
         )
@@ -462,6 +485,11 @@ class LogServer:
                 app_name=app_name,
                 theme_defaults=self._theme_defaults,
                 source_labels=self._source_labels,
+                pane_kinds=self._pane_kinds,
+                pane_commands=self._pane_commands,
+                frontend_plugins=self._frontend_plugins,
+                pane_plugins=self._pane_plugins,
+                plugin_scripts=self._plugin_scripts,
             )
 
         self._broadcaster = broadcaster
@@ -661,6 +689,9 @@ class LogServer:
                 tabs=self._tabs,
                 source_files=self._source_files,
                 source_labels=self._source_labels,
+                frontend_plugins=self._frontend_plugins,
+                pane_plugins=self._pane_plugins,
+                plugin_scripts=self._plugin_scripts,
                 started_at=self._started_at,
                 config_path=self._session.config_path if hasattr(self._session, "config_path") else None,
                 job_id=self._job_id,
@@ -673,6 +704,9 @@ class LogServer:
                 source_files=self._source_files,
                 tabs=self._tabs,
                 source_labels=self._source_labels,
+                frontend_plugins=self._frontend_plugins,
+                pane_plugins=self._pane_plugins,
+                plugin_scripts=self._plugin_scripts,
                 timestamp_mode=self._timestamp_mode,
                 first_log_at=self._session.first_log_at,
             )

@@ -47,7 +47,6 @@ Short, practical map of this repository for humans and coding agents.
     - `log_client.py` — marker injection + stream subscription client.
     - `tx_client.py` — TX-only client.
     - `parse.py` — parse exported HTML back to raw logs.
-    - `file_tail_udp.py` — tail file → UDP forwarding.
 
 - `frontend/`
   - Browser UI (vanilla HTML/CSS/JS, no build step).

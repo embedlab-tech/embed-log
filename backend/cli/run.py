@@ -9,7 +9,9 @@ from pathlib import Path
 
 from ..app import DEFAULT_WS_UI, build_source, parse_source, run_app
 from ..config import AppConfig, ConfigError, load_config
+from ..frontend_plugins import resolve_frontend_plugin
 from ..sources import LogSource
+import yaml
 
 
 def _run_merge(args: argparse.Namespace) -> int:
@@ -50,28 +52,14 @@ def _run_run(args: argparse.Namespace) -> int:
     source_specs = args.sources if args.sources else cfg.sources
     inject_specs = args.injects if args.injects else cfg.injects
     forward_specs = args.forwards if args.forwards else cfg.forwards
-    if args.tabs:
-        tab_specs = args.tabs
-    elif cfg.tabs:
-        tab_specs = [[t.label, *t.panes] for t in cfg.tabs]
-    else:
-        tab_specs = []
-    source_labels = (
-        cfg.source_labels if (args.config and not args.sources) else {}
-    )
+    source_labels = cfg.source_labels if (args.config and not args.sources) else {}
 
-    baudrate = (
-        args.baudrate if args.baudrate is not None else cfg.baudrate
-    )
-    logs_root = Path(
-        args.log_dir if args.log_dir is not None else cfg.logs.dir
-    )
+    baudrate = args.baudrate if args.baudrate is not None else cfg.baudrate
+    logs_root = Path(args.log_dir if args.log_dir is not None else cfg.logs.dir)
     host = args.host if args.host is not None else cfg.server.host
     ws_port = args.ws_port if args.ws_port is not None else cfg.server.ws_port
     ws_ui = args.ws_ui if args.ws_ui is not None else cfg.server.ws_ui or DEFAULT_WS_UI
-    app_name = (
-        args.app_name if args.app_name is not None else cfg.server.app_name
-    )
+    app_name = args.app_name if args.app_name is not None else cfg.server.app_name
     cfg_verbosity = cfg.server.verbosity
     cfg_legacy_verbose = cfg.server.verbose
     if args.verbosity is not None:
@@ -86,26 +74,14 @@ def _run_run(args: argparse.Namespace) -> int:
         verbosity = "full" if cfg_legacy_verbose else "quiet"
 
     full_verbose = verbosity == "full"
-    open_browser = (
-        args.open_browser
-        if args.open_browser is not None
-        else cfg.server.open_browser
-    )
+    open_browser = args.open_browser if args.open_browser is not None else cfg.server.open_browser
     job_id = args.job_id if args.job_id is not None else cfg.server.job_id
-    timestamp_mode = (
-        args.timestamp_mode
-        if args.timestamp_mode is not None
-        else cfg.server.timestamp_mode
-    )
+    timestamp_mode = args.timestamp_mode if args.timestamp_mode is not None else cfg.server.timestamp_mode
     default_light_theme = (
-        args.default_light_theme
-        if args.default_light_theme is not None
-        else cfg.server.default_light_theme
+        args.default_light_theme if args.default_light_theme is not None else cfg.server.default_light_theme
     )
     default_dark_theme = (
-        args.default_dark_theme
-        if args.default_dark_theme is not None
-        else cfg.server.default_dark_theme
+        args.default_dark_theme if args.default_dark_theme is not None else cfg.server.default_dark_theme
     )
     queue_maxsize = cfg.server.queue_size if args.config else 20000
 
@@ -125,7 +101,7 @@ def _run_run(args: argparse.Namespace) -> int:
     source_names: list[str] = []
     source_objects: dict[str, LogSource] = {}
     if args.sources:
-        for name, spec in source_specs:
+        for name, spec in args.sources:
             if name in source_objects:
                 print(f"duplicate --source name: {name!r}", file=sys.stderr)
                 return 1
@@ -185,29 +161,86 @@ def _run_run(args: argparse.Namespace) -> int:
             return 1
         forward_ports.setdefault(name, []).append(port)
 
+    frontend_plugins: dict[str, dict] = {}
+    pane_plugins: dict[str, list[dict]] = {}
+    plugin_scripts: dict[str, str] = {}
+
     tabs: list[dict] = []
-    for tab_entry in tab_specs:
-        if len(tab_entry) < 2:
-            print(
-                f"--tab requires at least LABEL SOURCE, got: {tab_entry}",
-                file=sys.stderr,
-            )
-            return 1
-        if len(tab_entry) > 3:
-            print(
-                f"--tab takes at most 2 sources per tab, got: {tab_entry}",
-                file=sys.stderr,
-            )
-            return 1
-        label = tab_entry[0]
-        panes = tab_entry[1:]
-        pane_labels: dict[str, str] = {}
-        for pane in panes:
-            if pane not in source_objects:
-                print(f"--tab {label!r}: unknown source {pane!r}", file=sys.stderr)
+    if args.tabs:
+        tab_specs = args.tabs
+        for tab_entry in tab_specs:
+            if len(tab_entry) < 2:
+                print(
+                    f"--tab requires at least LABEL SOURCE, got: {tab_entry}",
+                    file=sys.stderr,
+                )
                 return 1
-            pane_labels[pane] = source_labels.get(pane, pane)
-        tabs.append({"label": label, "panes": panes, "pane_labels": pane_labels})
+            if len(tab_entry) > 3:
+                print(
+                    f"--tab takes at most 2 sources per tab, got: {tab_entry}",
+                    file=sys.stderr,
+                )
+                return 1
+            label = tab_entry[0]
+            panes = tab_entry[1:]
+            pane_labels: dict[str, str] = {}
+            for pane in panes:
+                if pane not in source_objects:
+                    print(f"--tab {label!r}: unknown source {pane!r}", file=sys.stderr)
+                    return 1
+                pane_labels[pane] = source_labels.get(pane, pane)
+            tabs.append({"label": label, "panes": panes, "pane_labels": pane_labels})
+    else:
+        for plugin_name, definition in cfg.frontend_plugins.items():
+            resolved = resolve_frontend_plugin(plugin_name, builtin=definition.builtin, path=definition.path)
+            frontend_plugins[plugin_name] = resolved.public_metadata()
+            plugin_scripts[plugin_name] = resolved.script
+
+        for tab in cfg.tabs:
+            panes: list[str] = []
+            pane_labels: dict[str, str] = {}
+            for pane in tab.panes:
+                source_name = pane.source
+                if source_name not in source_objects:
+                    print(f"tab {tab.label!r}: unknown source {source_name!r}", file=sys.stderr)
+                    return 1
+                panes.append(source_name)
+                pane_labels[source_name] = source_labels.get(source_name, source_name)
+                refs = [
+                    {"name": plugin.name, "options": dict(plugin.options)}
+                    for plugin in pane.plugins
+                ]
+                if refs:
+                    previous = pane_plugins.get(source_name)
+                    if previous is None:
+                        pane_plugins[source_name] = refs
+                    elif previous != refs:
+                        print(
+                            f"source {source_name!r} uses conflicting frontend plugins across tabs",
+                            file=sys.stderr,
+                        )
+                        return 1
+            tabs.append({"label": tab.label, "panes": panes, "pane_labels": pane_labels})
+
+    # Load per-source TX command suggestions (embed-log.commands.yml)
+    pane_commands: dict[str, list[str]] = {}
+    commands_candidates = []
+    if args.config:
+        cf = Path(args.config)
+        commands_candidates.append(str(cf.parent / f"{cf.stem}.commands.yml"))
+    commands_candidates.append("embed-log.commands.yml")
+    for cmdfile in commands_candidates:
+        try:
+            data = yaml.safe_load(Path(cmdfile).read_text())
+            srcs = data.get("sources", {}) if isinstance(data, dict) else {}
+            for name in source_names:
+                cmds = srcs.get(name)
+                if isinstance(cmds, list):
+                    pane_commands[name] = [str(c) for c in cmds if isinstance(c, str) and c]
+            if pane_commands:
+                break
+        except (OSError, yaml.YAMLError, AttributeError):
+            continue
 
     return run_app(
         source_names=source_names,
@@ -216,6 +249,10 @@ def _run_run(args: argparse.Namespace) -> int:
         source_labels=source_labels,
         forward_ports=forward_ports,
         tabs=tabs,
+        frontend_plugins=frontend_plugins,
+        pane_plugins=pane_plugins,
+        pane_commands=pane_commands,
+        plugin_scripts=plugin_scripts,
         logs_root=logs_root,
         host=host,
         verbose=full_verbose,

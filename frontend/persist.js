@@ -1,3 +1,4 @@
+import { getPanePluginUiState, replacePanePluginUiState } from './pluginRuntime.js';
 import { state, TABS, PANES } from './state.js';
 import { appendLine, updateJumpBtn, setTimestampMode } from './lines.js';
 import { createTabWithPanes } from './tabcreate.js';
@@ -41,6 +42,7 @@ function _snapshot() {
         activeTab: state.activeTab,
         fontSize: state.fontSize,
         timestampMode: state.timestampMode,
+        panePluginUiState: getPanePluginUiState(),
         lines,
         savedAt: Date.now(),
     };
@@ -82,6 +84,7 @@ function _restoreIfPossible() {
             switchTab(idx);
         }
     }
+    replacePanePluginUiState(snap.panePluginUiState);
 
     // Refill panes that are currently empty.
     const byPane = snap.lines && typeof snap.lines === 'object' ? snap.lines : {};

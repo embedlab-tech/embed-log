@@ -13,6 +13,8 @@ SCRIPT_TABS_RE = re.compile(r"window\.TABS\s*=\s*(\[.*?\])\s*;", re.S)
 LOGDATA_MARKER_RE = re.compile(r"var\s+_logData\s*=\s*", re.S)
 MARKERS_MARKER_RE = re.compile(r"var\s+_markers\s*=\s*", re.S)
 SCRIPT_PANE_LABELS_RE = re.compile(r"window\.PANE_LABELS\s*=\s*(\{.*?\})\s*;", re.S)
+SCRIPT_FRONTEND_PLUGINS_RE = re.compile(r"window\.__embedLogFrontendPlugins\s*=\s*(\{.*?\})\s*;", re.S)
+SCRIPT_PANE_PLUGINS_RE = re.compile(r"window\.__embedLogPanePlugins\s*=\s*(\{.*?\})\s*;", re.S)
 SCRIPT_TS_MODE_RE = re.compile(r"window\.__embedLogInitialTimestampMode\s*=\s*(\"[^\"]*\");")
 SCRIPT_FIRST_LOG_RE = re.compile(r"window\.__embedLogFirstLogAt\s*=\s*(\"[^\"]*\"|null);")
 
@@ -140,6 +142,8 @@ def run_parse(argv: list[str]) -> int:
     # Optional embedded data — never fail on missing
     markers = _extract_json_after_marker_optional(text, MARKERS_MARKER_RE)
     pane_labels = _extract_regex_json(text, SCRIPT_PANE_LABELS_RE)
+    frontend_plugins = _extract_regex_json(text, SCRIPT_FRONTEND_PLUGINS_RE)
+    pane_plugins = _extract_regex_json(text, SCRIPT_PANE_PLUGINS_RE)
     ts_mode = _extract_regex_json(text, SCRIPT_TS_MODE_RE)
     first_log_at = _extract_regex_json(text, SCRIPT_FIRST_LOG_RE)
 
@@ -198,6 +202,8 @@ def run_parse(argv: list[str]) -> int:
         "first_log_at": first_log_at,
         "tabs": tabs,
         "pane_labels": pane_labels,
+        "frontend_plugins": frontend_plugins,
+        "pane_plugins": pane_plugins,
         "source_files": source_files,
         "session_html": str(html_path),
     }

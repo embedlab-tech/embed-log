@@ -1,10 +1,23 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
 import yaml
-from .models import AppConfig, LogsConfig, ParserConfig, ServerConfig, SourceConfig, TabConfig
+
+from ..frontend_plugins import builtin_frontend_plugin_names
+from .models import (
+    AppConfig,
+    FrontendPluginDefinition,
+    LogsConfig,
+    PaneConfig,
+    PanePluginConfig,
+    ParserConfig,
+    ServerConfig,
+    SourceConfig,
+    TabConfig,
+)
 
 
 class ConfigError(ValueError):
@@ -43,6 +56,10 @@ def _require_choice(value: Any, field: str, choices: set[str]) -> str:
     return s
 
 
+def _options_signature(options: dict[str, Any]) -> str:
+    return json.dumps(options, sort_keys=True, separators=(",", ":"))
+
+
 def _load_parser_config(value: Any, field: str) -> ParserConfig:
     if value is None:
         return ParserConfig()
@@ -53,6 +70,93 @@ def _load_parser_config(value: Any, field: str) -> ParserConfig:
     if extra_fields:
         raise ConfigError(f"{field}.{extra_fields[0]} unsupported for parser type {parser_type!r}")
     return ParserConfig(type=parser_type)
+
+
+def _load_frontend_plugins(value: Any, *, config_dir: Path) -> dict[str, FrontendPluginDefinition]:
+    if value is None:
+        return {}
+
+    root = _require_dict(value, "frontend_plugins")
+    resolved: dict[str, FrontendPluginDefinition] = {}
+    builtins = builtin_frontend_plugin_names()
+
+    for name, raw_plugin in root.items():
+        plugin_name = _require_str(name, f"frontend_plugins key {name!r}")
+        plugin = _require_dict(raw_plugin, f"frontend_plugins.{plugin_name}")
+        builtin = plugin.get("builtin")
+        raw_path = plugin.get("path")
+        extra_fields = sorted(key for key in plugin if key not in {"builtin", "path"})
+        if extra_fields:
+            raise ConfigError(f"frontend_plugins.{plugin_name}.{extra_fields[0]} is unsupported")
+        if bool(builtin) == bool(raw_path):
+            raise ConfigError(f"frontend_plugins.{plugin_name} must define exactly one of builtin or path")
+
+        if builtin:
+            builtin_name = _require_choice(builtin, f"frontend_plugins.{plugin_name}.builtin", builtins)
+            resolved[plugin_name] = FrontendPluginDefinition(builtin=builtin_name)
+            continue
+
+        plugin_path = config_dir / _require_str(raw_path, f"frontend_plugins.{plugin_name}.path")
+        plugin_path = plugin_path.resolve()
+        if not plugin_path.is_file():
+            raise ConfigError(f"frontend_plugins.{plugin_name}.path file not found: {plugin_path}")
+        resolved[plugin_name] = FrontendPluginDefinition(path=str(plugin_path))
+
+    return resolved
+
+
+def _load_pane_plugin(value: Any, field: str, frontend_plugins: dict[str, FrontendPluginDefinition]) -> PanePluginConfig:
+    if isinstance(value, str):
+        name = _require_str(value, field)
+        if name not in frontend_plugins:
+            raise ConfigError(f"{field} unknown plugin: {name!r}")
+        return PanePluginConfig(name=name)
+
+    plugin = _require_dict(value, field)
+    name = _require_str(plugin.get("name"), f"{field}.name")
+    if name not in frontend_plugins:
+        raise ConfigError(f"{field}.name unknown plugin: {name!r}")
+
+    options = plugin.get("options", {})
+    if options is None:
+        options = {}
+    options = _require_dict(options, f"{field}.options")
+
+    extra_fields = sorted(key for key in plugin if key not in {"name", "options"})
+    if extra_fields:
+        raise ConfigError(f"{field}.{extra_fields[0]} is unsupported")
+
+    return PanePluginConfig(name=name, options=options)
+
+
+def _load_pane_config(
+    value: Any,
+    field: str,
+    *,
+    source_names: set[str],
+    frontend_plugins: dict[str, FrontendPluginDefinition],
+) -> PaneConfig:
+    if isinstance(value, str):
+        source = _require_str(value, field)
+        if source not in source_names:
+            raise ConfigError(f"{field} unknown source: {source!r}")
+        return PaneConfig(source=source)
+
+    pane = _require_dict(value, field)
+    source = _require_str(pane.get("source"), f"{field}.source")
+    if source not in source_names:
+        raise ConfigError(f"{field}.source unknown source: {source!r}")
+
+    raw_plugins = pane.get("plugins", [])
+    if raw_plugins is None:
+        raw_plugins = []
+    plugins = [_load_pane_plugin(item, f"{field}.plugins[{idx}]", frontend_plugins) for idx, item in enumerate(_require_list(raw_plugins, f"{field}.plugins"))]
+
+    extra_fields = sorted(key for key in pane if key not in {"source", "plugins"})
+    if extra_fields:
+        raise ConfigError(f"{field}.{extra_fields[0]} is unsupported")
+
+    return PaneConfig(source=source, plugins=plugins)
 
 
 def load_config(path: str | Path) -> AppConfig:
@@ -116,8 +220,11 @@ def load_config(path: str | Path) -> AppConfig:
         elif src_type == "udp":
             port = _as_int(src.get("port"), f"sources[{i}].port")
             source_config = SourceConfig(name=name, type=src_type, port=port, parser=parser)
+        elif src_type == "file":
+            port = _require_str(src.get("port"), f"sources[{i}].port")
+            source_config = SourceConfig(name=name, type=src_type, port=port, parser=parser)
         else:
-            raise ConfigError(f"sources[{i}].type unsupported: {src_type!r} (use 'uart' or 'udp')")
+            raise ConfigError(f"sources[{i}].type unsupported: {src_type!r} (use 'uart', 'udp', or 'file')")
 
         label = src.get("label")
         source_labels[name] = _require_str(label, f"sources[{i}].label") if label is not None else name
@@ -137,24 +244,42 @@ def load_config(path: str | Path) -> AppConfig:
             for j, fp in enumerate(fp_list):
                 forwards.append((name, _as_int(fp, f"sources[{i}].forward_ports[{j}]")))
 
+    frontend_plugins = _load_frontend_plugins(cfg.get("frontend_plugins"), config_dir=p.parent.resolve())
+
     tabs_raw = _require_list(cfg.get("tabs", []), "tabs")
     tabs: list[TabConfig] = []
+    pane_signatures: dict[str, tuple[tuple[str, str], ...]] = {}
 
     for i, item in enumerate(tabs_raw):
         tab = _require_dict(item, f"tabs[{i}]")
         label = _require_str(tab.get("label"), f"tabs[{i}].label")
         panes = _require_list(tab.get("panes"), f"tabs[{i}].panes")
         if not (1 <= len(panes) <= 2):
-            raise ConfigError(f"tabs[{i}].panes must contain 1 or 2 source names")
+            raise ConfigError(f"tabs[{i}].panes must contain 1 or 2 pane definitions")
 
-        pane_names: list[str] = []
+        pane_configs: list[PaneConfig] = []
         for j, pane in enumerate(panes):
-            pane_name = _require_str(pane, f"tabs[{i}].panes[{j}]")
-            if pane_name not in source_names:
-                raise ConfigError(f"tabs[{i}].panes[{j}] unknown source: {pane_name!r}")
-            pane_names.append(pane_name)
+            pane_config = _load_pane_config(
+                pane,
+                f"tabs[{i}].panes[{j}]",
+                source_names=source_names,
+                frontend_plugins=frontend_plugins,
+            )
+            signature = tuple((plugin.name, _options_signature(plugin.options)) for plugin in pane_config.plugins)
+            previous = pane_signatures.get(pane_config.source)
+            if previous is None:
+                pane_signatures[pane_config.source] = signature
+            elif previous != signature:
+                raise ConfigError(
+                    f"tabs[{i}].panes[{j}] plugin set conflicts with another tab using source {pane_config.source!r}"
+                )
+            pane_configs.append(pane_config)
 
-        tabs.append(TabConfig(label=label, panes=pane_names))
+        extra_fields = sorted(key for key in tab if key not in {"label", "panes"})
+        if extra_fields:
+            raise ConfigError(f"tabs[{i}].{extra_fields[0]} is unsupported")
+
+        tabs.append(TabConfig(label=label, panes=pane_configs))
 
     server_kwargs: dict[str, Any] = {}
     if "host" in server:
@@ -199,6 +324,7 @@ def load_config(path: str | Path) -> AppConfig:
         source_labels=source_labels,
         injects=injects,
         forwards=forwards,
+        frontend_plugins=frontend_plugins,
         tabs=tabs,
         server=ServerConfig(**server_kwargs),
         logs=LogsConfig(**logs_kwargs),

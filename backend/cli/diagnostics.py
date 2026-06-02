@@ -126,12 +126,12 @@ def _run_version(args: argparse.Namespace) -> int:
             # Tabs
             tabs = cfg.tabs
             for t in tabs:
-                for p in t.panes:
-                    if p not in names:
+                for pane in t.panes:
+                    if pane.source not in names:
                         checks.append(
                             (
                                 "tab-refs",
-                                f"unknown source {p!r} in tab {t.label!r}",
+                                f"unknown source {pane.source!r} in tab {t.label!r}",
                             )
                         )
                         ok = False

@@ -11,5 +11,6 @@ import './themes.js';
 import './settings.js';
 import './fontsize.js';
 import './persist.js';
+import './pluginRuntime.js';
 import './ws.js';
 import './export.js';
