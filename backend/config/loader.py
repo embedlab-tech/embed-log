@@ -220,8 +220,11 @@ def load_config(path: str | Path) -> AppConfig:
         elif src_type == "udp":
             port = _as_int(src.get("port"), f"sources[{i}].port")
             source_config = SourceConfig(name=name, type=src_type, port=port, parser=parser)
+        elif src_type == "file":
+            port = _require_str(src.get("port"), f"sources[{i}].port")
+            source_config = SourceConfig(name=name, type=src_type, port=port, parser=parser)
         else:
-            raise ConfigError(f"sources[{i}].type unsupported: {src_type!r} (use 'uart' or 'udp')")
+            raise ConfigError(f"sources[{i}].type unsupported: {src_type!r} (use 'uart', 'udp', or 'file')")
 
         label = src.get("label")
         source_labels[name] = _require_str(label, f"sources[{i}].label") if label is not None else name
