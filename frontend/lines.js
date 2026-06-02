@@ -91,7 +91,8 @@ document.body.appendChild(_pluginInfoEl);
 let _pluginInfoHideTimer = null;
 let _pluginInfoPaneId = null;
 let _pluginInfoAnchorEl = null;
-
+let _pluginInfoPinned = false;
+let _pluginInfoClickInside = false;
 function _hasAnySelection() {
     return PANES.some(id => state.selected[id]?.size > 0);
 }
@@ -146,9 +147,11 @@ function _hidePluginInfo() {
     _pluginInfoEl.classList.remove("visible");
     _pluginInfoPaneId = null;
     _pluginInfoAnchorEl = null;
+    _pluginInfoPinned = false;
 }
 
 function _schedulePluginInfoHide(delay = 400) {
+    if (_pluginInfoPinned) return;
     _cancelPluginInfoHide();
     _pluginInfoHideTimer = window.setTimeout(() => {
         _pluginInfoHideTimer = null;
@@ -224,6 +227,17 @@ function _showPluginInfo(paneId, anchor) {
 
 _pluginInfoEl.addEventListener("mouseenter", _cancelPluginInfoHide);
 _pluginInfoEl.addEventListener("mouseleave", () => _schedulePluginInfoHide());
+_pluginInfoEl.addEventListener("mousedown", () => { _pluginInfoClickInside = true; });
+
+document.addEventListener("click", ev => {
+    if (_pluginInfoClickInside) {
+        _pluginInfoClickInside = false;
+        return;
+    }
+    if (!_pluginInfoPinned) return;
+    if (_pluginInfoAnchorEl?.contains(ev.target)) return;
+    _hidePluginInfo();
+});
 
 window.addEventListener("resize", () => {
     if (_pluginInfoEl.classList.contains("visible") && _pluginInfoAnchorEl) {
@@ -468,7 +482,7 @@ function _refreshPluginIndicator(paneId) {
     const configurable = getPanePluginSettings(paneId).length > 0;
     el.style.display = "";
     el.textContent = "\u26A1";  // ⚡
-    el.title = refs.map(r => r.name).join("\n") + (configurable ? "\n\nClick to configure" : "");
+    el.title = refs.map(r => r.name).join("\n") + (configurable ? "\n\nHover or click to configure" : "");
     el.classList.toggle("configurable", configurable);
     el.tabIndex = configurable ? 0 : -1;
     el.setAttribute("aria-label", configurable ? "Configure pane plugins" : "Active pane plugins");
@@ -478,6 +492,12 @@ function _refreshPluginIndicator(paneId) {
     el.addEventListener("mouseleave", () => _schedulePluginInfoHide());
     el.addEventListener("focus", () => _showPluginInfo(paneId, el));
     el.addEventListener("blur", () => _schedulePluginInfoHide(0));
+    el.addEventListener("click", ev => {
+        ev.stopPropagation();
+        _cancelPluginInfoHide();
+        _showPluginInfo(paneId, el);
+        _pluginInfoPinned = !_pluginInfoPinned;
+    });
 }
 export function refreshPluginIndicators() {
     PANES.forEach(_refreshPluginIndicator);
