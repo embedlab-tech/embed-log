@@ -126,7 +126,6 @@ Dispatch:
 - `wizard.py` — `create-config` interactive wizard.
 - `diagnostics.py` — `version` / `doctor` / `ports`.
 - `update.py` — self-update logic.
-- `skill.py` — built-in skill system.
 - `demo.py` — demo utility commands.
 - `sessions/` — subpackage for all `sessions` subcommands.
 

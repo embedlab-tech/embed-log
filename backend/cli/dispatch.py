@@ -8,7 +8,6 @@ from pathlib import Path
 from .parser import build_parser
 
 from .sessions import _run_sessions
-from .skill import _run_skill
 from .diagnostics import _display_version_line, _run_ports, _run_version
 from .run import _run_merge, _run_run
 from .demo import _run_demo
@@ -45,10 +44,6 @@ def main(argv: list[str] | None = None) -> int:
             print("Development (run from source):")
             print("  python3 -m backend.server <command>")
         return 0
-
-    # ── skill uses its own internal sub-sub-parsers ──
-    if argv[0] == "skill":
-        return _run_skill(argv[1:])
 
     # ── sessions uses its own internal sub-sub-parsers ──
     if argv[0] == "sessions":
@@ -96,8 +91,6 @@ def main(argv: list[str] | None = None) -> int:
             return _run_ports(args)
         case "sessions":
             return _run_sessions(argv[1:])
-        case "skill":
-            return _run_skill(argv[1:])
         case _:
             parser.print_help()
             return 0

@@ -4,7 +4,7 @@
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.sh | bash
-#   ./install.sh                          install latest release
+#   ./install.sh                          install from the local checkout (when run in the repo)
 #   ./install.sh --main                   install latest commit from main branch
 #   ./install.sh --develop                install latest commit from develop branch
 #
