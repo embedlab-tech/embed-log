@@ -37,8 +37,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import socket
 import sys
+import termios
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -119,6 +121,14 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=30.0,
         help="Inject client connection timeout in seconds (default: 30).",
+    )
+    parser.add_argument(
+        "--uart",
+        action="append",
+        type=str,
+        default=[],
+        metavar="NAME",
+        help="UART target (virtual PTY). Creates a PTY pair; prints the slave path for your config. Repeat for multiple sources.",
     )
     parser.add_argument(
         "--cbor",
@@ -541,34 +551,59 @@ class InjectFanout:
 
 
 def run(args: argparse.Namespace) -> int:
-    if not args.udp:
-        raise ValueError("at least one --udp target is required")
+    if not args.udp and not args.uart:
+        raise ValueError("at least one --udp or --uart target is required")
     if args.tick_ms <= 0:
         raise ValueError("--tick-ms must be > 0")
     if args.cycles < 0:
         raise ValueError("--cycles must be >= 0")
+
+    # ── Create virtual UART PTY pairs ────────────────────────────────
+    uart_fds: dict[str, int] = {}
+    uart_paths: dict[str, str] = {}
+    uart_slave_fds: list[int] = []
+    for name in args.uart:
+        master_fd, slave_fd = os.openpty()
+        # Configure slave for raw pass-through (no echo, no canonical processing)
+        attr = termios.tcgetattr(slave_fd)
+        attr[0] = attr[0] & ~termios.BRKINT   # no break interrupt
+        attr[3] = attr[3] & ~(termios.ECHO | termios.ICANON | termios.ISIG)  # raw mode
+        termios.tcsetattr(slave_fd, termios.TCSANOW, attr)
+        slave_path = os.ttyname(slave_fd)
+        uart_slave_fds.append(slave_fd)  # keep open so master writes succeed
+        uart_fds[name] = master_fd
+        uart_paths[name] = slave_path
+    # ── Print targets ─────────────────────────────────────────────────
+    if args.uart:
+        print("[det-demo] UART targets (add these to your config):")
+        for name in args.uart:
+            print(f"  {name} → {uart_paths[name]}")
+        print()
+    if args.udp:
+        mode_label = "curated" if args.content == "curated" else "test"
+        print(f"[det-demo] content={mode_label} UDP targets:")
+        for t in args.udp:
+            print(f"  - {t.name} -> {t.host}:{t.port}")
+    if args.inject:
+        print(f"[det-demo] inject targets:")
+        for t in args.inject:
+            print(f"  - {t.name} -> {t.host}:{t.port}")
+    print(f"[det-demo] tick_ms={args.tick_ms:g} cycles={'infinite' if args.cycles == 0 else args.cycles}{' mode=CBOR' if args.cbor else ''}")
 
     is_curated = args.content == "curated"
     max_curated_tick = max(
         max((lines or {0: []}).keys())
         for lines in CURATED_LINES.values()
     ) if is_curated else 0
-    mode_label = "curated" if is_curated else "test"
-
-    print(f"[det-demo] content={mode_label} UDP targets:")
-    for t in args.udp:
-        print(f"  - {t.name} -> {t.host}:{t.port}")
-    if args.inject:
-        print(f"[det-demo] content={mode_label} inject targets:")
-        for t in args.inject:
-            print(f"  - {t.name} -> {t.host}:{t.port}")
-    print(f"[det-demo] tick_ms={args.tick_ms:g} cycles={'infinite' if args.cycles == 0 else args.cycles}{' mode=CBOR' if args.cbor else ''}")
 
     inject_source = "DEMO" if is_curated else "TEST"
     seq_by_src = {t.name: 1 for t in args.udp}
+    for name in args.uart:
+        seq_by_src[name] = 1
     inject = InjectFanout(args.inject, args.connect_timeout, source=inject_source) if args.inject else None
     tick_interval = args.tick_ms / 1000.0
-    per_source_offset = min(0.005, tick_interval / max(1, len(args.udp) * 4))
+    total_targets = len(args.udp) + len(args.uart)
+    per_source_offset = min(0.005, tick_interval / max(1, total_targets * 4))
 
     tick = 0
     next_tick_at = time.monotonic()
@@ -611,6 +646,19 @@ def run(args: argparse.Namespace) -> int:
                             seq_by_src[target.name] = next_seq
                             payload = ("\n".join(lines) + "\n").encode("utf-8")
                             udp_sock.sendto(payload, (target.host, target.port))
+                # ── UART targets (test mode only — write raw lines to master PTY fd)
+                if not is_curated and not args.cbor:
+                    for name in args.uart:
+                        fd = uart_fds.get(name)
+                        if fd is None:
+                            continue
+                        lines, next_seq = build_udp_lines(name, tick, seq_by_src[name])
+                        seq_by_src[name] = next_seq
+                        payload = ("\n".join(lines) + "\n").encode("utf-8")
+                        try:
+                            os.write(fd, payload)
+                        except OSError as exc:
+                            print(f"[det-demo] uart write error ({name}): {exc}", file=sys.stderr)
 
                 # Inject markers
                 if inject is not None:
@@ -622,18 +670,23 @@ def run(args: argparse.Namespace) -> int:
                                         client = inject._clients.get(target.name)
                                         if client:
                                             client.marker(m_msg.format(name=target.name), color=m_color)
+                                    for name in args.uart:
+                                        client = inject._clients.get(name)
+                                        if client:
+                                            client.marker(m_msg.format(name=name), color=m_color)
                                 else:
                                     client = inject._clients.get(m_src)
                                     if client:
                                         client.marker(m_msg, color=m_color)
                     else:
                         if tick % 10 == 0:
-                            for target in args.udp:
-                                seq = seq_by_src[target.name]
-                                seq_by_src[target.name] = seq + 1
+                            all_targets = [t.name for t in args.udp] + list(args.uart)
+                            for src_name in all_targets:
+                                seq = seq_by_src[src_name]
+                                seq_by_src[src_name] = seq + 1
                                 inject.marker(
-                                    target.name,
-                                    _msg(target.name, tick, seq, "inject", f"inject marker for {target.name}"),
+                                    src_name,
+                                    _msg(src_name, tick, seq, "inject", f"inject marker for {src_name}"),
                                     color="cyan",
                                 )
 
@@ -645,6 +698,16 @@ def run(args: argparse.Namespace) -> int:
         finally:
             if inject is not None:
                 inject.close()
+            for fd in uart_fds.values():
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            for fd in uart_slave_fds:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
 
     print(f"[det-demo] done at tick={tick:03d}")
     return 0

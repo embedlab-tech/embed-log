@@ -8,12 +8,22 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 from pathlib import Path
 
+try:
+    import termios
+    _HAS_TERMIOS = hasattr(termios, 'TCSANOW') and hasattr(os, 'openpty')
+except ImportError:
+    _HAS_TERMIOS = False
+
+import yaml
+
 
 # Ports used by the demo setup
-INJECT_PORTS = [5001, 5002, 5003, 5004, 5005]
+INJECT_PORTS = [5001, 5002, 5003, 5004, 5005, 5006, 5007]
 UDP_PORTS = [6000, 6001, 6002, 6003, 6004, 6005]
 WS_PORT = 8080
 ALL_PORTS = INJECT_PORTS + UDP_PORTS + [WS_PORT]
@@ -124,6 +134,45 @@ class DemoRunner:
         for p in ALL_PORTS:
             proto = "udp" if p in UDP_PORTS else "tcp"
             _free_port(p, proto)
+        # ── Create virtual UART PTY pairs and generate temp config ──
+        self._uart_slave_fds: list[int] = []
+        self._uart_master_fds: dict[str, int] = {}
+        self._uart_names: list[str] = []
+        try:
+            raw = demo_config.read_text("utf-8")
+        except OSError as exc:
+            print(f"ERROR: cannot read demo config {demo_config}: {exc}", file=sys.stderr)
+            return 1
+
+        if _HAS_TERMIOS:
+            for name, placeholder in [("UART_DUT", "__uart_dut_placeholder__"),
+                                       ("UART_DEBUG", "__uart_debug_placeholder__")]:
+                try:
+                    master_fd, slave_fd = os.openpty()
+                    attr = termios.tcgetattr(slave_fd)
+                    attr[0] = attr[0] & ~termios.BRKINT
+                    attr[3] = attr[3] & ~(termios.ECHO | termios.ICANON | termios.ISIG)
+                    termios.tcsetattr(slave_fd, termios.TCSANOW, attr)
+                    slave_path = os.ttyname(slave_fd)
+                    self._uart_slave_fds.append(slave_fd)
+                    self._uart_master_fds[name] = master_fd
+                    self._uart_names.append(name)
+                    raw = raw.replace(placeholder, slave_path)
+                    print(f"  UART {name} → {slave_path}")
+                except OSError as exc:
+                    print(f"  UART {name}: could not create PTY — {exc}", file=sys.stderr)
+        else:
+            print("  UART: PTY support not available on this platform — skipping UART sources")
+            # Remove UART sources and UART tab from config
+            import re
+            raw = re.sub(r'(?s)\n  # ── UART sources.*?\n  - label: UART\n    panes:.*?(?=\n\s*\n|\Z)', '', raw)
+            raw += "\n"  # ensure trailing newline
+
+        # Write temp config with resolved UART paths
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False, dir=demo_config.parent)
+        tmp.write(raw)
+        tmp.close()
+        demo_config = Path(tmp.name)
 
         # ── Start server ──
         python = sys.executable
@@ -283,6 +332,16 @@ class DemoRunner:
         print(f"Starting {label} traffic (tick {self.args.tick_ms}ms)...")
         self._processes.append((subprocess.Popen(cmd), cmd))
 
+        # ── UART traffic (written directly to master PTY fds) ──
+        if self._uart_master_fds:
+            uart_thread = threading.Thread(
+                target=self._run_uart_traffic,
+                args=(content_mode,),
+                daemon=True,
+                name="demo-uart",
+            )
+            uart_thread.start()
+
         cbor_cmd = [
             sys.executable, str(deterministic_script),
             "--content", content_mode,
@@ -293,6 +352,27 @@ class DemoRunner:
         ]
         print(f"Starting CBOR {label} traffic (tick {self.args.tick_ms}ms)...")
         self._processes.append((subprocess.Popen(cbor_cmd), cbor_cmd))
+
+    def _run_uart_traffic(self, content_mode: str) -> None:
+        """Write deterministic test lines to UART master PTY fds."""
+        tick = 0
+        seq: dict[str, int] = {name: 1 for name in self._uart_master_fds}
+        tick_s = self.args.tick_ms / 1000.0
+        try:
+            while tick < self._content_cycles(content_mode) or self._content_cycles(content_mode) == 0:
+                tick += 1
+                time.sleep(tick_s)
+                for name, fd in self._uart_master_fds.items():
+                    s = seq[name]
+                    seq[name] = s + 1
+                    line = f"UART {name} tick={tick:03d} seq={s:04d}\n"
+                    try:
+                        os.write(fd, line.encode("utf-8"))
+                    except OSError:
+                        pass
+        except Exception:
+            pass
+
 
     def _cleanup(self) -> None:
         """Stop all child processes."""
@@ -331,6 +411,17 @@ class DemoRunner:
             except (ProcessLookupError, subprocess.TimeoutExpired):
                 pass
         self._processes.clear()
+        # Close UART PTY fds
+        for fd in getattr(self, "_uart_slave_fds", []):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        for fd in getattr(self, "_uart_master_fds", {}).values():
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
 
 def _run_demo(args: argparse.Namespace) -> int:
