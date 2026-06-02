@@ -146,7 +146,16 @@ class SessionManager:
         scope: str,
         label: str | None = None,
     ) -> str | None:
+        stripped = text.strip()
+        if not stripped:
+            return None
+
         self.snippets_dir.mkdir(parents=True, exist_ok=True)
+
+        # Enforce limit before creating a new file
+        existing = sorted(self.snippets_dir.glob("snippet_*.txt"))
+        if len(existing) >= MAX_SNIPPETS:
+            return None
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         safe_label = ""
         if label:

@@ -106,6 +106,15 @@ export function _selectionSetupPane(id) {
     rawBtn.title = "Download selected lines as raw .log file";
     rawBtn.addEventListener("click", e => { e.stopPropagation(); _downloadRaw(id); });
     moreDropdown.appendChild(rawBtn);
+    if (can('sessionApi')) {
+        const snippetBtn = document.createElement("button");
+        snippetBtn.className = "copy-btn";
+        snippetBtn.id = "save-snippet-" + id;
+        snippetBtn.textContent = "Save snippet";
+        snippetBtn.title = "Save selected lines to the session for later review";
+        snippetBtn.addEventListener("click", e => { e.stopPropagation(); _saveSnippet(id); });
+        moreDropdown.appendChild(snippetBtn);
+    }
     actionRow.appendChild(copyBtn);
     // Marker toggle (runtime only) — in the main action row
     if (can('markers')) {
@@ -804,6 +813,23 @@ function _saveSnippetToServer(text, panes, scope, label) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, panes, scope, label }),
     }).catch(() => {});
+}
+
+function _saveSnippet(paneId) {
+    const sel = state.selected[paneId];
+    if (!sel.size) return;
+    const indices = Array.from(sel).sort((a, b) => a - b);
+    const text = _formatSelectionBlock(paneId, indices, true);
+    if (!text) return;
+    const label = _rangeBoundsLabelExact(paneId);
+    const panes = [paneId];
+    _saveSnippetToServer(text, panes, 'exact', label);
+    const btn = document.getElementById("save-snippet-" + paneId);
+    if (btn) {
+        const prev = btn.textContent;
+        btn.textContent = "Saved";
+        setTimeout(() => { btn.textContent = prev; }, 900);
+    }
 }
 
 // ---------------------------------------------------------------------------

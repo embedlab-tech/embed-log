@@ -393,19 +393,21 @@ test.describe('scope-aware selection actions', () => {
     // Pane selector should be visible
     await expect(page.locator('#pane-selector-SENSOR_A')).toBeVisible();
     // All panes should have checkboxes with unwrap-style labels
+
     const checkboxes = page.locator('#pane-selector-SENSOR_A .pane-checkbox input[type="checkbox"]');
-    await expect(checkboxes).toHaveCount(5);
+    await expect(checkboxes).toHaveCount(8);
     // Each checkbox should have a pane data attribute
     await expect(checkboxes.nth(0)).toHaveAttribute('data-pane', 'SENSOR_A');
     await expect(checkboxes.nth(1)).toHaveAttribute('data-pane', 'SENSOR_B');
     await expect(checkboxes.nth(2)).toHaveAttribute('data-pane', 'SENSOR_C');
     await expect(checkboxes.nth(3)).toHaveAttribute('data-pane', 'SENSOR_D');
     await expect(checkboxes.nth(4)).toHaveAttribute('data-pane', 'SENSOR_CBOR');
+    await expect(checkboxes.nth(5)).toHaveAttribute('data-pane', 'SENSOR_COAP');
+    await expect(checkboxes.nth(6)).toHaveAttribute('data-pane', 'UART_DUT');
+    await expect(checkboxes.nth(7)).toHaveAttribute('data-pane', 'UART_DEBUG');
     // All checked by default
-    await expect(checkboxes.nth(0)).toBeChecked();
-    await expect(checkboxes.nth(1)).toBeChecked();
-    await expect(checkboxes.nth(2)).toBeChecked();
-    await expect(checkboxes.nth(3)).toBeChecked();
-    await expect(checkboxes.nth(4)).toBeChecked();
+    for (let i = 0; i < 8; i++) {
+        await expect(checkboxes.nth(i)).toBeChecked();
+    }
   });
 });

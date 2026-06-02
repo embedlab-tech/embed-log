@@ -31,12 +31,12 @@ def _run_sessions_snippet(log_dir: Path, args) -> int:
         print(f"Snippets for session {args.session_id}:")
         print()
         for i, s in enumerate(snippets, 1):
-            saved = s.get("saved_at", "?")
+            saved = s.get("created_at", "?")
             label = s.get("label", "?")
             scope = s.get("scope", "?")
             panes = ",".join(s.get("panes", []))
-            lines = s.get("line_count", "?")
-            print(f"  {i}. {s['file']}")
+            lines = s.get("lines", "?")
+            print(f"  {i}. {s['filename']}")
             print(
                 f"       saved: {saved}  scope: {scope}  panes: {panes}  lines: {lines}"
             )
@@ -51,7 +51,7 @@ def _run_sessions_snippet(log_dir: Path, args) -> int:
             matches = [
                 i
                 for i, s in enumerate(snippets)
-                if s["file"].endswith(args.snippet_id) or args.snippet_id in s["file"]
+                if s["filename"].endswith(args.snippet_id) or args.snippet_id in s["filename"]
             ]
             if len(matches) == 0:
                 print(f"No snippet matching {args.snippet_id!r}", file=sys.stderr)
@@ -62,7 +62,7 @@ def _run_sessions_snippet(log_dir: Path, args) -> int:
                     file=sys.stderr,
                 )
                 for m in matches:
-                    print(f"  {m + 1}. {snippets[m]['file']}", file=sys.stderr)
+                    print(f"  {m + 1}. {snippets[m]['filename']}", file=sys.stderr)
                 return 1
             idx = matches[0]
         elif args.index is not None:
@@ -79,13 +79,13 @@ def _run_sessions_snippet(log_dir: Path, args) -> int:
             idx = len(snippets) - 1
 
         s = snippets[idx]
-        spath = sdir / s["file"]
+        spath = sdir / s["filename"]
         if not spath.is_file():
             print(f"Snippet file not found: {spath}", file=sys.stderr)
             return 1
-        print(f"# {s['file']}")
+        print(f"# {s['filename']}")
         print(f"# scope: {s.get('scope', '?')}  panes: {','.join(s.get('panes', []))}")
-        print(f"# saved: {s.get('saved_at', '?')}  lines: {s.get('line_count', '?')}")
+        print(f"# saved: {s.get('created_at', '?')}  lines: {s.get('lines', '?')}")
         print()
         sys.stdout.write(spath.read_text(encoding="utf-8"))
         return 0
@@ -110,14 +110,14 @@ def _run_sessions_snippet(log_dir: Path, args) -> int:
                 return 1
             idx = args.index - 1
             s = snippets[idx]
-            spath = sdir / s["file"]
+            spath = sdir / s["filename"]
             if spath.is_file():
                 spath.unlink()
             del snippets[idx]
             manifest["snippets"] = snippets
             mf_path = sdir / "manifest.json"
             mf_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-            print(f"Deleted snippet {idx + 1}: {s['file']}")
+            print(f"Deleted snippet {idx + 1}: {s['filename']}")
             return 0
 
         print("error: specify --index N or --all to delete", file=sys.stderr)

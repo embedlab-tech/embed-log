@@ -160,13 +160,13 @@ class SessionSnippetTests(unittest.TestCase):
             label="alpha",
         )
         self.assertIsNotNone(path)
-        self.assertIn("/sessions/session/snippets/", path)
+        self.assertEqual(str(self.session_dir), str(Path(path).parent.parent))
 
         snippets_dir = self.session_dir / "snippets"
         self.assertTrue(snippets_dir.is_dir())
         files = list(snippets_dir.iterdir())
         self.assertEqual(len(files), 1)
-        self.assertEqual(files[0].read_text(encoding="utf-8"), "line one\nline two\n\n")
+        self.assertEqual(files[0].read_text(encoding="utf-8"), "line one\nline two\n")
 
         manifest = json.loads((self.session_dir / "manifest.json").read_text(encoding="utf-8"))
         self.assertIn("snippets", manifest)
@@ -174,8 +174,8 @@ class SessionSnippetTests(unittest.TestCase):
         entry = manifest["snippets"][0]
         self.assertEqual(entry["scope"], "exact")
         self.assertEqual(entry["panes"], ["A"])
-        self.assertEqual(entry["line_count"], 3)
-        self.assertIn("saved_at", entry)
+        self.assertEqual(entry["lines"], 2)
+        self.assertIn("created_at", entry)
 
     def test_save_snippet_empty_text_returns_none(self):
         result = self.mgr.save_snippet("   ", panes=["A"], scope="exact")
