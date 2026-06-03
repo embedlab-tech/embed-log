@@ -655,7 +655,8 @@ export function _uiSetupTxPane(id) {
     const histKey = id;
 
     let matches = [];       // indexes into commands[] matching typed prefix
-    let hintIdx = 0;        // which match the ghost hint shows
+    let hintIdx = -1;       // which match the ghost hint shows (was 0; now -1 = no hint)
+    let _suppressInput = false;  // prevent input-event re-trigger when Tab fills value
 
     function fuzzyMatch(typed) {
         if (!typed || !commands.length) return [];
@@ -682,6 +683,7 @@ export function _uiSetupTxPane(id) {
 
     // ── typing → fuzzy match saved commands, show ghost hint ──────
     input.addEventListener("input", () => {
+        if (_suppressInput) return;
         const typed = input.value;
         matches = fuzzyMatch(typed);
         hintIdx = matches.length > 0 ? 0 : -1;
@@ -699,11 +701,29 @@ export function _uiSetupTxPane(id) {
             return;
         }
 
-        // Tab → accept ghost-hint suggestion
-        if (e.key === "Tab" && hintIdx >= 0 && hintIdx < matches.length) {
+        // Tab / Shift+Tab → cycle through command suggestions, filling the input
+        if (e.key === "Tab" && commands.length > 0) {
             e.preventDefault();
+
+            if (matches.length === 0) {
+                // No matches yet (empty input or no fuzzy match) — show all commands
+                matches = commands.map((_, i) => i);
+                hintIdx = e.shiftKey ? matches.length - 1 : 0;
+            }
+
+            // Fill input with the currently-selected command
+            _suppressInput = true;
             input.value = commands[matches[hintIdx]];
-            matches = []; hintIdx = -1; showHint();
+            _suppressInput = false;
+            input.setSelectionRange(input.value.length, input.value.length);
+
+            // Advance hintIdx for next Tab (wrapping)
+            if (e.shiftKey) {
+                hintIdx = hintIdx <= 0 ? matches.length - 1 : hintIdx - 1;
+            } else {
+                hintIdx = (hintIdx + 1) % matches.length;
+            }
+            showHint();
             resetHistoryIndex();
             return;
         }
