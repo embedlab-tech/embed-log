@@ -46,11 +46,34 @@ It is intentionally simple:
 - `frontend/export.js` — full export generation
 - `frontend/persist.js` — session-aware cache persistence
 
+## Scalable log rendering
+
+The UI keeps large live sessions and exported HTML smooth by separating the log data model from the DOM.
+
+Each pane stores the complete log history in `state.rawLines[paneId]`, but the browser only renders the rows that intersect the current viewport plus a small overscan buffer. The DOM shape is:
+
+```html
+<div class="log-area" id="log-...">
+  <div class="log-spacer">
+    <div class="log-window"></div>
+  </div>
+</div>
+```
+
+- `.log-spacer` has the full virtual height (`visible row count × measured row height`), so the browser scrollbar has a stable, finite range even for multi-megabyte logs.
+- `.log-window` contains only the currently rendered `.log-line` elements.
+- Every rendered row carries `data-idx`, the raw line index. Code must use that index, not DOM child position.
+- Live logs, imports, and exported replay all append to the same pane model and rerender the visible window instead of appending one DOM node per line.
+- Exported/replayed logs and live appends may store compact tuples (`[ts, rawText, isTx, meta]`). Full line objects, ANSI parsing, timestamp view selection, and plugin analysis are built lazily by `getLine(paneId, idx)` only when a row is rendered or otherwise needed.
+- Filtering builds a projection of matching raw indices. Virtual scrolling then operates over that projection, so rare matches far outside the current viewport are reachable without rendering the whole log.
+- Sync highlights are persisted by raw line index and reapplied when virtualized rows are recreated during scrolling, tab switching, font-size changes, or live updates.
+
+This keeps DOM size bounded while preserving full-history operations such as export, download, selection, markers, filtering, and timestamp synchronization.
 ## Important runtime assumptions
 
 - Tabs and panes come from backend `config.tabs`.
 - Pane ids remain unique technical keys; visible pane names may now come from backend `config.pane_labels`.
-- Live runtime appends every received line into the pane DOM; the on-screen log must match the full live/exported history.
+- Live runtime stores every received line in the pane model; the rendered DOM is a bounded virtual window over the full live/exported history.
 - Live UI and exported HTML reuse the same general UI model.
 - Timestamp mode switching is a pure view switch when both timestamp representations are available; live/export paths preserve enough metadata to render both offline.
 - Not all panes are visible at once; current demo has multiple tabs.

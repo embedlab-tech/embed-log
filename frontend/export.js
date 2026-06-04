@@ -7,7 +7,8 @@ import {
 const STATIC_EXPORT_PROFILE =
     typeof STATIC_PROFILE !== 'undefined' ? STATIC_PROFILE : window.__embedLogProfile;
 
-import { buildStoredLine, renderPaneWindow, updateJumpBtn } from './lines.js';
+import { renderPaneWindow, updateJumpBtn, getLine } from './lines.js';
+
 import { state, TABS, PANES, PANE_LABELS } from './state.js';
 
 export async function exportHtmlSnapshot(options = {}) {
@@ -126,6 +127,8 @@ export async function exportHtmlSnapshot(options = {}) {
         // ------------------------------------------------------------------
         const _tmpEl = document.createElement("div");
         function _rawOf(line) {
+            if (Array.isArray(line)) return line[1];
+
             if (line.rawText !== undefined) return line.rawText;
             _tmpEl.innerHTML = line.html;
             return _tmpEl.textContent;
@@ -133,6 +136,7 @@ export async function exportHtmlSnapshot(options = {}) {
 
         // Compact tuple: [ts, text, isTx, meta|null]
         function _compactEntry(line) {
+            if (Array.isArray(line)) return line;
             const meta = {};
             if (line.absTs != null) meta.absTs = line.absTs;
             if (Number.isFinite(line.absNum)) meta.absNum = line.absNum;
@@ -218,18 +222,18 @@ export async function exportHtmlSnapshot(options = {}) {
         flat.sort(function (a, b) { return (a.numTs || 0) - (b.numTs || 0); });
         if (idx > flat.length) return;
         var target = flat[idx - 1];
-        var div = document.querySelector('#log-' + target.paneId + ' [data-idx="' + target.lineIdx + '"]');
-        if (!div) return;
-        var logEl = document.getElementById('log-' + target.paneId);
-        if (!logEl) return;
-        logEl.scrollTop = div.offsetTop - Math.floor(logEl.clientHeight / 3);
-        state.atBottom[target.paneId] = false;
-        if (typeof onLineClick === 'function') onLineClick(target.paneId, target.numTs, div);
         var tabIdx = -1;
         for (var t = 0; t < TABS.length; t++) {
             if (TABS[t].panes.indexOf(target.paneId) >= 0) { tabIdx = t; break; }
         }
         if (tabIdx >= 0 && typeof switchTab === 'function') switchTab(tabIdx);
+        if (typeof ensureLineVisible === 'function') ensureLineVisible(target.paneId, target.lineIdx, { align: 'center' });
+        var div = document.querySelector('#log-' + target.paneId + ' [data-idx="' + target.lineIdx + '"]');
+        if (!div) return;
+        var logEl = document.getElementById('log-' + target.paneId);
+        if (!logEl) return;
+        state.atBottom[target.paneId] = false;
+        if (typeof onLineClick === 'function') onLineClick(target.paneId, target.numTs, div);
     })();
 })();`;
 
@@ -353,8 +357,9 @@ function _lineRawFull(line) {
 function downloadRawMerged() {
     const entries = [];
     PANES.forEach(id => {
-        (state.rawLines[id] || []).forEach((line, idx) => {
-            entries.push({ paneId: id, idx, line });
+        (state.rawLines[id] || []).forEach((_, idx) => {
+            const line = getLine(id, idx);
+            if (line) entries.push({ paneId: id, idx, line });
         });
     });
     entries.sort((a, b) =>
@@ -382,7 +387,10 @@ function downloadRawSplit() {
     PANES.forEach(id => {
         const lines = state.rawLines[id] || [];
         if (!lines.length) return;
-        const text = lines.map(line => `[${line.ts}] ${_cleanMessage(line.rawText)}`).join("\n");
+        const text = lines.map((_, idx) => {
+            const line = getLine(id, idx);
+            return line ? `[${line.ts}] ${_cleanMessage(line.rawText)}` : "";
+        }).filter(Boolean).join("\n");
         const blob = new Blob([text + "\n"], { type: "text/plain" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -463,11 +471,10 @@ export function hydratePanesFromJson() {
             const tuples = JSON.parse(script.textContent);
             if (!Array.isArray(tuples) || !tuples.length) return;
 
-            // Convert compact tuples to stored line objects
-            // Tuple format: [ts, text, isTx, meta|null]
-            state.rawLines[paneId] = tuples.map(([ts, text, isTx, meta]) =>
-                buildStoredLine(paneId, ts, text, isTx, meta)
-            );
+            // Keep compact tuples in state; lines are parsed/analyzed lazily
+            // when the virtual renderer needs to display a raw index.
+            state.rawLines[paneId] = tuples;
+
 
             // Scroll to top on initial load (consistent with legacy behavior)
             state.atBottom[paneId] = false;

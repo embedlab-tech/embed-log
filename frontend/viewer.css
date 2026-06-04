@@ -558,6 +558,9 @@ button.active { background: var(--selection); border-color: var(--accent); color
     white-space: pre;
 }
 .log-area.wrap { white-space: pre-wrap; word-break: break-all; }
+/* Virtual log rendering — spacer sets scrollbar height, window holds visible lines */
+.log-spacer { position: relative; }
+.log-window { position: relative; will-change: transform; }
 
 .log-line {
     font-size: var(--font-size);

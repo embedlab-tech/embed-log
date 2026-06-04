@@ -366,7 +366,7 @@ def _pane_html(pane_id: str, label: str, *, show_tx: bool = False) -> str:
                 <input class="filter-input" data-pane="{pane_id}" placeholder="Filter (regex)…">
             </div>
             <div class="pane-body">
-                <div class="log-area" id="log-{pane_id}"></div>
+                <div class="log-area" id="log-{pane_id}"><div class="log-spacer"><div class="log-window"></div></div></div>
                 <button class="jump-btn" id="jump-{pane_id}">jump to bottom</button>
             </div>
             <div class="input-row"{tx_display}>
@@ -649,7 +649,7 @@ def generate_html(
 
         pane_data_tags = "\n".join(
             f'<script type="application/json" data-pane="{pane_id}">'
-            f"{json.dumps([_compact_entry(e) for e in entries], ensure_ascii=False)}"
+            f"{json.dumps([_compact_entry(e) for e in entries], ensure_ascii=False).replace('</', '<\\/')}"
             f"</script>"
             for pane_id, entries in log_data.items()
         )

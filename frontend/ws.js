@@ -30,6 +30,7 @@ function resetLayoutForNewSession() {
     state.rawLines = {};
     state.atBottom = {};
     state.highlighted = {};
+    state.highlightedIdx = {};
     state.selected = {};
     Object.keys(PANE_LABELS).forEach(key => delete PANE_LABELS[key]);
     resetPanePlugins();

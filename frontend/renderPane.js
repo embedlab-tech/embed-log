@@ -31,7 +31,7 @@ export function renderPaneShell(paneId, label, { showTx = false, paneKind = "" }
         '                <input class="filter-input" data-pane="' + paneId + '" placeholder="' + filterPlaceholder + '">',
         '            </div>',
         '            <div class="pane-body">',
-        '                <div class="log-area" id="log-' + paneId + '"></div>',
+'                <div class="log-area" id="log-' + paneId + '"><div class="log-spacer"><div class="log-window"></div></div></div>',
         '                <button class="jump-btn" id="jump-' + paneId + '">jump to bottom</button>',
         '            </div>',
         txRow,

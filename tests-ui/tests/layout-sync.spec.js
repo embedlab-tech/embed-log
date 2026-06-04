@@ -33,12 +33,12 @@ test.describe('layout and time synchronization', () => {
     await expect(page.locator('#tab-content-1 .splitter')).toHaveCount(0);
   });
 
-// Scenario: Clicking a line sync-highlights the nearest timestamp in the sibling pane
+// Scenario: Clicking a line sync-highlights the nearest timestamp in the sibling pane and survives rerenders/tab switches
 //   Given a line in SENSOR_A with a known tick
-//   When  the line is clicked
-//   Then  both SENSOR_A and SENSOR_B show a sync-highlight for the matching tick
+//   When  the line is clicked, panes rerender, and the user switches tabs
+//   Then  SENSOR_A, SENSOR_B, and the synced pane on DevB retain sync-highlight at the matching tick
 
-  test('clicking a line sync-highlights nearest timestamp in sibling pane', async ({ page }) => {
+  test('clicking a line keeps sync-highlight across rerenders and tabs', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
 
@@ -48,6 +48,32 @@ test.describe('layout and time synchronization', () => {
 
     await lineA.click();
 
+    await expect(page.locator('#log-SENSOR_A .log-line.sync-highlight')).toContainText(`tick=${tick}`);
+    await expect(page.locator('#log-SENSOR_B .log-line.sync-highlight')).toContainText(new RegExp(`tick=${tick}`));
+
+    await page.evaluate(() => {
+      const original = window.__embedLogSchedulePersist;
+      window.__testLogFlushesAfterSyncClick = 0;
+      window.__embedLogSchedulePersist = function (...args) {
+        window.__testLogFlushesAfterSyncClick += 1;
+        return original?.apply(this, args);
+      };
+    });
+    await expect.poll(() => page.evaluate(() => window.__testLogFlushesAfterSyncClick || 0)).toBeGreaterThan(0);
+
+    await expect(page.locator('#log-SENSOR_A .log-line.sync-highlight')).toContainText(`tick=${tick}`);
+    await expect(page.locator('#log-SENSOR_B .log-line.sync-highlight')).toContainText(new RegExp(`tick=${tick}`));
+
+    await page.locator('#btn-settings').click();
+    await page.locator('#btn-font-inc').click();
+
+    await expect(page.locator('#log-SENSOR_A .log-line.sync-highlight')).toContainText(`tick=${tick}`);
+    await expect(page.locator('#log-SENSOR_B .log-line.sync-highlight')).toContainText(new RegExp(`tick=${tick}`));
+
+    await page.getByRole('button', { name: 'DevB', exact: true }).click();
+    await expect(page.locator('#log-SENSOR_C .log-line.sync-highlight')).toContainText(new RegExp(`tick=${tick}`));
+
+    await page.getByRole('button', { name: 'DevA', exact: true }).click();
     await expect(page.locator('#log-SENSOR_A .log-line.sync-highlight')).toContainText(`tick=${tick}`);
     await expect(page.locator('#log-SENSOR_B .log-line.sync-highlight')).toContainText(new RegExp(`tick=${tick}`));
   });

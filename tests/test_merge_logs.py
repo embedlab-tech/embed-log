@@ -67,6 +67,21 @@ class MergeLogsParseTests(unittest.TestCase):
             self.assertIn("pluginRuntime", html)
             self.assertIn("hex-coap", html)
 
+    def test_generate_html_escapes_script_end_in_lazy_log_data(self):
+        with tempfile.TemporaryDirectory() as td:
+            log_path = Path(td) / "a.log"
+            log_path.write_text(
+                "[2026-04-22T10:11:12.123+02:00] payload </script><script>broken</script> ok\n",
+                encoding="utf-8",
+            )
+
+            html = generate_html(
+                [{"label": "UART", "panes": [("A", "READER", str(log_path))]}],
+            )
+
+            self.assertIn("<\\/script><script>broken<\\/script>", html)
+            self.assertNotIn("payload </script><script>broken</script> ok", html)
+
 
 if __name__ == "__main__":
     unittest.main()

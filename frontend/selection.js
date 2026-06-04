@@ -1,5 +1,5 @@
 import { state, TABS, PANES, paneLabel, unwrapPaneLabel } from './state.js';
-import { onLineClick, hidePluginOverlays } from './lines.js';
+import { onLineClick, hidePluginOverlays, ensureLineVisible, getLine } from './lines.js';
 import { exportHtmlSnapshot } from './export.js';
 import { can } from './profile.js';
 import { switchTab } from './tabs.js';
@@ -242,6 +242,8 @@ function _flatMarkerList() {
 }
 
 function _markerLineIdx(paneId) {
+    const idx = state.highlightedIdx[paneId];
+    if (Number.isFinite(idx)) return idx;
     const div = state.highlighted[paneId];
     if (div) return parseInt(div.dataset.idx, 10);
     const sel = state.selected[paneId];
@@ -367,11 +369,14 @@ export function applyMarkers() {
                 if (byLine[i] === undefined) byLine[i] = m.description;
             }
         });
-        Array.from(logEl.children).forEach((div, i) => {
-            const hasMarker = byLine[i] !== undefined;
+        const windowEl = logEl.querySelector(".log-window");
+        if (!windowEl) return;
+        Array.from(windowEl.children).forEach(div => {
+            const idx = parseInt(div.dataset.idx, 10);
+            const hasMarker = byLine[idx] !== undefined;
             div.classList.toggle("has-marker", hasMarker);
             if (hasMarker) {
-                div.dataset.markerTooltip = byLine[i];
+                div.dataset.markerTooltip = byLine[idx];
             } else {
                 delete div.dataset.markerTooltip;
             }
@@ -442,25 +447,26 @@ function _jumpMarker(m) {
     // Switch to the tab containing this pane
     const tabIdx = TABS.findIndex(t => t.panes.includes(paneId));
     if (tabIdx >= 0) switchTab(tabIdx);
+    ensureLineVisible(paneId, m.lineIdx, { align: "center" });
     const div = document.querySelector(`#log-${paneId} [data-idx="${m.lineIdx}"]`);
     if (!div) return;
     const logEl = document.getElementById("log-" + paneId);
     if (!logEl) return;
-    logEl.scrollTop = div.offsetTop - Math.floor(logEl.clientHeight / 3);
     state.atBottom[paneId] = false;
     onLineClick(paneId, m.numTs, div);
     _updateMarkerNavBtn();
 }
-
 function _applySelection(paneId) {
     const logEl = document.getElementById("log-" + paneId);
     const sel = state.selected[paneId];
-    Array.from(logEl.children).forEach((div, i) =>
-        div.classList.toggle("selected", sel.has(i))
-    );
+    const windowEl = logEl?.querySelector(".log-window");
+    if (!windowEl) return;
+    Array.from(windowEl.children).forEach(div => {
+        const idx = parseInt(div.dataset.idx, 10);
+        div.classList.toggle("selected", sel.has(idx));
+    });
     _syncSelectionActions(paneId);
 }
-
 function _selectIndexRange(paneId, startIdx, endIdx) {
     if (!Number.isFinite(startIdx) || !Number.isFinite(endIdx)) return;
     _clearOtherSelections(paneId);
@@ -497,6 +503,9 @@ function _decodeEntities(text) {
     return ta.value;
 }
 
+function _selectionLine(paneId, idx) {
+    return getLine(paneId, idx);
+}
 function _linePlain(line) {
     return _decodeEntities(_stripHtml(line?.html || "")).replace(/\s+/g, " ").trim();
 }
@@ -543,9 +552,8 @@ const RANGE_MARGIN_MS = 10;
 function _selectionRange(paneId) {
     const sel = state.selected[paneId];
     if (!sel?.size) return null;
-    const lines = state.rawLines[paneId] || [];
     const nums = Array.from(sel)
-        .map(i => lines[i]?.numTs)
+        .map(i => _selectionLine(paneId, i)?.numTs)
         .filter(n => Number.isFinite(n) && n >= 0);
     if (!nums.length) return null;
     const from = Math.min(...nums);
@@ -568,8 +576,8 @@ function _countRangeEntries(paneId) {
     if (!range) return 0;
     let count = 0;
     _rangeTargetPanes().forEach(id => {
-        (state.rawLines[id] || []).forEach(line => {
-            const n = line?.numTs;
+        (state.rawLines[id] || []).forEach((_, idx) => {
+            const n = _selectionLine(id, idx)?.numTs;
             if (Number.isFinite(n) && n >= range.from && n <= range.to) count++;
         });
     });
@@ -581,7 +589,8 @@ function _collectRangeEntries(paneId) {
     if (!range) return [];
     const entries = [];
     _rangeTargetPanes().forEach(id => {
-        (state.rawLines[id] || []).forEach((line, idx) => {
+        (state.rawLines[id] || []).forEach((_, idx) => {
+            const line = _selectionLine(id, idx);
             const n = line?.numTs;
             if (Number.isFinite(n) && n >= range.from && n <= range.to) {
                 entries.push({ paneId: id, idx, line });
@@ -604,10 +613,9 @@ function _rangeBoundsLabel(entries) {
 function _rangeBoundsLabelExact(paneId) {
     const sel = state.selected[paneId];
     if (!sel?.size) return "snippet";
-    const lines = state.rawLines[paneId] || [];
     const indices = Array.from(sel).sort((a, b) => a - b);
-    const first = lines[indices[0]]?.ts;
-    const last = lines[indices[indices.length - 1]]?.ts;
+    const first = _selectionLine(paneId, indices[0])?.ts;
+    const last = _selectionLine(paneId, indices[indices.length - 1])?.ts;
     if (!first || !last) return "snippet";
     return `${first}_to_${last}`;
 }
@@ -696,11 +704,13 @@ function _buildRangeLogData(entries) {
 }
 
 function _formatSelectionBlock(paneId, indices, useRendered = false) {
-    const lines = state.rawLines[paneId];
     const items = indices
-        .map(idx => lines[idx]
-            ? { idx, text: `${lines[idx].ts}  [${paneId}] ${(useRendered ? _lineRenderedPlain(lines[idx]) : _linePlain(lines[idx]))}` }
-            : null)
+        .map(idx => {
+            const line = _selectionLine(paneId, idx);
+            return line
+                ? { idx, text: `${line.ts}  [${paneId}] ${(useRendered ? _lineRenderedPlain(line) : _linePlain(line))}` }
+                : null;
+        })
         .filter(Boolean);
     return _applyMarkerAnnotations(paneId, items);
 }
@@ -853,11 +863,9 @@ function _exportHtml(paneId) {
         });
     } else {
         const indices = Array.from(sel).sort((a, b) => a - b);
-        const entries = indices.map(i => ({
-            paneId,
-            idx: i,
-            line: state.rawLines[paneId][i],
-        }));
+        const entries = indices
+            .map(i => ({ paneId, idx: i, line: _selectionLine(paneId, i) }))
+            .filter(e => e.line);
         const label = _rangeBoundsLabelExact(paneId);
         exportHtmlSnapshot({
             button: btn,
@@ -913,7 +921,7 @@ document.addEventListener("pointermove", e => {
 
         _clearOtherSelections(_drag.paneId);
 
-        const raw = state.rawLines[_drag.paneId][_drag.startIdx];
+        const raw = _selectionLine(_drag.paneId, _drag.startIdx);
         if (raw) onLineClick(_drag.paneId, raw.numTs, _drag.lineEl);
 
         try { _drag.lineEl.setPointerCapture(e.pointerId); } catch (_) {}
@@ -1001,12 +1009,14 @@ document.addEventListener("keydown", e => {
         const pane = PANES.find(id => state.selected[id].size > 0);
         if (pane) { _copyExact(pane); e.preventDefault(); return; }
         // No explicit selection — fall back to the sync-highlighted line.
-        const hlPane = PANES.find(id => state.highlighted[id]);
+        const hlPane = PANES.find(id => Number.isFinite(state.highlightedIdx[id]) || state.highlighted[id]);
         if (hlPane) {
             const div = state.highlighted[hlPane];
-            const idx = parseInt(div?.dataset.idx, 10);
+            const idx = Number.isFinite(state.highlightedIdx[hlPane])
+                ? state.highlightedIdx[hlPane]
+                : parseInt(div?.dataset.idx, 10);
             if (Number.isFinite(idx)) {
-                const text = _formatSelectionBlock(hlPane, [idx], true);
+                const text = _formatSelectionBlock(hlPane, [idx], !!div);
                 if (text) { _copyText(text); e.preventDefault(); return; }
             }
         }
