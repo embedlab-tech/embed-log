@@ -30,6 +30,22 @@ test.describe('embed-log deterministic demo smoke', () => {
     expect(errors).toEqual([]);
   });
 
+// Scenario: UI renders first log line within 1 second of page load
+//   Given the user navigates to the app
+//   When  the WebSocket connects and config is processed
+//   Then  at least one log-line is visible within 1 second
+  test('renders first log line within 1 second', async ({ page }) => {
+    await page.goto('/');
+    // Wait for WS connection first so we know the pipeline is open
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+
+    // Now measure: from this point, how long until the first log-line appears?
+    const deadline = Date.now() + 1_000;
+    await expect(page.locator('.log-line').first()).toBeVisible({ timeout: 1_000 });
+    const elapsed = Date.now() - (deadline - 1_000);
+    expect(elapsed).toBeLessThanOrEqual(1_000);
+  });
+
 // Scenario: Connects to backend WS and receives deterministic logs with correct pane labels
 //   Given the user navigates to the app
 //   When  the WebSocket connects

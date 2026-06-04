@@ -122,8 +122,8 @@ test.describe('HTML export replay', () => {
 
       await exported.locator('#btn-unwrap').click();
       await expect(exported.locator('#btn-unwrap')).toHaveClass(/active/);
-      await expect(exported.locator('#tab-bar .tab-btn')).toHaveText(['DEVICE_A-DevA', 'HOST-DevA', 'AUX-DevB', 'PYTEST-PYTEST', 'CBOR-cbor-tab', 'CoAP-CoAP', 'DUT-UART', 'DEBUG-UART']);
-      for (let i = 0; i < 8; i++) {
+      await expect(exported.locator('#tab-bar .tab-btn')).toHaveText(['DEVICE_A-DevA', 'HOST-DevA', 'AUX-DevB', 'PYTEST-PYTEST', 'CBOR-cbor-tab', 'CoAP-CoAP', 'DUT-UART', 'DEBUG-UART', 'Net-Network']);
+      for (let i = 0; i < 9; i++) {
         await exported.locator('#tab-bar .tab-btn').nth(i).click();
       }
 
