@@ -5,7 +5,7 @@ from pathlib import Path
 
 from .core.naming import slugify
 from .parsers import create_parser
-from .sources import LogSource, ParsedSource, RawUartSource, RawUdpSource, RawFileSource, UartSource, UdpSource, FileSource
+from .sources import LogSource, ParsedSource, RawUartSource, RawUdpSource, RawFileSource, UartSource, UdpSource, FileSource, NetworkCaptureSource, MockNetworkCaptureSource
 
 DEFAULT_WS_UI = str((Path(__file__).resolve().parents[1] / "frontend" / "index.html").resolve())
 
@@ -89,6 +89,21 @@ def build_source(source_config: dict) -> LogSource:
         raw_source = RawUdpSource(source_config["port"])
     elif source_type == "file":
         raw_source = RawFileSource(source_config["port"])
+    elif source_type == "network_capture":
+        backend = source_config.get("network_backend", "scapy")
+        if backend == "mock":
+            return MockNetworkCaptureSource(
+                interface=source_config.get("interface", "mock0"),
+                interval=source_config.get("mock_interval", 0.5),
+            )
+        return NetworkCaptureSource(
+            interface=source_config["interface"],
+            bpf_filter=source_config.get("bpf_filter", ""),
+            pcap_enabled=source_config.get("pcap_enabled", False),
+            pcap_path=source_config.get("pcap_path"),
+            include_preview=source_config.get("include_preview", True),
+            max_preview_bytes=source_config.get("max_preview_bytes", 128),
+        )
     else:
         raise ValueError(f"source {source_config.get('name', '?')!r}: unsupported type {source_type!r}")
 

@@ -603,6 +603,14 @@ export function _uiSetupPane(id) {
     if (input) {
         input.addEventListener("input", () => {
             const val = input.value.trim();
+            const panekind = window.__embedLogPaneKinds?.[id] || "";
+            if (panekind === "network_capture") {
+                // For network_capture, treat the filter as a BPF expression.
+                // Send it to the backend and clear client-side filter.
+                state.filters[id] = null;
+                window.wsSend?.({ cmd: "set_filter", id, filter: val });
+                return;
+            }
             if (!val) {
                 state.filters[id] = null;
                 input.classList.remove("invalid");

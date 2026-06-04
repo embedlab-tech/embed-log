@@ -225,6 +225,18 @@ function wsConnect() {
             return;
         }
 
+        if (msg.type === "filter_result") {
+            const input = document.querySelector(`.filter-input[data-pane="${msg.id}"]`);
+            if (input && msg.error) {
+                input.classList.add("invalid");
+                input.title = msg.error;
+            } else if (input) {
+                input.classList.remove("invalid");
+                input.title = "";
+            }
+            return;
+        }
+
         if (msg.type !== "rx" && msg.type !== "tx") return;
 
         const { type, data, timestamp, timestamp_iso, timestamp_num, source_id } = msg;

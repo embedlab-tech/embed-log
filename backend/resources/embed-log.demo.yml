@@ -83,6 +83,15 @@ sources:
     baudrate: 115200
     inject_port: 5007
 
+  # ── Network tab (mock capture — no Scapy needed) ──────────────────
+  - name: NET_CAPTURE
+    label: Net
+    type: network_capture
+    network_backend: mock
+    interface: mock0
+    mock_interval: 1.0
+    bpf_filter: ""
+
 
 
 tabs:
@@ -108,3 +117,6 @@ tabs:
 
   - label: UART
     panes: [UART_DUT, UART_DEBUG]
+
+  - label: Network
+    panes: [NET_CAPTURE]

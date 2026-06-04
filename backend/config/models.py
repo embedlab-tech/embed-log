@@ -12,10 +12,19 @@ class ParserConfig:
 @dataclass
 class SourceConfig:
     name: str
-    type: str  # "uart", "udp", or "file"
-    port: str | int  # str for uart, int for udp
+    type: str  # "uart", "udp", "file", or "network_capture"
+    port: str | int  # str for uart/file, int for udp
     parser: ParserConfig = field(default_factory=ParserConfig)
     baudrate: int | None = None
+    # network_capture fields
+    interface: str | None = None
+    bpf_filter: str = ""
+    pcap_enabled: bool = False
+    pcap_path: str | None = None
+    include_preview: bool = True
+    max_preview_bytes: int = 128
+    network_backend: str = "scapy"  # "scapy" or "mock"
+    mock_interval: float = 0.5     # seconds between events for mock backend
 
 
 @dataclass

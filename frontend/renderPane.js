@@ -10,9 +10,9 @@ export function _escHtml(str) {
         .replace(/"/g, "&quot;");
 }
 
-export function renderPaneShell(paneId, label, { showTx = false } = {}) {
+export function renderPaneShell(paneId, label, { showTx = false, paneKind = "" } = {}) {
     const safeLabel = _escHtml(label);
-    const txInputAttrs = ' placeholder="Serial TX — press Enter to send"' + (showTx ? '' : ' style="display:none"');
+    const filterPlaceholder = paneKind === "network_capture" ? "Filter (BPF)…" : "Filter (regex)…";
     const txRow = [
         '            <div class="input-row"' + (showTx ? '' : ' style="display:none"') + '>',
         '                <input class="serial-input" id="input-' + paneId + '" autocomplete="off"' + (showTx ? ' placeholder="Serial TX — press Enter to send"' : '') + '>',
@@ -28,7 +28,7 @@ export function renderPaneShell(paneId, label, { showTx = false } = {}) {
         '                <button class="pane-download-btn" title="Download raw .log for this pane">Download</button>',
         '            </div>',
         '            <div class="filter-bar">',
-        '                <input class="filter-input" data-pane="' + paneId + '" placeholder="Filter (regex)…">',
+        '                <input class="filter-input" data-pane="' + paneId + '" placeholder="' + filterPlaceholder + '">',
         '            </div>',
         '            <div class="pane-body">',
         '                <div class="log-area" id="log-' + paneId + '"></div>',

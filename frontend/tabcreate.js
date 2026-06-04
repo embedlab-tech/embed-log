@@ -44,7 +44,7 @@ export function createTabWithPanes(label, paneIds, { switchTo = true, paneLabels
         if (i > 0) parts.push('<div class="splitter"></div>');
         const panekind = window.__embedLogPaneKinds?.[paneId];
         const showTx = panekind === "uart";
-        parts.push(renderPaneShell(paneId, paneLabel(paneId), { showTx }));
+        parts.push(renderPaneShell(paneId, paneLabel(paneId), { showTx, paneKind: panekind || "" }));
     });
     tc.innerHTML = parts.join("\n");
     container.appendChild(tc);
@@ -87,8 +87,9 @@ export function rebuildLayout(previousUnwrap = state.unwrap) {
             tc.className = "tab-content";
             tc.id = "u-tab-content-" + idx;
             tc.style.display = idx === activePaneBefore ? "flex" : "none";
-            const showTxU = window.__embedLogPaneKinds?.[paneId] === "uart";
-            tc.innerHTML = renderPaneShell(paneId, unwrapPaneLabel(paneId), { showTx: showTxU });
+            const panekindU = window.__embedLogPaneKinds?.[paneId] || "";
+            const showTxU = panekindU === "uart";
+            tc.innerHTML = renderPaneShell(paneId, unwrapPaneLabel(paneId), { showTx: showTxU, paneKind: panekindU });
 
             container.appendChild(tc);
         });
@@ -107,8 +108,9 @@ export function rebuildLayout(previousUnwrap = state.unwrap) {
             const parts = [];
             tab.panes.forEach((paneId, pi) => {
                 if (pi > 0) parts.push('<div class="splitter"></div>');
-                const showTxG = window.__embedLogPaneKinds?.[paneId] === "uart";
-                parts.push(renderPaneShell(paneId, paneLabel(paneId), { showTx: showTxG }));
+                const panekindG = window.__embedLogPaneKinds?.[paneId] || "";
+                const showTxG = panekindG === "uart";
+                parts.push(renderPaneShell(paneId, paneLabel(paneId), { showTx: showTxG, paneKind: panekindG }));
 
             });
             tc.innerHTML = parts.join("\n");

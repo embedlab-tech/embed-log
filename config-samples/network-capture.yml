@@ -1,0 +1,48 @@
+# Network capture config — live packet capture with BPF filtering.
+#
+# Two modes:
+#   1. Real capture (requires Scapy + permissions)
+#   2. Mock capture (runs anywhere, deterministic fake traffic)
+#
+# Requirements for real capture:
+#   Linux:   libpcap + CAP_NET_RAW or sudo
+#   macOS:   built-in libpcap (needs sudo)
+#   Windows: Npcap (https://npcap.com/)
+
+version: 1
+
+server:
+  host: 127.0.0.1
+  ws_port: 8080
+  app_name: embed-log
+  open_browser: true
+  timestamp_mode: absolute
+
+logs:
+  dir: logs/
+
+sources:
+  # ── Mock mode (runs without Scapy/sudo) ────────────────────────────
+  - name: device_network
+    type: network_capture
+    network_backend: mock       # ← "mock" = no Scapy needed
+    interface: mock0
+    mock_interval: 1.0          # one fake packet per second
+    bpf_filter: ""
+
+  # ── Real capture mode (uncomment and comment out the mock block above)
+  # - name: device_network
+  #   type: network_capture
+  #   network_backend: scapy    # ← "scapy" = real libpcap capture
+  #   interface: lo0
+  #   bpf_filter: "udp port 5683"
+  #   pcap:
+  #     enabled: true
+  #     path: "captures/device_network.pcap"
+  #   payload:
+  #     include_preview: true
+  #     max_preview_bytes: 128
+
+tabs:
+  - label: Network
+    panes: [device_network]
