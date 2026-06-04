@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import os
 import sys
 from pathlib import Path
 
-from ..util import format_session_row, iter_sessions
+from ..util import format_session_row, is_session_dir, iter_sessions
 
 
 def _run_sessions_list(log_dir: Path, args) -> int:
@@ -97,7 +98,15 @@ def _run_sessions_list(log_dir: Path, args) -> int:
         return 0
 
     if not sessions:
-        print(f"No sessions found in {log_dir}")
+        hint = ""
+        if not is_session_dir(log_dir):
+            try:
+                rel = os.path.relpath(log_dir)
+            except ValueError:
+                rel = str(log_dir)
+            resolved_hint = f"  (resolved: {log_dir})" if rel.startswith("..") else ""
+            hint = f"\nHint: pass --dir PATH, or run embed-log run --log-dir PATH{resolved_hint}"
+        print(f"No sessions found in {log_dir}{hint}")
         return 0
 
     print(

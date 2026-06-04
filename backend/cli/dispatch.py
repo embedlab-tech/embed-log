@@ -6,9 +6,10 @@ import sys
 from pathlib import Path
 
 from .parser import build_parser
+from .config_resolution import ENV_CONFIG_PATH, resolve_config_path
 
 from .sessions import _run_sessions
-from .diagnostics import _display_version_line, _run_ports, _run_version
+from .diagnostics import _display_version_line, _run_doctor, _run_ports, _run_version
 from .run import _run_merge, _run_run
 from .demo import _run_demo
 from .sample_config import _run_sample_config
@@ -21,8 +22,15 @@ def main(argv: list[str] | None = None) -> int:
 
     # ── No arguments → show guided message ──
     if not argv:
-        cfg_path = Path("embed-log.yml")
-        if cfg_path.exists():
+        env_cfg = resolve_config_path(None)
+        local_cfg = Path("embed-log.yml")
+        if env_cfg is not None and env_cfg.is_file():
+            print(f"Config from {ENV_CONFIG_PATH}: {env_cfg}")
+            print("")
+            print("  embed-log run")
+            print("")
+            print("  embed-log --help             all options")
+        elif local_cfg.exists():
             print("Config found: embed-log.yml")
             print("")
             print("  embed-log run --config embed-log.yml")
@@ -36,6 +44,7 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 "  embed-log run --config embed-log.yml    (if you already have a config)"
             )
+            print(f"  export {ENV_CONFIG_PATH}=embed-log.yml   (then just: embed-log run)")
             print("")
             print("")
             print("  embed-log --help                        all options")
@@ -84,6 +93,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_parse(argv[1:])  # keep old parse signature
         case "version":
             return _run_version(args)
+        case "doctor":
+            return _run_doctor(args)
         case "ports":
             return _run_ports(args)
         case "sessions":
