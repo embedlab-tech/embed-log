@@ -78,7 +78,7 @@ test.describe('HTML export replay', () => {
     const htmlPath = await saveDownload(download, testInfo);
 
     const html = fs.readFileSync(htmlPath, 'utf-8');
-    expect(html).toContain('var _logData =');
+    expect(html).toContain('hydratePanesFromJson');
     expect(html).toContain('kind=filter-alpha');
 
     const exported = await openHtmlFile(browser, htmlPath);

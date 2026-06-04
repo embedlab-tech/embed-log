@@ -8,6 +8,17 @@ import { analyzeLinePlugins, getLinePluginTooltip, getConfiguredPanePlugins, get
 // ---------------------------------------------------------------------------
 // Line rendering
 // ---------------------------------------------------------------------------
+// Windowed rendering state
+// ---------------------------------------------------------------------------
+
+const WINDOW_SIZE = 250;
+// paneId → Map<index, Element> — tracks which line indices are currently in the DOM
+const _renderedIndices = new Map();
+// paneId → number — current window center (targetIdx of last renderPaneWindow call)
+const _windowTarget = new Map();
+// paneId → boolean — rAF debounce guard for scroll-triggered window shifts
+const _pendingRaf = new Map();
+// ---------------------------------------------------------------------------
 
 
 // parseAnsi HTML-escapes < and >, so <wrn> becomes &lt;wrn&gt; in stored HTML.
@@ -318,17 +329,31 @@ export function appendLineBatch(entries) {
 
 export function rerenderPane(paneId) {
     const logEl = document.getElementById("log-" + paneId);
-    const lines = state.rawLines[paneId];
-    const divs  = logEl.children;
-    const rx    = state.filters[paneId];
+    const rx = state.filters[paneId];
 
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const div  = divs[i];
-        if (!div) continue;
-        applyLineDom(div, line, paneId, i, rx);
+    // Check if windowed rendering is active for this pane
+    if (_windowTarget.has(paneId)) {
+        const rendered = _renderedIndices.get(paneId);
+        if (rendered) {
+            rendered.forEach((div, idx) => {
+                const line = state.rawLines[paneId]?.[idx];
+                if (line) applyLineDom(div, line, paneId, idx, rx);
+            });
+        }
+    } else {
+        // Legacy path: iterate all DOM children (live mode)
+        const lines = state.rawLines[paneId];
+        if (lines && logEl) {
+            const divs = logEl.children;
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const div = divs[i];
+                if (!div) continue;
+                applyLineDom(div, line, paneId, i, rx);
+            }
+        }
     }
-    if (state.atBottom[paneId]) logEl.scrollTop = logEl.scrollHeight;
+    if (state.atBottom[paneId] && logEl) logEl.scrollTop = logEl.scrollHeight;
 }
 export function reanalyzePanePlugins(paneId) {
     const lines = state.rawLines[paneId] || [];
@@ -378,16 +403,151 @@ export function updateJumpBtn(paneId) {
 export function scrollPaneToBottom(paneId) {
     const logEl = document.getElementById("log-" + paneId);
     if (!logEl) return;
+    const lines = state.rawLines[paneId];
+    if (lines && lines.length) {
+        renderPaneWindow(paneId, { targetIdx: lines.length - 1 });
+    }
     logEl.scrollTop = logEl.scrollHeight;
     state.atBottom[paneId] = true;
     updateJumpBtn(paneId);
 }
 
+// ---------------------------------------------------------------------------
+// Windowed rendering
+// ---------------------------------------------------------------------------
+
+// Ensure a single line index has a DOM element in the pane.
+// Creates the element if missing, inserted at correct DOM position.
+// Returns the element (existing or newly created).
+function _ensureLineInDom(paneId, idx) {
+    let rendered = _renderedIndices.get(paneId);
+    if (!rendered) {
+        rendered = new Map();
+        _renderedIndices.set(paneId, rendered);
+    }
+    const existing = rendered.get(idx);
+    if (existing) return existing;
+
+    const lines = state.rawLines[paneId];
+    if (!lines || idx < 0 || idx >= lines.length) return null;
+
+    const line = lines[idx];
+    const logEl = document.getElementById("log-" + paneId);
+    if (!logEl) return null;
+
+    const div = document.createElement("div");
+    div.dataset.ts = line.ts;
+    div.dataset.idx = idx;
+
+    const rx = state.filters[paneId];
+    applyLineDom(div, line, paneId, idx, rx);
+
+    // Insert at correct DOM position (maintain sorted order by data-idx)
+    let inserted = false;
+    for (const child of logEl.children) {
+        const childIdx = parseInt(child.dataset.idx, 10);
+        if (!isNaN(childIdx) && childIdx > idx) {
+            logEl.insertBefore(div, child);
+            inserted = true;
+            break;
+        }
+    }
+    if (!inserted) logEl.appendChild(div);
+
+    rendered.set(idx, div);
+    return div;
+}
+
+// Bulk-ensure a range of line indices have DOM elements.
+function _ensureRange(paneId, start, end) {
+    for (let i = start; i <= end; i++) {
+        _ensureLineInDom(paneId, i);
+    }
+}
+
+// Remove DOM elements for indices outside [start, end].
+function _pruneOutside(paneId, start, end) {
+    const rendered = _renderedIndices.get(paneId);
+    if (!rendered) return;
+    const toRemove = [];
+    for (const [idx, div] of rendered) {
+        if (idx < start || idx > end) {
+            toRemove.push(idx);
+            if (div.parentNode) div.parentNode.removeChild(div);
+        }
+    }
+    for (const idx of toRemove) {
+        rendered.delete(idx);
+    }
+}
+
+// Render only the visible window of lines around targetIdx.
+// Keeps ~WINDOW_SIZE lines above and below targetIdx in the DOM.
+// Preserves scrollTop relative to the target line when possible.
+export function renderPaneWindow(paneId, { targetIdx }) {
+    const lines = state.rawLines[paneId];
+    if (!lines || !lines.length) return;
+
+    const start = Math.max(0, targetIdx - WINDOW_SIZE);
+    const end = Math.min(lines.length - 1, targetIdx + WINDOW_SIZE);
+
+    const logEl = document.getElementById("log-" + paneId);
+    if (!logEl) return;
+
+    const prevTarget = _windowTarget.get(paneId);
+    const targetLine = _ensureLineInDom(paneId, targetIdx);
+
+    // Remember scroll offset relative to target for smooth transitions
+    let targetOffset = -1;
+    if (prevTarget !== undefined && prevTarget !== targetIdx) {
+        const prevTargetLine = _renderedIndices.get(paneId)?.get(prevTarget);
+        if (prevTargetLine) {
+            targetOffset = prevTargetLine.offsetTop - logEl.scrollTop;
+        }
+    }
+
+    _ensureRange(paneId, start, end);
+    _pruneOutside(paneId, start, end);
+
+    _windowTarget.set(paneId, targetIdx);
+
+    // Restore scroll position anchored to the target line
+    if (targetOffset >= 0 && targetLine) {
+        logEl.scrollTop = targetLine.offsetTop - targetOffset;
+    }
+}
 export function _linesSetupPane(id) {
     const logEl = document.getElementById("log-" + id);
     logEl.addEventListener("scroll", () => {
         state.atBottom[id] = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
         updateJumpBtn(id);
+
+        // Window boundary detection: when scrolling near the edge of the
+        // rendered window, shift the window to the current viewport center.
+        const rendered = _renderedIndices.get(id);
+        if (!rendered || rendered.size === 0) return;
+
+        const viewMid = logEl.scrollTop + logEl.clientHeight / 2;
+        let midIdx = null;
+        for (const [idx, div] of rendered) {
+            const top = div.offsetTop;
+            const bottom = top + div.offsetHeight;
+            if (top <= viewMid && bottom >= viewMid) {
+                midIdx = idx;
+                break;
+            }
+        }
+        if (midIdx === null) return;
+
+        const currentTarget = _windowTarget.get(id);
+        if (currentTarget !== undefined && Math.abs(midIdx - currentTarget) > Math.floor(WINDOW_SIZE * 0.6)) {
+            if (_pendingRaf.has(id)) return;
+            _pendingRaf.set(id, true);
+            requestAnimationFrame(() => {
+                _pendingRaf.delete(id);
+                renderPaneWindow(id, { targetIdx: midIdx });
+            });
+        }
     });
     // Event delegation — replaces per-line listeners for better performance
     logEl.addEventListener("click", e => {
@@ -511,6 +671,8 @@ export function clearPane(paneId) {
     state.rawLines[paneId] = [];
     state.selected[paneId] = new Set();
     document.getElementById("log-" + paneId).innerHTML = "";
+    _renderedIndices.delete(paneId);
+    _windowTarget.delete(paneId);
     highlightLine(paneId, null);
     hidePluginOverlays();
     state.atBottom[paneId] = true;
@@ -534,16 +696,14 @@ export function repopulatePaneLogs(paneId) {
     const logEl = document.getElementById("log-" + paneId);
     if (!logEl) return;
     logEl.innerHTML = "";
-    const lines = state.rawLines[paneId] || [];
-    const rx = state.filters[paneId];
-    lines.forEach((line, idx) => {
-        const div = document.createElement("div");
-        div.dataset.ts  = line.ts;
-        div.dataset.idx = idx;
-        applyLineDom(div, line, paneId, idx, rx);
+    _renderedIndices.delete(paneId);
+    _windowTarget.delete(paneId);
 
-        logEl.appendChild(div);
-    });
+    const lines = state.rawLines[paneId] || [];
+    if (lines.length) {
+        const targetIdx = state.atBottom[paneId] ? lines.length - 1 : 0;
+        renderPaneWindow(paneId, { targetIdx });
+    }
     if (state.atBottom[paneId]) logEl.scrollTop = logEl.scrollHeight;
     updateJumpBtn(paneId);
 }
@@ -573,10 +733,12 @@ export function scrollPaneToTs(paneId, numTs) {
     }
     if (lo > 0 && Math.abs(lines[lo - 1].numTs - numTs) < Math.abs(lines[lo].numTs - numTs)) lo--;
 
-    const logEl = document.getElementById("log-" + paneId);
-    const div   = logEl.children[lo];
+    // Ensure the target index is in the DOM window
+    renderPaneWindow(paneId, { targetIdx: lo });
+    const div = _ensureLineInDom(paneId, lo);
     if (!div) return;
 
+    const logEl = document.getElementById("log-" + paneId);
     logEl.scrollTop = Math.max(0, div.offsetTop - Math.floor(logEl.clientHeight / 3));
     state.atBottom[paneId] = false;
     updateJumpBtn(paneId);
@@ -657,10 +819,12 @@ export function syncPanes(fromId, numTs, clickedDiv) {
             lo--;
         }
 
-        const logEl     = document.getElementById("log-" + toId);
-        const targetDiv = logEl.children[lo];
+        // Ensure the target index is in the DOM window
+        renderPaneWindow(toId, { targetIdx: lo });
+        const targetDiv = _ensureLineInDom(toId, lo);
         if (!targetDiv) return;
 
+        const logEl = document.getElementById("log-" + toId);
         logEl.scrollTop = targetDiv.offsetTop - clickedRelTop;
         state.atBottom[toId] = false;
         updateJumpBtn(toId);

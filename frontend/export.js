@@ -7,6 +7,7 @@ import {
 const STATIC_EXPORT_PROFILE =
     typeof STATIC_PROFILE !== 'undefined' ? STATIC_PROFILE : window.__embedLogProfile;
 
+import { buildStoredLine, renderPaneWindow, updateJumpBtn } from './lines.js';
 import { state, TABS, PANES, PANE_LABELS } from './state.js';
 
 export async function exportHtmlSnapshot(options = {}) {
@@ -118,10 +119,10 @@ export async function exportHtmlSnapshot(options = {}) {
 
 
         // ------------------------------------------------------------------
-        // Serialize all pane data with both timestamp representations when known.
+        // Serialize all pane data as compact JSON tuples (same format as
+        // merge_logs.py's lazy mode) for fast hydration with windowed rendering.
         // rawText may be absent on lines loaded before this session; fall back
-        // to decoding the stored HTML via a temporary element (strips tags,
-        // decodes entities) so the export always has something to render.
+        // to decoding the stored HTML via a temporary element.
         // ------------------------------------------------------------------
         const _tmpEl = document.createElement("div");
         function _rawOf(line) {
@@ -130,29 +131,44 @@ export async function exportHtmlSnapshot(options = {}) {
             return _tmpEl.textContent;
         }
 
-        const logData = options.logData || {};
-        if (!options.logData) {
-            PANES.forEach(id => {
-                logData[id] = state.rawLines[id].map(line => ({
-                    ts: line.ts,
-                    text: _rawOf(line),
-                    isTx: line.isTx,
-                    absTs: line.absTs ?? null,
-                    absNum: Number.isFinite(line.absNum) ? line.absNum : null,
-                    relTs: line.relTs ?? null,
-                    relNum: Number.isFinite(line.relNum) ? line.relNum : null,
-                }));
-            });
+        // Compact tuple: [ts, text, isTx, meta|null]
+        function _compactEntry(line) {
+            const meta = {};
+            if (line.absTs != null) meta.absTs = line.absTs;
+            if (Number.isFinite(line.absNum)) meta.absNum = line.absNum;
+            if (line.relTs != null) meta.relTs = line.relTs;
+            if (Number.isFinite(line.relNum)) meta.relNum = line.relNum;
+            return [line.ts, _rawOf(line), line.isTx, Object.keys(meta).length ? meta : null];
         }
 
+        const logData = options.logData || {};
+        let paneDataTags = "";
+        if (!options.logData) {
+            PANES.forEach(id => {
+                const lines = state.rawLines[id] || [];
+                if (!lines.length) return;
+                paneDataTags += `<script type="application/json" data-pane="${id}">${_safeJson(lines.map(_compactEntry))}</script>\n`;
+            });
+        } else {
+            // Custom logData passed in (e.g. from snippet export)
+            Object.entries(options.logData).forEach(([paneId, entries]) => {
+                if (!entries || !entries.length) return;
+                paneDataTags += `<script type="application/json" data-pane="${paneId}">${_safeJson(entries.map(e => {
+                    const meta = {};
+                    if (e.absTs != null) meta.absTs = e.absTs;
+                    if (Number.isFinite(e.absNum)) meta.absNum = e.absNum;
+                    if (e.relTs != null) meta.relTs = e.relTs;
+                    if (Number.isFinite(e.relNum)) meta.relNum = e.relNum;
+                    return [e.ts, e.text, e.isTx, Object.keys(meta).length ? meta : null];
+                }))}</script>\n`;
+            });
+        }
         // ------------------------------------------------------------------
         // Build pane + tab HTML (mirrors merge_logs.py's _pane_html /
         // _tab_content_html, with TX input row hidden in static mode)
         // ------------------------------------------------------------------
         function _paneHtml(paneId) {
-            // Read the display name from the live DOM, fall back to paneId.
             const raw = document.querySelector(`#pane-${paneId} .pane-name`)?.textContent.trim() || paneId;
-            // TX row is hidden in the static export output.
             return renderPaneShell(paneId, raw, { showTx: false });
         }
 
@@ -164,25 +180,19 @@ export async function exportHtmlSnapshot(options = {}) {
         }).join("\n");
 
         // ------------------------------------------------------------------
-        // Bootstrap: runs last, populates all panes with log data
+        // Bootstrap: lazy hydration via compact JSON + windowed rendering
         // ------------------------------------------------------------------
         const activeTabIdx = Number.isInteger(options.activeTab) ? options.activeTab : state.activeTab;
         const bootstrapJs = `(function () {
     "use strict";
     window.wsSend = function () {};
-    var _logData = ${_safeJson(logData)};
-    var _markers = ${_safeJson(Object.values(state.markers).flat() || [])};
-    function _loadPane(paneId) {
-        var entries = _logData[paneId];
-        if (!entries || !entries.length) return;
-        state.atBottom[paneId] = false;
-        entries.forEach(function (e) { appendLine(paneId, e.ts, e.text, e.isTx, e); });
-        document.getElementById("log-" + paneId).scrollTop = 0;
-        state.atBottom[paneId] = false;
-        updateJumpBtn(paneId);
+    if (typeof hydratePanesFromJson === "function") {
+        hydratePanesFromJson();
     }
-    PANES.forEach(_loadPane);
-    // Load markers
+    if (typeof window.__embedLogUpdateTimestampModeUi === "function") {
+        window.__embedLogUpdateTimestampModeUi();
+    }
+    var _markers = ${_safeJson(Object.values(state.markers).flat() || [])};
     if (_markers.length) {
         state.markers = {};
         _markers.forEach(function (m) {
@@ -193,11 +203,9 @@ export async function exportHtmlSnapshot(options = {}) {
         if (typeof applyMarkers === "function") applyMarkers();
         if (typeof window.__embedLogOnMarkers === "function") window.__embedLogOnMarkers();
     }
-    // Restore the tab that was active when the export was taken
     if (${activeTabIdx} !== 0) switchTab(${activeTabIdx});
-    // Jump to marker from URL hash (e.g. #marker-2)
     (function () {
-        var m = window.location.hash.match(/^#marker-(\d+)$/);
+        var m = window.location.hash.match(/^#marker-(\\d+)$/);
         if (!m) return;
         var idx = parseInt(m[1], 10);
         if (!Number.isFinite(idx) || idx < 1) return;
@@ -217,14 +225,13 @@ export async function exportHtmlSnapshot(options = {}) {
         logEl.scrollTop = div.offsetTop - Math.floor(logEl.clientHeight / 3);
         state.atBottom[target.paneId] = false;
         if (typeof onLineClick === 'function') onLineClick(target.paneId, target.numTs, div);
-        // Find the tab containing this pane and switch to it
         var tabIdx = -1;
         for (var t = 0; t < TABS.length; t++) {
             if (TABS[t].panes.indexOf(target.paneId) >= 0) { tabIdx = t; break; }
         }
         if (tabIdx >= 0 && typeof switchTab === 'function') switchTab(tabIdx);
     })();
-})();`
+})();`;
 
         // ------------------------------------------------------------------
         // Assemble final HTML
@@ -245,8 +252,6 @@ export async function exportHtmlSnapshot(options = {}) {
 
                 ${renderToolbar(STATIC_EXPORT_PROFILE)}
 
-
-
 <div id="download-raw-menu">
     <div class="download-raw-head">Download raw logs</div>
     <div class="download-raw-body">
@@ -262,6 +267,7 @@ ${tabContentsHtml}
 </div>
 
 <script>${configJs}</script>
+${paneDataTags}
 <script>${profileJs}</script>
 <script>${renderPaneJs}</script>
 <script>${renderToolbarJs}</script>
@@ -440,3 +446,48 @@ document.addEventListener("click", e => {
 document.addEventListener("keydown", e => {
     if (e.key === "Escape") _closeRawMenu();
 });
+
+// ---------------------------------------------------------------------------
+// Lazy hydration — reads compact JSON from <script data-pane> tags,
+// populates state.rawLines[] without creating DOM elements, then
+// renders only the visible window of lines for instant load with 100k+ lines.
+// ---------------------------------------------------------------------------
+export function hydratePanesFromJson() {
+    const scripts = document.querySelectorAll('script[type="application/json"][data-pane]');
+    if (!scripts.length) return;
+
+    scripts.forEach(script => {
+        const paneId = script.dataset.pane;
+        if (!paneId) return;
+        try {
+            const tuples = JSON.parse(script.textContent);
+            if (!Array.isArray(tuples) || !tuples.length) return;
+
+            // Convert compact tuples to stored line objects
+            // Tuple format: [ts, text, isTx, meta|null]
+            state.rawLines[paneId] = tuples.map(([ts, text, isTx, meta]) =>
+                buildStoredLine(paneId, ts, text, isTx, meta)
+            );
+
+            // Scroll to top on initial load (consistent with legacy behavior)
+            state.atBottom[paneId] = false;
+        } catch (e) {
+            console.error("Failed to parse JSON data for pane", paneId, e);
+        }
+    });
+
+    // Render the visible window for each hydrated pane
+    PANES.forEach(id => {
+        const lines = state.rawLines[id];
+        if (lines && lines.length) {
+            renderPaneWindow(id, { targetIdx: 0 });
+            const logEl = document.getElementById("log-" + id);
+            if (logEl) logEl.scrollTop = 0;
+            updateJumpBtn(id);
+        }
+    });
+
+    window.__embedLogUpdateTimestampModeUi?.();
+}
+
+window.__embedLogHydratePanes = hydratePanesFromJson;

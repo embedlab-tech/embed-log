@@ -481,6 +481,7 @@ def generate_html(
     frontend_plugins: dict[str, dict] | None = None,
     pane_plugins: dict[str, list[dict]] | None = None,
     plugin_scripts: dict[str, str] | None = None,
+    lazy: bool = True,
 ) -> str:
     """
     tab_specs: [
@@ -488,6 +489,10 @@ def generate_html(
         ...
     ]
     Returns a complete self-contained HTML string.
+
+    If lazy=True (default), line data is embedded as compact JSON arrays
+    and hydrated via windowed rendering for fast load even with 100k+ lines.
+    Set lazy=False or use --legacy-embed for the old full-DOM embedding.
     """
     frontend_plugins = frontend_plugins or {}
     pane_plugins = pane_plugins or {}
@@ -629,7 +634,59 @@ def generate_html(
     )
 
     # Bootstrap script: runs after all other scripts to inject log data
-    bootstrap_js = _esc_script_text(f"""\
+    if lazy:
+        # ── Lazy / windowed mode ──
+        # Embed compact JSON arrays in <script data-pane> tags.
+        # The frontend hydrates them into state.rawLines[] without creating
+        # DOM elements, then calls renderPaneWindow for initial visible window.
+        def _compact_entry(entry: dict) -> list:
+            meta = {}
+            for k in ("absTs", "absNum", "relTs", "relNum"):
+                v = entry.get(k)
+                if v is not None:
+                    meta[k] = v
+            return [entry["ts"], entry["text"], entry["isTx"], meta or None]
+
+        pane_data_tags = "\n".join(
+            f'<script type="application/json" data-pane="{pane_id}">'
+            f"{json.dumps([_compact_entry(e) for e in entries], ensure_ascii=False)}"
+            f"</script>"
+            for pane_id, entries in log_data.items()
+        )
+
+        bootstrap_js = _esc_script_text(f"""\
+(function () {{
+    "use strict";
+
+    // No WebSocket in static mode — satisfy the reference in ui.js
+    window.wsSend = function () {{}};
+
+    if (typeof hydratePanesFromJson === "function") {{
+        hydratePanesFromJson();
+    }}
+
+    if (typeof window.__embedLogUpdateTimestampModeUi === "function") {{
+        window.__embedLogUpdateTimestampModeUi();
+    }}
+
+    var _markers = {json.dumps(markers_list, ensure_ascii=False)};
+    if (_markers.length) {{
+        state.markers = {{}};
+        _markers.forEach(function (m) {{
+            if (!m.paneId) return;
+            state.markers[m.paneId] = state.markers[m.paneId] || [];
+            state.markers[m.paneId].push(m);
+        }});
+        if (typeof applyMarkers === "function") applyMarkers();
+        if (typeof window.__embedLogOnMarkers === "function") window.__embedLogOnMarkers();
+    }}
+}})();""")
+
+        # Inject pane data tags between config scripts and the main body
+        pane_data_block = "\n" + pane_data_tags
+    else:
+        # ── Legacy mode: embed all lines as DOM elements via appendLine ──
+        bootstrap_js = _esc_script_text(f"""\
 (function () {{
     "use strict";
 
@@ -664,6 +721,8 @@ def generate_html(
         if (typeof window.__embedLogOnMarkers === "function") window.__embedLogOnMarkers();
     }}
 }})();""")
+        config_with_data = config_js
+        pane_data_block = ""
 
     return f"""<!DOCTYPE html>
 <html lang="en" data-theme="whitesand">
@@ -695,6 +754,7 @@ def generate_html(
 </div>
 
 <script>{config_js}</script>
+{pane_data_block}
 <script>{profile_js}</script>
 <script>{render_pane_js}</script>
 <script>{render_toolbar_js}</script>
@@ -831,6 +891,19 @@ def main():
         default=None,
         help="JSON object mapping frontend plugin names to plain JS source",
     )
+    parser.add_argument(
+        "--no-lazy",
+        dest="lazy",
+        action="store_false",
+        help="Disable lazy/windowed rendering (embed all lines as DOM elements, slow for large files)",
+    )
+    parser.add_argument(
+        "--legacy-embed",
+        dest="lazy",
+        action="store_false",
+        help="Alias for --no-lazy (legacy full-DOM embedding)",
+    )
+    parser.set_defaults(lazy=True)
     args = parser.parse_args()
 
     def _json_arg(name: str) -> dict:
@@ -872,6 +945,7 @@ def main():
         frontend_plugins=_json_arg("frontend_plugins_json"),
         pane_plugins=_json_arg("pane_plugins_json"),
         plugin_scripts=_json_arg("plugin_scripts_json"),
+        lazy=args.lazy,
     )
 
     with open(args.output, "w", encoding="utf-8") as fh:

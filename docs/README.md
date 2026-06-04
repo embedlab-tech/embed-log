@@ -18,6 +18,10 @@ Use the files below as the canonical entry points.
 - `BACKEND_BACKLOG.md` — backend/prioritized engineering backlog
 - `FRONTEND_BACKLOG.md` — frontend/UI/testing backlog
 
+## Design & planning
+
+- `improve_ui_performance.md` — JSON export + lazy hydration plan (large-session performance)
+
 ## Supporting reference docs
 
 - `DIRECTORY_GUIDE.md` — quick repository map

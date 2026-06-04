@@ -177,7 +177,7 @@ test.describe('embed-log deterministic demo smoke', () => {
     const html = fs.readFileSync(downloadedPath, 'utf-8');
     expect(html).toContain('<div id="toolbar">');
     expect(html).toContain('<div id="tab-bar"></div>');
-    expect(html).toContain('var _logData =');
+    expect(html).toContain('hydratePanesFromJson');
     expect(html).toContain('kind=prefix-cleanup');
     expect(html).toMatch(/\[SENSOR_A\]/);
     expect(html).not.toContain('<h1>embed-log snippet</h1>');
