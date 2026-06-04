@@ -17,6 +17,8 @@ const OVERSCAN = 60;
 const _virtualPanes = new Map();
 // paneId → boolean — rAF debounce guard for scroll-triggered window shifts
 const _pendingRaf = new Map();
+// paneId → running UTF-8 byte total for stats display
+const _paneBytes = new Map();
 // ---------------------------------------------------------------------------
 
 
@@ -651,6 +653,79 @@ function _renderVirtualWindow(paneId, { targetIdx, forceAtBottom } = {}) {
     updateJumpBtn(paneId);
 }
 
+// ---------------------------------------------------------------------------
+// Stats (line count + UTF-8 byte count per pane; toolbar total)
+// ---------------------------------------------------------------------------
+
+const _textEncoder = new TextEncoder();
+
+function _byteSize(text) {
+    if (!text) return 0;
+    return _textEncoder.encode(text).length;
+}
+
+function _formatInt(n) {
+    return n.toLocaleString("en-US");
+}
+
+function _formatBytes(bytes) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} kB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function _formatStatsText(lines, bytes) {
+    return `${_formatInt(lines)} lines · ${_formatBytes(bytes)}`;
+}
+
+function _updatePaneStats(paneId) {
+    const el = document.querySelector(`.pane-stats[data-pane-stats="${paneId}"]`);
+    if (!el) return;
+    const lines = state.rawLines[paneId] || [];
+    el.textContent = lines.length
+        ? _formatStatsText(lines.length, _paneBytes.get(paneId) || 0)
+        : "";
+}
+
+function _updateToolbarStats() {
+    const el = document.getElementById("toolbar-stats");
+    if (!el) return;
+    let totalLines = 0;
+    let totalBytes = 0;
+    for (const paneId of PANES) {
+        const lines = state.rawLines[paneId];
+        if (!lines) continue;
+        totalLines += lines.length;
+        totalBytes += _paneBytes.get(paneId) || 0;
+    }
+    el.textContent = totalLines
+        ? `· ${_formatStatsText(totalLines, totalBytes)}`
+        : "";
+}
+
+function _recordPaneBytes(paneId, newLines) {
+    if (!newLines || newLines.length === 0) return;
+    let delta = 0;
+    for (const line of newLines) {
+        // state.rawLines entries are [ts, rawText, isTx, meta]
+        delta += _byteSize(line && line[1]);
+    }
+    _paneBytes.set(paneId, (_paneBytes.get(paneId) || 0) + delta);
+}
+
+function _resetPaneStats(paneId) {
+    _paneBytes.set(paneId, 0);
+    _updatePaneStats(paneId);
+}
+
+export function refreshStatsUi() {
+    // Public hook so callers outside this module can re-render (e.g. after
+    // importing lines from a file or after pane layout rebuilds).
+    for (const paneId of PANES) _updatePaneStats(paneId);
+    _updateToolbarStats();
+}
+
+
 export function renderPaneWindow(paneId, { targetIdx }) {
     _renderVirtualWindow(paneId, { targetIdx, forceAtBottom: false });
 }
@@ -660,12 +735,20 @@ export function appendLine(paneId, ts, rawText, isTx, meta = null) {
 
 export function appendLineBatch(entries) {
     const touched = new Set();
+    const newByPane = new Map();
 
     entries.forEach(({ paneId, ts, rawText, isTx, meta = null }) => {
         if (!state.rawLines[paneId]) return;
         state.rawLines[paneId].push([ts, rawText, isTx, meta]);
+        if (!newByPane.has(paneId)) newByPane.set(paneId, []);
+        newByPane.get(paneId).push([ts, rawText, isTx, meta]);
         touched.add(paneId);
     });
+
+    for (const [paneId, batch] of newByPane) {
+        _recordPaneBytes(paneId, batch);
+        _updatePaneStats(paneId);
+    }
 
     touched.forEach(paneId => {
         const lines = state.rawLines[paneId];
@@ -685,6 +768,7 @@ export function appendLineBatch(entries) {
     });
 
     if (touched.size > 0) {
+        _updateToolbarStats();
         window.__embedLogSchedulePersist?.();
         window.__embedLogUpdateTimestampModeUi?.();
         window.applyMarkers?.();
@@ -956,6 +1040,7 @@ export function clearPane(paneId) {
     }
     _virtualPanes.delete(paneId);
     highlightLine(paneId, null);
+    _resetPaneStats(paneId);
     hidePluginOverlays();
     state.atBottom[paneId] = true;
     updateJumpBtn(paneId);
@@ -968,6 +1053,7 @@ export function clearPane(paneId) {
 document.getElementById("btn-clear")?.addEventListener("click", () => {
     window.wsSend?.({ cmd: "clear_logs", scope: "all" });
     PANES.forEach(clearPane);
+    _updateToolbarStats();
 });
 
 
@@ -988,6 +1074,8 @@ export function repopulatePaneLogs(paneId) {
     }
     if (state.atBottom[paneId] && logEl) logEl.scrollTop = logEl.scrollHeight;
     updateJumpBtn(paneId);
+    _updatePaneStats(paneId);
+    _updateToolbarStats();
 }
 // ---------------------------------------------------------------------------
 // Sync

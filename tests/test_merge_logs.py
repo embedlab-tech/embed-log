@@ -83,5 +83,40 @@ class MergeLogsParseTests(unittest.TestCase):
             self.assertNotIn("payload </script><script>broken</script> ok", html)
 
 
+class MergeLogsStatsTests(unittest.TestCase):
+    def test_static_html_contains_pane_and_toolbar_stats(self):
+        with tempfile.TemporaryDirectory() as td:
+            log_path = Path(td) / "a.log"
+            log_path.write_text(
+                "[2026-04-22T10:11:12.123+02:00] boot ok\n"
+                "[2026-04-22T10:11:13.456+02:00] second line\n"
+                "[2026-04-22T10:11:14.000+02:00] third line\n",
+                encoding="utf-8",
+            )
+
+            html = generate_html(
+                [{"label": "UART", "panes": [("A", "READER", str(log_path))]}],
+            )
+
+            self.assertIn('class="pane-stats"', html)
+            self.assertIn('data-pane-stats="A"', html)
+            self.assertIn('class="toolbar-stats"', html)
+            self.assertIn('id="toolbar-stats"', html)
+            self.assertIn("3 lines", html)
+            self.assertIn(" B", html)  # small payload renders as bytes
+
+    def test_static_html_omits_pane_stats_for_empty_pane(self):
+        with tempfile.TemporaryDirectory() as td:
+            log_path = Path(td) / "a.log"
+            log_path.write_text("", encoding="utf-8")
+
+            html = generate_html(
+                [{"label": "UART", "panes": [("A", "READER", str(log_path))]}],
+            )
+
+            self.assertIn('data-pane-stats="A"', html)
+            self.assertIn('id="toolbar-stats"', html)
+
+
 if __name__ == "__main__":
     unittest.main()

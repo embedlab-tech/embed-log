@@ -36,9 +36,9 @@ export function renderToolbar(profile) {
         parts.push(`    <button id="${item.id}" title="${_escAttr(item.title)}">${item.label}</button>`);
     });
 
+    parts.push('    <div id="toolbar-stats" class="toolbar-stats"></div>');
     if (caps.wsStatus) {
         parts.push('    <div id="ws-status" class="disconnected">WS: disconnected</div>');
-
     }
     parts.push('    <div id="marker-nav" class="marker-nav" style="display:none">');
     parts.push('        <button id="marker-nav-prev" title="Previous marker">◀</button>');

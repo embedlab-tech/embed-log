@@ -23,6 +23,7 @@ export function renderPaneShell(paneId, label, { showTx = false, paneKind = "" }
         '        <div class="pane" id="pane-' + paneId + '">',
         '            <div class="pane-header">',
         '                <span class="pane-name">' + safeLabel + '</span>',
+        '                <span class="pane-stats" data-pane-stats="' + paneId + '"></span>',
         '',
         '                <button class="pane-wrap-btn" title="Toggle word wrap in this pane">Wrap</button>',
         '                <button class="pane-download-btn" title="Download raw .log for this pane">Download</button>',

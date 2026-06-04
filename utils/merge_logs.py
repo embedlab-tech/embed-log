@@ -350,14 +350,17 @@ def _esc_script_text(src: str) -> str:
 # HTML generation
 # ---------------------------------------------------------------------------
 
-def _pane_html(pane_id: str, label: str, *, show_tx: bool = False) -> str:
+def _pane_html(pane_id: str, label: str, *, show_tx: bool = False, stats_text: str = "") -> str:
     """Render one pane div. TX input row is hidden by default (static mode)."""
     safe_label = _html.escape(label)
+    safe_stats = _html.escape(stats_text) if stats_text else ""
     tx_display = '' if show_tx else ' style="display:none"'
+    stats_span = f'<span class="pane-stats" data-pane-stats="{_html.escape(pane_id)}">{safe_stats}</span>' if stats_text else f'<span class="pane-stats" data-pane-stats="{_html.escape(pane_id)}"></span>'
     return f"""\
         <div class="pane" id="pane-{pane_id}">
             <div class="pane-header">
                 <span class="pane-name">{safe_label}</span>
+                {stats_span}
 
                 <button class="pane-wrap-btn" title="Toggle word wrap in this pane">Wrap</button>
 
@@ -377,13 +380,14 @@ def _pane_html(pane_id: str, label: str, *, show_tx: bool = False) -> str:
 
 
 
-def _tab_content_html(tab_idx: int, tab_panes: list) -> str:
+def _tab_content_html(tab_idx: int, tab_panes: list, pane_stats: dict | None = None) -> str:
     """Render a tab-content div containing 1 or 2 panes (+ splitter if 2)."""
     parts = []
     for i, (pane_id, label) in enumerate(tab_panes):
         if i > 0:
             parts.append('        <div class="splitter"></div>')
-        parts.append(_pane_html(pane_id, label, show_tx=False))
+        stats = (pane_stats or {}).get(pane_id, "")
+        parts.append(_pane_html(pane_id, label, show_tx=False, stats_text=stats))
     inner = "\n".join(parts)
     return (
         f'    <div class="tab-content" id="tab-content-{tab_idx}">\n'
@@ -392,8 +396,9 @@ def _tab_content_html(tab_idx: int, tab_panes: list) -> str:
     )
 
 
-def _render_toolbar() -> str:
+def _render_toolbar(total_stats_text: str = "") -> str:
     """Render toolbar HTML for static/exported mode."""
+    safe_total = _html.escape(total_stats_text) if total_stats_text else ""
     parts = ['<div id="toolbar">']
     parts.append('    <span class="app-name">embed-log</span>')
 
@@ -413,6 +418,11 @@ def _render_toolbar() -> str:
     # Theme toggle
     parts.append('    <div class="sep"></div>')
     parts.append('    <button id="btn-theme" title="Toggle light / dark theme">&#x1F319;</button>')
+
+    if safe_total:
+        parts.append(f'    <div id="toolbar-stats" class="toolbar-stats">· {safe_total}</div>')
+    else:
+        parts.append('    <div id="toolbar-stats" class="toolbar-stats"></div>')
 
     # Marker navigation (hidden by default, shown when markers are present)
     parts.append('    <div id="marker-nav" class="marker-nav" style="display:none">')
@@ -593,8 +603,39 @@ def generate_html(
     )
 
     # Build container HTML
+    # ── Per-pane / total stats ──
+    # Bytes use UTF-8 length of the raw text — matches what the live UI
+    # computes so live mode and static replay show the same numbers.
+    def _fmt_int(n: int) -> str:
+        return f"{n:,}"
+
+    def _fmt_bytes(n: int) -> str:
+        if n < 1024:
+            return f"{n} B"
+        if n < 1024 * 1024:
+            return f"{n / 1024:.1f} kB" if n < 10 * 1024 else f"{n / 1024:.0f} kB"
+        return f"{n / (1024 * 1024):.1f} MB"
+
+    def _stats_text(line_count: int, byte_count: int) -> str:
+        if line_count <= 0:
+            return ""
+        return f"{_fmt_int(line_count)} lines · {_fmt_bytes(byte_count)}"
+
+    pane_stats: dict[str, str] = {}
+    total_lines = 0
+    total_bytes = 0
+    for tab in tab_specs:
+        for pane_id, _pane_label, _file_path in tab["panes"]:
+            entries = log_data.get(pane_id, [])
+            byte_sum = sum(len((row.get("text") or "").encode("utf-8")) for row in entries)
+            pane_stats[pane_id] = _stats_text(len(entries), byte_sum)
+            total_lines += len(entries)
+            total_bytes += byte_sum
+    total_stats = _stats_text(total_lines, total_bytes)
+
+    # Build container HTML
     tab_contents = "\n".join(
-        _tab_content_html(i, [(p[0], p[1]) for p in tab["panes"]])
+        _tab_content_html(i, [(p[0], p[1]) for p in tab["panes"]], pane_stats)
         for i, tab in enumerate(tab_specs)
     )
 
@@ -735,7 +776,7 @@ def generate_html(
 </head>
 <body>
 
-{_render_toolbar()}
+{_render_toolbar(total_stats)}
 
 <div id="download-raw-menu">
     <div class="download-raw-head">Download raw logs</div>
