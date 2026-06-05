@@ -149,6 +149,18 @@ def read_manifest(session_dir: Path) -> dict | None:
     except (json.JSONDecodeError, OSError):
         return None
 
+
+def is_session_dir(path: Path) -> bool:
+    """Return True if ``path`` looks like an embed-log session directory.
+
+    The contract is deliberately strict: a directory is a session if and
+    only if it carries a ``manifest.json``. The top-level log root needs
+    no metadata, and unrelated child directories (e.g. ``__pycache__``,
+    editor swap files) are filtered out by the manifest check.
+    """
+    return (path / "manifest.json").is_file()
+
+
 # ---------------------------------------------------------------------------
 # Session stats and iteration
 # ---------------------------------------------------------------------------
@@ -226,18 +238,22 @@ def session_stats(session_dir: Path, manifest: dict | None) -> SessionStats:
 
 
 def iter_sessions(log_dir: Path) -> list[dict]:
-    """Iterate session directories, enriching each manifest with computed stats."""
+    """Iterate session directories, enriching each manifest with computed stats.
+
+    Child entries that do not look like session directories (no
+    ``manifest.json``) are skipped, so the log root can contain
+    housekeeping files and unrelated folders without polluting listings.
+    """
     if not log_dir.is_dir():
         return []
     sessions = []
     for child in sorted(log_dir.iterdir()):
         if not child.is_dir():
             continue
-        manifest = read_manifest(child)
-        if manifest:
-            manifest["_dir"] = str(child)
-        else:
-            manifest = {"_dir": str(child)}
+        if not is_session_dir(child):
+            continue
+        manifest = read_manifest(child) or {}
+        manifest["_dir"] = str(child)
         stats = session_stats(child, manifest)
         manifest["_alias"] = stats.alias
         manifest["_lines"] = stats.lines

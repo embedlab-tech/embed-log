@@ -1,9 +1,25 @@
 import { expect, test } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { collectPageErrors, openHtmlFile, saveDownload, waitForLineContaining, waitForRangePair, waitForSourceTestLine } from './helpers.js';
 
 async function openMore(page, paneId) {
   await page.locator(`#more-toggle-${paneId}`).click();
+}
+
+function generateMergedHtml(htmlPath, logPath) {
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+  const script = [
+    'import sys',
+    'from pathlib import Path',
+    'from utils.merge_logs import generate_html',
+    'html_path, log_path = sys.argv[1], sys.argv[2]',
+    'html = generate_html([{"label": "Large", "panes": [("A", "READER", log_path)]}])',
+    'Path(html_path).write_text(html, encoding="utf-8")',
+  ].join('\n');
+  execFileSync('python3', ['-c', script, htmlPath, logPath], { cwd: repoRoot });
 }
 
 // Feature: HTML export replay — export of static HTML snapshots and offline replay of log UI
@@ -78,7 +94,7 @@ test.describe('HTML export replay', () => {
     const htmlPath = await saveDownload(download, testInfo);
 
     const html = fs.readFileSync(htmlPath, 'utf-8');
-    expect(html).toContain('var _logData =');
+    expect(html).toContain('hydratePanesFromJson');
     expect(html).toContain('kind=filter-alpha');
 
     const exported = await openHtmlFile(browser, htmlPath);
@@ -89,6 +105,62 @@ test.describe('HTML export replay', () => {
       await expect(exported.locator('#log-SENSOR_A')).toContainText('kind=filter-alpha');
       await exported.getByRole('button', { name: 'DevB', exact: true }).click();
       await expect(exported.locator('#pane-SENSOR_C')).toBeVisible();
+    } finally {
+      await exported.close();
+    }
+  });
+
+// Scenario: Large generated static export keeps a bounded rendered DOM while preserving real scroll/filter indices
+//   Given a 3000-line lazy exported HTML file with a rare match near the end
+//   When  the replay is opened, scrolled, filtered, and the filtered line is clicked
+//   Then  the DOM remains bounded, bottom/middle scrolling maps to real raw indices, and clearing filter restores context
+  test('large static export virtualizes scroll range and filter projection', async ({ browser }, testInfo) => {
+    const logPath = testInfo.outputPath('large-virtual.log');
+    const htmlPath = testInfo.outputPath('large-virtual.html');
+    const lines = [];
+    for (let i = 0; i < 3000; i++) {
+      const rare = i === 2900 ? ' RARE_MATCH' : '';
+      lines.push(`[2026-04-22T10:11:${String(i % 60).padStart(2, '0')}.000+00:00] tick=${String(i).padStart(4, '0')}${rare}`);
+    }
+    fs.writeFileSync(logPath, lines.join('\n') + '\n', 'utf-8');
+    generateMergedHtml(htmlPath, logPath);
+
+    const exported = await openHtmlFile(browser, htmlPath);
+    const replayErrors = collectPageErrors(exported);
+    try {
+      const log = exported.locator('#log-A');
+      await expect(log.locator('.log-line').first()).toContainText('tick=0000');
+
+      const renderedCount = async () => log.locator('.log-line').count();
+      await expect.poll(renderedCount).toBeLessThan(250);
+
+      await log.evaluate(el => { el.scrollTop = el.scrollHeight; });
+      await expect.poll(async () => {
+        return log.locator('.log-line').evaluateAll(nodes =>
+          Math.max(...nodes.map(n => parseInt(n.dataset.idx, 10)).filter(Number.isFinite))
+        );
+      }).toBe(2999);
+      await expect.poll(renderedCount).toBeLessThan(250);
+
+      await log.evaluate(el => { el.scrollTop = el.scrollHeight / 2; });
+      await expect.poll(async () => {
+        const indices = await log.locator('.log-line').evaluateAll(nodes =>
+          nodes.map(n => parseInt(n.dataset.idx, 10)).filter(Number.isFinite)
+        );
+        return Math.min(...indices) <= 1500 && Math.max(...indices) >= 1500;
+      }).toBe(true);
+
+      await exported.locator('.filter-input[data-pane="A"]').fill('RARE_MATCH');
+      await expect(log.locator('.log-line', { hasText: 'RARE_MATCH' })).toBeVisible();
+      await expect(log.locator('[data-idx="2900"]')).toContainText('RARE_MATCH');
+      await expect.poll(renderedCount).toBeLessThan(250);
+
+      await log.locator('[data-idx="2900"]').click();
+      await expect(exported.locator('.filter-input[data-pane="A"]')).toHaveValue('');
+      await expect(log.locator('[data-idx="2900"]')).toBeVisible();
+      const geometry = await log.evaluate(el => ({ scrollHeight: el.scrollHeight, clientHeight: el.clientHeight }));
+      expect(geometry.scrollHeight).toBeGreaterThan(geometry.clientHeight);
+      expect(replayErrors).toEqual([]);
     } finally {
       await exported.close();
     }
@@ -169,10 +241,14 @@ test('repeated Export captures newer log content that arrived after first export
   const dataMatch1 = html1.match(/TEST src=SENSOR_A/g);
   const count1 = dataMatch1 ? dataMatch1.length : 0;
 
-  // Wait until the live UI has definitely received additional SENSOR_A lines
-  const liveTestLines = page.locator('#log-SENSOR_A .log-line', { hasText: 'TEST src=SENSOR_A' });
-  const liveCount1 = await liveTestLines.count();
-  await expect.poll(async () => liveTestLines.count()).toBeGreaterThan(liveCount1);
+  // Wait until the live UI has definitely received additional SENSOR_A lines.
+  // The pane is virtualized, so the rendered DOM count stays bounded; use the
+  // largest rendered raw index as the live-tail signal instead.
+  const liveMaxIdx = async () => page.locator('#log-SENSOR_A .log-line').evaluateAll(nodes =>
+    Math.max(...nodes.map(n => parseInt(n.dataset.idx, 10)).filter(Number.isFinite))
+  );
+  const maxIdx1 = await liveMaxIdx();
+  await expect.poll(liveMaxIdx).toBeGreaterThan(maxIdx1);
 
   // Second export — should contain all lines from the first PLUS new ones
   const dl2 = page.waitForEvent('download');

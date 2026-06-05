@@ -69,7 +69,7 @@ function _enrichExistingTimestampVariants() {
     PANES.forEach(paneId => {
         const lines = state.rawLines[paneId] || [];
         lines.forEach(line => {
-            if (!line) return;
+            if (!line || Array.isArray(line)) return;
             if (!line.absTs && Number.isFinite(line.relNum)) {
                 line.absNum = state.firstLogAtMs + line.relNum;
                 line.absTs = _formatAbsoluteTimestampFromMs(line.absNum);
@@ -102,6 +102,7 @@ export const state = {
     markerNavIdx: -1,      // index into flat marker list for navigation
     atBottom:    {},
     highlighted: {},
+    highlightedIdx: {},
     selected:    {},
     selectionScope:  'exact', // 'exact', 'context', or 'context-selected'
     contextPanes:    {},       // paneId → bool; only used when selectionScope === 'context-selected'
@@ -216,5 +217,6 @@ PANES.forEach(id => {
 
     state.wrap[id]        = false;
     state.highlighted[id] = null;
+    state.highlightedIdx[id] = null;
     state.selected[id]    = new Set();
 });

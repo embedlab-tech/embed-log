@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import os
 import logging
 import sys
 from pathlib import Path
 
 from ..app import DEFAULT_WS_UI, build_source, parse_source, run_app
+from .config_resolution import ENV_CONFIG_PATH, resolve_config_path
 from ..config import AppConfig, ConfigError, load_config
 from ..frontend_plugins import resolve_frontend_plugin
 from ..sources import LogSource
@@ -41,10 +43,28 @@ def _run_merge(args: argparse.Namespace) -> int:
 
 
 def _run_run(args: argparse.Namespace) -> int:
+    # Resolve config: explicit --config > EMBED_LOG_CONFIG_YML_PATH > none.
+    # The env var is treated as deliberate intent: when set but pointing at
+    # a missing or unreadable file, surface a clear error rather than
+    # silently falling back to inline defaults.
+    config_path = resolve_config_path(args.config)
+    if config_path is not None and not config_path.is_file():
+        if args.config:
+            source = "--config"
+            shown = args.config
+        else:
+            source = ENV_CONFIG_PATH
+            shown = os.environ.get(ENV_CONFIG_PATH, "")
+        print(
+            f"config error: {source} points to {shown!r} but the file is missing or unreadable.",
+            file=sys.stderr,
+        )
+        return 1
+
     cfg = AppConfig()
-    if args.config:
+    if config_path is not None:
         try:
-            cfg = load_config(args.config)
+            cfg = load_config(str(config_path))
         except ConfigError as exc:
             print(f"config error: {exc}", file=sys.stderr)
             return 1
@@ -52,7 +72,7 @@ def _run_run(args: argparse.Namespace) -> int:
     source_specs = args.sources if args.sources else cfg.sources
     inject_specs = args.injects if args.injects else cfg.injects
     forward_specs = args.forwards if args.forwards else cfg.forwards
-    source_labels = cfg.source_labels if (args.config and not args.sources) else {}
+    source_labels = cfg.source_labels if (config_path is not None and not args.sources) else {}
 
     baudrate = args.baudrate if args.baudrate is not None else cfg.baudrate
     logs_root = Path(args.log_dir if args.log_dir is not None else cfg.logs.dir)
@@ -83,7 +103,7 @@ def _run_run(args: argparse.Namespace) -> int:
     default_dark_theme = (
         args.default_dark_theme if args.default_dark_theme is not None else cfg.server.default_dark_theme
     )
-    queue_maxsize = cfg.server.queue_size if args.config else 20000
+    queue_maxsize = cfg.server.queue_size if config_path is not None else 20000
 
     logging.basicConfig(
         level=logging.INFO if verbosity in {"events", "full"} else logging.WARNING,
@@ -93,7 +113,7 @@ def _run_run(args: argparse.Namespace) -> int:
 
     if not source_specs:
         print(
-            "no sources configured. Use embed-log sample-config, --source ..., or --config FILE.",
+            f"no sources configured. Use --config FILE, {ENV_CONFIG_PATH}, embed-log sample-config, or --source ...",
             file=sys.stderr,
         )
         return 1
@@ -234,8 +254,8 @@ def _run_run(args: argparse.Namespace) -> int:
     # Load per-source TX command suggestions (embed-log.commands.yml)
     pane_commands: dict[str, list[str]] = {}
     commands_candidates = []
-    if args.config:
-        cf = Path(args.config)
+    if config_path is not None:
+        cf = config_path
         commands_candidates.append(str(cf.parent / f"{cf.stem}.commands.yml"))
     commands_candidates.append("embed-log.commands.yml")
     for cmdfile in commands_candidates:
@@ -267,7 +287,7 @@ def _run_run(args: argparse.Namespace) -> int:
         verbose=full_verbose,
         ws_port=ws_port,
         ws_ui=ws_ui,
-        config_path=args.config,
+        config_path=str(config_path) if config_path is not None else None,
         job_id=job_id,
         open_browser=open_browser,
         app_name=app_name,

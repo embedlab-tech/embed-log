@@ -177,7 +177,7 @@ test.describe('embed-log deterministic demo smoke', () => {
     const html = fs.readFileSync(downloadedPath, 'utf-8');
     expect(html).toContain('<div id="toolbar">');
     expect(html).toContain('<div id="tab-bar"></div>');
-    expect(html).toContain('var _logData =');
+    expect(html).toContain('hydratePanesFromJson');
     expect(html).toContain('kind=prefix-cleanup');
     expect(html).toMatch(/\[SENSOR_A\]/);
     expect(html).not.toContain('<h1>embed-log snippet</h1>');
@@ -257,9 +257,10 @@ test('runtime settings panel exposes working font-size controls', async ({ page 
     // Pick a log line index to mark
     const markerLineIdx = await page.evaluate(() => {
       const logEl = document.getElementById('log-SENSOR_A');
-      if (!logEl || !logEl.children.length) return -1;
-      const idx = Math.min(2, logEl.children.length - 1);
-      return parseInt(logEl.children[idx].dataset.idx, 10);
+      const windowEl = logEl?.querySelector('.log-window');
+      if (!windowEl || !windowEl.children.length) return -1;
+      const idx = Math.min(2, windowEl.children.length - 1);
+      return parseInt(windowEl.children[idx].dataset.idx, 10);
     });
     expect(markerLineIdx).toBeGreaterThanOrEqual(0);
 

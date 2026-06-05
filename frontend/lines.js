@@ -8,6 +8,18 @@ import { analyzeLinePlugins, getLinePluginTooltip, getConfiguredPanePlugins, get
 // ---------------------------------------------------------------------------
 // Line rendering
 // ---------------------------------------------------------------------------
+// Windowed rendering state
+// ---------------------------------------------------------------------------
+
+const OVERSCAN = 60;
+
+// paneId → virtual render controller for spacer/window geometry and raw-index DOM cache
+const _virtualPanes = new Map();
+// paneId → boolean — rAF debounce guard for scroll-triggered window shifts
+const _pendingRaf = new Map();
+// paneId → running UTF-8 byte total for stats display
+const _paneBytes = new Map();
+// ---------------------------------------------------------------------------
 
 
 // parseAnsi HTML-escapes < and >, so <wrn> becomes &lt;wrn&gt; in stored HTML.
@@ -261,6 +273,20 @@ export function applyLineDom(div, line, paneId, idx, filterRx) {
     } else {
         delete div.dataset.pluginTooltip;
     }
+
+    const highlightedIdx = state.highlightedIdx[paneId];
+    div.classList.toggle("sync-highlight", highlightedIdx === idx);
+    if (highlightedIdx === idx) {
+        state.highlighted[paneId] = div;
+    }
+
+    const markerDescription = _markerDescription(paneId, idx);
+    div.classList.toggle("has-marker", markerDescription !== null);
+    if (markerDescription !== null) {
+        div.dataset.markerTooltip = markerDescription;
+    } else {
+        delete div.dataset.markerTooltip;
+    }
     if (!matchesFilter(line, filterRx)) {
         div.style.display = "none";
         div.innerHTML = "";
@@ -270,46 +296,479 @@ export function applyLineDom(div, line, paneId, idx, filterRx) {
     div.innerHTML = buildLineHtml(line, state.showTs, filterRx);
 }
 
+
+// ── Virtual pane helpers ───────────────────────────────────────────
+
+function _getVirtual(paneId) {
+    let vp = _virtualPanes.get(paneId);
+    if (vp) return vp;
+    const logEl = document.getElementById("log-" + paneId);
+    if (!logEl) return null;
+
+    let spacerEl = logEl.querySelector(".log-spacer");
+    let windowEl = logEl.querySelector(".log-window");
+
+    if (!spacerEl) {
+        spacerEl = document.createElement("div");
+        spacerEl.className = "log-spacer";
+        if (windowEl) {
+            logEl.insertBefore(spacerEl, windowEl);
+            spacerEl.appendChild(windowEl);
+        } else {
+            logEl.appendChild(spacerEl);
+        }
+    }
+
+    if (!windowEl) {
+        windowEl = document.createElement("div");
+        windowEl.className = "log-window";
+        spacerEl.appendChild(windowEl);
+    } else if (windowEl.parentElement !== spacerEl) {
+        spacerEl.appendChild(windowEl);
+    }
+
+    vp = {
+        spacerEl,
+        windowEl,
+        rendered: new Map(),
+        firstRendered: -1,
+        lastRendered: -1,
+        rowHeight: 0,
+        visibleIndices: null,
+        projectionFilter: undefined,
+        projectionSourceLen: -1,
+    };
+    _virtualPanes.set(paneId, vp);
+    return vp;
+}
+
+function _measureRowHeight(paneId) {
+    const vp = _getVirtual(paneId);
+    if (!vp) return 20;
+    if (vp.rowHeight > 0) return vp.rowHeight;
+    for (const el of vp.rendered.values()) {
+        if (el.offsetHeight > 0) {
+            vp.rowHeight = el.offsetHeight;
+            return vp.rowHeight;
+        }
+    }
+    const lines = state.rawLines[paneId];
+    if (lines && lines.length > 0) {
+        const entry = lines[0];
+        const line = _isRawTuple(entry) ? getLine(paneId, 0) : entry;
+        if (line) {
+            const div = document.createElement("div");
+            div.className = "log-line";
+            div.style.position = "absolute";
+            div.style.visibility = "hidden";
+            div.innerHTML = buildLineHtml(line, state.showTs, null);
+            vp.windowEl.appendChild(div);
+            vp.rowHeight = div.offsetHeight || 20;
+            vp.windowEl.removeChild(div);
+            return vp.rowHeight;
+        }
+    }
+    vp.rowHeight = 20;
+    return 20;
+}
+
+function _isRawTuple(entry) {
+    return Array.isArray(entry);
+}
+
+export function getLine(paneId, idx) {
+    const lines = state.rawLines[paneId];
+    if (!lines || idx < 0 || idx >= lines.length) return null;
+    const entry = lines[idx];
+    if (!_isRawTuple(entry)) return entry;
+    const [ts, rawText, isTx, meta] = entry;
+    const line = buildStoredLine(paneId, ts, rawText, isTx, meta);
+    lines[idx] = line;
+    return line;
+}
+
+function _getNumTs(entry, paneId = null, idx = -1) {
+    if (_isRawTuple(entry)) {
+        const meta = entry[3];
+        if (meta && typeof meta === "object") {
+            if (Number.isFinite(meta.numTs)) return meta.numTs;
+            if (state.timestampMode === "relative" && Number.isFinite(meta.relNum)) return meta.relNum;
+            if (state.timestampMode === "absolute" && Number.isFinite(meta.absNum)) return meta.absNum;
+            if (Number.isFinite(meta.relNum)) return meta.relNum;
+            if (Number.isFinite(meta.absNum)) return meta.absNum;
+        }
+        if (Number.isFinite(meta)) return meta;
+        if (paneId !== null) {
+            const line = getLine(paneId, idx);
+            return line ? line.numTs : NaN;
+        }
+        return NaN;
+    }
+    return entry.numTs;
+}
+
+function _getVisibleIndices(paneId, vp) {
+    const lines = state.rawLines[paneId] || [];
+    const rx = state.filters[paneId] || null;
+    if (!rx) {
+        vp.visibleIndices = null;
+        vp.projectionFilter = null;
+        vp.projectionSourceLen = lines.length;
+        return null;
+    }
+    if (vp.projectionFilter === rx && vp.projectionSourceLen === lines.length && Array.isArray(vp.visibleIndices)) {
+        return vp.visibleIndices;
+    }
+    const indices = [];
+    for (let rawIndex = 0; rawIndex < lines.length; rawIndex++) {
+        const line = getLine(paneId, rawIndex);
+        if (line && matchesFilter(line, rx)) indices.push(rawIndex);
+    }
+    vp.visibleIndices = indices;
+    vp.projectionFilter = rx;
+    vp.projectionSourceLen = lines.length;
+    return indices;
+}
+
+function _visibleCount(paneId, vp) {
+    const lines = state.rawLines[paneId] || [];
+    const visible = _getVisibleIndices(paneId, vp);
+    return visible ? visible.length : lines.length;
+}
+
+function _rawIndexAt(paneId, vp, ordinal) {
+    const visible = _getVisibleIndices(paneId, vp);
+    return visible ? visible[ordinal] : ordinal;
+}
+
+function _ordinalForRawIndex(paneId, vp, rawIndex) {
+    const visible = _getVisibleIndices(paneId, vp);
+    if (!visible) return rawIndex;
+    let lo = 0, hi = visible.length;
+    while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (visible[mid] < rawIndex) lo = mid + 1;
+        else hi = mid;
+    }
+    return Math.max(0, Math.min(Math.max(0, visible.length - 1), lo));
+}
+
+function _markerDescription(paneId, idx) {
+    const markers = state.markers[paneId];
+    if (!markers) return null;
+    for (const m of markers) {
+        const end = m.endIdx ?? m.lineIdx;
+        if (idx >= m.lineIdx && idx <= end) return m.description || "";
+    }
+    return null;
+}
+
+function _ensureLine(paneId, rawIndex, ordinal, filterRx, rowH) {
+    const vp = _getVirtual(paneId);
+    if (!vp) return null;
+    const lines = state.rawLines[paneId];
+    if (!lines || rawIndex < 0 || rawIndex >= lines.length) return null;
+    const line = _isRawTuple(lines[rawIndex]) ? getLine(paneId, rawIndex) : lines[rawIndex];
+    if (!line) return null;
+
+    const existing = vp.rendered.get(rawIndex);
+    if (existing) {
+        applyLineDom(existing, line, paneId, rawIndex, filterRx);
+        existing.dataset.ts = line.ts;
+        existing.style.position = "absolute";
+        existing.style.top = (ordinal * rowH) + "px";
+        existing.style.left = "0";
+        existing.style.right = "0";
+        return existing;
+    }
+
+    const div = document.createElement("div");
+    div.className = "log-line";
+    div.dataset.idx = rawIndex;
+    div.dataset.ts = line.ts;
+    applyLineDom(div, line, paneId, rawIndex, filterRx);
+    div.style.position = "absolute";
+    div.style.top = (ordinal * rowH) + "px";
+    div.style.left = "0";
+    div.style.right = "0";
+    vp.windowEl.appendChild(div);
+    vp.rendered.set(rawIndex, div);
+    if (vp.firstRendered < 0 || rawIndex < vp.firstRendered) vp.firstRendered = rawIndex;
+    if (vp.lastRendered < 0 || rawIndex > vp.lastRendered) vp.lastRendered = rawIndex;
+    return div;
+}
+
+function _ensureRange(paneId, startOrdinal, endOrdinal, filterRx, rowH) {
+    const vp = _getVirtual(paneId);
+    if (!vp) return;
+    for (let ordinal = startOrdinal; ordinal <= endOrdinal; ordinal++) {
+        const rawIndex = _rawIndexAt(paneId, vp, ordinal);
+        if (rawIndex === undefined) continue;
+        _ensureLine(paneId, rawIndex, ordinal, filterRx, rowH);
+    }
+}
+
+function _pruneToRawSet(paneId, keepRaw) {
+    const vp = _getVirtual(paneId);
+    if (!vp) return;
+    const toRemove = [];
+    for (const [idx, el] of vp.rendered) {
+        if (!keepRaw.has(idx)) {
+            toRemove.push(idx);
+            if (el.parentNode) el.parentNode.removeChild(el);
+        }
+    }
+    for (const idx of toRemove) {
+        vp.rendered.delete(idx);
+    }
+    vp.firstRendered = -1;
+    vp.lastRendered = -1;
+    for (const idx of vp.rendered.keys()) {
+        if (vp.firstRendered < 0 || idx < vp.firstRendered) vp.firstRendered = idx;
+        if (vp.lastRendered < 0 || idx > vp.lastRendered) vp.lastRendered = idx;
+    }
+}
+
+export function getRenderedLineElement(paneId, rawIndex) {
+    const vp = _virtualPanes.get(paneId);
+    return vp ? vp.rendered.get(rawIndex) || null : null;
+}
+
+export function ensureLineVisible(paneId, rawIndex, { align = "center" } = {}) {
+    const logEl = document.getElementById("log-" + paneId);
+    if (!logEl) return;
+    _renderVirtualWindow(paneId, { targetIdx: rawIndex });
+    const div = getRenderedLineElement(paneId, rawIndex);
+    if (!div) return;
+    const top = div.offsetTop;
+    if (align === "center") {
+        logEl.scrollTop = Math.max(0, top - Math.floor(logEl.clientHeight / 2));
+    } else if (align === "top") {
+        logEl.scrollTop = top;
+    } else if (align === "bottom") {
+        logEl.scrollTop = Math.max(0, top - logEl.clientHeight + div.offsetHeight);
+    }
+}
+
+export function rerenderRenderedLines(paneId) {
+    const vp = _virtualPanes.get(paneId);
+    if (!vp) return;
+    const rx = state.filters[paneId];
+    vp.rendered.forEach((div, idx) => {
+        const line = getLine(paneId, idx);
+        if (line) applyLineDom(div, line, paneId, idx, rx);
+    });
+}
+
+function _renderVirtualWindow(paneId, { targetIdx, forceAtBottom } = {}) {
+    const vp = _getVirtual(paneId);
+    if (!vp) return;
+    const lines = state.rawLines[paneId];
+    const logEl = document.getElementById("log-" + paneId);
+    if (!logEl) return;
+
+    if (!lines || !lines.length) {
+        vp.windowEl.innerHTML = "";
+        vp.rendered.clear();
+        vp.spacerEl.style.height = "0";
+        vp.firstRendered = -1;
+        vp.lastRendered = -1;
+        vp.firstOrdinal = -1;
+        vp.lastOrdinal = -1;
+        state.atBottom[paneId] = true;
+        updateJumpBtn(paneId);
+        return;
+    }
+
+    const totalCount = _visibleCount(paneId, vp);
+    if (totalCount === 0) {
+        vp.windowEl.innerHTML = "";
+        vp.rendered.clear();
+        vp.spacerEl.style.height = "0";
+        vp.firstRendered = -1;
+        vp.lastRendered = -1;
+        vp.firstOrdinal = -1;
+        vp.lastOrdinal = -1;
+        state.atBottom[paneId] = true;
+        updateJumpBtn(paneId);
+        return;
+    }
+
+    if (targetIdx === undefined) targetIdx = forceAtBottom ? lines.length - 1 : 0;
+    targetIdx = Math.max(0, Math.min(lines.length - 1, targetIdx));
+
+    const rowH = _measureRowHeight(paneId);
+    const totalH = totalCount * rowH;
+    const viewH = logEl.clientHeight || rowH;
+    const viewportCount = Math.max(1, Math.ceil(viewH / rowH));
+    const targetOrdinal = forceAtBottom
+        ? totalCount - 1
+        : _ordinalForRawIndex(paneId, vp, targetIdx);
+
+    // Clear any orphan non-managed children (transition from legacy/non-virtual DOM).
+    if (vp.windowEl.children.length !== vp.rendered.size) {
+        vp.windowEl.innerHTML = "";
+        vp.rendered.clear();
+        vp.firstRendered = -1;
+        vp.lastRendered = -1;
+    }
+
+    let firstOrdinal, lastOrdinal;
+    if (forceAtBottom) {
+        lastOrdinal = totalCount - 1;
+        firstOrdinal = Math.max(0, lastOrdinal - viewportCount - OVERSCAN);
+    } else {
+        firstOrdinal = Math.max(0, targetOrdinal - Math.floor(viewportCount / 2) - OVERSCAN);
+        lastOrdinal = Math.min(totalCount - 1, targetOrdinal + Math.ceil(viewportCount / 2) + OVERSCAN);
+    }
+    vp.firstOrdinal = firstOrdinal;
+    vp.lastOrdinal = lastOrdinal;
+
+    vp.spacerEl.style.height = totalH + "px";
+
+    const rx = state.filters[paneId];
+    const keepRaw = new Set();
+    for (let ordinal = firstOrdinal; ordinal <= lastOrdinal; ordinal++) {
+        const rawIndex = _rawIndexAt(paneId, vp, ordinal);
+        if (rawIndex !== undefined) keepRaw.add(rawIndex);
+    }
+
+    for (const [rawIndex, el] of vp.rendered) {
+        if (!keepRaw.has(rawIndex)) continue;
+        const ordinal = _ordinalForRawIndex(paneId, vp, rawIndex);
+        el.style.position = "absolute";
+        el.style.top = (ordinal * rowH) + "px";
+        el.style.left = "0";
+        el.style.right = "0";
+    }
+
+    _ensureRange(paneId, firstOrdinal, lastOrdinal, rx, rowH);
+    _pruneToRawSet(paneId, keepRaw);
+
+    if (forceAtBottom) {
+        logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    state.atBottom[paneId] = forceAtBottom || (logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40);
+    updateJumpBtn(paneId);
+}
+
+// ---------------------------------------------------------------------------
+// Stats (line count + UTF-8 byte count per pane; toolbar total)
+// ---------------------------------------------------------------------------
+
+const _textEncoder = new TextEncoder();
+
+function _byteSize(text) {
+    if (!text) return 0;
+    return _textEncoder.encode(text).length;
+}
+
+function _formatInt(n) {
+    return n.toLocaleString("en-US");
+}
+
+function _formatBytes(bytes) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} kB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function _formatStatsText(lines, bytes) {
+    return `${_formatInt(lines)} lines · ${_formatBytes(bytes)}`;
+}
+
+function _updatePaneStats(paneId) {
+    const el = document.querySelector(`.pane-stats[data-pane-stats="${paneId}"]`);
+    if (!el) return;
+    const lines = state.rawLines[paneId] || [];
+    el.textContent = lines.length
+        ? _formatStatsText(lines.length, _paneBytes.get(paneId) || 0)
+        : "";
+}
+
+function _updateToolbarStats() {
+    const el = document.getElementById("toolbar-stats");
+    if (!el) return;
+    let totalLines = 0;
+    let totalBytes = 0;
+    for (const paneId of PANES) {
+        const lines = state.rawLines[paneId];
+        if (!lines) continue;
+        totalLines += lines.length;
+        totalBytes += _paneBytes.get(paneId) || 0;
+    }
+    el.textContent = totalLines
+        ? `· ${_formatStatsText(totalLines, totalBytes)}`
+        : "";
+}
+
+function _recordPaneBytes(paneId, newLines) {
+    if (!newLines || newLines.length === 0) return;
+    let delta = 0;
+    for (const line of newLines) {
+        // state.rawLines entries are [ts, rawText, isTx, meta]
+        delta += _byteSize(line && line[1]);
+    }
+    _paneBytes.set(paneId, (_paneBytes.get(paneId) || 0) + delta);
+}
+
+function _resetPaneStats(paneId) {
+    _paneBytes.set(paneId, 0);
+    _updatePaneStats(paneId);
+}
+
+export function refreshStatsUi() {
+    // Public hook so callers outside this module can re-render (e.g. after
+    // importing lines from a file or after pane layout rebuilds).
+    for (const paneId of PANES) _updatePaneStats(paneId);
+    _updateToolbarStats();
+}
+
+
+export function renderPaneWindow(paneId, { targetIdx }) {
+    _renderVirtualWindow(paneId, { targetIdx, forceAtBottom: false });
+}
 export function appendLine(paneId, ts, rawText, isTx, meta = null) {
     appendLineBatch([{ paneId, ts, rawText, isTx, meta }]);
 }
 
 export function appendLineBatch(entries) {
-    const fragments = new Map();
     const touched = new Set();
+    const newByPane = new Map();
 
     entries.forEach(({ paneId, ts, rawText, isTx, meta = null }) => {
         if (!state.rawLines[paneId]) return;
-
-        const line = buildStoredLine(paneId, ts, rawText, isTx, meta);
-        state.rawLines[paneId].push(line);
-
-        const logEl = document.getElementById("log-" + paneId);
-        if (!logEl) return;
-
-        const idx = state.rawLines[paneId].length - 1;
-        const div = document.createElement("div");
-        div.dataset.ts = line.ts;
-        div.dataset.idx = idx;
-
-        const rx = state.filters[paneId];
-        applyLineDom(div, line, paneId, idx, rx);
-
-        if (!fragments.has(paneId)) fragments.set(paneId, document.createDocumentFragment());
-        fragments.get(paneId).appendChild(div);
+        state.rawLines[paneId].push([ts, rawText, isTx, meta]);
+        if (!newByPane.has(paneId)) newByPane.set(paneId, []);
+        newByPane.get(paneId).push([ts, rawText, isTx, meta]);
         touched.add(paneId);
     });
 
+    for (const [paneId, batch] of newByPane) {
+        _recordPaneBytes(paneId, batch);
+        _updatePaneStats(paneId);
+    }
+
     touched.forEach(paneId => {
+        const lines = state.rawLines[paneId];
+        if (!lines || !lines.length) return;
+        const vp = _getVirtual(paneId);
         const logEl = document.getElementById("log-" + paneId);
-        const fragment = fragments.get(paneId);
-        if (!logEl || !fragment) return;
-        logEl.appendChild(fragment);
-        if (state.atBottom[paneId]) logEl.scrollTop = logEl.scrollHeight;
+        if (!logEl || !vp) return;
+
+        const rowH = _measureRowHeight(paneId);
+        const midOrdinal = Math.max(0, Math.floor((logEl.scrollTop + logEl.clientHeight / 2) / rowH));
+        const targetIdx = state.atBottom[paneId]
+            ? lines.length - 1
+            : (_rawIndexAt(paneId, vp, midOrdinal) ?? Math.min(lines.length - 1, midOrdinal));
+        _renderVirtualWindow(paneId, { targetIdx, forceAtBottom: state.atBottom[paneId] });
+
         updateJumpBtn(paneId);
     });
 
     if (touched.size > 0) {
+        _updateToolbarStats();
         window.__embedLogSchedulePersist?.();
         window.__embedLogUpdateTimestampModeUi?.();
         window.applyMarkers?.();
@@ -318,21 +777,43 @@ export function appendLineBatch(entries) {
 
 export function rerenderPane(paneId) {
     const logEl = document.getElementById("log-" + paneId);
-    const lines = state.rawLines[paneId];
-    const divs  = logEl.children;
-    const rx    = state.filters[paneId];
+    if (!logEl) return;
 
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const div  = divs[i];
-        if (!div) continue;
-        applyLineDom(div, line, paneId, i, rx);
+    const vp = _getVirtual(paneId);
+    if (!vp) return;
+
+    const lines = state.rawLines[paneId] || [];
+    if (!lines.length) {
+        _renderVirtualWindow(paneId, { targetIdx: 0 });
+        return;
     }
-    if (state.atBottom[paneId]) logEl.scrollTop = logEl.scrollHeight;
+
+    if (state.filters[paneId]) {
+        logEl.scrollTop = 0;
+        _renderVirtualWindow(paneId, { targetIdx: 0 });
+        return;
+    }
+
+    const rowH = _measureRowHeight(paneId);
+    const midOrdinal = Math.max(0, Math.floor((logEl.scrollTop + logEl.clientHeight / 2) / rowH));
+    const targetIdx = state.atBottom[paneId]
+        ? lines.length - 1
+        : Math.min(lines.length - 1, midOrdinal);
+    _renderVirtualWindow(paneId, { targetIdx, forceAtBottom: state.atBottom[paneId] });
 }
+window.__embedLogInvalidateVirtualMetrics = function () {
+    PANES.forEach(paneId => {
+        const vp = _virtualPanes.get(paneId);
+        if (!vp) return;
+        vp.rowHeight = 0;
+        rerenderPane(paneId);
+    });
+};
 export function reanalyzePanePlugins(paneId) {
     const lines = state.rawLines[paneId] || [];
-    lines.forEach(line => analyzeLinePlugins(paneId, line));
+    lines.forEach(entry => {
+        if (!_isRawTuple(entry)) analyzeLinePlugins(paneId, entry);
+    });
     rerenderPane(paneId);
 }
 export function setTimestampMode(mode) {
@@ -345,7 +826,9 @@ export function setTimestampMode(mode) {
 
     PANES.forEach(paneId => {
         const lines = state.rawLines[paneId] || [];
-        lines.forEach(applyTimestampModeToLine);
+        lines.forEach(entry => {
+            if (!_isRawTuple(entry)) applyTimestampModeToLine(entry);
+        });
         rerenderPane(paneId);
 
         highlightLine(paneId, null);
@@ -355,12 +838,20 @@ export function setTimestampMode(mode) {
 
     window.__embedLogUpdateTimestampModeUi?.();
 }
-
 export function canDisplayTimestampMode(mode) {
     for (const paneId of PANES) {
         const lines = state.rawLines[paneId] || [];
-        for (const line of lines) {
-            if (lineHasTimestampMode(line, mode)) return true;
+        for (const entry of lines) {
+            if (_isRawTuple(entry)) {
+                const meta = entry[3];
+                if (meta && typeof meta === "object") {
+                    if (mode === "relative" && (meta.relTs || meta.relNum !== undefined)) return true;
+                    if (mode === "absolute" && (meta.absTs || meta.absNum !== undefined || meta.timestampIso)) return true;
+                }
+                if (mode === "relative" && typeof entry[0] === "string" && entry[0].startsWith("T+")) return true;
+            } else {
+                if (lineHasTimestampMode(entry, mode)) return true;
+            }
         }
     }
     return false;
@@ -378,23 +869,51 @@ export function updateJumpBtn(paneId) {
 export function scrollPaneToBottom(paneId) {
     const logEl = document.getElementById("log-" + paneId);
     if (!logEl) return;
-    logEl.scrollTop = logEl.scrollHeight;
+    const lines = state.rawLines[paneId];
+    const len = lines ? lines.length : 0;
+    if (len) {
+        _renderVirtualWindow(paneId, { targetIdx: len - 1, forceAtBottom: true });
+    } else {
+        logEl.scrollTop = logEl.scrollHeight;
+    }
     state.atBottom[paneId] = true;
     updateJumpBtn(paneId);
 }
-
 export function _linesSetupPane(id) {
     const logEl = document.getElementById("log-" + id);
     logEl.addEventListener("scroll", () => {
         state.atBottom[id] = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
         updateJumpBtn(id);
+
+        const vp = _virtualPanes.get(id);
+        if (!vp || vp.rendered.size === 0) return;
+
+        const viewMid = logEl.scrollTop + logEl.clientHeight / 2;
+        const rowH = vp.rowHeight > 0 ? vp.rowHeight : _measureRowHeight(id);
+        const totalCount = _visibleCount(id, vp);
+        if (!totalCount) return;
+        let midOrdinal = Math.round(viewMid / rowH);
+        midOrdinal = Math.max(0, Math.min(totalCount - 1, midOrdinal));
+
+        const firstOrdinal = Number.isFinite(vp.firstOrdinal) ? vp.firstOrdinal : 0;
+        const lastOrdinal = Number.isFinite(vp.lastOrdinal) ? vp.lastOrdinal : firstOrdinal;
+        const rangeCenter = firstOrdinal + Math.floor((lastOrdinal - firstOrdinal) / 2);
+        if (Math.abs(midOrdinal - rangeCenter) > OVERSCAN) {
+            if (_pendingRaf.has(id)) return;
+            _pendingRaf.set(id, true);
+            requestAnimationFrame(() => {
+                _pendingRaf.delete(id);
+                const targetIdx = _rawIndexAt(id, vp, midOrdinal);
+                if (targetIdx !== undefined) _renderVirtualWindow(id, { targetIdx });
+            });
+        }
     });
     // Event delegation — replaces per-line listeners for better performance
     logEl.addEventListener("click", e => {
         const lineDiv = e.target.closest(".log-line");
         if (!lineDiv) return;
         const idx = parseInt(lineDiv.dataset.idx, 10);
-        const line = state.rawLines[id] ? state.rawLines[id][idx] : null;
+        const line = getLine(id, idx);
         if (!line) return;
         hidePluginOverlays();
         onLineClick(id, line.numTs, lineDiv);
@@ -405,7 +924,7 @@ export function _linesSetupPane(id) {
         const lineDiv = e.target.closest(".log-line");
         if (!lineDiv) return;
         const idx = parseInt(lineDiv.dataset.idx, 10);
-        const line = state.rawLines[id] ? state.rawLines[id][idx] : null;
+        const line = getLine(id, idx);
         if (!line) return;
         onMiddleClick(id, line.numTs, lineDiv);
     });
@@ -439,9 +958,11 @@ export function _linesSetupPane(id) {
         dlBtn.addEventListener("click", () => {
             const lines = state.rawLines[id] || [];
             if (!lines.length) return;
-            const text = lines.map(line => {
-                const clean = (line.rawText ?? "").replace(/\x1b(?:\[[0-9;]*[A-Za-z]|\][^\x07]*\x07|[^[\]])/g, "").trim();
-                return `[${line.ts}] ${clean}`;
+            const text = lines.map(entry => {
+                const rawText = _isRawTuple(entry) ? entry[1] : entry.rawText;
+                const ts = _isRawTuple(entry) ? entry[0] : entry.ts;
+                const clean = (rawText ?? "").replace(/\x1b(?:\[[0-9;]*[A-Za-z]|\][^\x07]*\x07|[^[\]])/g, "").trim();
+                return `[${ts}] ${clean}`;
             }).join("\n");
             const blob = new Blob([text + "\n"], { type: "text/plain" });
             const url = URL.createObjectURL(blob);
@@ -510,14 +1031,20 @@ window.__embedLogRefreshPluginIndicators = refreshPluginIndicators;
 export function clearPane(paneId) {
     state.rawLines[paneId] = [];
     state.selected[paneId] = new Set();
-    document.getElementById("log-" + paneId).innerHTML = "";
+    const logEl = document.getElementById("log-" + paneId);
+    if (logEl) {
+        const windowEl = logEl.querySelector(".log-window");
+        if (windowEl) windowEl.innerHTML = "";
+        const spacerEl = logEl.querySelector(".log-spacer");
+        if (spacerEl) spacerEl.style.height = "0";
+    }
+    _virtualPanes.delete(paneId);
     highlightLine(paneId, null);
+    _resetPaneStats(paneId);
     hidePluginOverlays();
     state.atBottom[paneId] = true;
     updateJumpBtn(paneId);
-    // Hide copy-selection actions if selection.js has added them
     document.getElementById("copy-actions-" + paneId)?.classList.remove("visible");
-    // Close any open More dropdown for this pane
     document.getElementById("more-dropdown-" + paneId)?.classList.remove("open");
     window.__embedLogSchedulePersist?.();
     window.__embedLogUpdateTimestampModeUi?.();
@@ -526,6 +1053,7 @@ export function clearPane(paneId) {
 document.getElementById("btn-clear")?.addEventListener("click", () => {
     window.wsSend?.({ cmd: "clear_logs", scope: "all" });
     PANES.forEach(clearPane);
+    _updateToolbarStats();
 });
 
 
@@ -533,19 +1061,21 @@ document.getElementById("btn-clear")?.addEventListener("click", () => {
 export function repopulatePaneLogs(paneId) {
     const logEl = document.getElementById("log-" + paneId);
     if (!logEl) return;
-    logEl.innerHTML = "";
-    const lines = state.rawLines[paneId] || [];
-    const rx = state.filters[paneId];
-    lines.forEach((line, idx) => {
-        const div = document.createElement("div");
-        div.dataset.ts  = line.ts;
-        div.dataset.idx = idx;
-        applyLineDom(div, line, paneId, idx, rx);
+    const windowEl = logEl.querySelector(".log-window");
+    if (windowEl) windowEl.innerHTML = "";
+    const spacerEl = logEl.querySelector(".log-spacer");
+    if (spacerEl) spacerEl.style.height = "0";
+    _virtualPanes.delete(paneId);
 
-        logEl.appendChild(div);
-    });
-    if (state.atBottom[paneId]) logEl.scrollTop = logEl.scrollHeight;
+    const lines = state.rawLines[paneId] || [];
+    if (lines.length) {
+        const targetIdx = state.atBottom[paneId] ? lines.length - 1 : 0;
+        _renderVirtualWindow(paneId, { targetIdx, forceAtBottom: state.atBottom[paneId] });
+    }
+    if (state.atBottom[paneId] && logEl) logEl.scrollTop = logEl.scrollHeight;
     updateJumpBtn(paneId);
+    _updatePaneStats(paneId);
+    _updateToolbarStats();
 }
 // ---------------------------------------------------------------------------
 // Sync
@@ -553,9 +1083,18 @@ export function repopulatePaneLogs(paneId) {
 
 export function highlightLine(paneId, div) {
     const prev = state.highlighted[paneId];
-    if (prev) prev.classList.remove("sync-highlight");
+    if (prev && prev !== div) prev.classList.remove("sync-highlight");
+
+    if (!div) {
+        state.highlighted[paneId] = null;
+        state.highlightedIdx[paneId] = null;
+        return;
+    }
+
+    const idx = parseInt(div.dataset.idx, 10);
     state.highlighted[paneId] = div;
-    if (div) div.classList.add("sync-highlight");
+    state.highlightedIdx[paneId] = Number.isFinite(idx) ? idx : null;
+    div.classList.add("sync-highlight");
 }
 
 // Scroll a pane to the line closest to numTs — used when switching tabs.
@@ -568,15 +1107,16 @@ export function scrollPaneToTs(paneId, numTs) {
     let lo = 0, hi = lines.length - 1;
     while (lo < hi) {
         const mid = (lo + hi) >> 1;
-        if (lines[mid].numTs < numTs) lo = mid + 1;
+        if (_getNumTs(lines[mid], paneId, mid) < numTs) lo = mid + 1;
         else hi = mid;
     }
-    if (lo > 0 && Math.abs(lines[lo - 1].numTs - numTs) < Math.abs(lines[lo].numTs - numTs)) lo--;
+    if (lo > 0 && Math.abs(_getNumTs(lines[lo - 1], paneId, lo - 1) - numTs) < Math.abs(_getNumTs(lines[lo], paneId, lo) - numTs)) lo--;
 
-    const logEl = document.getElementById("log-" + paneId);
-    const div   = logEl.children[lo];
+    _renderVirtualWindow(paneId, { targetIdx: lo });
+    const div = getRenderedLineElement(paneId, lo);
     if (!div) return;
 
+    const logEl = document.getElementById("log-" + paneId);
     logEl.scrollTop = Math.max(0, div.offsetTop - Math.floor(logEl.clientHeight / 3));
     state.atBottom[paneId] = false;
     updateJumpBtn(paneId);
@@ -587,23 +1127,34 @@ export function scrollPaneToTs(paneId, numTs) {
 // in full context, and sync — the deliberate "zoom out to this moment" gesture.
 export function onMiddleClick(paneId, numTs, div) {
     const logEl = document.getElementById("log-" + paneId);
+    if (!logEl) return;
+
+    let activeDiv = div;
+    const rawIdx = parseInt(div?.dataset?.idx, 10);
 
     if (state.filters[paneId]) {
         const input = document.querySelector(`.filter-input[data-pane="${paneId}"]`);
-        input.value = "";
+        if (input) {
+            input.value = "";
+            input.classList.remove("invalid");
+        }
         state.filters[paneId] = null;
-        input.classList.remove("invalid");
-        rerenderPane(paneId);
+        if (Number.isFinite(rawIdx)) {
+            ensureLineVisible(paneId, rawIdx, { align: "top" });
+            activeDiv = getRenderedLineElement(paneId, rawIdx) || div;
+        } else {
+            rerenderPane(paneId);
+        }
     }
 
-    logEl.scrollTop = div.offsetTop - Math.floor(logEl.clientHeight / 3);
+    logEl.scrollTop = activeDiv.offsetTop - Math.floor(logEl.clientHeight / 3);
     state.atBottom[paneId] = false;
     updateJumpBtn(paneId);
 
     state.syncTs = numTs;
     state.syncTabSwitch = true;
-    highlightLine(paneId, div);
-    syncPanes(paneId, numTs, div);
+    highlightLine(paneId, activeDiv);
+    syncPanes(paneId, numTs, activeDiv);
 }
 
 // Click handler:
@@ -612,22 +1163,34 @@ export function onMiddleClick(paneId, numTs, div) {
 //   • always         → store syncTs, highlight clicked line, sync other panes in active tab
 export function onLineClick(paneId, numTs, div) {
     const logEl = document.getElementById("log-" + paneId);
+    if (!logEl) return;
+
+    let activeDiv = div;
+    const rawIdx = parseInt(div?.dataset?.idx, 10);
 
     if (state.filters[paneId]) {
         const filterInput = document.querySelector(`.filter-input[data-pane="${paneId}"]`);
-        filterInput.value = "";
+        if (filterInput) {
+            filterInput.value = "";
+            filterInput.classList.remove("invalid");
+        }
         state.filters[paneId] = null;
-        filterInput.classList.remove("invalid");
-        rerenderPane(paneId);
-        logEl.scrollTop = div.offsetTop - Math.floor(logEl.clientHeight / 3);
-        state.atBottom[paneId] = false;
-        updateJumpBtn(paneId);
+        if (Number.isFinite(rawIdx)) {
+            ensureLineVisible(paneId, rawIdx, { align: "top" });
+            activeDiv = getRenderedLineElement(paneId, rawIdx) || div;
+            logEl.scrollTop = activeDiv.offsetTop - Math.floor(logEl.clientHeight / 3);
+        } else {
+            rerenderPane(paneId);
+        }
     }
+
+    state.atBottom[paneId] = false;
+    updateJumpBtn(paneId);
 
     state.syncTs = numTs;
     state.syncTabSwitch = true;
-    highlightLine(paneId, div);
-    syncPanes(paneId, numTs, div);
+    highlightLine(paneId, activeDiv);
+    syncPanes(paneId, numTs, activeDiv);
 }
 
 // Sync all OTHER panes in the active tab to numTs, mirroring the clicked
@@ -650,17 +1213,18 @@ export function syncPanes(fromId, numTs, clickedDiv) {
         let lo = 0, hi = lines.length - 1;
         while (lo < hi) {
             const mid = (lo + hi) >> 1;
-            if (lines[mid].numTs < numTs) lo = mid + 1;
+            if (_getNumTs(lines[mid], toId, mid) < numTs) lo = mid + 1;
             else hi = mid;
         }
-        if (lo > 0 && Math.abs(lines[lo - 1].numTs - numTs) < Math.abs(lines[lo].numTs - numTs)) {
+        if (lo > 0 && Math.abs(_getNumTs(lines[lo - 1], toId, lo - 1) - numTs) < Math.abs(_getNumTs(lines[lo], toId, lo) - numTs)) {
             lo--;
         }
 
-        const logEl     = document.getElementById("log-" + toId);
-        const targetDiv = logEl.children[lo];
+        _renderVirtualWindow(toId, { targetIdx: lo });
+        const targetDiv = getRenderedLineElement(toId, lo);
         if (!targetDiv) return;
 
+        const logEl = document.getElementById("log-" + toId);
         logEl.scrollTop = targetDiv.offsetTop - clickedRelTop;
         state.atBottom[toId] = false;
         updateJumpBtn(toId);

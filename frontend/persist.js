@@ -1,6 +1,6 @@
 import { getPanePluginUiState, replacePanePluginUiState } from './pluginRuntime.js';
 import { state, TABS, PANES } from './state.js';
-import { appendLine, updateJumpBtn, setTimestampMode } from './lines.js';
+import { appendLine, updateJumpBtn, setTimestampMode, getLine } from './lines.js';
 import { createTabWithPanes } from './tabcreate.js';
 import { switchTab } from './tabs.js';
 
@@ -25,15 +25,19 @@ function _snapshot() {
     const lines = {};
     PANES.forEach(paneId => {
         const src = state.rawLines[paneId] || [];
-        const sliced = src.slice(-MAX_LINES_PER_PANE).map(line => ({
-            ts: line.ts,
-            text: line.rawText ?? '',
-            isTx: !!line.isTx,
-            absTs: line.absTs ?? null,
-            absNum: Number.isFinite(line.absNum) ? line.absNum : null,
-            relTs: line.relTs ?? null,
-            relNum: Number.isFinite(line.relNum) ? line.relNum : null,
-        }));
+        const start = Math.max(0, src.length - MAX_LINES_PER_PANE);
+        const sliced = src.slice(start).map((_, offset) => {
+            const line = getLine(paneId, start + offset);
+            return {
+                ts: line?.ts ?? '',
+                text: line?.rawText ?? '',
+                isTx: !!line?.isTx,
+                absTs: line?.absTs ?? null,
+                absNum: Number.isFinite(line?.absNum) ? line.absNum : null,
+                relTs: line?.relTs ?? null,
+                relNum: Number.isFinite(line?.relNum) ? line.relNum : null,
+            };
+        });
         if (sliced.length) lines[paneId] = sliced;
     });
 

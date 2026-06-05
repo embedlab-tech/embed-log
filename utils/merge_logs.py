@@ -350,14 +350,17 @@ def _esc_script_text(src: str) -> str:
 # HTML generation
 # ---------------------------------------------------------------------------
 
-def _pane_html(pane_id: str, label: str, *, show_tx: bool = False) -> str:
+def _pane_html(pane_id: str, label: str, *, show_tx: bool = False, stats_text: str = "") -> str:
     """Render one pane div. TX input row is hidden by default (static mode)."""
     safe_label = _html.escape(label)
+    safe_stats = _html.escape(stats_text) if stats_text else ""
     tx_display = '' if show_tx else ' style="display:none"'
+    stats_span = f'<span class="pane-stats" data-pane-stats="{_html.escape(pane_id)}">{safe_stats}</span>' if stats_text else f'<span class="pane-stats" data-pane-stats="{_html.escape(pane_id)}"></span>'
     return f"""\
         <div class="pane" id="pane-{pane_id}">
             <div class="pane-header">
                 <span class="pane-name">{safe_label}</span>
+                {stats_span}
 
                 <button class="pane-wrap-btn" title="Toggle word wrap in this pane">Wrap</button>
 
@@ -366,7 +369,7 @@ def _pane_html(pane_id: str, label: str, *, show_tx: bool = False) -> str:
                 <input class="filter-input" data-pane="{pane_id}" placeholder="Filter (regex)…">
             </div>
             <div class="pane-body">
-                <div class="log-area" id="log-{pane_id}"></div>
+                <div class="log-area" id="log-{pane_id}"><div class="log-spacer"><div class="log-window"></div></div></div>
                 <button class="jump-btn" id="jump-{pane_id}">jump to bottom</button>
             </div>
             <div class="input-row"{tx_display}>
@@ -377,13 +380,14 @@ def _pane_html(pane_id: str, label: str, *, show_tx: bool = False) -> str:
 
 
 
-def _tab_content_html(tab_idx: int, tab_panes: list) -> str:
+def _tab_content_html(tab_idx: int, tab_panes: list, pane_stats: dict | None = None) -> str:
     """Render a tab-content div containing 1 or 2 panes (+ splitter if 2)."""
     parts = []
     for i, (pane_id, label) in enumerate(tab_panes):
         if i > 0:
             parts.append('        <div class="splitter"></div>')
-        parts.append(_pane_html(pane_id, label, show_tx=False))
+        stats = (pane_stats or {}).get(pane_id, "")
+        parts.append(_pane_html(pane_id, label, show_tx=False, stats_text=stats))
     inner = "\n".join(parts)
     return (
         f'    <div class="tab-content" id="tab-content-{tab_idx}">\n'
@@ -392,8 +396,9 @@ def _tab_content_html(tab_idx: int, tab_panes: list) -> str:
     )
 
 
-def _render_toolbar() -> str:
+def _render_toolbar(total_stats_text: str = "") -> str:
     """Render toolbar HTML for static/exported mode."""
+    safe_total = _html.escape(total_stats_text) if total_stats_text else ""
     parts = ['<div id="toolbar">']
     parts.append('    <span class="app-name">embed-log</span>')
 
@@ -413,6 +418,11 @@ def _render_toolbar() -> str:
     # Theme toggle
     parts.append('    <div class="sep"></div>')
     parts.append('    <button id="btn-theme" title="Toggle light / dark theme">&#x1F319;</button>')
+
+    if safe_total:
+        parts.append(f'    <div id="toolbar-stats" class="toolbar-stats">· {safe_total}</div>')
+    else:
+        parts.append('    <div id="toolbar-stats" class="toolbar-stats"></div>')
 
     # Marker navigation (hidden by default, shown when markers are present)
     parts.append('    <div id="marker-nav" class="marker-nav" style="display:none">')
@@ -481,6 +491,7 @@ def generate_html(
     frontend_plugins: dict[str, dict] | None = None,
     pane_plugins: dict[str, list[dict]] | None = None,
     plugin_scripts: dict[str, str] | None = None,
+    lazy: bool = True,
 ) -> str:
     """
     tab_specs: [
@@ -488,6 +499,10 @@ def generate_html(
         ...
     ]
     Returns a complete self-contained HTML string.
+
+    If lazy=True (default), line data is embedded as compact JSON arrays
+    and hydrated via windowed rendering for fast load even with 100k+ lines.
+    Set lazy=False or use --legacy-embed for the old full-DOM embedding.
     """
     frontend_plugins = frontend_plugins or {}
     pane_plugins = pane_plugins or {}
@@ -588,8 +603,39 @@ def generate_html(
     )
 
     # Build container HTML
+    # ── Per-pane / total stats ──
+    # Bytes use UTF-8 length of the raw text — matches what the live UI
+    # computes so live mode and static replay show the same numbers.
+    def _fmt_int(n: int) -> str:
+        return f"{n:,}"
+
+    def _fmt_bytes(n: int) -> str:
+        if n < 1024:
+            return f"{n} B"
+        if n < 1024 * 1024:
+            return f"{n / 1024:.1f} kB" if n < 10 * 1024 else f"{n / 1024:.0f} kB"
+        return f"{n / (1024 * 1024):.1f} MB"
+
+    def _stats_text(line_count: int, byte_count: int) -> str:
+        if line_count <= 0:
+            return ""
+        return f"{_fmt_int(line_count)} lines · {_fmt_bytes(byte_count)}"
+
+    pane_stats: dict[str, str] = {}
+    total_lines = 0
+    total_bytes = 0
+    for tab in tab_specs:
+        for pane_id, _pane_label, _file_path in tab["panes"]:
+            entries = log_data.get(pane_id, [])
+            byte_sum = sum(len((row.get("text") or "").encode("utf-8")) for row in entries)
+            pane_stats[pane_id] = _stats_text(len(entries), byte_sum)
+            total_lines += len(entries)
+            total_bytes += byte_sum
+    total_stats = _stats_text(total_lines, total_bytes)
+
+    # Build container HTML
     tab_contents = "\n".join(
-        _tab_content_html(i, [(p[0], p[1]) for p in tab["panes"]])
+        _tab_content_html(i, [(p[0], p[1]) for p in tab["panes"]], pane_stats)
         for i, tab in enumerate(tab_specs)
     )
 
@@ -629,7 +675,59 @@ def generate_html(
     )
 
     # Bootstrap script: runs after all other scripts to inject log data
-    bootstrap_js = _esc_script_text(f"""\
+    if lazy:
+        # ── Lazy / windowed mode ──
+        # Embed compact JSON arrays in <script data-pane> tags.
+        # The frontend hydrates them into state.rawLines[] without creating
+        # DOM elements, then calls renderPaneWindow for initial visible window.
+        def _compact_entry(entry: dict) -> list:
+            meta = {}
+            for k in ("absTs", "absNum", "relTs", "relNum"):
+                v = entry.get(k)
+                if v is not None:
+                    meta[k] = v
+            return [entry["ts"], entry["text"], entry["isTx"], meta or None]
+
+        pane_data_tags = "\n".join(
+            f'<script type="application/json" data-pane="{pane_id}">'
+            f"{json.dumps([_compact_entry(e) for e in entries], ensure_ascii=False).replace('</', '<\\/')}"
+            f"</script>"
+            for pane_id, entries in log_data.items()
+        )
+
+        bootstrap_js = _esc_script_text(f"""\
+(function () {{
+    "use strict";
+
+    // No WebSocket in static mode — satisfy the reference in ui.js
+    window.wsSend = function () {{}};
+
+    if (typeof hydratePanesFromJson === "function") {{
+        hydratePanesFromJson();
+    }}
+
+    if (typeof window.__embedLogUpdateTimestampModeUi === "function") {{
+        window.__embedLogUpdateTimestampModeUi();
+    }}
+
+    var _markers = {json.dumps(markers_list, ensure_ascii=False)};
+    if (_markers.length) {{
+        state.markers = {{}};
+        _markers.forEach(function (m) {{
+            if (!m.paneId) return;
+            state.markers[m.paneId] = state.markers[m.paneId] || [];
+            state.markers[m.paneId].push(m);
+        }});
+        if (typeof applyMarkers === "function") applyMarkers();
+        if (typeof window.__embedLogOnMarkers === "function") window.__embedLogOnMarkers();
+    }}
+}})();""")
+
+        # Inject pane data tags between config scripts and the main body
+        pane_data_block = "\n" + pane_data_tags
+    else:
+        # ── Legacy mode: embed all lines as DOM elements via appendLine ──
+        bootstrap_js = _esc_script_text(f"""\
 (function () {{
     "use strict";
 
@@ -664,6 +762,8 @@ def generate_html(
         if (typeof window.__embedLogOnMarkers === "function") window.__embedLogOnMarkers();
     }}
 }})();""")
+        config_with_data = config_js
+        pane_data_block = ""
 
     return f"""<!DOCTYPE html>
 <html lang="en" data-theme="whitesand">
@@ -676,7 +776,7 @@ def generate_html(
 </head>
 <body>
 
-{_render_toolbar()}
+{_render_toolbar(total_stats)}
 
 <div id="download-raw-menu">
     <div class="download-raw-head">Download raw logs</div>
@@ -695,6 +795,7 @@ def generate_html(
 </div>
 
 <script>{config_js}</script>
+{pane_data_block}
 <script>{profile_js}</script>
 <script>{render_pane_js}</script>
 <script>{render_toolbar_js}</script>
@@ -831,6 +932,19 @@ def main():
         default=None,
         help="JSON object mapping frontend plugin names to plain JS source",
     )
+    parser.add_argument(
+        "--no-lazy",
+        dest="lazy",
+        action="store_false",
+        help="Disable lazy/windowed rendering (embed all lines as DOM elements, slow for large files)",
+    )
+    parser.add_argument(
+        "--legacy-embed",
+        dest="lazy",
+        action="store_false",
+        help="Alias for --no-lazy (legacy full-DOM embedding)",
+    )
+    parser.set_defaults(lazy=True)
     args = parser.parse_args()
 
     def _json_arg(name: str) -> dict:
@@ -872,6 +986,7 @@ def main():
         frontend_plugins=_json_arg("frontend_plugins_json"),
         pane_plugins=_json_arg("pane_plugins_json"),
         plugin_scripts=_json_arg("plugin_scripts_json"),
+        lazy=args.lazy,
     )
 
     with open(args.output, "w", encoding="utf-8") as fh:

@@ -1,8 +1,7 @@
 import { state, PANES } from './state.js';
 import { parseLogLine } from './tsparse.js';
 import {
-    clearPane, applyLineDom, buildStoredLine,
-    onLineClick, onMiddleClick, updateJumpBtn,
+    clearPane, appendLineBatch, updateJumpBtn,
 } from './lines.js';
 
 // ---------------------------------------------------------------------------
@@ -17,34 +16,20 @@ import {
 // Continuation lines (no leading timestamp) are appended to the preceding
 // timestamped line so multi-line stack traces stay together.
 //
-// All lines are bulk-inserted via DocumentFragment — one DOM write per file.
+// Parsed lines are appended through the shared pane model so large imports
+// use the same bounded virtual DOM as live and exported logs.
 // ---------------------------------------------------------------------------
 
 function _loadTextIntoPane(paneId, text) {
     clearPane(paneId);
-    const logEl = document.getElementById("log-" + paneId);
-    const rx = state.filters[paneId];
-    const frag = document.createDocumentFragment();
 
     let pendingTs = null;
     let pendingData = null;
-    let count = 0;
+    const batch = [];
 
     function flush() {
         if (pendingTs === null) return;
-        const line = buildStoredLine(paneId, pendingTs, pendingData, false);
-        const idx = state.rawLines[paneId].length;
-        state.rawLines[paneId].push(line);
-
-        const div = document.createElement("div");
-        div.dataset.ts = line.ts;
-        div.dataset.idx = idx;
-        applyLineDom(div, line, paneId, idx, rx);
-        div.addEventListener("click", () => onLineClick(paneId, line.numTs, div));
-        div.addEventListener("mousedown", e => { if (e.button === 1) e.preventDefault(); });
-        div.addEventListener("auxclick", e => { if (e.button === 1) onMiddleClick(paneId, line.numTs, div); });
-        frag.appendChild(div);
-        count++;
+        batch.push({ paneId, ts: pendingTs, rawText: pendingData, isTx: false, meta: null });
         pendingTs = null;
     }
 
@@ -55,19 +40,13 @@ function _loadTextIntoPane(paneId, text) {
             pendingTs = parsed.ts;
             pendingData = parsed.data;
         } else if (pendingTs !== null && raw.trim()) {
-            // Continuation line — append to current entry (stack traces, etc.)
             pendingData += " " + raw.trim();
         }
     }
     flush();
 
-    const wasAtBottom = state.atBottom[paneId];
-    logEl.appendChild(frag);
-    if (wasAtBottom) {
-        logEl.scrollTop = logEl.scrollHeight;
-    }
-    updateJumpBtn(paneId);
-    return count;
+    appendLineBatch(batch);
+    return batch.length;
 }
 
 function _importFile(paneId, file) {

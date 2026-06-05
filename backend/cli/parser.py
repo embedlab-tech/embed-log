@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 
+from .config_resolution import ENV_CONFIG_PATH
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -31,6 +32,9 @@ def build_parser() -> argparse.ArgumentParser:
             "Common:\n"
             "  embed-log run --config embed-log.yml\n"
             "  embed-log run --config demo.yml --open-browser\n"
+            f"  {ENV_CONFIG_PATH}=/path/embed-log.yml embed-log run\n"
+            "\n"
+            "Config precedence: --config > EMBED_LOG_CONFIG_YML_PATH > inline flags.\n"
             "\n"
             "Advanced (inline sources, no config file):\n"
             "  embed-log run --source SENSOR_A uart:/dev/cu.usbmodem101@115200"
@@ -43,8 +47,9 @@ def build_parser() -> argparse.ArgumentParser:
         "-c",
         metavar="FILE",
         default=None,
-        help="YAML config file. CLI flags override config values.",
+        help=f"YAML config file (overrides {ENV_CONFIG_PATH}). CLI flags override config values.",
     )
+
     p.add_argument(
         "--source",
         nargs=2,
@@ -233,6 +238,26 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("--config", "-c", default=None, help="config file to inspect")
+    p.add_argument("--json", action="store_true", help="machine-readable JSON output")
+
+    # ── doctor ──
+    p = sub.add_parser(
+        "doctor",
+        help="show environment, config, install, and runtime status",
+        description=(
+            "Show a sectioned diagnostic of the embed-log environment, the\n"
+            f"effective config (explicit --config > {ENV_CONFIG_PATH} > inline),\n"
+            "the install identity, and runtime detection (e.g. serial ports)."
+        ),
+        epilog=(
+            "Examples:\n"
+            "  embed-log doctor\n"
+            "  embed-log doctor --json\n"
+            "  embed-log doctor --config /path/to/embed-log.yml\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("--config", "-c", default=None, help="config file to inspect (overrides env var)")
     p.add_argument("--json", action="store_true", help="machine-readable JSON output")
 
     # ── ports ──

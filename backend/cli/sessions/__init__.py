@@ -15,10 +15,17 @@ from .snippet import _run_sessions_snippet
 
 
 def _run_sessions(argv: list[str]) -> int:
-    # Shared arguments that each subcommand inherits
+    # Shared arguments that each subcommand inherits.
+    # --dir is the documented form; --log-dir is kept as a compatibility alias
+    # because session commands read/manage an existing session root rather
+    # than configure runtime logging (which is what `run --log-dir` does).
     shared = argparse.ArgumentParser(add_help=False)
     shared.add_argument(
-        "--log-dir", default="logs/", help="log directory (default: logs/)"
+        "--dir",
+        "--log-dir",
+        dest="log_dir",
+        default=None,
+        help="session log root directory (default: logs/)",
     )
 
     parser = argparse.ArgumentParser(
@@ -273,7 +280,7 @@ def _run_sessions(argv: list[str]) -> int:
         parser.print_help()
         return 0
 
-    log_dir = Path(args.log_dir) if hasattr(args, "log_dir") else Path("logs/")
+    log_dir = Path(args.log_dir) if args.log_dir else Path("logs/")
 
     match args.command:
         case "list":

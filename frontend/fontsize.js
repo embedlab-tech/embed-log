@@ -10,6 +10,7 @@ if (typeof initialFontSize === 'number' && initialFontSize > 0) {
 
 export function applyFontSize() {
     document.documentElement.style.setProperty('--font-size', state.fontSize + 'px');
+    window.__embedLogInvalidateVirtualMetrics?.();
 }
 
 (function () {
