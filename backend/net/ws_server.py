@@ -193,7 +193,7 @@ class WebSocketBroadcaster:
         app.router.add_get("/{filename}", self._static_handler)
         runner = web.AppRunner(app)
         await runner.setup()
-        site = web.TCPSite(runner, self._host, self._port)
+        site = web.TCPSite(runner, self._host, self._port, reuse_address=True, reuse_port=True)
         await site.start()
         self._stop_async = asyncio.Event()
         self._started.set()
@@ -453,4 +453,27 @@ class WebSocketBroadcaster:
                     await ws.send_str(update)
                 except Exception as exc:
                     logging.debug("failed to send markers update to client: %s", exc)
+            return
+
+        if cmd == "set_filter":
+            name = msg.get("id", "")
+            bpf_filter = msg.get("filter", "")
+            logging.info("WS cmd set_filter source=%s filter=%r", name, bpf_filter)
+            mgr = self._source_map.get(name)
+            if mgr:
+                error = await asyncio.to_thread(mgr.set_filter, bpf_filter)
+                if error:
+                    logging.warning("set_filter failed for '%s': %s", name, error)
+                # Send ack/nack back to the requesting client
+                ws = None
+                for client in list(self._clients):
+                    try:
+                        await client.send_str(json.dumps({
+                            "type": "filter_result",
+                            "id": name,
+                            "filter": bpf_filter,
+                            "error": error,
+                        }))
+                    except Exception:
+                        pass
             return

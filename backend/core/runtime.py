@@ -24,6 +24,73 @@ from .naming import slugify
 from .queue import TrackedQueue
 
 
+
+def _compact_network_event(data: str) -> str:
+    """Format a JSON network_capture event into a compact one-line display."""
+    try:
+        ev = json.loads(data)
+    except (json.JSONDecodeError, TypeError):
+        return data
+    proto = ev.get("protocol", "?")
+    length = ev.get("length", 0)
+    src = ev.get("src") or "-"
+    dst = ev.get("dst") or "-"
+    sp = ev.get("src_port")
+    dp = ev.get("dst_port")
+    summary = ev.get("summary", "")
+    payload_hex = ev.get("payload_hex") or ""
+
+    # Build port string: "192.168.1.20:5000" or just "192.168.1.20"
+    src_str = f"{src}:{sp}" if sp is not None else src
+    dst_str = f"{dst}:{dp}" if dp is not None else dst
+
+    parts = [
+        f"proto:{proto}",
+        f"len:{length}",
+        f"src:{src_str}",
+        f"dst:{dst_str}",
+    ]
+    # Extract a short upper-layer hint from the summary
+    hint = _upper_layer_hint(summary, proto)
+    if hint:
+        parts.append(f"payload:{hint}")
+    elif payload_hex:
+        # Truncated hex preview
+        hex_short = " ".join(payload_hex.split()[:4])
+        parts.append(f"hex:{hex_short}")
+
+    return "  ".join(parts)
+
+
+def _upper_layer_hint(summary: str, proto: str) -> str:
+    """Extract a concise upper-layer descriptor from the packet summary."""
+    s = summary.lower()
+    # Common protocol/traffic patterns
+    for keyword, label in [
+        ("mdns", "mDNS"),
+        ("coap", "CoAP"),
+        ("mqtt", "MQTT"),
+        ("dhcp", "DHCP"),
+        ("dns", "DNS"),
+        ("http", "HTTP"),
+        ("tls", "TLS"),
+        ("ssh", "SSH"),
+        ("ntp", "NTP"),
+        ("icmp echo request", "ping"),
+        ("icmp echo reply", "pong"),
+        ("arp who-has", "ARP req"),
+        ("arp is-at", "ARP reply"),
+        ("neighbor solicitation", "ND solicit"),
+        ("neighbor advertisement", "ND advert"),
+    ]:
+        if keyword in s:
+            return label
+    # Generic: show first bracketed description from summary if any
+    if "[" in summary and "]" in summary:
+        start = summary.index("[") + 1
+        end = summary.index("]", start)
+        return summary[start:end]
+    return ""
 class SourceManager:
     """
     Owns a LogSource, an optional inject TCP server, a write queue,
@@ -155,6 +222,20 @@ class SourceManager:
     def _on_source_line(self, message: str) -> None:
         self._queue.put(LogEntry(self._clock(), "SERIAL", message))
 
+    def set_filter(self, bpf_filter: str) -> str | None:
+        """Apply a new BPF filter on a network_capture source.
+
+        Returns None on success or an error string.
+        """
+        source = self.source
+        set_filter_fn = getattr(source, "set_filter", None)
+        if set_filter_fn is None:
+            return f"source {self.name!r} does not support filter changes"
+        try:
+            set_filter_fn(bpf_filter)
+        except ValueError as exc:
+            return str(exc)
+        return None
     def _format(self, entry: LogEntry) -> str:
         ts = self.session_clock.file_timestamp(entry.timestamp)
         is_serial = entry.source == "SERIAL"
@@ -174,6 +255,9 @@ class SourceManager:
             data = ANSI[entry.color] + entry.message + ANSI["reset"]
         else:
             data = entry.message
+        # Compact display for network_capture events
+        if entry.source == "SERIAL" and '"source":"network_capture"' in data:
+            data = _compact_network_event(data)
         return {
             "type": "tx" if is_tx else "rx",
             "data": data,
@@ -413,7 +497,10 @@ class LogServer:
         self._pane_kinds = {}
         for s in sources:
             src = s["source"]
-            kind = "uart" if src.supports_write else type(src).__name__.lower().replace("source", "")
+            if type(src).__name__ in ("NetworkCaptureSource", "MockNetworkCaptureSource"):
+                kind = "network_capture"
+            else:
+                kind = "uart" if src.supports_write else type(src).__name__.lower().replace("source", "")
             self._pane_kinds[s["name"]] = kind
         self._frontend_plugins = frontend_plugins or {}
         self._pane_plugins = pane_plugins or {}

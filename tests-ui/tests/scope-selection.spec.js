@@ -395,7 +395,7 @@ test.describe('scope-aware selection actions', () => {
     // All panes should have checkboxes with unwrap-style labels
 
     const checkboxes = page.locator('#pane-selector-SENSOR_A .pane-checkbox input[type="checkbox"]');
-    await expect(checkboxes).toHaveCount(8);
+    await expect(checkboxes).toHaveCount(9);
     // Each checkbox should have a pane data attribute
     await expect(checkboxes.nth(0)).toHaveAttribute('data-pane', 'SENSOR_A');
     await expect(checkboxes.nth(1)).toHaveAttribute('data-pane', 'SENSOR_B');

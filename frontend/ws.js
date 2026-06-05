@@ -96,19 +96,8 @@ async function _handleConfigMessage(msg) {
     }
     currentSessionId = sessionId || currentSessionId;
 
-    configReady = false;
-    try {
-        await configurePanePlugins(
-            msg.frontend_plugins && typeof msg.frontend_plugins === "object" ? msg.frontend_plugins : {},
-            msg.pane_plugins && typeof msg.pane_plugins === "object" ? msg.pane_plugins : {},
-            msg.plugin_scripts && typeof msg.plugin_scripts === "object" ? msg.plugin_scripts : {},
-        );
-    } catch (err) {
-        console.error("embed-log: failed to configure pane plugins", err);
-        alert(`Failed to load pane plugins: ${err.message}`);
-        resetPanePlugins();
-    }
-
+    // Create tabs and set pane metadata BEFORE loading plugins so log
+    // lines render immediately.  Plugins load asynchronously and catch up.
     setTimestampContext({
         mode: msg.session?.timestamp_mode || "absolute",
         firstLogAt: msg.session?.first_log_at,
@@ -146,11 +135,32 @@ async function _handleConfigMessage(msg) {
         window.applyMarkers?.();
         window.__embedLogOnMarkers?.();
     }
+
+    // Allow rendering immediately — plugins will catch up asynchronously.
     configReady = true;
     if (pendingLogMessages.length > 0 && !pendingLogFlush) {
         pendingLogFlush = true;
         requestAnimationFrame(flushLogMessages);
     }
+
+    // Load plugins in the background.  Lines rendered before plugins are
+    // ready won't have plugin data, but a re-render is triggered below.
+    try {
+        await configurePanePlugins(
+            msg.frontend_plugins && typeof msg.frontend_plugins === "object" ? msg.frontend_plugins : {},
+            msg.pane_plugins && typeof msg.pane_plugins === "object" ? msg.pane_plugins : {},
+            msg.plugin_scripts && typeof msg.plugin_scripts === "object" ? msg.plugin_scripts : {},
+        );
+    } catch (err) {
+        console.error("embed-log: failed to configure pane plugins", err);
+        alert(`Failed to load pane plugins: ${err.message}`);
+        resetPanePlugins();
+    }
+
+    // Re-render all panes so plugin data attaches to already-visible lines.
+    PANES.forEach(id => {
+        try { rerenderPane(id); } catch (_) {}
+    });
     window.__embedLogAfterConfig?.(msg.tabs || []);
 }
 
@@ -222,6 +232,18 @@ function wsConnect() {
             });
             window.applyMarkers?.();
             window.__embedLogOnMarkers?.();
+            return;
+        }
+
+        if (msg.type === "filter_result") {
+            const input = document.querySelector(`.filter-input[data-pane="${msg.id}"]`);
+            if (input && msg.error) {
+                input.classList.add("invalid");
+                input.title = msg.error;
+            } else if (input) {
+                input.classList.remove("invalid");
+                input.title = "";
+            }
             return;
         }
 

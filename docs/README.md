@@ -12,7 +12,9 @@ Use the files below as the canonical entry points.
 - `BACKEND.md` — backend architecture, runtime flow, key contracts
 - `FRONTEND.md` — frontend architecture, UI behavior, fragile areas
 - `TESTING.md` — backend tests, Playwright E2E, deterministic demo testing
-- `BENCHMARKING.md` — benchmark scope, commands, current limitations
+- `BENCHMARK.md` — benchmark scope, commands, current limitations
+- `DEMOS.md` — demo profiles, config samples, network capture setup
+- `FRONTEND_PLUGINS.md` — plugin API, how to write custom line plugins
 - `BACKEND_BACKLOG.md` — backend/prioritized engineering backlog
 - `FRONTEND_BACKLOG.md` — frontend/UI/testing backlog
 

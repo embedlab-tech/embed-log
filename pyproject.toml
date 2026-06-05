@@ -11,6 +11,9 @@ dependencies = [
     "watchdog>=4.0",
 ]
 
+[project.optional-dependencies]
+network-capture = ["scapy>=2.5"]
+
 [project.scripts]
 embed-log = "backend.server:main"
 

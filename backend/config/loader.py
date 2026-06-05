@@ -223,8 +223,73 @@ def load_config(path: str | Path) -> AppConfig:
         elif src_type == "file":
             port = _require_str(src.get("port"), f"sources[{i}].port")
             source_config = SourceConfig(name=name, type=src_type, port=port, parser=parser)
+        elif src_type == "network_capture":
+            if src.get("port") is not None:
+                raise ConfigError(f"sources[{i}].port is not used for network_capture; use 'interface'")
+            iface = _require_str(src.get("interface"), f"sources[{i}].interface")
+            bpf = src.get("bpf_filter", "")
+            if bpf is None:
+                bpf = ""
+            bpf = str(bpf)
+
+            pcap_raw = src.get("pcap")
+            pcap_enabled = False
+            pcap_path = None
+            if pcap_raw is not None:
+                pcap = _require_dict(pcap_raw, f"sources[{i}].pcap")
+                pcap_enabled = bool(pcap.get("enabled", False))
+                if pcap_enabled:
+                    pcap_path = _require_str(pcap.get("path"), f"sources[{i}].pcap.path")
+                extra_pcap = sorted(key for key in pcap if key not in {"enabled", "path"})
+                if extra_pcap:
+                    raise ConfigError(f"sources[{i}].pcap.{extra_pcap[0]} is unsupported")
+
+            payload_raw = src.get("payload")
+            include_preview = True
+            max_preview_bytes = 128
+            if payload_raw is not None:
+                pl = _require_dict(payload_raw, f"sources[{i}].payload")
+                if "include_preview" in pl:
+                    include_preview = bool(pl["include_preview"])
+                if "max_preview_bytes" in pl:
+                    max_preview_bytes = _as_int(pl["max_preview_bytes"], f"sources[{i}].payload.max_preview_bytes")
+                extra_pl = sorted(key for key in pl if key not in {"include_preview", "max_preview_bytes"})
+                if extra_pl:
+                    raise ConfigError(f"sources[{i}].payload.{extra_pl[0]} is unsupported")
+
+            extra_fields = sorted(
+                key for key in src
+                if key not in {"name", "type", "label", "interface", "bpf_filter",
+                               "pcap", "payload", "inject_port", "forward_port",
+                               "forward_ports", "parser", "enabled",
+                               "network_backend", "mock_interval"}
+            )
+            if extra_fields:
+                raise ConfigError(f"sources[{i}].{extra_fields[0]} is unsupported")
+
+            network_backend = str(src.get("network_backend", "scapy")).lower()
+            if network_backend not in ("scapy", "mock"):
+                raise ConfigError(f"sources[{i}].network_backend must be 'scapy' or 'mock'")
+
+            mock_interval = 0.5
+            if "mock_interval" in src:
+                mock_interval = float(src["mock_interval"])
+
+            source_config = SourceConfig(
+                name=name,
+                type=src_type,
+                port="",
+                interface=iface,
+                bpf_filter=bpf,
+                pcap_enabled=pcap_enabled,
+                pcap_path=pcap_path,
+                include_preview=include_preview,
+                max_preview_bytes=max_preview_bytes,
+                network_backend=network_backend,
+                mock_interval=mock_interval,
+            )
         else:
-            raise ConfigError(f"sources[{i}].type unsupported: {src_type!r} (use 'uart', 'udp', or 'file')")
+            raise ConfigError(f"sources[{i}].type unsupported: {src_type!r} (use 'uart', 'udp', 'file', or 'network_capture')")
 
         label = src.get("label")
         source_labels[name] = _require_str(label, f"sources[{i}].label") if label is not None else name

@@ -126,6 +126,15 @@ def _run_run(args: argparse.Namespace) -> int:
                 }
                 if source_config.baudrate is not None:
                     source_dict["baudrate"] = source_config.baudrate
+                if source_config.type == "network_capture":
+                    source_dict["interface"] = source_config.interface
+                    source_dict["bpf_filter"] = source_config.bpf_filter
+                    source_dict["pcap_enabled"] = source_config.pcap_enabled
+                    source_dict["pcap_path"] = source_config.pcap_path
+                    source_dict["include_preview"] = source_config.include_preview
+                    source_dict["max_preview_bytes"] = source_config.max_preview_bytes
+                    source_dict["network_backend"] = source_config.network_backend
+                    source_dict["mock_interval"] = source_config.mock_interval
                 source_objects[name] = build_source(source_dict)
             except ValueError as exc:
                 print(f"source {name!r}: {exc}", file=sys.stderr)
