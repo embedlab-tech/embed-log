@@ -13,10 +13,11 @@ server:
   ws_port: 8080
   app_name: embed-log
   open_browser: true
+  verbosity: full
   timestamp_mode: absolute
 
 logs:
-  dir: logs/
+  dir: logs/double_uart_file_udp_coap_three_tabs/
 
 baudrate: 115200
 

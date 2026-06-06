@@ -12,7 +12,8 @@ from .sessions import _run_sessions
 from .diagnostics import _display_version_line, _run_doctor, _run_ports, _run_version
 from .run import _run_merge, _run_run
 from .demo import _run_demo
-from .sample_config import _run_sample_config
+from .onboarding import _run_init, _run_onboard
+from .update import _run_update
 from ..parse import run_parse
 
 
@@ -85,8 +86,10 @@ def main(argv: list[str] | None = None) -> int:
             return _run_run(args)
         case "demo":
             return _run_demo(args)
-        case "sample-config":
-            return _run_sample_config(args)
+        case "onboard":
+            return _run_onboard(args)
+        case "init":
+            return _run_init(args)
         case "merge":
             return _run_merge(args)
         case "parse":
@@ -97,6 +100,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_doctor(args)
         case "ports":
             return _run_ports(args)
+        case "update":
+            return _run_update(args)
         case "sessions":
             return _run_sessions(argv[1:])
         case _:

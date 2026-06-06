@@ -27,12 +27,14 @@ packages = ["backend"]
 [tool.hatch.build.targets.wheel.force-include]
 "frontend" = "frontend"
 "utils" = "utils"
+"config-samples" = "config-samples"
 
 [tool.hatch.build.targets.sdist]
 include = [
     "backend/**",
     "frontend/**",
     "utils/**",
+    "config-samples/**",
     "examples/**",
     "embed-log.demo.yml",
     "README.md",

@@ -7,11 +7,12 @@ server:
   host: 127.0.0.1
   ws_port: 8080
   app_name: embed-log
-  open_browser: false
+  open_browser: true
+  verbosity: full
   timestamp_mode: absolute
 
 logs:
-  dir: logs/
+  dir: logs/double_uart_udp_multi_baud_two_tabs/
 
 # This default is overridden per-source below
 baudrate: 115200

@@ -34,27 +34,103 @@ Uninstall:
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/krezolekcoder/embed-log/main/uninstall.ps1'))
 ```
 
-## Fastest start: real logs on your desk
+## Update an existing install
 
-Find your serial ports:
+Use the installer scripts for first install. After `embed-log` is installed, update through the CLI:
+
+```bash
+embed-log update
+embed-log update --sha <sha>
+```
+
+`embed-log update --sha <sha>` refuses commits older than the latest release unless you pass `--allow-rollback`.
+
+
+## Quick start
+
+**Step 1** — find serial ports:
 
 ```bash
 embed-log ports
 ```
 
-Typical Linux ports look like `/dev/ttyUSB0` or `/dev/ttyACM0`.
-Typical macOS ports look like `/dev/cu.usbserial-*` or `/dev/cu.usbmodem*`.
-Typical Windows ports look like `COM3`, `COM4`, or another `COM<number>`.
-
-Create a config file:
+**Step 2** — generate a config (double UART + UDP by default):
 
 ```bash
-embed-log sample-config --sample single-tab-dual-pane.yml --output embed-log.yml
+embed-log init
 ```
 
-Edit the `port:` values in `embed-log.yml` to match your devices.
+This writes `embed-log.yml`. Edit the `port:` values to match your devices.
 
-### Example 1: two UART devices
+To start from a specific sample:
+
+```bash
+embed-log init --list                                    # see all samples
+embed-log init --sample single_uart_single_tab           # pick one
+```
+
+**Step 3** — validate the config:
+
+```bash
+embed-log doctor --config embed-log.yml
+```
+
+**Step 4** — start the UI:
+
+```bash
+embed-log run --config embed-log.yml
+```
+
+Open `http://127.0.0.1:8080/`. Stop with `Ctrl+C`.
+
+Or set the config once for this shell:
+
+```bash
+export EMBED_LOG_CONFIG_YML_PATH="$PWD/embed-log.yml"
+embed-log run
+```
+
+Windows PowerShell:
+
+```powershell
+$env:EMBED_LOG_CONFIG_YML_PATH = "C:\path\to\embed-log.yml"
+embed-log run
+```
+
+
+### UART TX autocomplete (optional)
+
+embed-log can show TX command suggestions in the browser UI. Focus a UART input field and press `Tab` to cycle matching commands.
+
+**Generate alongside a new config:**
+
+```bash
+embed-log init --add-uart-shell
+```
+
+This writes `embed-log.commands.yml` next to `embed-log.yml` with starter commands for every UART source.
+
+**Generate for an existing config:**
+
+```bash
+embed-log init --config embed-log.yml --add-uart-shell
+```
+
+This generates only the commands file; the config is not modified.
+
+`embed-log run` loads `<config-stem>.commands.yml` automatically when it is next to the config file. Edit the commands to match the shell your firmware actually supports.
+
+
+### Demo without hardware
+
+```bash
+embed-log demo
+```
+
+
+## Config reference
+
+### Example: two UART devices
 
 ```yaml
 version: 1
@@ -85,9 +161,9 @@ tabs:
     panes: [DUT, AUX]
 ```
 
-### Example 2: one UART plus one UDP source
+### Example: one UART plus one UDP source
 
-This is useful when a test runner, for example `PYTEST`, sends logs over UDP.
+Useful when a test runner, for example `PYTEST`, sends logs over UDP.
 
 ```yaml
 version: 1
@@ -118,75 +194,66 @@ tabs:
     panes: [DUT, PYTEST]
 ```
 
-Check which config is active, then run:
+
+## Ready-made config samples
+
+List all samples:
 
 ```bash
-embed-log doctor --config embed-log.yml
-embed-log run --config embed-log.yml
+embed-log init --list
 ```
 
-`embed-log doctor` prints the effective config source: explicit `--config`, `EMBED_LOG_CONFIG_YML_PATH`, or the default `embed-log.yml` in the current directory. Use it when you are not sure which config `embed-log run` will load.
-
-Or point `embed-log` at your config once and run it without flags:
+Generate from a sample:
 
 ```bash
-export EMBED_LOG_CONFIG_YML_PATH="$PWD/embed-log.yml"
-embed-log run
+embed-log init --sample double_uart_udp_two_tabs --output embed-log.yml
 ```
 
-Windows PowerShell:
-
-```powershell
-$env:EMBED_LOG_CONFIG_YML_PATH = "C:\path\to\embed-log.yml"
-embed-log run
-```
-
-Open:
-
-```text
-http://127.0.0.1:8080/
-```
-
-Stop the server with `Ctrl+C`.
-
-## Demo without hardware
-
-If you only want to see the UI, run simulated traffic:
-
-```bash
-embed-log demo
-```
-
-## Ready-made config examples
-
-Write any example into `embed-log.yml`:
-
-```bash
-embed-log sample-config --sample single-tab-dual-pane.yml --output embed-log.yml
-```
-
-Useful starter files:
-
-| Example | Use when |
+| Sample | Use when |
 |---|---|
-| `single-tab-dual-pane.yml` | You have two UART devices and want them side-by-side |
-| `multi-tab-multi-baud.yml` | You have UART devices with different baudrates plus a UDP source |
-| `three-tab-uart-file-udp-coap.yml` | You want UART, file tailing, and UDP in one UI |
-| `network-capture.yml` | You want simplified network packet captures in the UI |
-| `annotated-full-config.yml` | You want every config option documented inline |
+| `single_uart_single_tab` | One UART source in one tab |
+| `double_uart_single_tab` | Two UART panes side-by-side in one tab |
+| `double_uart_udp_two_tabs` | Two UART panes plus one UDP/pytest tab |
+| `double_uart_network_two_tabs` | Two UART panes plus a packet-capture network tab |
+| `double_uart_udp_coap_two_tabs` | Two UART panes plus UDP panes using the CoAP plugin |
+| `single_file_single_tab` | One file-tail source in one tab |
+| `double_uart_file_two_tabs` | Two UART panes plus a file-tail log tab |
+| `double_uart_minimal_single_tab` | Minimal two-UART single-tab layout |
+| `double_uart_udp_multi_baud_two_tabs` | Two UARTs with different baudrates plus a UDP tab |
+| `double_uart_file_udp_coap_three_tabs` | Two UARTs, file tailing, UDP, and CoAP across three tabs |
+| `single_network_single_tab` | Simplified packet capture in one tab |
+| `three_udp_cbor_two_tabs` | Two CBOR UDP sources plus one text UDP monitor |
+| `reference_full_annotated` | Every config option documented inline |
 
-The same files are also in `config-samples/` in this repo.
+The same files are in `config-samples/` in this repo.
+
+
+## Agents / quick repo orientation
+
+```bash
+embed-log doctor
+embed-log onboard --samples
+embed-log init --list
+```
+
+`embed-log onboard --json` prints stable machine-readable orientation: version, install source, active config, samples, commands, docs, and next steps.
+
 
 ## Common commands
 
 ```bash
-embed-log demo                         # run simulated traffic
-embed-log ports                        # list serial ports
-embed-log sample-config --output embed-log.yml
-embed-log doctor --config embed-log.yml
-embed-log run --config embed-log.yml
-export EMBED_LOG_CONFIG_YML_PATH="$PWD/embed-log.yml"
-embed-log run                            # uses EMBED_LOG_CONFIG_YML_PATH
+embed-log init                            # generate default config
+embed-log init --list                     # list available samples
+embed-log init --add-uart-shell           # config + TX command suggestions
+embed-log init --config x.yml --add-uart-shell  # TX suggestions for existing config
+embed-log doctor --config embed-log.yml   # validate config
+embed-log run --config embed-log.yml      # start the UI
+embed-log demo                            # simulated traffic, no hardware
+embed-log ports                           # list serial ports
+embed-log onboard                         # practical CLI orientation
+embed-log sessions list                   # list saved sessions
+embed-log update                          # install the latest release
+embed-log update --sha <sha>              # install a specific commit
 embed-log version
 ```
 

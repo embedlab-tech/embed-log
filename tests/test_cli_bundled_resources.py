@@ -25,19 +25,17 @@ class BundledCliResourceTests(unittest.TestCase):
 
         self.assertEqual(packaged, resolved)
 
-    def test_main_sample_config_writes_file_outside_repo(self):
-        expected = cli._require_bundled_file(
-            "examples/embed-log.yml",
-            packaged_relative="examples/embed-log.yml",
-            label="Bundled sample config",
-        ).read_text(encoding="utf-8")
+    def test_main_init_writes_default_config_outside_repo(self):
+        expected = (cli._repo_root() / "config-samples" / "double_uart_udp_two_tabs.yml").read_text(
+            encoding="utf-8"
+        )
 
         with tempfile.TemporaryDirectory() as td:
             cwd = Path(td)
             old = Path.cwd()
             try:
                 os.chdir(cwd)
-                rc = cli.main(["sample-config"])
+                rc = cli.main(["init"])
             finally:
                 os.chdir(old)
 

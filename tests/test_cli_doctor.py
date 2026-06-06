@@ -110,7 +110,13 @@ class DoctorSectionTests(unittest.TestCase):
             env_path.unlink()
 
     def test_effective_config_none_when_unset(self):
-        sections = _collect_doctor_sections(_ns(config=None))
+        old_cwd = Path.cwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                os.chdir(tmp)
+                sections = _collect_doctor_sections(_ns(config=None))
+            finally:
+                os.chdir(old_cwd)
         config_section = dict(sections[1][1])
         self.assertIn("none", config_section["effective config"])
         self.assertIn("inline flags", config_section["effective config"])
@@ -167,6 +173,63 @@ class DoctorCommandTests(unittest.TestCase):
             for check in section["checks"]:
                 self.assertIn("check", check)
                 self.assertIn("status", check)
+
+    def test_json_reports_uart_command_file_counts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "bench.yml"
+            config_path.write_text(
+                """version: 1
+logs:
+  dir: logs/
+sources:
+  - name: DUT_UART
+    type: uart
+    port: /dev/ttyUSB0
+  - name: AUX_UART
+    type: uart
+    port: /dev/ttyUSB1
+  - name: PYTEST_UDP
+    type: udp
+    port: 6000
+tabs:
+  - label: Device
+    panes: [DUT_UART, AUX_UART]
+  - label: CI
+    panes: [PYTEST_UDP]
+""",
+                encoding="utf-8",
+            )
+            (root / "bench.commands.yml").write_text(
+                """sources:
+  DUT_UART:
+    - "help\\r\\n"
+    - "status\\r\\n"
+  AUX_UART:
+    - "version\\r\\n"
+  PYTEST_UDP:
+    - "ignored for TX UI"
+  UNKNOWN:
+    - "ignored"
+""",
+                encoding="utf-8",
+            )
+
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = _run_doctor(_ns(config=str(config_path), json=True))
+
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        config_section = next(
+            section for section in payload["sections"] if section["name"] == "Config"
+        )
+        checks = {item["check"]: item["status"] for item in config_section["checks"]}
+        self.assertEqual(checks["UART command file"], str(config_path.with_name("bench.commands.yml")))
+        self.assertIn("DUT_UART: 2", checks["UART commands"])
+        self.assertIn("AUX_UART: 1", checks["UART commands"])
+        self.assertNotIn("PYTEST_UDP", checks["UART commands"])
+        self.assertEqual(checks["UART command sources ignored"], "PYTEST_UDP, UNKNOWN")
 
     def test_json_reports_failure_for_missing_env_config(self):
         os.environ[ENV_CONFIG_PATH] = "/no/such/env.yml"

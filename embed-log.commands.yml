@@ -1,0 +1,19 @@
+# UART TX command suggestions for embed-log.
+# Generated for embed-log.yml from existing config.
+# embed-log run loads this file automatically when it is next to the config.
+# In the browser UI, focus a UART TX input and press Tab to cycle matching commands.
+# Replace these starter commands with the shell commands supported by your firmware.
+
+sources:
+  "DUT_UART":
+    # Edit these for this UART device.
+    - "help\r\n"
+    - "version\r\n"
+    - "status\r\n"
+    - "reboot\r\n"
+  "AUX_UART":
+    # Edit these for this UART device.
+    - "help\r\n"
+    - "version\r\n"
+    - "status\r\n"
+    - "reboot\r\n"

@@ -1,0 +1,54 @@
+
+version: 1
+
+server:
+  host: 127.0.0.1
+  ws_port: 8080
+  app_name: embed-log
+  open_browser: true
+  verbosity: full
+  timestamp_mode: absolute
+
+logs:
+  dir: logs/double_uart_udp_coap_two_tabs/
+
+baudrate: 115200
+
+sources:
+  - name: DUT_UART
+    label: DUT UART
+    type: uart
+    port: /dev/ttyUSB0
+    inject_port: 5001
+
+  - name: AUX_UART
+    label: AUX UART
+    type: uart
+    port: /dev/ttyUSB1
+    inject_port: 5002
+
+  - name: RAW_UDP
+    label: Raw UDP
+    type: udp
+    port: 6000
+    inject_port: 5003
+
+  - name: COAP_UDP
+    label: CoAP UDP
+    type: udp
+    port: 5683
+    inject_port: 5004
+
+frontend_plugins:
+  coap:
+    builtin: hex-coap
+
+tabs:
+  - label: Device
+    panes: [DUT_UART, AUX_UART]
+
+  - label: Network
+    panes:
+      - source: RAW_UDP
+      - source: COAP_UDP
+        plugins: [coap]

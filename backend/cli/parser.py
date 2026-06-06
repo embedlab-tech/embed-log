@@ -13,6 +13,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="embed-log — collect UART/UDP logs and view them in a browser UI.",
         epilog=(
             "Common workflow:\n"
+            "  embed-log onboard\n"
+            "  embed-log init --output embed-log.yml\n"
+            "  embed-log doctor --config embed-log.yml\n"
             "  embed-log run --config embed-log.yml\n"
             "  embed-log sessions list\n"
             "\n"
@@ -202,9 +205,11 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
-    # ── sample-config ──
-    from .sample_config import add_subparser as add_sample_config_subparser
-    add_sample_config_subparser(sub)
+    from .onboarding import add_subparsers as add_onboarding_subparsers
+    add_onboarding_subparsers(sub)
+
+    from .update import add_subparser as add_update_subparser
+    add_update_subparser(sub)
 
     # ── parse ──
     p = sub.add_parser(

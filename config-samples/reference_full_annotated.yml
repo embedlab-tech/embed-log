@@ -7,15 +7,15 @@ server:
   ws_port: 8080                  # HTTP/WS port (0 disables the server)
   # ws_ui: /path/to/custom.html  # custom UI HTML file (optional)
   app_name: embed-log
-  open_browser: false            # auto-open browser on startup
+  open_browser: true             # auto-open browser on startup
   timestamp_mode: absolute       # absolute (wall-clock) or relative (T+ offset)
   default_light_theme: whitesand
   default_dark_theme: one-dark
-  verbosity: quiet               # quiet | events | full
+  verbosity: full                # quiet | events | full
   # job_id: CI-123                # optional CI/job identifier for session naming
 
 logs:
-  dir: logs/                     # session log files output directory
+  dir: logs/reference_full_annotated/  # session log files output directory
 
 baudrate: 115200                 # default UART baudrate; overridable per source
 
@@ -48,10 +48,16 @@ sources:
     parser:
       type: cbor-datagram          # decodes each UDP datagram as CBOR map
 
+frontend_plugins:
+  # Built-in line plugin that scans each pane line for embedded CoAP packets
+  hex-coap:
+    builtin: hex-coap
 tabs:
-  # Single-pane tab
+  # Single-pane tab with a per-pane frontend plugin
   - label: DUT
-    panes: [DUT_UART]
+    panes:
+      - source: DUT_UART
+        plugins: [hex-coap]
 
   # Dual-pane tab
   - label: Debug

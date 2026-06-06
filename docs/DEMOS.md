@@ -7,7 +7,7 @@
 embed-log demo --profile deterministic --fast
 
 # Focused network capture demo (one tab, mock traffic)
-embed-log run --config config-samples/network-capture.yml
+embed-log run --config config-samples/single_network_single_tab.yml
 ```
 
 Both open the UI at `http://127.0.0.1:8080/` by default.
@@ -70,7 +70,7 @@ Each config file in `config-samples/` is a self-contained demo. Run like:
 embed-log run --config config-samples/<file>.yml
 ```
 
-### `network-capture.yml` — network packet capture
+### `single_network_single_tab.yml` — network packet capture
 
 Mock packets (no Scapy/root needed) in a single pane:
 
@@ -86,7 +86,7 @@ proto:ICMP len:94  src:192.168.1.100       dst:192.168.1.1       payload:Echo re
 To switch to real capture (requires Scapy + root):
 
 ```yaml
-# In config-samples/network-capture.yml, change:
+# In config-samples/single_network_single_tab.yml, change:
 network_backend: scapy
 interface: lo0                # your real interface
 bpf_filter: "udp port 5683"
@@ -98,10 +98,10 @@ Then:
 # Linux: set capabilities once (no need for sudo after)
 sudo setcap cap_net_raw=+ep $(which python3)
 # macOS / Windows: run as root
-sudo python3 -m backend.server run --config config-samples/network-capture.yml
+sudo python3 -m backend.server run --config config-samples/single_network_single_tab.yml
 ```
 
-### `three-tab-uart-file-udp-coap.yml` — UART + file tail + UDP with CoAP plugin
+### `double_uart_file_udp_coap_three_tabs.yml` — UART + file tail + UDP with CoAP plugin
 
 Three tabs showing different source types:
 
@@ -111,19 +111,19 @@ Three tabs showing different source types:
 | Logs | APP_LOG (`/var/log/myapp.log`) | Tail-follows a file |
 | Net | TELEMETRY (UDP :6000), COAP_DEVICE (UDP :6001) | CoAP pane has hex-coap plugin |
 
-### `single-tab-dual-pane.yml` — simplest layout
+### `double_uart_minimal_single_tab.yml` — simplest layout
 
 One tab with two UART devices side-by-side.
 
-### `multi-tab-multi-baud.yml` — UART at different baud rates
+### `double_uart_udp_multi_baud_two_tabs.yml` — UART at different baud rates
 
 Demonstrates per-source baudrate configuration.
 
-### `udp-cbor-datagram.yml` — structured CBOR diagnostics
+### `three_udp_cbor_two_tabs.yml` — structured CBOR diagnostics
 
 UDP source with a CBOR datagram parser that decodes embedded structured data.
 
-### `annotated-full-config.yml` — reference config
+### `reference_full_annotated.yml` — reference config
 
 Every supported option with inline comments explaining each field.
 
@@ -160,7 +160,7 @@ The server now sets `SO_REUSEADDR` so restarts should not fail on TIME_WAIT sock
 
 **No packets appearing in the Network tab**
 
-- Check `embed-log run --config config-samples/network-capture.yml` (standalone, mock backend)
+- Check `embed-log run --config config-samples/single_network_single_tab.yml` (standalone, mock backend)
 - In the full demo, click the **Network** tab at the end of the tab bar
 - Verify the server started: `curl http://127.0.0.1:8080/api/health` should return `{"status":"ok"}`
 
