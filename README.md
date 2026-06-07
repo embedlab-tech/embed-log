@@ -48,6 +48,10 @@ embed-log update --sha <sha>
 
 ## Quick start
 
+**Want to see it working now?** Run `embed-log demo` — no config, no hardware, opens in the browser immediately. See [Demo without hardware](#demo-without-hardware).
+
+**Setting up with real devices:**
+
 **Step 1** — find serial ports:
 
 ```bash
@@ -123,10 +127,28 @@ This generates only the commands file; the config is not modified.
 
 ### Demo without hardware
 
+The fastest way to see embed-log in action — no devices, no config needed:
+
 ```bash
 embed-log demo
 ```
 
+This starts a local server with simulated traffic across 7 tabs (UART, UDP, CBOR, CoAP, network capture). Open `http://127.0.0.1:8080/` and stop with `Ctrl+C`.
+
+Useful flags:
+
+```bash
+embed-log demo --fast            # faster ticks for testing
+embed-log demo --tick-ms 200     # custom tick interval (default: 500)
+embed-log demo --print-config    # show the demo config and exit
+embed-log demo --no-browser      # don't auto-open the browser
+```
+
+To see the full demo config (sources, tabs, plugins):
+
+```bash
+embed-log demo --print-config
+```
 
 ## Config reference
 
@@ -249,6 +271,8 @@ embed-log init --config x.yml --add-uart-shell  # TX suggestions for existing co
 embed-log doctor --config embed-log.yml   # validate config
 embed-log run --config embed-log.yml      # start the UI
 embed-log demo                            # simulated traffic, no hardware
+embed-log demo --fast                    # faster ticks for testing
+embed-log demo --print-config            # show demo config and exit
 embed-log ports                           # list serial ports
 embed-log onboard                         # practical CLI orientation
 embed-log sessions list                   # list saved sessions
