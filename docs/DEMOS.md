@@ -35,13 +35,13 @@ embed-log demo [--profile PROFILE] [--fast] [--continuous] [--cycles N]
 
 | Flag | Effect |
 |------|--------|
-| `--fast` | Reduces tick interval from 300 ms → 50 ms; tightens random profile delays |
+| `--fast` | Speeds up tick to 50 ms and tightens random profile delays |
 | `--continuous` | Restarts traffic generators when they exit (keeps the demo alive indefinitely) |
 | `--cycles 0` | Same as `--continuous` |
 | `--cycles 50` | Run exactly 50 traffic ticks then stop |
 | `--no-browser` | Don't open the browser |
 | `--log-dir DIR` | Override log output directory |
-| `--tick-ms N` | Set tick interval in milliseconds (overrides --fast) |
+| `--tick-ms N` | Set tick interval in ms (default: 5000; overrides --fast) |
 | `--verbose` | Enable server event logging to stdout |
 
 ### Examples

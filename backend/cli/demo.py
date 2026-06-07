@@ -119,7 +119,11 @@ class DemoRunner:
             return 0
         if self.args.cycles is not None:
             return self.args.cycles
-        return 20 if content_mode == "curated" else 100
+        if content_mode == "curated":
+            return 20
+        if content_mode == "test":
+            return 100
+        return 100
 
     def run(self) -> int:
         """Start the demo and wait for it to finish."""
@@ -128,6 +132,10 @@ class DemoRunner:
             print("Demo config not found.", file=sys.stderr)
             print("Ensure embed-log.demo.yml is bundled or run from the repository root.", file=sys.stderr)
             return 1
+
+        if self.args.print_config:
+            print(demo_config.read_text("utf-8"))
+            return 0
 
         # ── Port cleanup ──
         print("Checking demo ports...")
@@ -189,7 +197,7 @@ class DemoRunner:
             server_cmd.append("-v")
 
         print(f"Starting embed-log server on port {WS_PORT}...")
-        server = subprocess.Popen(server_cmd)
+        server = subprocess.Popen(server_cmd, start_new_session=True)
         self._server_pid = server.pid
         self._processes.append((server, None))
 
@@ -199,6 +207,7 @@ class DemoRunner:
             self._cleanup()
             return 1
         # ── Resolve defaults with --fast ──
+        # ── Resolve defaults ──
         if self.args.fast:
             if self.args.interval_min is None:
                 self.args.interval_min = 0.10
@@ -210,13 +219,13 @@ class DemoRunner:
                 self.args.tick_ms = 50
         else:
             if self.args.interval_min is None:
-                self.args.interval_min = 5.0
+                self.args.interval_min = 10.0
             if self.args.interval_max is None:
-                self.args.interval_max = 20.0
+                self.args.interval_max = 30.0
             if self.args.inject_interval is None:
-                self.args.inject_interval = 5.0
+                self.args.inject_interval = 10.0
             if self.args.tick_ms is None:
-                self.args.tick_ms = 300
+                self.args.tick_ms = 500
 
         # ── Start traffic ──
         profile = self.args.profile
@@ -230,6 +239,8 @@ class DemoRunner:
             print(f"Unknown profile: {profile}", file=sys.stderr)
             self._cleanup()
             return 1
+
+        self._install_signal_handlers()
 
         print("")
         print("Demo running!")
@@ -281,7 +292,7 @@ class DemoRunner:
             "--interval-max", str(self.args.interval_max),
         ]
         print(f"Starting UDP simulator (interval {self.args.interval_min}-{self.args.interval_max}s)...")
-        self._processes.append((subprocess.Popen(cmd), cmd))
+        self._processes.append((subprocess.Popen(cmd, start_new_session=True), cmd))
 
         inject_script = DEMO_UTILS / "inject_log_demo.py"
         if inject_script.is_file():
@@ -296,7 +307,7 @@ class DemoRunner:
                 "--source", "demo",
             ]
             print(f"Starting marker injector (interval {self.args.inject_interval}s)...")
-            self._processes.append((subprocess.Popen(inject_cmd), inject_cmd))
+            self._processes.append((subprocess.Popen(inject_cmd, start_new_session=True), inject_cmd))
 
         deterministic_script = DEMO_UTILS / "deterministic_demo_traffic.py"
         if deterministic_script.is_file():
@@ -304,11 +315,11 @@ class DemoRunner:
                 sys.executable, str(deterministic_script),
                 "--cbor",
                 "--udp", "SENSOR_CBOR=127.0.0.1:6003",
-                "--tick-ms", "500",
+                "--tick-ms", str(self.args.tick_ms),
                 "--cycles", str(self._content_cycles("curated")),
             ]
-            print("Starting CBOR demo traffic (tick 500ms)...")
-            self._processes.append((subprocess.Popen(cbor_cmd), cbor_cmd))
+            print(f"Starting CBOR demo traffic (tick {self.args.tick_ms}ms)...")
+            self._processes.append((subprocess.Popen(cbor_cmd, start_new_session=True), cbor_cmd))
 
     def _start_deterministic_traffic(self, content_mode: str = "test") -> None:
         """Start deterministic demo traffic (test or curated content)."""
@@ -317,22 +328,42 @@ class DemoRunner:
             print(f"Traffic script not found: {deterministic_script}", file=sys.stderr)
             return
 
-        cmd = [
+        cycles = self._content_cycles(content_mode)
+        tick_ms = self.args.tick_ms
+        label = "curated demo" if content_mode == "curated" else "deterministic test"
+
+        # Main traffic: UDP sources
+        main_targets = [
+            "SENSOR_A=127.0.0.1:6000",
+            "SENSOR_B=127.0.0.1:6001",
+            "SENSOR_C=127.0.0.1:6002",
+            "SENSOR_D=127.0.0.1:6004",
+            "SENSOR_COAP=127.0.0.1:6005",
+        ]
+        main_cmd = [
             sys.executable, str(deterministic_script),
             "--content", content_mode,
-            "--udp", "SENSOR_A=127.0.0.1:6000",
-            "--udp", "SENSOR_B=127.0.0.1:6001",
-            "--udp", "SENSOR_C=127.0.0.1:6002",
-            "--udp", "SENSOR_D=127.0.0.1:6004",
-            "--udp", "SENSOR_COAP=127.0.0.1:6005",
-            "--tick-ms", str(self.args.tick_ms),
-            "--cycles", str(self._content_cycles(content_mode)),
+            "--tick-ms", str(tick_ms),
+            "--cycles", str(cycles),
         ]
-        label = "curated demo" if content_mode == "curated" else "deterministic test"
-        print(f"Starting {label} traffic (tick {self.args.tick_ms}ms)...")
-        self._processes.append((subprocess.Popen(cmd), cmd))
+        for target in main_targets:
+            main_cmd.extend(["--udp", target])
+        print(f"Starting {label} traffic (tick {tick_ms}ms)...")
+        self._processes.append((subprocess.Popen(main_cmd, start_new_session=True), main_cmd))
 
-        # ── UART traffic (written directly to master PTY fds) ──
+        # CBOR traffic: one additional CBOR source
+        cbor_cmd = [
+            sys.executable, str(deterministic_script),
+            "--content", content_mode,
+            "--cbor",
+            "--udp", "SENSOR_CBOR=127.0.0.1:6003",
+            "--tick-ms", str(tick_ms),
+            "--cycles", str(cycles),
+        ]
+        print(f"Starting CBOR {label} traffic (tick {tick_ms}ms)...")
+        self._processes.append((subprocess.Popen(cbor_cmd, start_new_session=True), cbor_cmd))
+
+        # UART traffic (written directly to master PTY fds)
         if self._uart_master_fds:
             uart_thread = threading.Thread(
                 target=self._run_uart_traffic,
@@ -341,17 +372,6 @@ class DemoRunner:
                 name="demo-uart",
             )
             uart_thread.start()
-
-        cbor_cmd = [
-            sys.executable, str(deterministic_script),
-            "--content", content_mode,
-            "--cbor",
-            "--udp", "SENSOR_CBOR=127.0.0.1:6003",
-            "--tick-ms", str(self.args.tick_ms),
-            "--cycles", str(self._content_cycles(content_mode)),
-        ]
-        print(f"Starting CBOR {label} traffic (tick {self.args.tick_ms}ms)...")
-        self._processes.append((subprocess.Popen(cbor_cmd), cbor_cmd))
 
     def _run_uart_traffic(self, content_mode: str) -> None:
         """Write deterministic test lines to UART master PTY fds."""
@@ -373,6 +393,23 @@ class DemoRunner:
         except Exception:
             pass
 
+
+    def _install_signal_handlers(self) -> None:
+        """Ensure cleanup runs on Ctrl+C, Ctrl+Z, and terminal close."""
+        def _handler(signum, _frame):
+            self._cleanup()
+            if signum == signal.SIGTSTP:
+                # Re-raise default behaviour so the shell actually suspends us.
+                signal.signal(signal.SIGTSTP, signal.SIG_DFL)
+                os.kill(os.getpid(), signal.SIGTSTP)
+            else:
+                sys.exit(0)
+
+        signal.signal(signal.SIGINT, _handler)
+        signal.signal(signal.SIGTERM, _handler)
+        signal.signal(signal.SIGTSTP, _handler)
+        if hasattr(signal, 'SIGHUP'):
+            signal.signal(signal.SIGHUP, _handler)
 
     def _cleanup(self) -> None:
         """Stop all child processes."""
@@ -408,7 +445,7 @@ class DemoRunner:
             try:
                 proc.kill()
                 proc.wait(timeout=2)
-            except (ProcessLookupError, subprocess.TimeoutExpired):
+            except (ProcessLookupError, ChildProcessError, subprocess.TimeoutExpired):
                 pass
         self._processes.clear()
         # Close UART PTY fds
@@ -438,9 +475,7 @@ def add_subparser(subparsers) -> None:
             "Examples:\n"
             "  embed-log demo\n"
             "  embed-log demo --fast\n"
-            "  embed-log demo --profile deterministic --fast\n"
-            "  embed-log demo --profile random --no-browser\n"
-            "  embed-log demo --profile deterministic --fast --continuous\n"
+            "  embed-log demo --fast --continuous\n"
             "  embed-log demo --cycles 50\n"
             "  embed-log demo --cycles 0\n"
         ),
@@ -464,24 +499,28 @@ def add_subparser(subparsers) -> None:
         help="override the log output directory",
     )
     p.add_argument(
+        "--print-config", action="store_true",
+        help="print the demo config and exit (does not start the server)",
+    )
+    p.add_argument(
         "--fast", action="store_true",
-        help="use faster intervals for testing",
+        help="use faster intervals for demos and testing (tick 50ms)",
     )
     p.add_argument(
         "--tick-ms", type=int, default=None,
-        help="tick interval in ms for curated/deterministic profiles (default: 300, fast: 50)",
+        help="tick interval in ms for curated/deterministic profiles (default: 500, fast: 50)",
     )
     p.add_argument(
         "--interval-min", type=float, default=None,
-        help="random profile minimum interval in seconds (default: 5.0, fast: 0.1)",
+        help="random profile minimum interval in seconds (default: 10, fast: 0.1)",
     )
     p.add_argument(
         "--interval-max", type=float, default=None,
-        help="random profile maximum interval in seconds (default: 20.0, fast: 0.3)",
+        help="random profile maximum interval in seconds (default: 30, fast: 0.3)",
     )
     p.add_argument(
         "--inject-interval", type=float, default=None,
-        help="random profile inject interval in seconds (default: 5, fast: 1)",
+        help="random profile inject interval in seconds (default: 10, fast: 1)",
     )
     p.add_argument(
         "--cycles", type=int, default=None,

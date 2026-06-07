@@ -845,11 +845,20 @@ class LogServer:
 
         def _handler(sig, frame):
             logging.info("shutting down…")
-            self.stop()
-            self.export_session_html("signal")
+            try:
+                self.stop()
+            except Exception:
+                logging.warning("error during shutdown", exc_info=True)
+            try:
+                self.export_session_html("signal")
+            except Exception:
+                logging.warning("session export failed", exc_info=True)
             stop_event.set()
 
         signal.signal(signal.SIGINT, _handler)
         signal.signal(signal.SIGTERM, _handler)
+        if hasattr(signal, 'SIGHUP'):
+            signal.signal(signal.SIGHUP, _handler)
+        signal.signal(signal.SIGTSTP, _handler)
         logging.info("log server running — press Ctrl-C to stop")
         stop_event.wait()
