@@ -102,6 +102,9 @@ def main(argv: list[str] | None = None) -> int:
             return _run_ports(args)
         case "update":
             return _run_update(args)
+        case "hello":
+            print("embed-log hello v1 — this is a test command")
+            return 0
         case "sessions":
             return _run_sessions(argv[1:])
         case _:

@@ -210,6 +210,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     from .update import add_subparser as add_update_subparser
     add_update_subparser(sub)
+    # ── hello ──
+    sub.add_parser(
+        "hello",
+        help="print a greeting and exit (smoke-test target for update verification)",
+        description="Minimal command used to verify CLI update round-trips.",
+    )
 
     # ── parse ──
     p = sub.add_parser(
