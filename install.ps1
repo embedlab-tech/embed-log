@@ -10,13 +10,13 @@
 $ErrorActionPreference = 'Stop'
 
 $Repo = 'krezolekcoder/embed-log'
-$Branch = 'main'
 $RepoUrl = "https://github.com/$Repo.git"
 $MinPy = [Version]'3.10'
-$InstallRefType = if ($env:EMBED_LOG_REF_TYPE) { $env:EMBED_LOG_REF_TYPE } else { 'branch' }
-$InstallRef = if ($env:EMBED_LOG_REF) { $env:EMBED_LOG_REF } else { $Branch }
+$InstallRefType = if ($env:EMBED_LOG_REF_TYPE) { $env:EMBED_LOG_REF_TYPE } else { 'release' }
+$InstallRef = if ($env:EMBED_LOG_REF) { $env:EMBED_LOG_REF } else { 'latest' }
 $OverrideRepo = if ($env:EMBED_LOG_REPO) { $env:EMBED_LOG_REPO } else { $Repo }
 $OverrideRepoUrl = if ($env:EMBED_LOG_REPO_URL) { $env:EMBED_LOG_REPO_URL } else { "https://github.com/$OverrideRepo.git" }
+$InstallMode = if ($env:EMBED_LOG_INSTALL_MODE) { $env:EMBED_LOG_INSTALL_MODE } else { 'install' }
 
 function Write-Info { Write-Host "embed-log $args" -ForegroundColor Cyan }
 function Write-OK { Write-Host "  ✓ $args" -ForegroundColor Green }
@@ -264,7 +264,11 @@ Failed to install embed-log via pipx.
     }
 }
 
-Write-OK "embed-log installed!"
+if ($InstallMode -eq 'update') {
+    Write-OK "embed-log updated!"
+} else {
+    Write-OK "embed-log installed!"
+}
 
 Write-Host ""
 Write-Host "  Run from any terminal:"
@@ -273,7 +277,8 @@ Write-Host "    embed-log --help"
 Write-Host ""
 Write-Host "  Quick start:"
 Write-Host ""
-Write-Host "    embed-log sample-config"
+Write-Host "    embed-log onboard"
+Write-Host "    embed-log init --sample uart --output embed-log.yml"
 Write-Host "    embed-log run --config embed-log.yml"
 Write-Host ""
 Write-Host "  If the command is not found, open a new terminal (PATH refresh)."

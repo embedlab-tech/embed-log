@@ -12,9 +12,11 @@
 # Works on macOS, Linux, and (via WSL/Git-Bash) Windows.
 #
 # Environment overrides (take precedence over CLI args):
-#   EMBED_LOG_REF_TYPE  release|branch|tag|commit  (default: release)
-#   EMBED_LOG_REF       ref value                   (default: latest)
-#   EMBED_LOG_REPO      fork/other repo             (default: krezolekcoder/embed-log)
+#   EMBED_LOG_INSTALL_MODE  install|update              (default: install)
+#   EMBED_LOG_REF_TYPE      release|branch|tag|commit  (default: release)
+#   EMBED_LOG_REF           ref value                   (default: latest)
+#   EMBED_LOG_REPO          fork/other repo             (default: krezolekcoder/embed-log)
+#   EMBED_LOG_REPO_URL      git URL                     (default: https://github.com/krezolekcoder/embed-log.git)
 
 set -euo pipefail
 
@@ -30,6 +32,7 @@ INSTALL_REF_TYPE="${EMBED_LOG_REF_TYPE:-release}"
 INSTALL_REF="${EMBED_LOG_REF:-latest}"
 OVERRIDE_REPO="${EMBED_LOG_REPO:-$REPO}"
 OVERRIDE_REPO_URL="${EMBED_LOG_REPO_URL:-https://github.com/${OVERRIDE_REPO}.git}"
+INSTALL_MODE="${EMBED_LOG_INSTALL_MODE:-install}"
 
 INSTALLER_VERSION="1.0.0"
 # If a --<branch> argument is passed, treat it as a branch install.
@@ -332,7 +335,11 @@ fi
 # ─────────────────────────────────────────────────────────────────
 
 echo ""
-print_ok "embed-log installed!"
+if [ "$INSTALL_MODE" = "update" ]; then
+  print_ok "embed-log updated!"
+else
+  print_ok "embed-log installed!"
+fi
 echo ""
 echo "  Run from any directory:"
 echo ""
@@ -340,7 +347,8 @@ echo "    embed-log --help"
 echo ""
 echo "  Quick start:"
 echo ""
-echo "    embed-log sample-config"
+echo "    embed-log onboard"
+echo "    embed-log init --sample uart --output embed-log.yml"
 echo "    embed-log run --config embed-log.yml"
 echo ""
 echo "  If the command is not found, open a new terminal (PATH refresh)."

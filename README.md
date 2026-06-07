@@ -1,51 +1,17 @@
 # embed-log
-[embed-lab](https://embedlab.tech/) · Log aggregation for embedded development and CI
 
-`embed-log` is a configurable log aggregation server for embedded development and CI.
+[embed-lab](https://embedlab.tech/) · live log aggregation for embedded development and CI.
 
-It reads logs from UART and UDP sources, stores them in per-session artifacts, and streams them live to a browser UI.
-## Get up to speed
+`embed-log` reads logs from UART, UDP, files, and simplified network packet captures, stores each run as a session, and shows the logs live in a browser UI.
 
-Read these in order:
-- `AGENTS.md` — fast repo orientation for humans and coding agents
-- `docs/ARCHITECTURE.md` — end-to-end system flow
-- `docs/BACKEND.md` / `docs/FRONTEND.md` — subsystem details
-- `docs/TESTING.md` — test strategy and commands
+## Install / uninstall
 
-## Quick install
+### macOS / Linux
 
-One command, no clone needed — installs the **latest tagged release**:
+Install latest release:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.sh | bash
-```
-
-Windows (PowerShell 7+):
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.ps1'))
-```
-
-Install a specific version:
-
-```bash
-EMBED_LOG_REF_TYPE=release EMBED_LOG_REF=v1.1.5 curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.sh | bash
-```
-
-Install the **latest** `main` branch — clone and run the installer locally:
-
-```bash
-git clone https://github.com/krezolekcoder/embed-log.git
-cd embed-log
-./install.sh
-```
-
-After install, `embed-log` is available globally (no venv activation needed):
-
-```bash
-embed-log sample-config
-embed-log run --config embed-log.yml
-embed-log demo --no-open-browser
 ```
 
 Uninstall:
@@ -54,20 +20,296 @@ Uninstall:
 curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/uninstall.sh | bash
 ```
 
-### Fonts
+### Windows PowerShell 7+
 
-The UI defaults to **JetBrains Mono** (a Nerd Font). If it's not installed,
-the browser falls back through:
-`ui-monospace` → `SFMono-Regular` (macOS) → `Menlo` → `Monaco`
-→ `Consolas` (Windows) → `'Courier New'` → `monospace`
+Install latest release:
 
-Windows (PowerShell 7+):
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.ps1'))
+```
+
+Uninstall:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/krezolekcoder/embed-log/main/uninstall.ps1'))
 ```
 
-### Developer setup
+## Update an existing install
+
+Use the installer scripts for first install. After `embed-log` is installed, update through the CLI:
+
+```bash
+embed-log update
+embed-log update --sha <sha>
+```
+
+`embed-log update --sha <sha>` refuses commits older than the latest release unless you pass `--allow-rollback`.
+
+
+## Quick start
+
+**Want to see it working now?** Run `embed-log demo` — no config, no hardware, opens in the browser immediately. See [Demo without hardware](#demo-without-hardware).
+
+**Setting up with real devices:**
+
+**Step 1** — find serial ports:
+
+```bash
+embed-log ports
+```
+
+**Step 2** — generate a config (double UART + UDP by default):
+
+```bash
+embed-log init
+```
+
+This writes `embed-log.yml`. Edit the `port:` values to match your devices.
+
+To start from a specific sample:
+
+```bash
+embed-log init --list                                    # see all samples
+embed-log init --sample single_uart_single_tab           # pick one
+```
+
+**Step 3** — validate the config:
+
+```bash
+embed-log doctor --config embed-log.yml
+```
+
+**Step 4** — start the UI:
+
+```bash
+embed-log run --config embed-log.yml
+```
+
+Open `http://127.0.0.1:8080/`. Stop with `Ctrl+C`.
+
+Or set the config once for this shell:
+
+```bash
+export EMBED_LOG_CONFIG_YML_PATH="$PWD/embed-log.yml"
+embed-log run
+```
+
+Windows PowerShell:
+
+```powershell
+$env:EMBED_LOG_CONFIG_YML_PATH = "C:\path\to\embed-log.yml"
+embed-log run
+```
+
+
+### UART TX autocomplete (optional)
+
+embed-log can show TX command suggestions in the browser UI. Focus a UART input field and press `Tab` to cycle matching commands.
+
+**Generate alongside a new config:**
+
+```bash
+embed-log init --add-uart-shell
+```
+
+This writes `embed-log.commands.yml` next to `embed-log.yml` with starter commands for every UART source.
+
+**Generate for an existing config:**
+
+```bash
+embed-log init --config embed-log.yml --add-uart-shell
+```
+
+This generates only the commands file; the config is not modified.
+
+`embed-log run` loads `<config-stem>.commands.yml` automatically when it is next to the config file. Edit the commands to match the shell your firmware actually supports.
+
+
+### Demo without hardware
+
+The fastest way to see embed-log in action — no devices, no config needed:
+
+```bash
+embed-log demo
+```
+
+This starts a local server with simulated traffic across 7 tabs (UART, UDP, CBOR, CoAP, network capture). Open `http://127.0.0.1:8080/` and stop with `Ctrl+C`.
+
+Useful flags:
+
+```bash
+embed-log demo --fast            # faster ticks for testing
+embed-log demo --tick-ms 200     # custom tick interval (default: 500)
+embed-log demo --print-config    # show the demo config and exit
+embed-log demo --no-browser      # don't auto-open the browser
+```
+
+To see the full demo config (sources, tabs, plugins):
+
+```bash
+embed-log demo --print-config
+```
+
+## Config reference
+
+### Example: two UART devices
+
+```yaml
+version: 1
+
+server:
+  host: 127.0.0.1
+  ws_port: 8080
+  app_name: embed-log
+  open_browser: true
+  timestamp_mode: absolute
+
+logs:
+  dir: logs/
+
+baudrate: 115200
+
+sources:
+  - name: DUT
+    type: uart
+    port: /dev/ttyUSB0
+
+  - name: AUX
+    type: uart
+    port: /dev/ttyUSB1
+
+tabs:
+  - label: Devices
+    panes: [DUT, AUX]
+```
+
+### Example: one UART plus one UDP source
+
+Useful when a test runner, for example `PYTEST`, sends logs over UDP.
+
+```yaml
+version: 1
+
+server:
+  host: 127.0.0.1
+  ws_port: 8080
+  app_name: embed-log
+  open_browser: true
+  timestamp_mode: absolute
+
+logs:
+  dir: logs/
+
+baudrate: 115200
+
+sources:
+  - name: DUT
+    type: uart
+    port: /dev/ttyUSB0
+
+  - name: PYTEST
+    type: udp
+    port: 6000
+
+tabs:
+  - label: Desk
+    panes: [DUT, PYTEST]
+```
+
+
+## Ready-made config samples
+
+List all samples:
+
+```bash
+embed-log init --list
+```
+
+Generate from a sample:
+
+```bash
+embed-log init --sample double_uart_udp_two_tabs --output embed-log.yml
+```
+
+| Sample | Use when |
+|---|---|
+| `single_uart_single_tab` | One UART source in one tab |
+| `double_uart_single_tab` | Two UART panes side-by-side in one tab |
+| `double_uart_udp_two_tabs` | Two UART panes plus one UDP/pytest tab |
+| `double_uart_network_two_tabs` | Two UART panes plus a packet-capture network tab |
+| `double_uart_udp_coap_two_tabs` | Two UART panes plus UDP panes using the CoAP plugin |
+| `single_file_single_tab` | One file-tail source in one tab |
+| `double_uart_file_two_tabs` | Two UART panes plus a file-tail log tab |
+| `double_uart_minimal_single_tab` | Minimal two-UART single-tab layout |
+| `double_uart_udp_multi_baud_two_tabs` | Two UARTs with different baudrates plus a UDP tab |
+| `double_uart_file_udp_coap_three_tabs` | Two UARTs, file tailing, UDP, and CoAP across three tabs |
+| `single_network_single_tab` | Simplified packet capture in one tab |
+| `three_udp_cbor_two_tabs` | Two CBOR UDP sources plus one text UDP monitor |
+| `reference_full_annotated` | Every config option documented inline |
+
+The same files are in `config-samples/` in this repo.
+
+
+## Agents / quick repo orientation
+
+```bash
+embed-log doctor
+embed-log onboard --samples
+embed-log init --list
+```
+
+`embed-log onboard --json` prints stable machine-readable orientation: version, install source, active config, samples, commands, docs, and next steps.
+
+
+## Common commands
+
+```bash
+embed-log init                            # generate default config
+embed-log init --list                     # list available samples
+embed-log init --add-uart-shell           # config + TX command suggestions
+embed-log init --config x.yml --add-uart-shell  # TX suggestions for existing config
+embed-log doctor --config embed-log.yml   # validate config
+embed-log run --config embed-log.yml      # start the UI
+embed-log demo                            # simulated traffic, no hardware
+embed-log demo --fast                    # faster ticks for testing
+embed-log demo --print-config            # show demo config and exit
+embed-log ports                           # list serial ports
+embed-log onboard                         # practical CLI orientation
+embed-log sessions list                   # list saved sessions
+embed-log update                          # install the latest release
+embed-log update --sha <sha>              # install a specific commit
+embed-log version
+```
+
+## Sessions and exported reports
+
+Every run is saved under the configured `logs.dir` as a session. The UI can export a portable `session.html` report.
+
+CLI session commands:
+
+```bash
+embed-log sessions list
+embed-log sessions info <session-id>
+embed-log sessions export <session-id>
+```
+
+Merge existing raw log files into a standalone HTML report:
+
+```bash
+embed-log merge --tab "My Report" SENSOR_A sensor.log --output report.html
+```
+
+## Install from source
+
+Use this only if you want the latest `main` branch or local development.
+
+```bash
+git clone https://github.com/krezolekcoder/embed-log.git
+cd embed-log
+./install.sh
+```
+
+Developer setup:
 
 ```bash
 python3 -m venv .venv
@@ -76,191 +318,14 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-## Run with a config file
+## More documentation
 
-Validate first:
+- `docs/README.md` — documentation index
+- `docs/ARCHITECTURE.md` — end-to-end system flow
+- `docs/BACKEND.md` / `docs/FRONTEND.md` — subsystem details
+- `docs/TESTING.md` — test strategy and commands
 
-```bash
-embed-log validate --config embed-log.yml
-```
-
-Run:
-```bash
-embed-log run --config embed-log.yml
-# or override timestamp mode from the CLI
-embed-log run --config embed-log.yml --timestamp-mode relative
-```
-
-UI default:
-
-```text
-http://127.0.0.1:8080/
-```
-
-## Configuration
-
-Write the bundled example into the current directory with:
-
-```bash
-embed-log sample-config
-```
-
-See the `config-samples/` directory for additional ready-to-use examples.
-
-The UI layout supports 1 or 2 panes per tab. A three-source setup therefore uses two tabs below.
-
-| File | What it shows |
-|---|---|
-| `single-tab-dual-pane.yml` | Two UART sources side-by-side |
-| `multi-tab-multi-baud.yml` | Two tabs with different UART baudrates + UDP |
-| `udp-cbor-datagram.yml` | UDP sources with CBOR datagram parser |
-| `annotated-full-config.yml` | All options documented inline |
-
-### Timestamp modes
-
-- `absolute` — wall-clock timestamps like `05-29 12:42:47.123`
-- `relative` — elapsed time from the first log line like `T+00:00:01.234`
-
-In the UI you can switch between absolute and relative time when the session carries the required origin metadata. Exported HTML snapshots embed that metadata too, so the same toggle works offline.
-
-### Source types
-
-| Type | Syntax | Parser options |
-|---|---|---|
-| `uart` | Serial port path | `text` (default), `cbor-datagram` |
-| `udp` | UDP port number | `text` (default), `cbor-datagram` |
-
-Add a `parser:` block to use structured decoding:
-
-```yaml
-sources:
-  - name: TELEMETRY
-    type: udp
-    port: 6001
-    parser:
-      type: cbor-datagram
-```
-
-## CLI reference
-
-| Command | Description |
-|---|---|
-| `run` | Start the log server from a config file |
-| `demo` | Start a local demo with simulated traffic (no hardware needed) |
-| `merge` | Merge raw log files into a standalone static HTML report |
-| `parse` | Extract raw log files from an exported session HTML |
-| `tail-file` | Tail a file and forward lines to a UDP source |
-| `version` | Show version and environment information |
-| `ports` | List detected serial ports |
-| `update` | Update embed-log to a new version |
-| `sessions` | List, inspect, and export session artifacts |
-
-### `run`
-
-```bash
-# write bundled starter config
-embed-log sample-config --output embed-log.yml
-
-# or pick a template from config-samples/
-embed-log sample-config --sample single-tab-dual-pane.yml --output embed-log.yml
-
-# validate config
-embed-log validate --config embed-log.yml
-
-# run app
-embed-log run --config embed-log.yml
-
-# run bundled demo config from any directory
-embed-log demo --no-open-browser
-
-# deterministic fast demo for local UI testing (repo checkout)
-./run_demo.sh --profile test --fast --no-browser
-
-# faster random demo traffic for manual testing (repo checkout)
-./run_demo.sh --profile random --fast --no-browser
-```
-
-See `config-samples/` for example config files.
-
-### `demo`
-
-Start a local demo with simulated traffic — useful for testing the UI without real hardware. Uses the bundled `embed-log.demo.yml` config.
-
-```bash
-embed-log demo
-embed-log demo --profile test
-embed-log demo --profile random --fast --no-browser
-```
-
-Profiles: `random` (interactive, default), `test` / `deterministic` (for UI tests).
-
-### `merge`
-
-Take recorded log files and produce a portable static HTML — useful in CI for archiving test runs:
-
-```bash
-embed-log merge --tab "My Report" SENSOR_A sensor.log --output report.html
-```
-
-Each `--tab` takes a label, a pane name, and a log file path. Repeat `--tab` for multiple tabs.
-
-### `parse`
-
-Extract raw log files from a previously exported session HTML:
-
-```bash
-embed-log parse session.html
-embed-log parse session.html --output my-session
-```
-
-### `tail-file`
-
-Forward log lines from an existing file into a running embed-log UDP source. Useful for integrating file-based loggers:
-
-```bash
-embed-log tail-file app.log 127.0.0.1:6000
-embed-log tail-file app.log 127.0.0.1:6000 --from-start
-```
-
-### `version`
-
-```bash
-embed-log version
-embed-log version --json
-```
-
-### `ports`
-
-```bash
-embed-log ports
-embed-log ports --json
-```
-
-### `update`
-
-```bash
-embed-log update                # update to latest release
-embed-log update --tag v1.1.5   # specific tag
-embed-log update --branch main  # specific branch
-```
-
-### `sessions`
-
-```bash
-embed-log sessions list
-embed-log sessions list --search build-123
-embed-log sessions list --with-markers --app demo
-embed-log sessions info <session-id>
-embed-log sessions logs <session-id> --grep "timeout"
-embed-log sessions logs <session-id> --pane SENSOR_A --grep "error" --tail 20
-embed-log sessions export <session-id>
-embed-log sessions marker list <session-id> --search boot
-```
-
-Use `embed-log sessions --help` and `embed-log sessions <subcommand> --help` for the full flag reference.
-
-
-## Testing
+## Testing this repo
 
 Backend tests:
 
@@ -274,7 +339,3 @@ UI tests:
 cd tests-ui
 npm test
 ```
-
-## More docs
-
-See `docs/README.md` for the curated documentation index.

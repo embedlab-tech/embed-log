@@ -11,7 +11,8 @@ from pathlib import Path
 from serial.tools import list_ports
 
 from ..config import ConfigError, load_config
-from .config_resolution import ENV_CONFIG_PATH, resolve_config_path
+import yaml
+from .config_resolution import ENV_CONFIG_PATH, resolve_active_config_path, resolve_config_path
 
 
 def _detected_serial_ports() -> list[dict[str, str]]:
@@ -87,7 +88,7 @@ def _display_version_line() -> str:
 
 def _run_version(args: argparse.Namespace) -> int:
 
-    checks: list[dict] = []
+    checks: list[tuple[str, str]] = []
     ok = True
 
     version, commit, source_kind, ref_type, ref, local_path = _load_install_identity()
@@ -214,11 +215,64 @@ def _status_icon(status: str) -> str:
     return "!!" if any(token in status for token in _BAD_TOKENS) else "OK"
 
 
-def _resolved_source_label(args: argparse.Namespace) -> str:
-    """Return a human label for which source supplied the effective config."""
-    if getattr(args, "config", None):
-        return "--config"
-    return ENV_CONFIG_PATH
+def _format_source_detail(source) -> str:
+    if source.type == "network_capture":
+        endpoint = source.interface or "?"
+    else:
+        endpoint = str(source.port)
+    return f"{source.name} ({source.type}:{endpoint})"
+
+
+def _format_tab_detail(tab) -> str:
+    panes = ", ".join(pane.source for pane in tab.panes)
+    return f"{tab.label} [{panes}]"
+
+
+def _command_file_candidates(config_path: Path) -> list[Path]:
+    return [
+        config_path.with_name(f"{config_path.stem}.commands.yml"),
+        Path("embed-log.commands.yml"),
+    ]
+
+
+def _inspect_uart_command_file(config_path: Path, source_names: list[str]) -> list[tuple[str, str]]:
+    """Return doctor rows for the UART TX command suggestion file, if present."""
+    for command_path in _command_file_candidates(config_path):
+        if not command_path.is_file():
+            continue
+        checks: list[tuple[str, str]] = [("UART command file", str(command_path))]
+        try:
+            data = yaml.safe_load(command_path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError) as exc:
+            checks.append(("UART commands", f"PARSE_ERROR: {exc}"))
+            return checks
+
+        sources = data.get("sources", {}) if isinstance(data, dict) else {}
+        if not isinstance(sources, dict):
+            checks.append(("UART commands", "PARSE_ERROR: sources must be a mapping"))
+            return checks
+
+        counts: list[str] = []
+        source_set = set(source_names)
+        for name in source_names:
+            commands = sources.get(name)
+            if isinstance(commands, list):
+                count = sum(1 for command in commands if isinstance(command, str) and command)
+                counts.append(f"{name}: {count}")
+        unknown = [
+            str(name)
+            for name in sources
+            if isinstance(name, str) and name not in source_set
+        ]
+
+        if counts:
+            checks.append(("UART commands", ", ".join(counts)))
+        else:
+            checks.append(("UART commands", "0 for configured sources"))
+        if unknown:
+            checks.append(("UART command sources ignored", ", ".join(sorted(unknown))))
+        return checks
+    return []
 
 
 def _collect_doctor_sections(args: argparse.Namespace) -> list[tuple[str, list[tuple[str, str]]]]:
@@ -260,18 +314,51 @@ def _collect_doctor_sections(args: argparse.Namespace) -> list[tuple[str, list[t
             else f"{default_cfg}  (not present)",
         )
     ]
-    resolved = resolve_config_path(args.config)
-    if resolved is not None:
+    resolved = resolve_active_config_path(args.config)
+    if resolved.path is not None:
         config_checks.append(
             (
                 "effective config",
-                f"{resolved}  (from {_resolved_source_label(args)})",
+                f"{resolved.path}  (from {resolved.source})",
             )
         )
+        if resolved.path.is_file():
+            config_checks.append(("config exists", "yes"))
+            try:
+                cfg = load_config(resolved.path)
+            except ConfigError as exc:
+                config_checks.append(("config parse", f"PARSE_ERROR: {exc}"))
+            else:
+                config_checks.append(
+                    (
+                        "sources",
+                        ", ".join(_format_source_detail(source) for source in cfg.sources)
+                        or "(none configured)",
+                    )
+                )
+                config_checks.append(
+                    (
+                        "tabs",
+                        ", ".join(_format_tab_detail(tab) for tab in cfg.tabs)
+                        or "(none configured)",
+                    )
+                )
+                pane_count = sum(len(tab.panes) for tab in cfg.tabs)
+                config_checks.append(("panes", f"{pane_count} configured"))
+                config_checks.append(("logs will be written", cfg.logs.dir))
+                config_checks.extend(
+                    _inspect_uart_command_file(
+                        resolved.path,
+                        [source.name for source in cfg.sources if source.type == "uart"],
+                    )
+                )
+        else:
+            config_checks.append(("config exists", f"MISSING: {resolved.path}"))
     else:
         config_checks.append(
-            ("effective config", "(none — will use inline flags)")
+            ("effective config", "(none — use --config, EMBED_LOG_CONFIG_YML_PATH, ./embed-log.yml, or inline flags)")
         )
+        config_checks.append(("config exists", "(no active config)"))
     sections.append(("Config", config_checks))
 
     # ── Install ──
@@ -336,6 +423,7 @@ def _run_doctor(args: argparse.Namespace) -> int:
 
 
 def _run_ports(args: argparse.Namespace) -> int:
+    ports = _detected_serial_ports()
 
     if args.json:
         print(json.dumps(ports))

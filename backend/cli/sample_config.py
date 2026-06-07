@@ -8,11 +8,25 @@ import sys
 from pathlib import Path
 
 
-def _bundled_samples_dir() -> Path | None:
-    from . import _bundled_resource_root
+_SAMPLE_DESCRIPTIONS: dict[str, str] = {
+    "single_uart_single_tab.yml": "one UART source in one tab",
+    "double_uart_single_tab.yml": "two UART panes side-by-side in one tab",
+    "double_uart_udp_two_tabs.yml": "two UART panes plus one UDP/pytest tab",
+    "double_uart_network_two_tabs.yml": "two UART panes plus a packet-capture network tab",
+    "double_uart_udp_coap_two_tabs.yml": "two UART panes plus UDP panes with the CoAP plugin",
+    "single_file_single_tab.yml": "one file-tail source in one tab",
+    "double_uart_file_two_tabs.yml": "two UART panes plus a file-tail log tab",
+    "double_uart_minimal_single_tab.yml": "minimal two-UART single-tab layout",
+    "double_uart_udp_multi_baud_two_tabs.yml": "two UARTs with different baudrates plus a UDP tab",
+    "double_uart_file_udp_coap_three_tabs.yml": "two UARTs, file tailing, UDP, and CoAP across three tabs",
+    "single_network_single_tab.yml": "one packet-capture source in one tab",
+    "three_udp_cbor_two_tabs.yml": "two CBOR UDP sources plus one text UDP monitor",
+    "reference_full_annotated.yml": "full annotated reference config",
+}
 
-    path = _bundled_resource_root() / "config-samples"
-    return path if path.is_dir() else None
+_SAMPLE_ORDER = {name: index for index, name in enumerate(_SAMPLE_DESCRIPTIONS)}
+
+
 
 
 def _repo_samples_dir() -> Path:
@@ -22,34 +36,20 @@ def _repo_samples_dir() -> Path:
 
 
 def _list_samples() -> list[Path]:
-    """Return sorted list of available YAML sample files."""
-    seen: dict[str, Path] = {}
-
-    bundled_dir = _bundled_samples_dir()
-    if bundled_dir is not None:
-        for sample in sorted(bundled_dir.glob("*.yml")):
-            seen.setdefault(sample.name, sample)
-
-    repo_dir = _repo_samples_dir()
-    if repo_dir.is_dir():
-        for sample in sorted(repo_dir.glob("*.yml")):
-            seen.setdefault(sample.name, sample)
-
-    return [seen[name] for name in sorted(seen)]
+    """Return canonical YAML sample files in user-facing order."""
+    samples_dir = _repo_samples_dir()
+    if not samples_dir.is_dir():
+        return []
+    return sorted(
+        samples_dir.glob("*.yml"),
+        key=lambda path: (_SAMPLE_ORDER.get(path.name, len(_SAMPLE_ORDER)), path.name),
+    )
 
 
 def _describe(sample: Path) -> str:
-    """Extract the first useful comment line from a sample file."""
-    try:
-        text = sample.read_text("utf-8")
-        for line in text.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("#"):
-                content = stripped.lstrip("#").strip()
-                if content and not content.startswith("embed-log"):
-                    return content
-    except OSError:
-        pass
+    """Return the short user-facing description for a sample config."""
+    if description := _SAMPLE_DESCRIPTIONS.get(sample.name):
+        return description
     return ""
 
 
@@ -62,6 +62,10 @@ def _resolve_default_sample() -> Path:
         label="Bundled sample config",
     )
 
+def _shell_config_path(output: Path) -> str:
+    return str(output) if output.is_absolute() else f"$PWD/{output}"
+
+
 
 def _run_sample_config(args: argparse.Namespace) -> int:
     samples = _list_samples()
@@ -72,11 +76,7 @@ def _run_sample_config(args: argparse.Namespace) -> int:
             return 1
         print("Available config samples:")
         for sample in samples:
-            desc = _describe(sample)
-            if desc:
-                print(f"  {sample.name}  — {desc}")
-            else:
-                print(f"  {sample.name}")
+            print(f"  {sample.name.removesuffix('.yml'):<40} {_describe(sample)}")
         return 0
 
     if args.sample:
@@ -102,20 +102,28 @@ def _run_sample_config(args: argparse.Namespace) -> int:
     output.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(chosen, output)
     print(f"Created: {output}  (from {chosen.name})")
+    print("")
+    print("Next commands:")
+    print(f"  embed-log doctor --config {output}")
+    print(f"  embed-log run --config {output}")
+    print("")
+    print("Or set the config once for this shell:")
+    print(f"  export EMBED_LOG_CONFIG_YML_PATH=\"{_shell_config_path(output)}\"")
+    print("  embed-log run")
     return 0
 
 
 def add_subparser(subparsers) -> None:
     p = subparsers.add_parser(
         "sample-config",
-        help="generate a config file from a template",
-        description="Copy the bundled default config or pick a specific sample by filename.",
+        help=argparse.SUPPRESS,
+        description="Deprecated alias for `embed-log init`.",
         epilog=(
             "Examples:\n"
             "  embed-log sample-config\n"
             "  embed-log sample-config --list\n"
-            "  embed-log sample-config --sample single-tab-dual-pane.yml\n"
-            "  embed-log sample-config --sample multi-tab-multi-baud.yml -o my-config.yml --force\n"
+            "  embed-log sample-config --sample double_uart_minimal_single_tab.yml\n"
+            "  embed-log sample-config --sample double_uart_udp_multi_baud_two_tabs.yml -o my-config.yml --force\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

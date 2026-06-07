@@ -31,7 +31,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; iex ((New-Object Sys
 After install:
 
 ```bash
-embed-log sample-config
+embed-log init
 embed-log run --config embed-log.yml
 embed-log demo --no-open-browser
 ```
@@ -86,7 +86,7 @@ pip install -e .
 
 Then use:
 ```bash
-embed-log sample-config
+embed-log init
 embed-log validate --config embed-log.yml
 embed-log run --config embed-log.yml
 embed-log demo --no-open-browser
@@ -94,7 +94,7 @@ embed-log demo --no-open-browser
 
 If `embed-log` is not on your PATH in the venv, use:
 ```bash
-python3 -m backend.server sample-config
+python3 -m backend.server init
 python3 -m backend.server validate --config embed-log.yml
 python3 -m backend.server run --config embed-log.yml
 python3 -m backend.server demo --no-open-browser

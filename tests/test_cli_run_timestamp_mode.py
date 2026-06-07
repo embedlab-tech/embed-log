@@ -42,7 +42,7 @@ tabs:
 
         self.assertEqual(rc, 0)
         self.assertEqual("relative", run_app.call_args.kwargs["timestamp_mode"])
-    def test_no_sources_message_points_to_sample_config(self):
+    def test_no_sources_message_points_to_init(self):
         parser = build_parser()
         args = parser.parse_args(["run"])
         stderr = io.StringIO()
@@ -51,7 +51,7 @@ tabs:
             rc = _run_run(args)
 
         self.assertEqual(rc, 1)
-        self.assertIn("embed-log sample-config", stderr.getvalue())
+        self.assertIn("embed-log init", stderr.getvalue())
         self.assertNotIn("embed-log create-config", stderr.getvalue())
 
 

@@ -23,7 +23,7 @@ class ParserStructureTests(unittest.TestCase):
         """All expected subcommands must be registered."""
         expected = {
             "run", "demo", "sessions", "merge", "parse",
-            "version", "ports", "sample-config",
+            "version", "ports", "init", "onboard", "update",
         }
         # subparsers are stored in the _subparsers action
         subparser_actions = [

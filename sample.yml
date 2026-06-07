@@ -1,0 +1,24 @@
+# embed-log starter: one UART device
+version: 1
+
+server:
+  host: 127.0.0.1
+  ws_port: 8080
+  app_name: embed-log
+  open_browser: true
+  timestamp_mode: absolute
+
+logs:
+  dir: logs/
+
+baudrate: 115200
+
+sources:
+  - name: DUT
+    type: uart
+    port: /dev/ttyUSB0
+    inject_port: 5001
+
+tabs:
+  - label: Device
+    panes: [DUT]

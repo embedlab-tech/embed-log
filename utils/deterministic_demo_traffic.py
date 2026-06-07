@@ -493,12 +493,33 @@ CURATED_CBOR: dict[int, list[dict]] = {
     16: [{"src": "DIAG", "kind": "sync", "state": "IDLE"}],
 }
 
+CURATED_COAP: dict[int, list[str]] = {
+    1:  [f"coap {COAP_DEMO_HEX_LIST[7]}"],                                                   # device registers via .well-known/core
+    2:  [f"coap {COAP_DEMO_HEX_LIST[3]}"],                                                   # registration ACK
+    3:  [f"coap {COAP_DEMO_HEX_LIST[4]}"],                                                   # host → GET /sensors (status query)
+    4:  [f"coap {COAP_DEMO_HEX_LIST[0]}"],                                                   # device receives CON /foo/bar
+    5:  [f"coap {COAP_DEMO_HEX_LIST[2]}",                                                    # device → 200 OK with sensor payload
+         f"coap {COAP_DEMO_HEX_LIST[1]}"],                                                   # follow-up CON /temp
+    6:  [f"coap {COAP_DEMO_HEX_LIST[6]}"],                                                   # host → GET /cfg (config query)
+    7:  [f"coap {COAP_DEMO_HEX_LIST[10]}"],                                                  # device processes /temp request
+    8:  [f"coap {COAP_DEMO_HEX_LIST[5]}"],                                                   # device → RST (config unavailable)
+    9:  [],
+    10: [f"coap {COAP_DEMO_HEX_LIST[8]}"],                                                   # host → GET /sessions/42 (health)
+    11: [f"coap {COAP_DEMO_HEX_LIST[11]}"],                                                  # device receives /data query
+    12: [f"coap {COAP_DEMO_HEX_LIST[14]}"],                                                  # device → 200 OK healthy
+    13: [f"coap {COAP_DEMO_HEX_LIST[9]}"],                                                   # session close ACK
+    14: [f"coap {COAP_DEMO_HEX_LIST[13]}"],                                                  # final cfg exchange
+    15: [f"coap {COAP_DEMO_HEX_LIST[5]}"],                                                   # RST — session over
+    16: [],
+}
+
 # Source name → content dict mapping for curated mode
 CURATED_LINES: dict[str, dict[int, list[str]]] = {
     "SENSOR_A": CURATED_DEVICE_A,
     "SENSOR_B": CURATED_HOST,
     "SENSOR_C": CURATED_AUX,
     "SENSOR_D": CURATED_PYTEST,
+    "SENSOR_COAP": CURATED_COAP,
 }
 
 CURATED_MARKERS: list[tuple[int, str, str, str]] = [
