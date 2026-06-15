@@ -1,64 +1,50 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
-
-# C extensions
-*.so
-
-# Distribution / packaging
-.Python
-build/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual environments
-.venv/
-venv/
-ENV/
-env/
-
-# Tool caches
-.mypy_cache/
-.pytest_cache/
-.ruff_cache/
-.coverage
-.coverage.*
-htmlcov/
-.tox/
-.nox/
-
-# IDE / editor
-.vscode/
-.idea/
+# OS/editor noise
+.DS_Store
+.AppleDouble
+.LSOverride
+*~
 *.swp
 *.swo
 
-# OS files
-.DS_Store
+# Rust build outputs
+/target/
+**/target/
+/dist/
 
-# Local runtime logs/artifacts
-logs/
-.benchmark-runs/
-*.log
-
-# Node / Playwright UI tests
+# Node dependencies
 node_modules/
-tests-ui/.tmp/
-tests-ui/playwright-report/
-tests-ui/test-results/
+**/node_modules/
 
-# Benchmark output
-.benchmark-runs/
+# Test and browser artifacts
+test-results/
+**/test-results/
+playwright-report/
+**/playwright-report/
+coverage/
+**/coverage/
+.nyc_output/
+
+# Runtime/demo/generated logs and temp files
+/logs/
 logs/
+.tmp/
+**/.tmp/
+*.log
+*.tmp
+
+# Generated session/static exports
+session.html
+merged.html
+parsed/
+
+# Python build / virtual env
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.venv-review/
+
+# Local environment files
+.env
+.env.*
+!.env.example

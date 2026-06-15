@@ -1,0 +1,43 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/embed-log-core",
+    "crates/embed-log-cli",
+    "crates/embed-log-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+license = "MIT"
+repository = "https://github.com/krezolekcoder/embed-log"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+futures = "0.3"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+
+# Logging / tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Time
+chrono = "0.4"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Misc
+anyhow = "1"
+thiserror = "2"
+slug = "0.1"
+
+# Core crate (used by CLI and Tauri)
+embed-log-core = { path = "crates/embed-log-core" }

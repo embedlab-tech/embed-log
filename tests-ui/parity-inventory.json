@@ -1,0 +1,151 @@
+{
+  "source_repo": "/Users/kamilkrezolek/Programming/krezolekcoder-github/embed-log/tests-ui",
+  "updated_at": "2026-06-13",
+  "current_rust_specs": [
+    {
+      "file": "tests/rust-demo.spec.js",
+      "status": "passing",
+      "covers": [
+        "browser connects to Rust backend",
+        "pane layout from Rust config",
+        "UDP text rendering",
+        "CBOR datagram rendering",
+        "session export API and static replay smoke",
+        "raw pane download smoke",
+        "session rotation smoke"
+      ]
+    }
+  ],
+  "original_unit_tests": [
+    {
+      "file": "unit/logStore.test.js",
+      "status": "ported_passing",
+      "ported_file": "unit/logStore.test.js",
+      "production_module": "frontend/kernel/logStore.js",
+      "verified_by": "npm run test:unit"
+    },
+    {
+      "file": "unit/protocol.test.js",
+      "status": "ported_passing",
+      "ported_file": "unit/protocol.test.js",
+      "production_module": "frontend/kernel/protocol.js",
+      "verified_by": "npm run test:unit"
+    }
+  ],
+  "original_playwright_specs": [
+    {
+      "file": "tests/layout-sync.spec.js",
+      "status": "passing",
+      "verified_with": "npm run test:parity",
+      "notes": "All layout and unwrap scenarios pass; one wrap-scroll timing path has previously shown flake in full-suite runs."
+    },
+    {
+      "file": "tests/stats-display.spec.js",
+      "status": "passing",
+      "verified_with": "npm run test:parity"
+    },
+    {
+      "file": "tests/timestamp-toggle.spec.js",
+      "status": "passing",
+      "verified_with": "npm run test:parity"
+    },
+    {
+      "file": "tests/cbor-decoder.spec.js",
+      "status": "passing",
+      "verified_with": "npm run test:parity"
+    },
+    {
+      "file": "tests/export-replay.spec.js",
+      "status": "passing_with_skip_and_full_suite_flake",
+      "verified_with": "dependency subset: 7/7 passed; full parity: large static export classified flaky",
+      "notes": "Python merge_logs.py dependency removed. Rust merge now backs large static export generation. One per-pane export scenario remains skipped by design."
+    },
+    {
+      "file": "tests/session-workflows.spec.js",
+      "status": "passing_in_isolation_full_suite_flake",
+      "verified_with": "npx playwright test --config=playwright.parity.config.js parity-tests/session-workflows.spec.js => 3 passed",
+      "notes": "Failed in the full concurrent parity run but passed immediately in isolation; treat as suite-level concurrency/flakiness until reproduced deterministically."
+    },
+    {
+      "file": "tests/filter-keyboard.spec.js",
+      "status": "passing",
+      "verified_with": "npm run test:parity"
+    },
+    {
+      "file": "tests/scope-selection.spec.js",
+      "status": "passing_with_skips",
+      "verified_with": "npm run test:parity",
+      "notes": "11/13 scenarios pass; 2 skipped by design."
+    },
+    {
+      "file": "tests/network-capture.spec.js",
+      "status": "passing",
+      "verified_with": "npm run test:parity",
+      "notes": "Mock backend coverage passes; real packet capture remains unimplemented."
+    },
+    {
+      "file": "tests/pane-plugin-coap.spec.js",
+      "status": "passing",
+      "verified_with": "dependency subset: 7/7 passed",
+      "fixes": [
+        "Spec now spawns the Rust backend instead of the original Python backend.",
+        "Exporter embeds real frontend/plugin runtime code so exported CoAP mode is preserved."
+      ]
+    },
+    {
+      "file": "tests/deterministic-demo-coap.spec.js",
+      "status": "passing",
+      "verified_with": "dependency subset: 7/7 passed",
+      "fixes": [
+        "Spec now spawns the Rust backend.",
+        "Python deterministic_demo_traffic.py dependency replaced with inline Node UDP traffic."
+      ]
+    },
+    {
+      "file": "tests/demo-smoke.spec.js",
+      "status": "partial",
+      "verified_with": "npm run test:parity",
+      "notes": "Most scenarios pass. Remaining failures are frontend behavior/parity gaps: live DOM history while tailing and marker persistence after unwrap toggle; font-size control showed flake then passed on retry."
+    },
+    {
+      "file": "tests/clipboard.spec.js",
+      "status": "passing_with_skip",
+      "verified_with": "npm run test:parity",
+      "notes": "3/4 scenarios pass; 1 skipped by design."
+    },
+    {
+      "file": "tests/drag-selection.spec.js",
+      "status": "passing",
+      "verified_with": "npm run test:parity"
+    },
+    {
+      "file": "tests/plugin-failure-isolation.spec.js",
+      "status": "passing",
+      "verified_with": "dependency subset: 7/7 passed",
+      "fixes": [
+        "Spec now spawns Rust backend instead of Python backend.",
+        "frontend/pluginRuntime.js catches plugin analyzeLine failures so raw rendering continues without page errors."
+      ]
+    },
+    {
+      "file": "tests/relative-time-replay.spec.js",
+      "status": "passing",
+      "verified_with": "npx playwright test --config=playwright.parity.config.js parity-tests/relative-time-replay.spec.js => 2 passed",
+      "fixes": [
+        "Python merge_logs.py dependency removed.",
+        "Rust merge supports --timestamp-mode and --first-log-at.",
+        "SessionExporter preserves fixed-offset origin wall-clock display for relative-to-absolute replay."
+      ]
+    }
+  ],
+  "latest_verification": {
+    "cargo_test_workspace": "74 passed",
+    "dependency_unblocked_subset": "7 passed",
+    "full_parity_run": "53 passed, 2 flaky, 5 failed, 4 skipped",
+    "remaining_full_parity_failures": [
+      "demo-smoke: live DOM keeps full pane history while tailing",
+      "demo-smoke: marker persists after unwrap toggle",
+      "session-workflows full-suite concurrency/flaky failures (3 pass in isolation)"
+    ]
+  }
+}
