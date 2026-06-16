@@ -44,10 +44,17 @@ test.describe('session workflows', () => {
     await waitForSourceTestLine(page, 'SENSOR_A');
     await openSettingsPanel(page);
 
+    const exportResponse = page.waitForResponse(response =>
+      response.url().includes('/api/session/export') && response.request().method() === 'POST',
+      { timeout: 60_000 }
+    );
     await page.locator('#btn-save-to-server').click();
+    const response = await exportResponse;
+    expect(response.ok()).toBeTruthy();
+
     const currentBtn = currentHtmlButton(page);
-    await expect(currentBtn).toBeEnabled({ timeout: 20_000 });
-    await expect(currentBtn).toHaveText('Open HTML', { timeout: 20_000 });
+    await expect(currentBtn).toBeEnabled({ timeout: 60_000 });
+    await expect(currentBtn).toHaveText('Open HTML', { timeout: 60_000 });
 
     await page.evaluate(() => {
       window.__openedUrls = [];

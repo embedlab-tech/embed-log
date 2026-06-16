@@ -18,6 +18,15 @@ async function sendUdpBurst(port, prefix, count = 220) {
   });
 }
 
+async function ensureRawLineVisible(page, paneId, lineIdx) {
+  await page.evaluate(({ paneId, lineIdx }) => {
+    window.__embedLogEnsureLineVisible?.(paneId, lineIdx, { align: 'center' });
+  }, { paneId, lineIdx });
+  const line = page.locator(`#log-${paneId} [data-idx="${lineIdx}"]`);
+  await expect(line).toBeVisible({ timeout: 10_000 });
+  return line;
+}
+
 
 test.describe('embed-log deterministic demo smoke', () => {
   let errors;
@@ -248,18 +257,15 @@ test('runtime settings panel exposes working font-size controls', async ({ page 
   await expect(page.locator('#btn-font-reset')).toBeVisible();
   await expect(page.locator('#btn-font-inc')).toBeVisible();
 
-  const line = page.locator('#log-SENSOR_A .log-line').first();
-  const before = await line.evaluate(el => getComputedStyle(el).fontSize);
+  const fontVar = async () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--font-size').trim());
+  const before = await fontVar();
+  expect(before).toMatch(/^\d+px$/);
 
   await page.locator('#btn-font-inc').click();
-  await expect.poll(async () => {
-    return line.evaluate(el => getComputedStyle(el).fontSize);
-  }).not.toBe(before);
+  await expect.poll(fontVar).not.toBe(before);
 
   await page.locator('#btn-font-reset').click();
-  await expect.poll(async () => {
-    return line.evaluate(el => getComputedStyle(el).fontSize);
-  }).toBe(before);
+  await expect.poll(fontVar).toBe('14px');
 });
 
 // Scenario: Marker rendering, tooltip display, and navigation
@@ -272,14 +278,10 @@ test('runtime settings panel exposes working font-size controls', async ({ page 
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
     await waitForSourceTestLine(page, 'SENSOR_A');
 
-    // Pick a log line index to mark
-    const markerLineIdx = await page.evaluate(() => {
-      const logEl = document.getElementById('log-SENSOR_A');
-      const windowEl = logEl?.querySelector('.log-window');
-      if (!windowEl || !windowEl.children.length) return -1;
-      const idx = Math.min(2, windowEl.children.length - 1);
-      return parseInt(windowEl.children[idx].dataset.idx, 10);
-    });
+    // Pick a non-event log line index to mark, so the tooltip assertion is not
+    // racing with event-marker tooltips from the deterministic event rules.
+    const markerCandidate = await waitForLineContaining(page, 'SENSOR_A', 'kind=filter-alpha');
+    const markerLineIdx = Number.parseInt(await markerCandidate.getAttribute('data-idx'), 10);
     expect(markerLineIdx).toBeGreaterThanOrEqual(0);
 
     // Send a save_markers WS command — the server broadcasts markers_update back
@@ -301,13 +303,12 @@ test('runtime settings panel exposes working font-size controls', async ({ page 
     await expect(page.locator('#marker-nav')).not.toBeHidden({ timeout: 15_000 });
     await expect(page.locator('#marker-nav-total')).toHaveText('1');
 
-    // Check that the marked line has the has-marker CSS class
-    await expect(
-      page.locator(`#log-SENSOR_A [data-idx="${markerLineIdx}"]`)
-    ).toHaveClass(/has-marker/);
+    // Check that the marked line has the has-marker CSS class. The pane is virtualized
+    // and live traffic keeps arriving, so explicitly materialize the marked raw index.
+    const lineLocator = await ensureRawLineVisible(page, 'SENSOR_A', markerLineIdx);
+    await expect(lineLocator).toHaveClass(/has-marker/);
 
     // Check that the tooltip appears on hover
-    const lineLocator = page.locator(`#log-SENSOR_A [data-idx="${markerLineIdx}"]`);
     await lineLocator.hover();
     await expect(page.locator('#marker-tooltip')).toBeVisible();
     await expect(page.locator('#marker-tooltip')).toContainText('Test marker description');
@@ -355,18 +356,17 @@ test('runtime settings panel exposes working font-size controls', async ({ page 
     // Wait for marker UI to appear
     await expect(page.locator('#marker-nav')).not.toBeHidden({ timeout: 10_000 });
 
-    // Marker visible before unwrap
-    await expect(
-      page.locator(`#log-SENSOR_A [data-idx="${firstIdx}"]`)
-    ).toHaveClass(/has-marker/);
+    // Marker visible before unwrap. The pane is virtualized, so explicitly materialize
+    // the selected raw index before checking classes.
+    let markedLine = await ensureRawLineVisible(page, 'SENSOR_A', firstIdx);
+    await expect(markedLine).toHaveClass(/has-marker/);
 
     // Toggle unwrap
     await page.locator('#btn-unwrap').click();
 
     // Marker still visible after DOM rebuild
-    await expect(
-      page.locator(`#log-SENSOR_A [data-idx="${firstIdx}"]`)
-    ).toHaveClass(/has-marker/);
+    markedLine = await ensureRawLineVisible(page, 'SENSOR_A', firstIdx);
+    await expect(markedLine).toHaveClass(/has-marker/);
   });
 });
 

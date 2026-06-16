@@ -114,6 +114,7 @@ jobs:
     env:
       CI: "true"
       CARGO_TERM_COLOR: always
+      DEMO_TEST_TICK_MS: "250"
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -572,6 +572,10 @@ export function ensureLineVisible(paneId, rawIndex, { align = "center" } = {}) {
     }
 }
 
+window.__embedLogEnsureLineVisible = function (paneId, rawIndex, options) {
+    ensureLineVisible(paneId, rawIndex, options || {});
+};
+
 export function rerenderRenderedLines(paneId) {
     const vp = _virtualPanes.get(paneId);
     if (!vp) return;

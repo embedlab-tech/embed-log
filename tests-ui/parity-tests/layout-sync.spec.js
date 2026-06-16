@@ -1,5 +1,15 @@
 import { expect, test } from '@playwright/test';
-import { collectPageErrors, lineTick, selectedLineTicks, visiblePaneNames, waitForLineContaining, waitForSourceTestLine } from './helpers.js';
+import { collectPageErrors, selectedLineTicks, visiblePaneNames, waitForLineContaining, waitForSourceTestLine } from './helpers.js';
+
+async function findCommonVisibleTick(page, leftPane, rightPane) {
+  return page.evaluate(({ leftPane, rightPane }) => {
+    const ticks = paneId => Array.from(document.querySelectorAll(`#log-${paneId} .log-line`))
+      .map(node => /tick=(\d{3})/.exec(node.textContent || '')?.[1])
+      .filter(Boolean);
+    const right = new Set(ticks(rightPane));
+    return ticks(leftPane).find(tick => right.has(tick)) || null;
+  }, { leftPane, rightPane });
+}
 
 // Feature: layout and time synchronization — tab layout matching backend config, line sync-highlights, range selection, per-pane wrap, and UNWRAP mode
 
@@ -42,9 +52,17 @@ test.describe('layout and time synchronization', () => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
 
-    const lineA = await waitForSourceTestLine(page, 'SENSOR_A');
-    const tick = await lineTick(lineA);
-    await waitForLineContaining(page, 'SENSOR_B', `tick=${tick}`);
+    await waitForSourceTestLine(page, 'SENSOR_A');
+    await waitForSourceTestLine(page, 'SENSOR_B');
+    let tick = null;
+    await expect.poll(async () => {
+      tick = await findCommonVisibleTick(page, 'SENSOR_A', 'SENSOR_B');
+      return tick;
+    }, { timeout: 30_000 }).not.toBeNull();
+    expect(tick).toMatch(/^\d{3}$/);
+    const lineA = page.locator('#log-SENSOR_A .log-line', { hasText: `tick=${tick}` }).first();
+    await expect(lineA).toBeVisible();
+    await expect(page.locator('#log-SENSOR_B .log-line', { hasText: `tick=${tick}` }).first()).toBeVisible();
 
     await lineA.click();
 

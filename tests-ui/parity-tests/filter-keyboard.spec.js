@@ -28,10 +28,14 @@ test.describe('filter and keyboard UX', () => {
     await input.fill('filter-alpha');
 
     await expect(page.locator('#log-SENSOR_A .log-line:visible').first()).toContainText('kind=filter-alpha');
-    // Only lines matching the filter should be visible — there should be 1 or 2
-    const visibleCount = await page.locator('#log-SENSOR_A .log-line:visible').count();
-    expect(visibleCount).toBeGreaterThanOrEqual(1);
-    expect(visibleCount).toBeLessThanOrEqual(20);
+    // Only lines matching the filter should be visible. Do not assert an upper
+    // bound here: CI can have a long-running shared demo stream, and the
+    // virtualized DOM may legitimately contain more matching rows.
+    const visibleTexts = await page.locator('#log-SENSOR_A .log-line:visible').evaluateAll(nodes =>
+      nodes.map(n => n.textContent || '')
+    );
+    expect(visibleTexts.length).toBeGreaterThanOrEqual(1);
+    expect(visibleTexts.every(text => text.includes('kind=filter-alpha'))).toBe(true);
 
     // Clear filter — all lines reappear
     await input.fill('');
