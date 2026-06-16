@@ -17,9 +17,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  format:
+    name: Format check
+    runs-on: [self-hosted, Linux]
+    timeout-minutes: 20
+    env:
+      CI: "true"
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  build-cli:
     name: Build CLI
     runs-on: [self-hosted, Linux]
+    needs: format
     timeout-minutes: 45
     env:
       CI: "true"
@@ -33,6 +53,8 @@ jobs:
 
       - name: Cache Rust build outputs
         uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: cli
 
       - name: Show Rust versions
         run: |
@@ -43,9 +65,10 @@ jobs:
       - name: Build CLI
         run: cargo build --locked --package embed-log-cli --bin embed-log
 
-  rust-tests:
-    name: Rust format, clippy, and tests
+  unit-tests:
+    name: Unit tests
     runs-on: [self-hosted, Linux]
+    needs: build-cli
     timeout-minutes: 60
     env:
       CI: "true"
@@ -57,23 +80,36 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: clippy
 
       - name: Cache Rust build outputs
         uses: Swatinem/rust-cache@v2
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
+        with:
+          shared-key: cli
 
       - name: Clippy CLI/core
         run: cargo clippy --locked --package embed-log-core --package embed-log-cli --all-targets -- -D warnings
 
-      - name: Rust tests CLI/core
+      - name: Rust unit tests CLI/core
         run: cargo test --locked --package embed-log-core --package embed-log-cli
 
-  ui-e2e:
-    name: UI unit and e2e tests
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: tests-ui/package-lock.json
+
+      - name: Install UI test dependencies
+        run: npm --prefix tests-ui ci
+
+      - name: UI unit tests
+        run: npm --prefix tests-ui run test:unit
+
+  e2e-tests:
+    name: UI e2e tests
     runs-on: [self-hosted, Linux]
+    needs: unit-tests
     timeout-minutes: 90
     env:
       CI: "true"
@@ -88,7 +124,7 @@ jobs:
       - name: Cache Rust build outputs
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ui-e2e
+          shared-key: e2e
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -103,9 +139,6 @@ jobs:
       - name: Install Playwright Chromium
         working-directory: tests-ui
         run: npx playwright install chromium
-
-      - name: UI unit tests
-        run: npm --prefix tests-ui run test:unit
 
       - name: UI e2e tests
         run: npm --prefix tests-ui run test:e2e
@@ -126,6 +159,7 @@ jobs:
   tauri-linux:
     name: Tauri Linux build
     runs-on: [self-hosted, Linux]
+    needs: build-cli
     timeout-minutes: 60
     env:
       CI: "true"
