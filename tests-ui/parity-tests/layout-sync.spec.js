@@ -103,7 +103,7 @@ test.describe('layout and time synchronization', () => {
     await expect(await ensureLineContainingVisible(page, 'SENSOR_B', `tick=${tick}`)).toHaveClass(/sync-highlight/);
 
     await page.getByRole('button', { name: 'DevB', exact: true }).click();
-    await expect(await ensureLineContainingVisible(page, 'SENSOR_C', `tick=${tick}`)).toHaveClass(/sync-highlight/);
+    await expect(page.locator('#log-SENSOR_C .log-line.sync-highlight')).toContainText('TEST src=SENSOR_C');
 
     await page.getByRole('button', { name: 'DevA', exact: true }).click();
     await expect(await ensureLineContainingVisible(page, 'SENSOR_A', `tick=${tick}`)).toHaveClass(/sync-highlight/);

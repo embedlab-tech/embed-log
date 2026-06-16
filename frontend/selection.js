@@ -496,6 +496,10 @@ function _selectIndexRange(paneId, startIdx, endIdx) {
     _applySelection(paneId);
 }
 
+window.__embedLogTestSelectRange = function (paneId, startIdx, endIdx) {
+    _selectIndexRange(paneId, startIdx, endIdx);
+};
+
 function _clearOtherSelections(keepPane) {
     PANES.forEach(id => {
         if (id === keepPane || !state.selected[id].size) return;
