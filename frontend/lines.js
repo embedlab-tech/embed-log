@@ -576,6 +576,18 @@ window.__embedLogEnsureLineVisible = function (paneId, rawIndex, options) {
     ensureLineVisible(paneId, rawIndex, options || {});
 };
 
+window.__embedLogFindRawIndexContaining = function (paneId, text) {
+    const needle = String(text ?? "");
+    const lines = state.rawLines[paneId] || [];
+    for (let i = 0; i < lines.length; i++) {
+        const line = getLine(paneId, i);
+        if (!line) continue;
+        const haystack = `${line.rawText || ""} ${line.html || ""} ${line.ts || ""} ${line.pluginFilterText || ""}`;
+        if (haystack.includes(needle)) return i;
+    }
+    return -1;
+};
+
 export function rerenderRenderedLines(paneId) {
     const vp = _virtualPanes.get(paneId);
     if (!vp) return;

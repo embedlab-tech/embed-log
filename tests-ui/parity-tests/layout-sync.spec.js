@@ -11,6 +11,20 @@ async function findCommonVisibleTick(page, leftPane, rightPane) {
   }, { leftPane, rightPane });
 }
 
+async function ensureLineContainingVisible(page, paneId, text) {
+  const rawIndex = await page.evaluate(({ paneId, text }) =>
+    window.__embedLogFindRawIndexContaining?.(paneId, text) ?? -1,
+    { paneId, text }
+  );
+  expect(rawIndex).toBeGreaterThanOrEqual(0);
+  await page.evaluate(({ paneId, rawIndex }) => {
+    window.__embedLogEnsureLineVisible?.(paneId, rawIndex, { align: 'center' });
+  }, { paneId, rawIndex });
+  const line = page.locator(`#log-${paneId} [data-idx="${rawIndex}"]`);
+  await expect(line).toBeVisible({ timeout: 10_000 });
+  return line;
+}
+
 // Feature: layout and time synchronization — tab layout matching backend config, line sync-highlights, range selection, per-pane wrap, and UNWRAP mode
 
 test.describe('layout and time synchronization', () => {
@@ -60,14 +74,14 @@ test.describe('layout and time synchronization', () => {
       return tick;
     }, { timeout: 30_000 }).not.toBeNull();
     expect(tick).toMatch(/^\d{3}$/);
-    const lineA = page.locator('#log-SENSOR_A .log-line', { hasText: `tick=${tick}` }).first();
-    await expect(lineA).toBeVisible();
-    await expect(page.locator('#log-SENSOR_B .log-line', { hasText: `tick=${tick}` }).first()).toBeVisible();
+
+    const lineA = await ensureLineContainingVisible(page, 'SENSOR_A', `tick=${tick}`);
+    await ensureLineContainingVisible(page, 'SENSOR_B', `tick=${tick}`);
 
     await lineA.click();
 
-    await expect(page.locator('#log-SENSOR_A .log-line.sync-highlight')).toContainText(`tick=${tick}`);
-    await expect(page.locator('#log-SENSOR_B .log-line.sync-highlight')).toContainText(new RegExp(`tick=${tick}`));
+    await expect(await ensureLineContainingVisible(page, 'SENSOR_A', `tick=${tick}`)).toHaveClass(/sync-highlight/);
+    await expect(await ensureLineContainingVisible(page, 'SENSOR_B', `tick=${tick}`)).toHaveClass(/sync-highlight/);
 
     await page.evaluate(() => {
       const original = window.__embedLogSchedulePersist;
@@ -79,21 +93,21 @@ test.describe('layout and time synchronization', () => {
     });
     await expect.poll(() => page.evaluate(() => window.__testLogFlushesAfterSyncClick || 0)).toBeGreaterThan(0);
 
-    await expect(page.locator('#log-SENSOR_A .log-line.sync-highlight')).toContainText(`tick=${tick}`);
-    await expect(page.locator('#log-SENSOR_B .log-line.sync-highlight')).toContainText(new RegExp(`tick=${tick}`));
+    await expect(await ensureLineContainingVisible(page, 'SENSOR_A', `tick=${tick}`)).toHaveClass(/sync-highlight/);
+    await expect(await ensureLineContainingVisible(page, 'SENSOR_B', `tick=${tick}`)).toHaveClass(/sync-highlight/);
 
     await page.locator('#btn-settings').click();
     await page.locator('#btn-font-inc').click();
 
-    await expect(page.locator('#log-SENSOR_A .log-line.sync-highlight')).toContainText(`tick=${tick}`);
-    await expect(page.locator('#log-SENSOR_B .log-line.sync-highlight')).toContainText(new RegExp(`tick=${tick}`));
+    await expect(await ensureLineContainingVisible(page, 'SENSOR_A', `tick=${tick}`)).toHaveClass(/sync-highlight/);
+    await expect(await ensureLineContainingVisible(page, 'SENSOR_B', `tick=${tick}`)).toHaveClass(/sync-highlight/);
 
     await page.getByRole('button', { name: 'DevB', exact: true }).click();
-    await expect(page.locator('#log-SENSOR_C .log-line.sync-highlight')).toContainText(new RegExp(`tick=${tick}`));
+    await expect(await ensureLineContainingVisible(page, 'SENSOR_C', `tick=${tick}`)).toHaveClass(/sync-highlight/);
 
     await page.getByRole('button', { name: 'DevA', exact: true }).click();
-    await expect(page.locator('#log-SENSOR_A .log-line.sync-highlight')).toContainText(`tick=${tick}`);
-    await expect(page.locator('#log-SENSOR_B .log-line.sync-highlight')).toContainText(new RegExp(`tick=${tick}`));
+    await expect(await ensureLineContainingVisible(page, 'SENSOR_A', `tick=${tick}`)).toHaveClass(/sync-highlight/);
+    await expect(await ensureLineContainingVisible(page, 'SENSOR_B', `tick=${tick}`)).toHaveClass(/sync-highlight/);
   });
 
 // Scenario: Shift+Click selects a contiguous range without selecting sibling panes

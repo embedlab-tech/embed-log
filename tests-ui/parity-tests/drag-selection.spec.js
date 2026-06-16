@@ -25,14 +25,23 @@ test.describe('drag selection UX', () => {
     await waitForLineContaining(page, 'SENSOR_A', 'kind=warning');
 
     const lines = page.locator('#log-SENSOR_A .log-line');
+    await expect.poll(async () => lines.count()).toBeGreaterThanOrEqual(6);
     const start = lines.nth(1);
     const end = lines.nth(5);
+    await expect(start).toBeVisible();
+    await expect(end).toBeVisible();
 
-    await start.hover();
+    const startBox = await start.boundingBox();
+    const endBox = await end.boundingBox();
+    expect(startBox).toBeTruthy();
+    expect(endBox).toBeTruthy();
+
+    await page.mouse.move(startBox.x + 8, startBox.y + startBox.height / 2);
     await page.mouse.down();
-    await end.hover();
+    await page.mouse.move(endBox.x + 8, endBox.y + endBox.height / 2, { steps: 8 });
     await page.mouse.up();
 
+    await expect.poll(async () => (await selectedLineTicks(page, 'SENSOR_A')).length).toBeGreaterThanOrEqual(3);
     const ticks = await selectedLineTicks(page, 'SENSOR_A');
     expect(ticks.length).toBeGreaterThanOrEqual(3);
 
