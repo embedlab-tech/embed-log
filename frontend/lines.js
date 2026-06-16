@@ -47,11 +47,13 @@ function _escapeHtml(text) {
 
 export function buildStoredLine(paneId, ts, rawText, isTx, meta = null) {
     const html = parseAnsi(rawText);
+    const lineMeta = typeof meta === "object" && meta !== null
+        ? meta
+        : (Number.isFinite(meta) ? { numTs: meta } : {});
     const line = {
         paneId,
-        ...buildTimestampInfo(ts, typeof meta === "object" && meta !== null
-            ? meta
-            : (Number.isFinite(meta) ? { numTs: meta } : {})),
+        ...buildTimestampInfo(ts, lineMeta),
+        serverLineIdx: Number.isFinite(lineMeta.lineIdx) ? lineMeta.lineIdx : null,
         html,
         rawText,
         isTx,
@@ -294,12 +296,16 @@ export function applyLineDom(div, line, paneId, idx, filterRx) {
         state.highlighted[paneId] = div;
     }
 
-    const markerDescription = _markerDescription(paneId, idx);
-    div.classList.toggle("has-marker", markerDescription !== null);
-    if (markerDescription !== null) {
-        div.dataset.markerTooltip = markerDescription;
+    const marker = _markerAt(paneId, idx, line);
+    div.classList.toggle("has-marker", marker !== null);
+    if (marker !== null) {
+        div.dataset.markerTooltip = marker.description || "";
+        div.dataset.kind = marker.kind || "user";
+        div.dataset.severity = marker.severity || "";
     } else {
         delete div.dataset.markerTooltip;
+        delete div.dataset.kind;
+        delete div.dataset.severity;
     }
     if (!matchesFilter(line, filterRx)) {
         div.style.display = "none";
@@ -467,12 +473,14 @@ function _ordinalForRawIndex(paneId, vp, rawIndex) {
     return Math.max(0, Math.min(Math.max(0, visible.length - 1), lo));
 }
 
-function _markerDescription(paneId, idx) {
+function _markerAt(paneId, idx, line = null) {
     const markers = state.markers[paneId];
     if (!markers) return null;
     for (const m of markers) {
+        const isEvent = (m.kind || "user") === "event";
+        const lineKey = isEvent && Number.isFinite(line?.serverLineIdx) ? line.serverLineIdx : idx;
         const end = m.endIdx ?? m.lineIdx;
-        if (idx >= m.lineIdx && idx <= end) return m.description || "";
+        if (lineKey >= m.lineIdx && lineKey <= end) return m;
     }
     return null;
 }

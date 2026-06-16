@@ -1,0 +1,28 @@
+SENSOR_A:
+  - name: sync_event
+    pattern: "synchronized step"
+    severity: info
+  - name: error_event
+    pattern: "error at tick"
+    severity: error
+  - name: warning_event
+    pattern: "warning at tick"
+    severity: warn
+
+SENSOR_B:
+  - name: sync_event
+    pattern: "synchronized step"
+    severity: info
+
+SENSOR_C:
+  - name: error_event
+    pattern: "error at tick"
+    severity: error
+
+SENSOR_D:
+  - name: error_event
+    pattern: "error at tick"
+    severity: error
+  - name: warning_event
+    pattern: "warning at tick"
+    severity: warn

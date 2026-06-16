@@ -55,6 +55,42 @@ class LogEntry:
 
 
 @dataclass
+class Event:
+    """A backend-detected event received via event subscription."""
+
+    event_id: str
+    source_id: str
+    severity: str
+    timestamp_num: float
+    rel_num: float
+    line_idx: int
+    message: str
+    captures: list[str] = field(default_factory=list)
+    timestamp_iso: str = ""
+    timestamp: str = ""
+    origin: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Event":
+        captures = data.get("captures", [])
+        if not isinstance(captures, list):
+            captures = []
+        return cls(
+            event_id=data.get("event_id", ""),
+            source_id=data.get("source_id", ""),
+            severity=data.get("severity", "info"),
+            timestamp_num=float(data.get("timestamp_num") or 0.0),
+            rel_num=float(data.get("rel_num") or 0.0),
+            line_idx=int(data.get("line_idx") or 0),
+            message=data.get("message", ""),
+            captures=[str(c) for c in captures],
+            timestamp_iso=data.get("timestamp_iso", ""),
+            timestamp=data.get("timestamp", ""),
+            origin=data.get("origin", ""),
+        )
+
+
+@dataclass
 class Marker:
     """A marker attached to a log line."""
 

@@ -4,6 +4,7 @@ import { createTabWithPanes } from './tabcreate.js';
 import { configurePanePlugins, resetPanePlugins } from './pluginRuntime.js';
 
 import { switchTab } from './tabs.js';
+import { initEventsTab, addEvent, destroyEventsTab, renderTimeline } from './events.js';
 
 let ws = null;
 let wsRetryDelay = 1000;
@@ -34,6 +35,12 @@ function resetLayoutForNewSession() {
     state.selected = {};
     Object.keys(PANE_LABELS).forEach(key => delete PANE_LABELS[key]);
     resetPanePlugins();
+
+    // Tear down events timeline — recreated if the new config has rules.
+    destroyEventsTab();
+    state.events = [];
+    state.eventsEnabled = false;
+    state.eventRules = {};
 }
 
 function wsSetStatus(cls, text) {
@@ -119,6 +126,17 @@ async function _handleConfigMessage(msg) {
     window.__embedLogPaneCommands = msg.pane_commands && typeof msg.pane_commands === "object" ? msg.pane_commands : {};
     Object.keys(PANE_LABELS).forEach(key => delete PANE_LABELS[key]);
     Object.assign(PANE_LABELS, paneLabels);
+
+    // Event detection — initialize before tab creation so the Events button
+    // is appended on the first renderTabBar() pass. Pane labels are already
+    // assigned so source filters use user-facing names.
+    const eventRules = msg.event_rules && typeof msg.event_rules === "object" ? msg.event_rules : {};
+    state.eventRules = eventRules;
+    state.eventsEnabled = Object.values(eventRules).some(rules => Array.isArray(rules) && rules.length > 0);
+    if (state.eventsEnabled) {
+        state.events = [];
+        initEventsTab();
+    }
     if (TABS.length === 0 && msg.tabs && msg.tabs.length > 0) {
         msg.tabs.forEach(tab =>
             createTabWithPanes(tab.label, tab.panes, { switchTo: false, paneLabels: tab.pane_labels || paneLabels })
@@ -136,7 +154,6 @@ async function _handleConfigMessage(msg) {
         window.applyMarkers?.();
         window.__embedLogOnMarkers?.();
     }
-
     // Allow rendering immediately — plugins will catch up asynchronously.
     configReady = true;
     if (pendingLogMessages.length > 0 && !pendingLogFlush) {
@@ -207,6 +224,8 @@ function wsConnect() {
             currentSessionId = msg.session?.id || currentSessionId;
             state.syncTs = null;
             state.syncTabSwitch = false;
+            state.events = [];
+            renderTimeline();
             clearAllPaneContents();
             setTimestampContext({
                 mode: msg.session?.timestamp_mode || "absolute",
@@ -248,10 +267,15 @@ function wsConnect() {
             return;
         }
 
+        if (msg.type === "event") {
+            addEvent(msg);
+            return;
+        }
+
         if (msg.type !== "rx" && msg.type !== "tx") return;
 
         const { type, data, timestamp, timestamp_iso, timestamp_num, source_id,
-                absTs, absNum, relTs, relNum } = msg;
+                absTs, absNum, relTs, relNum, line_idx } = msg;
         if (!source_id) return;
 
         // Unknown source_id — server has no --tab for it; ignore with a warning.
@@ -271,6 +295,7 @@ function wsConnect() {
                 absNum: absNum,
                 relTs: relTs,
                 relNum: relNum,
+                lineIdx: line_idx,
             },
         });
     });

@@ -11,7 +11,7 @@ from .exceptions import (
     ServerError,
     UnknownSourceError,
 )
-from .models import HelloResult, LogEntry, Marker, SessionInfo, SourceInfo
+from .models import Event, HelloResult, LogEntry, Marker, SessionInfo, SourceInfo
 
 __all__ = [
     "EmbedLogClient",
@@ -25,6 +25,7 @@ __all__ = [
     "ConfigError",
     "HelloResult",
     "LogEntry",
+    "Event",
     "Marker",
     "SessionInfo",
     "SourceInfo",

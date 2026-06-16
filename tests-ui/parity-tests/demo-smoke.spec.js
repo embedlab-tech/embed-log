@@ -183,13 +183,13 @@ test.describe('embed-log deterministic demo smoke', () => {
     expect(html).not.toContain('<h1>embed-log snippet</h1>');
   });
 
-// Scenario: Live DOM keeps full pane history while tailing without clearing
+// Scenario: Live pane history is retained while tailing without clearing
 //   Given SENSOR_A and SENSOR_B have initial log lines
 //   When  a UDP burst of 220 lines is sent to each pane
-//   Then  each pane shows >200 lines
-//   And   the first lines are still present (no DOM clearing)
+//   Then  each pane reports >200 stored lines
+//   And   the first and latest lines can still be rendered via the virtual scroller
 
-test('live DOM keeps full pane history while tailing', async ({ page }) => {
+test('live pane history is retained while tailing', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
   await waitForSourceTestLine(page, 'SENSOR_A');
@@ -205,12 +205,30 @@ test('live DOM keeps full pane history while tailing', async ({ page }) => {
     sendUdpBurst(6001, 'burst-b'),
   ]);
 
-  await expect.poll(async () => page.locator('#log-SENSOR_A .log-line').count()).toBeGreaterThan(200);
-  await expect.poll(async () => page.locator('#log-SENSOR_B .log-line').count()).toBeGreaterThan(200);
+  async function storedLineCount(paneId) {
+    const text = await page.locator(`[data-pane-stats="${paneId}"]`).textContent();
+    const match = text?.replace(/,/g, '').match(/(\d+) lines/);
+    return match ? Number(match[1]) : 0;
+  }
 
+  await expect.poll(() => storedLineCount('SENSOR_A')).toBeGreaterThan(200);
+  await expect.poll(() => storedLineCount('SENSOR_B')).toBeGreaterThan(200);
+
+  async function scrollPane(paneId, position) {
+    await page.locator(`#log-${paneId}`).evaluate((el, pos) => {
+      el.scrollTop = pos === 'top' ? 0 : el.scrollHeight;
+      el.dispatchEvent(new Event('scroll'));
+    }, position);
+  }
+
+  await scrollPane('SENSOR_A', 'top');
   await expect(page.locator('#log-SENSOR_A')).toContainText(firstA);
+  await scrollPane('SENSOR_A', 'bottom');
   await expect(page.locator('#log-SENSOR_A')).toContainText('burst-a-219');
+
+  await scrollPane('SENSOR_B', 'top');
   await expect(page.locator('#log-SENSOR_B')).toContainText(firstB);
+  await scrollPane('SENSOR_B', 'bottom');
   await expect(page.locator('#log-SENSOR_B')).toContainText('burst-b-219');
 });
 

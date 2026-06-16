@@ -3,6 +3,11 @@
 The watcher connects to a running embed-log server, subscribes to sources,
 and matches incoming log lines against regex patterns.  Matches can be
 recorded as evidence (JSONL) and optionally create UI markers.
+
+Backend events from static ``.events.yml`` rules are also available via
+``client.subscribe(events=True)`` and ``client.events()``. These coexist with
+watcher rules: backend events are matched server-side, while watcher rules are
+runtime-defined and matched client-side on ``log.entry`` messages.
 """
 
 from __future__ import annotations

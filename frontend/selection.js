@@ -234,11 +234,30 @@ function _flatMarkerList() {
     const all = [];
     Object.keys(state.markers).forEach(paneId => {
         (state.markers[paneId] || []).forEach(m => {
+            if ((m.kind || "user") === "event" && !state.includeEventMarkers) return;
             all.push({ paneId, ...m });
         });
     });
     all.sort((a, b) => (a.numTs ?? 0) - (b.numTs ?? 0));
     return all;
+}
+
+function _markerMatchesRawIndex(paneId, marker, rawIdx) {
+    const line = getLine(paneId, rawIdx);
+    const isEvent = (marker.kind || "user") === "event";
+    const lineKey = isEvent && Number.isFinite(line?.serverLineIdx) ? line.serverLineIdx : rawIdx;
+    const end = marker.endIdx ?? marker.lineIdx;
+    return lineKey >= marker.lineIdx && lineKey <= end;
+}
+
+function _markerRawIndex(marker) {
+    const paneId = marker.paneId;
+    if ((marker.kind || "user") !== "event") return marker.lineIdx;
+    const lines = state.rawLines[paneId] || [];
+    for (let i = 0; i < lines.length; i++) {
+        if (_markerMatchesRawIndex(paneId, marker, i)) return i;
+    }
+    return marker.lineIdx;
 }
 
 function _markerLineIdx(paneId) {
@@ -361,24 +380,21 @@ export function applyMarkers() {
         const logEl = document.getElementById("log-" + paneId);
         if (!logEl) return;
         const paneMarkers = byPane[paneId] || [];
-        // Build a lookup: lineIdx → description (mark every line in a range)
-        const byLine = {};
-        paneMarkers.forEach(m => {
-            const end = m.endIdx ?? m.lineIdx;
-            for (let i = m.lineIdx; i <= end; i++) {
-                if (byLine[i] === undefined) byLine[i] = m.description;
-            }
-        });
         const windowEl = logEl.querySelector(".log-window");
         if (!windowEl) return;
         Array.from(windowEl.children).forEach(div => {
             const idx = parseInt(div.dataset.idx, 10);
-            const hasMarker = byLine[idx] !== undefined;
+            const m = paneMarkers.find(marker => _markerMatchesRawIndex(paneId, marker, idx));
+            const hasMarker = m !== undefined;
             div.classList.toggle("has-marker", hasMarker);
             if (hasMarker) {
-                div.dataset.markerTooltip = byLine[idx];
+                div.dataset.markerTooltip = m.description || "";
+                div.dataset.kind = m.kind || "user";
+                div.dataset.severity = m.severity || "";
             } else {
                 delete div.dataset.markerTooltip;
+                delete div.dataset.kind;
+                delete div.dataset.severity;
             }
         });
     });
@@ -396,7 +412,7 @@ document.addEventListener("mouseover", e => {
     const desc = line.dataset.markerTooltip || "";
     if (!desc) return;
     const rect = line.getBoundingClientRect();
-    _tooltipEl.innerHTML = '<span class="mt-label">Marker</span>' + _escHtml(desc);
+    _tooltipEl.innerHTML = '<span class="mt-label">' + (line.dataset.kind === "event" ? "Event" : "Marker") + '</span>' + _escHtml(desc);
     // Position above the line so it doesn't cover log text below
     _tooltipEl.style.left = Math.max(4, rect.left) + "px";
     _tooltipEl.style.bottom = (window.innerHeight - rect.top + 4) + "px";
@@ -416,7 +432,6 @@ function _updateMarkerNav() {
     navEl.style.display = "";
     const total = document.getElementById("marker-nav-total");
     if (total) total.textContent = String(flat.length);
-    // Clamp nav index
     if (state.markerNavIdx < 0 || state.markerNavIdx >= flat.length) {
         state.markerNavIdx = 0;
     }
@@ -444,16 +459,18 @@ document.getElementById("marker-nav-next")?.addEventListener("click", () => {
 
 function _jumpMarker(m) {
     const paneId = m.paneId;
+    const rawIdx = _markerRawIndex(m);
     // Switch to the tab containing this pane
     const tabIdx = TABS.findIndex(t => t.panes.includes(paneId));
     if (tabIdx >= 0) switchTab(tabIdx);
-    ensureLineVisible(paneId, m.lineIdx, { align: "center" });
-    const div = document.querySelector(`#log-${paneId} [data-idx="${m.lineIdx}"]`);
+    ensureLineVisible(paneId, rawIdx, { align: "center" });
+    const div = document.querySelector(`#log-${paneId} [data-idx="${rawIdx}"]`);
     if (!div) return;
     const logEl = document.getElementById("log-" + paneId);
     if (!logEl) return;
     state.atBottom[paneId] = false;
-    onLineClick(paneId, m.numTs, div);
+    const line = getLine(paneId, rawIdx);
+    onLineClick(paneId, line?.numTs ?? m.numTs, div);
     _updateMarkerNavBtn();
 }
 function _applySelection(paneId) {
@@ -1043,5 +1060,10 @@ document.addEventListener("keyup", e => {
 window.addEventListener("blur", () => document.body.classList.remove("alt-held"));
 // Update marker nav when markers arrive from server
 window.__embedLogOnMarkers = () => {
+    _updateMarkerNav();
+};
+// Events tab calls this to toggle event-marker inclusion in navigation.
+window.__embedLogToggleEventMarkers = function () {
+    state.includeEventMarkers = !state.includeEventMarkers;
     _updateMarkerNav();
 };

@@ -1,0 +1,23 @@
+DUT:
+  - name: boot_complete
+    pattern: "boot complete"
+    severity: info
+  - name: wifi_connected
+    pattern: "WiFi connected"
+    severity: info
+  - name: mqtt_publish
+    pattern: "MQTT publish"
+    severity: info
+  - name: watchdog_ok
+    pattern: "watchdog fed"
+    severity: info
+
+UART_DUT:
+  - name: bootloader_banner
+    pattern: "ROM bootloader"
+    severity: warn
+
+UART_DEBUG:
+  - name: debug_warn
+    pattern: "WARN"
+    severity: warn
