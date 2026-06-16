@@ -35,7 +35,7 @@ test.describe('event detection', () => {
     // the config message arrives.
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
-    // The parity config DOES have event rules, so the button must be visible.
+    // The regression config DOES have event rules, so the button must be visible.
     // This test serves as a regression guard — if the button disappears, it
     // means event detection broke.
     await expect(page.locator('.events-tab-btn')).toBeVisible();
@@ -52,7 +52,7 @@ test.describe('event detection', () => {
     const svg = page.locator('.events-timeline-svg');
     await expect(svg).toBeVisible();
 
-    // Should have at least one swimlane (the parity config has sync_event
+    // Should have at least one swimlane (the regression config has sync_event
     // matching every tick line).
     const lanes = page.locator('.events-lane-label');
     await expect(lanes.first()).toBeVisible();

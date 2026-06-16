@@ -9,13 +9,13 @@ const repo = path.resolve(here, '..');
 const tmp = path.join(here, '.tmp');
 const logs = path.join(tmp, 'logs');
 
-const parityMode = process.argv.includes('--parity');
-const config = parityMode ? path.join(here, 'config-parity.yml') : path.join(tmp, 'demo-e2e.yml');
+const regressionMode = process.argv.includes('--regression');
+const config = regressionMode ? path.join(here, 'config-regression.yml') : path.join(tmp, 'demo-e2e.yml');
 
 fs.rmSync(tmp, { recursive: true, force: true });
 fs.mkdirSync(logs, { recursive: true });
 
-if (!parityMode) {
+if (!regressionMode) {
   const demoConfig = `version: 1
 server:
   host: 127.0.0.1
@@ -125,7 +125,7 @@ function _msg(src, tick, seq, kind, message) {
   return `TEST src=${src} tick=${t} seq=${s} kind=${kind} msg="${message}"`;
 }
 
-function parityLines(src, tick) {
+function regressionLines(src, tick) {
   let seq = 1; // per-tick seq counter
   const lines = [];
 
@@ -164,7 +164,7 @@ function parityLines(src, tick) {
   return lines;
 }
 
-function parityCoapLines(tick) {
+function regressionCoapLines(tick) {
   const lines = [];
   const hex = coapHex(tick);
   lines.push(`coap ${hex}`);
@@ -179,7 +179,7 @@ function parityCoapLines(tick) {
   return lines;
 }
 
-function parityCborRecord(tick) {
+function regressionCborRecord(tick) {
   const t = String(tick).padStart(3, '0');
   return cborMap([
     ['kind', 'sync'],
@@ -191,7 +191,7 @@ function parityCborRecord(tick) {
 }
 
 let tick = 0;
-function startParityTraffic() {
+function startRegressionTraffic() {
   const tickMs = Number.parseInt(process.env.DEMO_TEST_TICK_MS || '100', 10);
   const interval = Number.isFinite(tickMs) && tickMs > 0 ? tickMs : 100;
   const timer = setInterval(() => {
@@ -199,32 +199,32 @@ function startParityTraffic() {
     tick += 1;
 
     // SENSOR_A -> port 6000
-    for (const line of parityLines('SENSOR_A', t)) {
+    for (const line of regressionLines('SENSOR_A', t)) {
       sendUdp(6000, line + '\n');
     }
 
     // SENSOR_B -> port 6001
-    for (const line of parityLines('SENSOR_B', t)) {
+    for (const line of regressionLines('SENSOR_B', t)) {
       sendUdp(6001, line + '\n');
     }
 
     // SENSOR_C -> port 6002
-    for (const line of parityLines('SENSOR_C', t)) {
+    for (const line of regressionLines('SENSOR_C', t)) {
       sendUdp(6002, line + '\n');
     }
 
     // SENSOR_D -> port 6004
-    for (const line of parityLines('SENSOR_D', t)) {
+    for (const line of regressionLines('SENSOR_D', t)) {
       sendUdp(6004, line + '\n');
     }
 
     // SENSOR_COAP -> port 6005 (bare hex lines)
-    for (const line of parityCoapLines(t)) {
+    for (const line of regressionCoapLines(t)) {
       sendUdp(6005, line + '\n');
     }
 
     // SENSOR_CBOR -> port 6003 (CBOR datagrams)
-    sendUdp(6003, parityCborRecord(t));
+    sendUdp(6003, regressionCborRecord(t));
   }, interval);
   children.push({ kill: () => clearInterval(timer) });
 }
@@ -285,6 +285,6 @@ process.on('exit', () => {
 
 start('cargo', ['run', '--quiet', '--package', 'embed-log-cli', '--bin', 'embed-log', '--', 'run', '--config', config, '--frontend-dir', 'frontend', '--no-open-browser']);
 
-setTimeout(parityMode ? startParityTraffic : startDeterministicTraffic, 1500);
+setTimeout(regressionMode ? startRegressionTraffic : startDeterministicTraffic, 1500);
 
 setInterval(() => {}, 1 << 30);

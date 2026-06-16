@@ -5,7 +5,7 @@ const baseURL = process.env.E2E_BASE_URL || defaultBaseURL;
 const shouldStartDemo = process.env.E2E_START_DEMO !== '0' && baseURL === defaultBaseURL;
 
 export default defineConfig({
-  testDir: './parity-tests',
+  testDir: './regression-tests',
   timeout: 45_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,
@@ -21,7 +21,7 @@ export default defineConfig({
     acceptDownloads: true,
   },
   webServer: shouldStartDemo ? {
-    command: 'node rust-demo-server.mjs --parity',
+    command: 'node rust-demo-server.mjs --regression',
     url: baseURL,
     timeout: 60_000,
     reuseExistingServer: false,

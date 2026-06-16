@@ -394,7 +394,7 @@ One JSON event payload per line in the session directory, appended as events fir
 
 **Files:**
 - `sdk/python/tests/test_events_e2e.py` (new)
-- `tests-ui/parity-tests/events.spec.js` (new)
+- `tests-ui/regression-tests/events.spec.js` (new)
 
 **Python E2E tests:**
 - Start server with config + events.yml companion file.

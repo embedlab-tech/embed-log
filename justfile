@@ -186,9 +186,37 @@ ui-unit:
 ui-e2e:
     npm --prefix {{node_package_dir}} run test:e2e
 
-# Run Rust-port parity Playwright tests.
-ui-parity:
-    npm --prefix {{node_package_dir}} run test:parity
+# Run all UI regression Playwright tests in one Playwright invocation.
+ui-regression:
+    npm --prefix {{node_package_dir}} run test:regression
+
+# Show UI regression Playwright test categories.
+ui-regression-list:
+    npm --prefix {{node_package_dir}} run test:regression:list
+
+# Run UI regression Playwright tests category-by-category.
+ui-regression-categorized:
+    npm --prefix {{node_package_dir}} run test:regression:categorized
+
+# Run regression smoke tests (core live UI smoke, demo traffic, stats, timestamp toggle).
+ui-regression-smoke:
+    npm --prefix {{node_package_dir}} run test:regression:smoke
+
+# Run regression data/source/plugin tests (CBOR, network capture, CoAP plugin, plugin isolation).
+ui-regression-data:
+    npm --prefix {{node_package_dir}} run test:regression:data
+
+# Run regression interaction tests (clipboard, drag, filters, layout sync, selection scopes).
+ui-regression-interaction:
+    npm --prefix {{node_package_dir}} run test:regression:interaction
+
+# Run regression event-detection tests.
+ui-regression-events:
+    npm --prefix {{node_package_dir}} run test:regression:events
+
+# Run regression session/export/replay tests.
+ui-regression-sessions:
+    npm --prefix {{node_package_dir}} run test:regression:sessions
 
 # Run all UI tests defined by tests-ui/package.json.
 ui-all:

@@ -144,8 +144,20 @@ jobs:
       - name: UI e2e tests
         run: npm --prefix tests-ui run test:e2e
 
-      - name: UI parity e2e tests
-        run: npm --prefix tests-ui run test:parity
+      - name: UI regression smoke tests
+        run: npm --prefix tests-ui run test:regression:smoke
+
+      - name: UI regression data/source/plugin tests
+        run: npm --prefix tests-ui run test:regression:data
+
+      - name: UI regression interaction tests
+        run: npm --prefix tests-ui run test:regression:interaction
+
+      - name: UI regression event tests
+        run: npm --prefix tests-ui run test:regression:events
+
+      - name: UI regression session/export tests
+        run: npm --prefix tests-ui run test:regression:sessions
 
       - name: Upload Playwright reports on failure
         if: failure()

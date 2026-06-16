@@ -173,7 +173,7 @@ Run tests:
 ```bash
 just ui-unit
 just ui-e2e
-just ui-parity
+just ui-regression
 just ui-all
 ```
 
