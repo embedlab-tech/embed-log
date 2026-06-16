@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { collectPageErrors, sendUdpLine } from './helpers.js';
+import { collectPageErrors, openHtmlFile, saveDownload, sendUdpLine, waitForSourceTestLine } from './helpers.js';
+import fs from 'node:fs';
 
 // Feature: Event detection — backend-matched events are visualized as a swimlane
 //   timeline and rendered as severity-coloured markers on log lines.
@@ -181,15 +182,114 @@ test.describe('event detection', () => {
     // Wait for dots
     await expect.poll(() => page.locator('.events-dot').count(), { timeout: 20_000 }).toBeGreaterThan(0);
 
-    // Uncheck "error" severity filter
+    // Uncheck "error" severity filter and verify error dots disappear
     const errorCheckbox = page.locator('[data-fsev="error"]');
     if (await errorCheckbox.count() > 0) {
-      const dotsBefore = await page.locator('.events-dot').count();
       await errorCheckbox.uncheck();
-      // Wait a tick for re-render
-      await new Promise(r => setTimeout(r, 200));
-      const dotsAfter = await page.locator('.events-dot').count();
-      expect(dotsAfter).toBeLessThan(dotsBefore);
+      // Wait for re-render to settle
+      await expect.poll(
+        () => page.locator('.events-dot[data-severity="error"]').count(),
+        { timeout: 5_000 }
+      ).toBe(0);
+
+      // Re-check and verify error dots reappear
+      await errorCheckbox.check();
+      await expect.poll(
+        () => page.locator('.events-dot[data-severity="error"]').count(),
+        { timeout: 5_000 }
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  // ── Static HTML export ──────────────────────────────────────────────────
+
+  test('exported static HTML includes events tab with timeline and dots', async ({ page, browser }, testInfo) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+
+    // Wait for event dots to appear in the live UI, confirming events are active
+    await page.locator('.events-tab-btn').click();
+    await expect.poll(
+      () => page.locator('.events-dot').count(),
+      { timeout: 20_000 }
+    ).toBeGreaterThan(0);
+
+    // Trigger a full HTML export via the toolbar export button
+    await page.locator('#btn-export').click();
+    const download = await page.waitForEvent('download');
+    const htmlPath = await saveDownload(download, testInfo);
+
+    // Verify events data is embedded in the HTML
+    const html = fs.readFileSync(htmlPath, 'utf-8');
+    expect(html).toContain('__embedLogEventRules');
+    expect(html).toContain('__embedLogEvents');
+    expect(html).toContain('initEventsTab');
+
+    // Open the exported HTML and verify events tab renders
+    const exported = await openHtmlFile(browser, htmlPath);
+    const exportErrors = collectPageErrors(exported);
+    try {
+      // Events tab button should be present in the tab bar
+      await expect(exported.locator('.events-tab-btn')).toBeVisible();
+      await expect(exported.locator('.events-tab-btn')).toContainText('Events');
+
+      // Click it and verify SVG timeline renders with dots
+      await exported.locator('.events-tab-btn').click();
+      await expect(exported.locator('.events-timeline-svg')).toBeVisible();
+      await expect.poll(
+        () => exported.locator('.events-dot').count(),
+        { timeout: 10_000 }
+      ).toBeGreaterThan(0);
+
+      // Swimlanes should be present
+      const lanes = exported.locator('.events-lane-label');
+      await expect(lanes.first()).toBeVisible();
+      expect(await lanes.count()).toBeGreaterThan(0);
+
+      // No JavaScript errors during export replay
+      expect(exportErrors).toEqual([]);
+    } finally {
+      await exported.close();
+    }
+  });
+
+  test('exported HTML event dots are clickable and switch to source tab', async ({ page, browser }, testInfo) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+
+    // Ensure events exist
+    await page.locator('.events-tab-btn').click();
+    await expect.poll(
+      () => page.locator('.events-dot').count(),
+      { timeout: 20_000 }
+    ).toBeGreaterThan(0);
+
+    // Export
+    await page.locator('#btn-export').click();
+    const download = await page.waitForEvent('download');
+    const htmlPath = await saveDownload(download, testInfo);
+
+    const exported = await openHtmlFile(browser, htmlPath);
+    const exportErrors = collectPageErrors(exported);
+    try {
+      // Open events tab in the exported HTML
+      await exported.locator('.events-tab-btn').click();
+      await expect(exported.locator('.events-timeline-svg')).toBeVisible();
+
+      // Click a dot hit area (SVG re-renders can break locator-based clicks)
+      await exported.evaluate(() => {
+        const hit = document.querySelector('.events-dot-hit');
+        if (hit) hit.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+
+      // Should switch away from the events tab
+      await expect(exported.locator('#events-tab-content')).toBeHidden();
+      const activeTabText = await exported.locator('.tab-btn.active').textContent();
+      expect(activeTabText).not.toContain('Events');
+
+      expect(exportErrors).toEqual([]);
+    } finally {
+      await exported.close();
     }
   });
 });

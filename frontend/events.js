@@ -25,6 +25,8 @@ const SEVERITY_COLORS = {
 const SEVERITY_ORDER = ['fatal', 'error', 'warn', 'info'];
 
 const LANE_HEIGHT   = 22;
+const MIN_LANE_HEIGHT = 18;
+const MAX_LANE_HEIGHT = 40;
 const LEFT_MARGIN   = 134;
 const RIGHT_MARGIN  = 16;
 const TOP_MARGIN    = 8;
@@ -35,7 +37,7 @@ const BOTTOM_MARGIN = 28;
 let _contentEl  = null;   // #events-tab-content — the full tab panel
 let _svgWrapEl  = null;   // div wrapping the <svg>
 let _filterEl   = null;   // source/severity filter bar
-let _tooltipEl  = null;   // hover tooltip
+let _eventsTooltipEl  = null;   // hover tooltip
 let _eventsBtn  = null;   // tab-bar button
 
 let _viewRange = null;     // {start, end} in epoch-ms; null = auto-range
@@ -55,15 +57,22 @@ export function initEventsTab() {
     _buildTooltip();
     _renderFilters();
     renderTimeline();
+
+    // Re-render when the SVG container resizes (window resize, splitter drag, etc.)
+    if (typeof ResizeObserver !== 'undefined' && _svgWrapEl) {
+        new ResizeObserver(() => {
+            if (state.eventsTabActive) _scheduleTimelineRender();
+        }).observe(_svgWrapEl);
+    }
 }
 
 export function destroyEventsTab() {
     _contentEl?.remove();
-    _tooltipEl?.remove();
+    _eventsTooltipEl?.remove();
     _contentEl  = null;
     _svgWrapEl  = null;
     _filterEl   = null;
-    _tooltipEl  = null;
+    _eventsTooltipEl  = null;
     _eventsBtn  = null;
     _viewRange  = null;
     _panState   = null;
@@ -96,10 +105,14 @@ export function renderTimeline() {
     const range  = _effectiveRange();
     const width  = _svgWrapEl.clientWidth || 800;
     const innerW = Math.max(50, width - LEFT_MARGIN - RIGHT_MARGIN);
-    const height = TOP_MARGIN + Math.max(1, lanes.size) * LANE_HEIGHT + BOTTOM_MARGIN;
+    const laneCount = Math.max(1, lanes.size);
+    const availH    = _svgWrapEl.clientHeight || 300;
+    const dynLaneH  = Math.max(MIN_LANE_HEIGHT, Math.min(MAX_LANE_HEIGHT, Math.floor((availH - TOP_MARGIN - BOTTOM_MARGIN) / laneCount)));
+    const minHeight = TOP_MARGIN + laneCount * dynLaneH + BOTTOM_MARGIN;
+    const height = Math.max(availH, minHeight);
 
     _svgWrapEl.innerHTML = '';
-    _svgWrapEl.appendChild(_buildSvg(events, lanes, range, width, height, innerW));
+    _svgWrapEl.appendChild(_buildSvg(events, lanes, range, width, height, innerW, dynLaneH));
     _hasRenderedEventSnapshot = state.events.length > 0;
 }
 
@@ -175,14 +188,14 @@ function _buildDom() {
 }
 
 function _buildTooltip() {
-    _tooltipEl = document.createElement('div');
-    _tooltipEl.id = 'events-tooltip';
-    document.body.appendChild(_tooltipEl);
+    _eventsTooltipEl = document.createElement('div');
+    _eventsTooltipEl.id = 'events-tooltip';
+    document.body.appendChild(_eventsTooltipEl);
 }
 
 // ── SVG rendering ─────────────────────────────────────────────────────────
 
-function _buildSvg(events, lanes, range, width, height, innerW) {
+function _buildSvg(events, lanes, range, width, height, innerW, laneH) {
     const svg = document.createElementNS(SVG_NS, 'svg');
     svg.setAttribute('width', width);
     svg.setAttribute('height', height);
@@ -193,20 +206,20 @@ function _buildSvg(events, lanes, range, width, height, innerW) {
 
     // Lane stripes + labels
     lanes.forEach((laneIdx, eventId) => {
-        const y = TOP_MARGIN + laneIdx * LANE_HEIGHT;
+        const y = TOP_MARGIN + laneIdx * laneH;
         if (laneIdx % 2 === 1) {
             svg.appendChild(_el('rect', {
-                x: LEFT_MARGIN, y, width: innerW, height: LANE_HEIGHT,
+                x: LEFT_MARGIN, y, width: innerW, height: laneH,
                 class: 'events-lane-bg',
             }));
         }
         svg.appendChild(_el('line', {
-            x1: LEFT_MARGIN,  y1: y + LANE_HEIGHT / 2,
-            x2: LEFT_MARGIN + innerW, y2: y + LANE_HEIGHT / 2,
+            x1: LEFT_MARGIN,  y1: y + laneH / 2,
+            x2: LEFT_MARGIN + innerW, y2: y + laneH / 2,
             class: 'events-lane-line',
         }));
         const label = _el('text', {
-            x: LEFT_MARGIN - 8, y: y + LANE_HEIGHT / 2 + 4,
+            x: LEFT_MARGIN - 8, y: y + laneH / 2 + 4,
             'text-anchor': 'end', class: 'events-lane-label',
         });
         label.textContent = eventId;
@@ -236,12 +249,13 @@ function _buildSvg(events, lanes, range, width, height, innerW) {
         const laneIdx = lanes.get(ev.event_id);
         if (laneIdx === undefined) return;
         const cx = xScale(ev.timestamp_num);
-        const cy = TOP_MARGIN + laneIdx * LANE_HEIGHT + LANE_HEIGHT / 2;
+        const cy = TOP_MARGIN + laneIdx * laneH + laneH / 2;
         const dot = _el('circle', {
             cx, cy, r: 5,
             fill: SEVERITY_COLORS[ev.severity] || SEVERITY_COLORS.info,
             class: 'events-dot',
             'data-event-idx': i,
+            'data-severity': ev.severity || 'info',
         });
         // Larger invisible hit target
         const hit = _el('circle', {
@@ -347,23 +361,23 @@ function _zoom(direction) {
 // ── Tooltip ───────────────────────────────────────────────────────────────
 
 function _showTooltip(ev, x, y) {
-    if (!_tooltipEl) return;
+    if (!_eventsTooltipEl) return;
     const captures = Array.isArray(ev.captures) && ev.captures.length
         ? `<div class="et-captures">${ev.captures.map(c => `<code>${_esc(c)}</code>`).join(' ')}</div>`
         : '';
-    _tooltipEl.innerHTML =
+    _eventsTooltipEl.innerHTML =
         `<div class="et-head"><span class="et-sev et-sev-${ev.severity}">${ev.severity}</span>${_esc(ev.event_id)}</div>` +
         `<div class="et-meta">${_esc(paneLabel(ev.source_id))} · ${_esc(ev.timestamp || '')} · line ${ev.line_idx ?? '?'}</div>` +
         `<div class="et-msg">${_esc(ev.message || '')}</div>` +
         captures;
-    const w = _tooltipEl.offsetWidth;
-    _tooltipEl.style.left = Math.min(x + 12, window.innerWidth - w - 8) + 'px';
-    _tooltipEl.style.top = (y + 12) + 'px';
-    _tooltipEl.classList.add('visible');
+    const w = _eventsTooltipEl.offsetWidth;
+    _eventsTooltipEl.style.left = Math.min(x + 12, window.innerWidth - w - 8) + 'px';
+    _eventsTooltipEl.style.top = (y + 12) + 'px';
+    _eventsTooltipEl.classList.add('visible');
 }
 
 function _hideTooltip() {
-    _tooltipEl?.classList.remove('visible');
+    _eventsTooltipEl?.classList.remove('visible');
 }
 
 // ── Filtering ─────────────────────────────────────────────────────────────

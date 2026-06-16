@@ -335,6 +335,7 @@ impl LogServer {
         let export_plugins_definitions = plugins.definitions.clone();
         let export_pane_plugins = plugins.pane_plugins.clone();
         let export_plugin_scripts = plugins.scripts.clone();
+        let export_event_rules = event_rules_meta.clone();
 
         let session_mgr_for_export = session_mgr.clone();
         let export_first_log_at = first_log_at.clone();
@@ -346,11 +347,12 @@ impl LogServer {
                 .map(|dt| dt.to_rfc3339());
             let export_html = export_html_path.lock().unwrap().clone();
             let export_sources = export_source_files.lock().unwrap().clone();
-            let (export_markers, marker_paths) = session_mgr_for_export
+            let (export_markers, export_events, marker_paths) = session_mgr_for_export
                 .lock()
                 .map(|mgr| {
                     (
                         mgr.load_markers(),
+                        mgr.load_events(),
                         vec![mgr.session_dir().join("markers.json")],
                     )
                 })
@@ -377,7 +379,8 @@ impl LogServer {
                 export_pane_plugins.clone(),
                 export_plugin_scripts.clone(),
             )
-            .with_markers(export_markers);
+            .with_markers(export_markers)
+            .with_events(export_events, export_event_rules.clone());
 
             match exporter.export() {
                 Ok(path) => {
@@ -423,11 +426,15 @@ impl LogServer {
         let rotate_event_rules = event_rules_meta.clone();
 
         let on_rotate: RotateCallback = Arc::new(move || {
-            let (old_session, old_markers) = {
+            let (old_session, old_markers, old_events) = {
                 let manager = rotate_session_mgr
                     .lock()
                     .map_err(|_| "session manager lock failed".to_string())?;
-                (manager.build_session_info(), manager.load_markers())
+                (
+                    manager.build_session_info(),
+                    manager.load_markers(),
+                    manager.load_events(),
+                )
             };
             let old_source_files = rotate_source_files.lock().unwrap().clone();
             let old_html_path = rotate_html_path.lock().unwrap().clone();
@@ -520,6 +527,7 @@ impl LogServer {
             let old_export_plugin_definitions = rotate_frontend_plugins.clone();
             let old_export_pane_plugins = rotate_pane_plugins.clone();
             let old_export_plugin_scripts = rotate_plugin_scripts.clone();
+            let old_export_event_rules = rotate_event_rules.clone();
             if let Some(old_manifest_path) =
                 old_html_path.parent().map(|dir| dir.join("manifest.json"))
             {
@@ -546,7 +554,8 @@ impl LogServer {
                         old_export_pane_plugins,
                         old_export_plugin_scripts,
                     )
-                    .with_markers(old_markers);
+                    .with_markers(old_markers)
+                    .with_events(old_events, old_export_event_rules);
 
                     match exporter.export() {
                         Ok(path) => {
