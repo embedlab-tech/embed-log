@@ -66,12 +66,7 @@ jobs:
 
       - name: Install Playwright Chromium
         working-directory: tests-ui
-        run: |
-          if [ "${RUNNER_OS}" = "Linux" ]; then
-            npx playwright install --with-deps chromium
-          else
-            npx playwright install chromium
-          fi
+        run: npx playwright install chromium
 
       - name: UI unit tests
         run: npm --prefix tests-ui run test:unit
