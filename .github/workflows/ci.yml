@@ -17,10 +17,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
-    name: Build, test, and UI e2e
+  build:
+    name: Build CLI
     runs-on: [self-hosted, Linux]
-    timeout-minutes: 90
+    timeout-minutes: 45
+    env:
+      CI: "true"
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+
+      - name: Show Rust versions
+        run: |
+          rustc --version
+          cargo --version
+          rustup show
+
+      - name: Build CLI
+        run: cargo build --locked --package embed-log-cli --bin embed-log
+
+  rust-tests:
+    name: Rust format, clippy, and tests
+    runs-on: [self-hosted, Linux]
+    timeout-minutes: 60
     env:
       CI: "true"
       CARGO_TERM_COLOR: always
@@ -36,23 +62,33 @@ jobs:
       - name: Cache Rust build outputs
         uses: Swatinem/rust-cache@v2
 
-      - name: Show Rust versions
-        run: |
-          rustc --version
-          cargo --version
-          rustup show
-
       - name: Check formatting
         run: cargo fmt --all -- --check
-
-      - name: Build CLI
-        run: cargo build --locked --package embed-log-cli --bin embed-log
 
       - name: Clippy CLI/core
         run: cargo clippy --locked --package embed-log-core --package embed-log-cli --all-targets -- -D warnings
 
       - name: Rust tests CLI/core
         run: cargo test --locked --package embed-log-core --package embed-log-cli
+
+  ui-e2e:
+    name: UI unit and e2e tests
+    runs-on: [self-hosted, Linux]
+    timeout-minutes: 90
+    env:
+      CI: "true"
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ui-e2e
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
