@@ -1,0 +1,28 @@
+version: 1
+server:
+  host: 127.0.0.1
+  ws_port: 8080
+logs:
+  dir: logs
+sources:
+  - name: SENSOR_A
+    label: Sensor A CBOR
+    type: udp
+    port: 6000
+    parser:
+      type: cbor-datagram
+  - name: SENSOR_B
+    label: Sensor B CBOR
+    type: udp
+    port: 6001
+    parser:
+      type: cbor-datagram
+  - name: DUT_TEXT
+    label: DUT text
+    type: udp
+    port: 6002
+tabs:
+  - label: Sensors
+    panes: [SENSOR_A, SENSOR_B]
+  - label: Device
+    panes: [DUT_TEXT]

@@ -1,0 +1,17 @@
+version: 1
+server:
+  host: 127.0.0.1
+  ws_port: 8080
+logs:
+  dir: logs
+sources:
+  - name: NET
+    label: Network capture
+    type: network_capture
+    interface: lo
+    network_backend: mock
+    mock_interval: 0.25
+    bpf_filter: udp
+tabs:
+  - label: Network
+    panes: [NET]

@@ -1,0 +1,26 @@
+version: 1
+baudrate: 115200
+server:
+  host: 127.0.0.1
+  ws_port: 8080
+logs:
+  dir: logs
+sources:
+  - name: DUT_UART
+    label: DUT UART
+    type: uart
+    port: /dev/ttyUSB0
+  - name: HOST_UART
+    label: Host UART
+    type: uart
+    port: /dev/ttyUSB1
+    baudrate: 921600
+  - name: AUX_UDP
+    label: Auxiliary UDP
+    type: udp
+    port: 6002
+tabs:
+  - label: Main
+    panes: [DUT_UART, HOST_UART]
+  - label: Auxiliary
+    panes: [AUX_UDP]

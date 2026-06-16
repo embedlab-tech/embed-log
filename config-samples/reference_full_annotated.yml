@@ -1,0 +1,50 @@
+version: 1
+baudrate: 115200
+server:
+  host: 127.0.0.1
+  ws_port: 8080
+  app_name: embed-log reference
+  open_browser: false
+  verbosity: events
+  default_light_theme: whitesand
+  default_dark_theme: one-dark
+  timestamp_mode: absolute
+  control_api: true
+logs:
+  dir: logs
+frontend_plugins:
+  hex-coap:
+    builtin: hex-coap
+sources:
+  - name: DUT_UART
+    label: DUT UART
+    type: uart
+    port: /dev/ttyUSB0
+    baudrate: 115200
+  - name: HOST_UDP
+    label: Host UDP
+    type: udp
+    port: 6000
+  - name: SENSOR_CBOR
+    label: Sensor CBOR
+    type: udp
+    port: 6001
+    parser:
+      type: cbor-datagram
+  - name: NET_CAPTURE
+    label: Network capture
+    type: network_capture
+    interface: lo
+    network_backend: mock
+    mock_interval: 0.5
+    bpf_filter: udp
+tabs:
+  - label: Device
+    panes:
+      - source: DUT_UART
+        plugins: [hex-coap]
+      - HOST_UDP
+  - label: Sensors
+    panes: [SENSOR_CBOR]
+  - label: Network
+    panes: [NET_CAPTURE]
