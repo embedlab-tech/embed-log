@@ -1,0 +1,90 @@
+version: 1
+server:
+  host: 127.0.0.1
+  ws_port: 8080
+  app_name: embed-log demo
+  open_browser: true
+  timestamp_mode: absolute
+
+logs:
+  dir: logs/
+
+baudrate: 115200
+
+frontend_plugins:
+  hex-coap:
+    builtin: hex-coap
+
+sources:
+  - name: DUT
+    label: DUT Device
+    type: udp
+    port: 6000
+
+  - name: HOST
+    label: Host Controller
+    type: udp
+    port: 6001
+
+  - name: UART_DUT
+    label: UART Main
+    type: udp
+    port: 6100
+
+  - name: UART_DEBUG
+    label: UART Debug
+    type: udp
+    port: 6101
+
+  - name: COAP_RAW
+    label: CoAP Raw Hex
+    type: udp
+    port: 6005
+
+  - name: SENSORS
+    label: Sensor CBOR
+    type: udp
+    port: 6002
+    parser:
+      type: cbor-datagram
+
+  - name: NET_CAPTURE
+    label: Network Mock
+    type: network_capture
+    network_backend: mock
+    interface: mock0
+    mock_interval: 1.0
+    bpf_filter: udp or coap
+
+  - name: FILE_WATCH
+    label: Watched File
+    type: file
+    port: .tmp/demo-watch.log
+
+tabs:
+  - label: Device
+    panes:
+      - DUT
+      - HOST
+
+  - label: UART
+    panes:
+      - UART_DUT
+      - UART_DEBUG
+
+  - label: CoAP
+    panes:
+      - source: COAP_RAW
+        plugins: [hex-coap]
+
+  - label: Sensors
+    panes:
+      - SENSORS
+
+  - label: Network
+    panes:
+      - NET_CAPTURE
+
+  - label: File
+    panes:
+      - FILE_WATCH

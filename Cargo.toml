@@ -4,6 +4,7 @@ members = [
     "crates/embed-log-core",
     "crates/embed-log-cli",
     "crates/embed-log-tauri",
+    "crates/embed-log-tui",
 ]
 
 [workspace.package]
@@ -39,5 +40,6 @@ anyhow = "1"
 thiserror = "2"
 slug = "0.1"
 
-# Core crate (used by CLI and Tauri)
+# Core + TUI crates (used by CLI and Tauri)
 embed-log-core = { path = "crates/embed-log-core" }
+embed-log-tui = { path = "crates/embed-log-tui" }

@@ -116,6 +116,10 @@ struct Cli {
     #[arg(long, default_value = "frontend")]
     frontend_dir: PathBuf,
 
+    /// Launch the terminal UI (ratatui) instead of the default browser UI.
+    #[arg(long)]
+    tui: bool,
+
     /// Launch the Tauri desktop UI instead of the default browser UI.
     #[arg(long)]
     ui: bool,
@@ -155,6 +159,10 @@ enum Command {
         /// Override logs directory from config.
         #[arg(long)]
         log_dir: Option<PathBuf>,
+
+        /// Launch the terminal UI (ratatui) instead of the browser UI.
+        #[arg(long)]
+        tui: bool,
 
         /// Override bind host from config.
         #[arg(long)]
@@ -232,6 +240,10 @@ enum Command {
         /// Do not open the browser.
         #[arg(long)]
         no_open_browser: bool,
+
+        /// Launch the terminal UI (ratatui) instead of the browser.
+        #[arg(long)]
+        tui: bool,
     },
 
     /// Generate a sample embed-log.yml config file.
@@ -360,10 +372,11 @@ async fn main() -> Result<()> {
             frontend_dir,
             open_browser,
             no_open_browser,
+            tui,
             ..
         }) => {
             let open_browser = browser_launch_enabled(open_browser, no_open_browser);
-            cmd_run(config.as_ref(), &frontend_dir, open_browser).await
+            cmd_run(config.as_ref(), &frontend_dir, open_browser, tui).await
         }
         Some(Command::Version { config, json }) => cmd_version(config.as_deref(), json),
         Some(Command::Doctor { config, json }) => cmd_doctor(config.as_deref(), json),
@@ -374,9 +387,10 @@ async fn main() -> Result<()> {
             config,
             frontend_dir,
             no_open_browser,
+            tui,
         }) => {
             let config_path = config.as_deref().map(PathBuf::from);
-            cmd_demo(config_path.as_ref(), &frontend_dir, !no_open_browser).await
+            cmd_demo(config_path.as_ref(), &frontend_dir, !no_open_browser, tui).await
         }
 
         Some(Command::Onboard {
@@ -395,7 +409,13 @@ async fn main() -> Result<()> {
         Some(Command::Parse { html, output }) => cmd_parse(&html, &output),
         None => {
             let open_browser = browser_launch_enabled(cli.open_browser, cli.no_open_browser);
-            cmd_run(cli.config.as_ref(), &cli.frontend_dir, open_browser).await
+            cmd_run(
+                cli.config.as_ref(),
+                &cli.frontend_dir,
+                open_browser,
+                cli.tui,
+            )
+            .await
         }
     }
 }
@@ -404,6 +424,7 @@ async fn cmd_run(
     config_path: Option<&PathBuf>,
     frontend_dir: &PathBuf,
     open_browser: bool,
+    tui: bool,
 ) -> Result<()> {
     let config_path = resolve_config_path(config_path);
 
@@ -463,13 +484,47 @@ async fn cmd_run(
         "  server:   http://{}:{}",
         config.server.host, config.server.ws_port
     );
-    println!();
-    if open_browser && !onboarded {
+    // In TUI mode, suppress the browser (the terminal is the UI).
+    if open_browser && !onboarded && !tui {
         schedule_browser_open(config.server.host.clone(), config.server.ws_port);
     }
 
+    let ws_port = config.server.ws_port;
+    let app_name = config.server.app_name.clone();
     let server = LogServer::new(config, frontend_dir, logs_root).with_config_path(config_path);
-    server.run().await
+    if tui {
+        run_server_with_tui(server, ws_port, &app_name).await
+    } else {
+        server.run().await
+    }
+}
+
+/// Spawn the log server as a background task, then run the TUI in the
+/// foreground. When the TUI quits, abort the server task and return.
+///
+/// The server's `run()` is the blocking serve loop (no graceful shutdown
+/// signal), so we abort it on TUI exit. On-disk session artifacts are already
+/// written by the server during the run; abort only drops in-memory state.
+async fn run_server_with_tui(server: LogServer, ws_port: u16, app_name: &str) -> Result<()> {
+    // Spawn the server serve loop in the background.
+    let server_task = tokio::spawn(async move { server.run().await });
+
+    // Give the server a moment to bind the port before the TUI connects.
+    // The WS client retries on connect failure, so this is a best-effort race
+    // avoidance rather than a hard requirement.
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    // Run the TUI on the current thread. It connects to ws://127.0.0.1:port/ws.
+    #[cfg(feature = "tui")]
+    let tui_result = embed_log_tui::run_in_process_async(ws_port, Some(app_name)).await;
+    #[cfg(not(feature = "tui"))]
+    let tui_result: Result<()> = {
+        anyhow::bail!("embed-log was built without the `tui` feature; rebuild with --features tui")
+    };
+
+    // TUI exited → abort the server task.
+    server_task.abort();
+    tui_result
 }
 
 /// Run the interactive browser onboarding, blocking until the user saves a
@@ -513,7 +568,7 @@ async fn cmd_onboard(
 ) -> Result<()> {
     let config_path = resolve_config_path(config_path);
     run_onboarding(&config_path, open_browser)?;
-    cmd_run(Some(&config_path), frontend_dir, false).await
+    cmd_run(Some(&config_path), frontend_dir, false, false).await
 }
 
 fn browser_launch_enabled(_open_browser: bool, no_open_browser: bool) -> bool {
@@ -1220,6 +1275,7 @@ async fn cmd_demo(
     config_path: Option<&PathBuf>,
     frontend_dir: &PathBuf,
     open_browser: bool,
+    tui: bool,
 ) -> Result<()> {
     // Use embedded demo config if no explicit config provided.
     let config_path = resolve_config_path(config_path);
@@ -1262,13 +1318,19 @@ async fn cmd_demo(
             .collect::<Vec<_>>()
             .join(", ")
     );
-    if open_browser {
+    if open_browser && !tui {
         schedule_browser_open(config.server.host.clone(), config.server.ws_port);
     }
     prepare_demo_file_sources(&config)?;
     spawn_demo_traffic(&config);
+    let ws_port = config.server.ws_port;
+    let app_name = config.server.app_name.clone();
     let server = LogServer::new(config, frontend_dir, logs_root).with_config_path(config_path);
-    server.run().await
+    if tui {
+        run_server_with_tui(server, ws_port, &app_name).await
+    } else {
+        server.run().await
+    }
 }
 
 fn cmd_init(output: &PathBuf) -> Result<()> {

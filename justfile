@@ -130,6 +130,28 @@ demo-desktop:
     {{cargo}} build --package embed-log-tauri --bin embed-log-tauri
     EMBED_LOG_DEMO_TRAFFIC=1 exec ./target/debug/embed-log-tauri --config {{config}}
 
+
+# Build the terminal UI (ratatui) crate.
+build-tui:
+    {{cargo}} build --package embed-log-tui --bin embed-log-tui
+
+# Run the terminal UI demo with generated demo traffic (ratatui).
+#
+# Single command: `embed-log demo --tui` starts the server + demo traffic
+# in-process and connects the TUI. Quit with `q` or Ctrl+C.
+demo-tui:
+    {{cargo}} build --package embed-log-cli --bin embed-log
+    exec ./target/debug/embed-log demo --tui --no-open-browser
+
+# Run the terminal UI against a config (server + TUI in one process).
+run-tui cfg=config:
+    {{cargo}} build --package embed-log-cli --bin embed-log
+    exec ./target/debug/embed-log run --tui --config {{cfg}} --no-open-browser
+
+# Run terminal UI unit tests.
+tui-unit:
+    {{cargo}} test --package embed-log-tui
+
 # Run first-run onboarding. Default: web. Override: just onboarding desktop
 onboarding target="web":
     @just onboarding-{{target}}

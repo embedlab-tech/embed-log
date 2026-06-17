@@ -18,3 +18,11 @@ tracing-subscriber.workspace = true
 anyhow.workspace = true
 serde_json.workspace = true
 serialport = "4"
+
+[dependencies.embed-log-tui]
+workspace = true
+optional = true
+
+[features]
+default = ["tui"]
+tui = ["dep:embed-log-tui"]
