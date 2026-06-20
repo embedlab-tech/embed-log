@@ -146,7 +146,13 @@ fn draw_tab_bar(f: &mut Frame, state: &State, area: Rect) {
     };
     // Append Events tab when enabled (non-unwrap mode).
     if state.events_enabled && !state.unwrap {
-        titles.push(Line::from("⚡ Events"));
+        let count = state.events.len();
+        let label = if count > 0 {
+            format!("⚡ Events ({count})")
+        } else {
+            "⚡ Events".to_string()
+        };
+        titles.push(Line::from(label));
     }
 
     let tab_count = state.tab_count();
@@ -155,7 +161,12 @@ fn draw_tab_bar(f: &mut Frame, state: &State, area: Rect) {
     let tabs = Tabs::new(titles)
         .block(Block::default().borders(Borders::ALL).title("embed-log"))
         .select(active)
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD));
+        .highlight_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .bg(Color::Black)
+                .add_modifier(Modifier::BOLD),
+        );
     f.render_widget(tabs, area);
 }
 
@@ -221,11 +232,21 @@ fn draw_pane_content(f: &mut Frame, state: &State, area: Rect) {
         f.render_widget(block, pane_areas[i]);
 
         let stored = state.raw_lines.get(pane_id);
-        let count = stored.map(|v| v.len()).unwrap_or(0);
-        if count == 0 {
+        let line_count = stored.map(|v| v.len()).unwrap_or(0);
+        let mut content_area = inner;
+        if focused && state.is_writable(pane_id) && inner.height >= 2 {
+            let split = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(1), Constraint::Length(1)])
+                .split(inner);
+            content_area = split[0];
+            draw_tx_bar(f, state, pane_id, split[1]);
+        }
+
+        if line_count == 0 {
             f.render_widget(
                 Paragraph::new("(no lines yet)").style(Style::default().fg(Color::DarkGray)),
-                inner,
+                content_area,
             );
             continue;
         }
@@ -234,9 +255,8 @@ fn draw_pane_content(f: &mut Frame, state: &State, area: Rect) {
         let markers = state.markers_for(pane_id);
         let filter = state.filters.get(pane_id).and_then(|f| f.as_ref());
         let scroll = state.scroll.get(pane_id).copied().unwrap_or(0);
-        // Visible rows = inner height; clamp to ≥1.
-        let visible = inner.height.max(1) as usize;
-        let (_, lines) = crate::lines::pane_lines(
+        let visible = content_area.height.max(1) as usize;
+        let (_, rows) = crate::lines::pane_rows(
             stored,
             &markers,
             state.timestamp_mode,
@@ -244,8 +264,96 @@ fn draw_pane_content(f: &mut Frame, state: &State, area: Rect) {
             scroll,
             visible,
         );
-        f.render_widget(Paragraph::new(lines), inner);
+        let mut lines = Vec::with_capacity(rows.len());
+        for (raw_idx, mut line) in rows {
+            let line_abs = stored.get(raw_idx).map(|l| l.abs_num);
+            let is_focused = state.focused_raw_idx == Some(raw_idx as u64);
+            let is_synced = state
+                .sync_ts
+                .zip(line_abs)
+                .is_some_and(|(ts, n)| (ts - n).abs() < 0.5);
+            if is_focused || is_synced {
+                let style = if is_focused {
+                    Style::default().bg(Color::DarkGray)
+                } else {
+                    Style::default().bg(Color::Blue)
+                };
+                line = line.patch_style(style);
+            }
+            lines.push(line);
+        }
+        f.render_widget(Paragraph::new(lines), content_area);
+        draw_scrollbar(f, pane_areas[i], line_count, scroll, visible, focused);
     }
+}
+
+fn draw_tx_bar(f: &mut Frame, state: &State, _pane_id: &str, area: Rect) {
+    let commands = state.active_pane_commands();
+    let suggestion = state
+        .tx_match_pos
+        .and_then(|pos| state.tx_matches.get(pos).copied())
+        .and_then(|idx| commands.get(idx))
+        .cloned()
+        .unwrap_or_default();
+    let text = if state.tx_mode {
+        format!(
+            "TX> {}{}",
+            state.tx_buffer,
+            if !suggestion.is_empty() && suggestion != state.tx_buffer {
+                "  ⇥ suggestion"
+            } else {
+                ""
+            }
+        )
+    } else {
+        ": / i to send  •  Tab cycles saved commands".to_string()
+    };
+    let style = if state.tx_mode {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    f.render_widget(Paragraph::new(text).style(style), area);
+}
+
+fn draw_scrollbar(
+    f: &mut Frame,
+    outer: Rect,
+    total_lines: usize,
+    scroll: usize,
+    visible: usize,
+    focused: bool,
+) {
+    if outer.width < 3 || outer.height <= 2 || total_lines <= visible {
+        return;
+    }
+    let inner = Block::default().borders(Borders::ALL).inner(outer);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+    let track_h = inner.height as usize;
+    let thumb_h = ((visible as f32 / total_lines as f32) * track_h as f32)
+        .round()
+        .max(1.0) as usize;
+    let max_scroll = total_lines.saturating_sub(visible).max(1);
+    let thumb_top = ((scroll as f32 / max_scroll as f32) * (track_h.saturating_sub(thumb_h)) as f32)
+        .round() as usize;
+
+    let mut rows = Vec::with_capacity(track_h);
+    for y in 0..track_h {
+        let is_thumb = y >= thumb_top && y < thumb_top + thumb_h;
+        let span = if is_thumb {
+            Span::styled(
+                "█",
+                Style::default().fg(if focused { Color::Cyan } else { Color::Gray }),
+            )
+        } else {
+            Span::styled("│", Style::default().fg(Color::DarkGray))
+        };
+        rows.push(Line::from(vec![span]));
+    }
+    let bar_area = Rect::new(inner.x + inner.width - 1, inner.y, 1, inner.height);
+    f.render_widget(Paragraph::new(rows), bar_area);
 }
 
 /// Render the single-line status bar.
@@ -281,6 +389,16 @@ fn draw_status_bar(f: &mut Frame, state: &State, area: Rect) {
         crate::state::SelectionScope::Context => "context",
     };
     let unwrap = if state.unwrap { " │ UNWRAP" } else { "" };
+    let events_hint = if state.events_enabled {
+        format!(" │ events:{} │ e=events", state.events.len())
+    } else {
+        String::new()
+    };
+    let tx_hint = state
+        .tx_status
+        .as_ref()
+        .map(|s| format!(" │ tx:{s}"))
+        .unwrap_or_default();
 
     let line = Line::from(vec![
         conn_span,
@@ -289,7 +407,7 @@ fn draw_status_bar(f: &mut Frame, state: &State, area: Rect) {
         Span::raw(" │ session "),
         Span::styled(session, Style::default().fg(Color::Cyan)),
         Span::raw(format!(
-            " │ {ts_mode} │ {active_label} │ {scope}{unwrap} │ ?:help q=quit "
+            " │ {ts_mode} │ {active_label} │ {scope}{unwrap}{events_hint}{tx_hint} │ ?:help q=quit "
         )),
     ]);
     f.render_widget(

@@ -33,6 +33,10 @@ pub fn handle_key(
     key: &InputKey,
     terminal_height: u16,
 ) -> KeyAction {
+    if state.tx_mode {
+        handle_tx_key(state, client, key);
+        return KeyAction::Continue;
+    }
     if key.is_quit() {
         return KeyAction::Quit;
     }
@@ -46,10 +50,23 @@ pub fn handle_key(
     }
 
     match key.code {
+        // ── TX open ──
+        KeyCode::Char(':') => state.open_tx_mode(),
+        KeyCode::Char('i')
+            if state
+                .active_pane_id()
+                .as_deref()
+                .is_some_and(|p| state.is_writable(p)) =>
+        {
+            state.open_tx_mode();
+        }
         // ── Tab navigation ──
         KeyCode::Tab => cycle_tab(state, true),
         KeyCode::BackTab => cycle_tab(state, false),
-
+        KeyCode::Char('e') if state.events_enabled && !state.unwrap => {
+            state.active_tab = state.tabs.len();
+            state.active_pane = 0;
+        }
         // ── Pane focus (within a 2-pane tab) ──
         KeyCode::Char('h') | KeyCode::Left if !key.modifiers.contains(KeyModifiers::SHIFT) => {
             if !state.unwrap {
@@ -100,13 +117,9 @@ pub fn handle_key(
         KeyCode::Enter => {
             if let Some(pane) = state.active_pane_id() {
                 let scroll = state.scroll_of(&pane);
-                if let Some(ts) = state
-                    .raw_lines
-                    .get(&pane)
-                    .and_then(|l| l.get(scroll))
-                    .map(|l| l.abs_num)
-                {
-                    state.sync_panes_to_ts(ts, visible);
+                if let Some(line) = state.raw_lines.get(&pane).and_then(|l| l.get(scroll)) {
+                    state.focused_raw_idx = Some(line.line_idx);
+                    state.sync_panes_to_ts(line.abs_num, visible);
                 }
             }
         }
@@ -239,6 +252,37 @@ pub fn handle_key(
     }
 
     KeyAction::Continue
+}
+
+fn handle_tx_key(state: &mut State, client: &mut ClientHandle, key: &InputKey) {
+    match key.code {
+        KeyCode::Esc => state.close_tx_mode(),
+        KeyCode::Enter => {
+            if let Some(pane) = state.active_pane_id() {
+                let text = state.tx_buffer.trim_end().to_string();
+                if !text.is_empty() {
+                    let _ = client.commands.try_send(ClientCommand::SendRaw {
+                        id: pane,
+                        data: format!("{text}\n"),
+                    });
+                    state.tx_status = Some(format!("sent {} bytes", text.len() + 1));
+                }
+                state.tx_buffer.clear();
+                state.close_tx_mode();
+            }
+        }
+        KeyCode::Backspace => {
+            state.tx_buffer.pop();
+            state.refresh_tx_matches();
+        }
+        KeyCode::Tab => state.cycle_tx_suggestion(false),
+        KeyCode::BackTab => state.cycle_tx_suggestion(true),
+        KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            state.tx_buffer.push(c);
+            state.refresh_tx_matches();
+        }
+        _ => {}
+    }
 }
 
 /// Cycle to the next/previous tab (or pane in unwrap mode).

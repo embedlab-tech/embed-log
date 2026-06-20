@@ -141,7 +141,7 @@ build-tui:
 # in-process and connects the TUI. Quit with `q` or Ctrl+C.
 demo-tui:
     {{cargo}} build --package embed-log-cli --bin embed-log
-    exec ./target/debug/embed-log demo --tui --no-open-browser
+    exec ./target/debug/embed-log demo --tui --config demo.yml --no-open-browser
 
 # Run the terminal UI against a config (server + TUI in one process).
 run-tui cfg=config:

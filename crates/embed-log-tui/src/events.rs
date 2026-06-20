@@ -18,8 +18,12 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
+    symbols,
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{
+        canvas::{Canvas, Points},
+        Block, Borders, List, ListItem, Paragraph,
+    },
     Frame,
 };
 
@@ -176,73 +180,171 @@ impl EventsView {
     }
 }
 
-/// Render the events view: header + event list + (optional) detail popup.
+/// Render the events view: header + swimlane canvas + detail panel.
 pub fn draw_events(f: &mut Frame, state: &State, view: &EventsView, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(2), Constraint::Min(1)])
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Min(8),
+            Constraint::Length(6),
+        ])
         .split(area);
 
     draw_events_header(f, state, view, chunks[0]);
 
     let events = EventsView::visible_events(state, view);
     let lanes = EventsView::lanes(state, view);
+    let selected = events.get(view.cursor).copied();
 
-    let items: Vec<ListItem> = events
+    let mid = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(22), Constraint::Min(20)])
+        .split(chunks[1]);
+
+    draw_lane_labels(f, &lanes, selected, mid[0]);
+    draw_timeline_canvas(f, &events, &lanes, selected, mid[1]);
+    draw_event_detail_panel(f, state, selected, chunks[2]);
+
+    if view.show_detail {
+        if let Some(ev) = selected {
+            draw_event_detail(f, state, ev, area);
+        }
+    }
+}
+
+fn draw_lane_labels(f: &mut Frame, lanes: &[String], selected: Option<&EventPayload>, area: Rect) {
+    let items: Vec<ListItem> = lanes
         .iter()
-        .map(|ev| {
-            let color = severity_color(&ev.severity);
-            let lane_idx = lanes.iter().position(|l| l == &ev.event_id);
-            let lane_label = lane_idx.map(|i| format!("L{}", i + 1)).unwrap_or_default();
-            let source_label = state.pane_label(&ev.source_id);
+        .enumerate()
+        .map(|(i, lane)| {
+            let active = selected.is_some_and(|ev| ev.event_id == *lane);
             let line = Line::from(vec![
                 Span::styled(
-                    format!("{:<5}", ev.severity),
-                    Style::default().fg(color).add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(" "),
-                Span::styled(ev.timestamp.clone(), Style::default().fg(Color::DarkGray)),
-                Span::raw(" "),
-                Span::styled(
-                    format!("[{source_label}]"),
-                    Style::default().fg(Color::Cyan),
-                ),
-                Span::raw(" "),
-                Span::styled(
-                    format!("({lane_label}) "),
+                    format!("L{:<2}", i + 1),
                     Style::default().fg(Color::DarkGray),
                 ),
-                Span::raw(ev.message.clone()),
+                Span::raw(" "),
+                Span::styled(
+                    lane.clone(),
+                    if active {
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default()
+                    },
+                ),
             ]);
             ListItem::new(line)
         })
         .collect();
+    let list = List::new(items).block(Block::default().borders(Borders::ALL).title(" Lanes "));
+    f.render_widget(list, area);
+}
 
-    let title = if events.is_empty() {
-        " Events (waiting…) ".to_string()
+fn draw_timeline_canvas(
+    f: &mut Frame,
+    events: &[&EventPayload],
+    lanes: &[String],
+    selected: Option<&EventPayload>,
+    area: Rect,
+) {
+    let (start, end) = if events.is_empty() {
+        (0.0, 1.0)
     } else {
-        format!(" Events ({}) ", events.len())
+        let min = events
+            .iter()
+            .map(|e| e.timestamp_num)
+            .fold(f64::INFINITY, f64::min);
+        let max = events
+            .iter()
+            .map(|e| e.timestamp_num)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let span = (max - min).max(1000.0);
+        (min - span * 0.05, max + span * 0.05)
     };
+    let lane_max = lanes.len().max(1) as f64;
 
-    let mut list_state = ListState::default();
-    list_state.select(Some(view.cursor.min(events.len().saturating_sub(1))));
+    let canvas = Canvas::default()
+        .block(Block::default().borders(Borders::ALL).title(" Timeline "))
+        .marker(symbols::Marker::Braille)
+        .x_bounds([start, end])
+        .y_bounds([0.0, lane_max])
+        .paint(|ctx| {
+            // Horizontal lane guides + labels
+            for idx in 0..lanes.len() {
+                let y = lane_max - 1.0 - idx as f64 + 0.5;
+                // guide line
+                ctx.draw(&ratatui::widgets::canvas::Line {
+                    x1: start,
+                    y1: y,
+                    x2: end,
+                    y2: y,
+                    color: Color::DarkGray,
+                });
+                // lane marker at left edge
+                ctx.print(start, y, format!("L{}", idx + 1));
+            }
 
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(title)
-                .border_style(Style::default().fg(Color::Yellow)),
+            // Plot per-severity batches for color grouping
+            for sev in ["fatal", "error", "warn", "info"] {
+                let coords: Vec<(f64, f64)> = events
+                    .iter()
+                    .filter(|ev| ev.severity == sev)
+                    .filter_map(|ev| {
+                        let idx = lanes.iter().position(|l| l == &ev.event_id)? as f64;
+                        let y = lane_max - 1.0 - idx + 0.5;
+                        Some((ev.timestamp_num, y))
+                    })
+                    .collect();
+                if !coords.is_empty() {
+                    ctx.draw(&Points {
+                        coords: &coords,
+                        color: severity_color(sev),
+                    });
+                }
+            }
+
+            // Highlight selected event with a white point over the colored dot.
+            if let Some(ev) = selected {
+                if let Some(idx) = lanes.iter().position(|l| l == &ev.event_id) {
+                    let y = lane_max - 1.0 - idx as f64 + 0.5;
+                    let coords = vec![(ev.timestamp_num, y)];
+                    ctx.draw(&Points {
+                        coords: &coords,
+                        color: Color::White,
+                    });
+                }
+            }
+        });
+    f.render_widget(canvas, area);
+}
+
+fn draw_event_detail_panel(
+    f: &mut Frame,
+    state: &State,
+    selected: Option<&EventPayload>,
+    area: Rect,
+) {
+    let text = if let Some(ev) = selected {
+        let source = state.pane_label(&ev.source_id);
+        let captures = if ev.captures.is_empty() {
+            String::new()
+        } else {
+            format!(" | captures: {}", ev.captures.join(", "))
+        };
+        format!(
+            "[{}] {} | {} | {} | line {}{}\n{}",
+            ev.severity, ev.event_id, source, ev.timestamp, ev.line_idx, captures, ev.message
         )
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
-    f.render_stateful_widget(list, chunks[1], &mut list_state);
-
-    // Detail popup.
-    if view.show_detail {
-        if let Some(ev) = events.get(view.cursor) {
-            draw_event_detail(f, state, ev, area);
-        }
-    }
+    } else {
+        "No events yet.".to_string()
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Selected event ");
+    f.render_widget(Paragraph::new(text).block(block), area);
 }
 
 /// Render the events header: title, count, zoom range, filter status.

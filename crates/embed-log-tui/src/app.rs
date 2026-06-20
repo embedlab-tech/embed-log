@@ -152,8 +152,22 @@ fn handle_message(state: &mut State, msg: ServerMessage) {
             state.teardown_layout();
         }
         ServerMessage::ClearLogs(c) => state.clear(c.pane.as_deref()),
-        ServerMessage::FilterResult(_) | ServerMessage::SendRawResult(_) => {
-            // Phase 5/7 surface these.
+        ServerMessage::FilterResult(_) => {
+            // Phase 5 surfaces this.
+        }
+        ServerMessage::SendRawResult(v) => {
+            let ok = v.get("ok").and_then(|x| x.as_bool()).unwrap_or(false);
+            let source = v.get("source_id").and_then(|x| x.as_str()).unwrap_or("");
+            if ok {
+                let bytes = v.get("bytes").and_then(|x| x.as_u64()).unwrap_or(0);
+                state.tx_status = Some(format!("{source} {bytes}B ok"));
+            } else {
+                let err = v
+                    .get("error")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("send failed");
+                state.tx_status = Some(format!("{source} {err}"));
+            }
         }
         ServerMessage::Unknown => {}
     }
@@ -184,6 +198,7 @@ fn handle_mouse(state: &mut State, mouse: &crossterm::event::MouseEvent, width: 
                     .get(&hit.pane_id)
                     .and_then(|l| l.get(raw_idx))
                 {
+                    state.focused_raw_idx = Some(line.line_idx);
                     state.sync_panes_to_ts(line.abs_num, visible);
                 }
             }

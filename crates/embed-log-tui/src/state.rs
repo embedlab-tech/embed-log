@@ -160,6 +160,8 @@ pub struct State {
     pub first_log_at: Option<String>,
     /// Sync timestamp (epoch millis) set by clicking/Enter on a line.
     pub sync_ts: Option<f64>,
+    /// The exact raw line index most recently focused/clicked in the active pane.
+    pub focused_raw_idx: Option<u64>,
     /// Whether switching tabs should scroll to `sync_ts`.
     pub sync_tab_switch: bool,
     /// Connection state for the status bar.
@@ -180,6 +182,16 @@ pub struct State {
     pub splitter: f32,
     /// Jump-to-bottom toggle per pane (true = follow new lines).
     pub at_bottom: HashMap<String, bool>,
+    /// TX input mode active (bottom input row shown for the active UART pane).
+    pub tx_mode: bool,
+    /// Current TX input buffer.
+    pub tx_buffer: String,
+    /// Matching command indices within `pane_commands[active_pane]`.
+    pub tx_matches: Vec<usize>,
+    /// Which match is currently selected when cycling suggestions.
+    pub tx_match_pos: Option<usize>,
+    /// Last TX result/status line shown in the status bar.
+    pub tx_status: Option<String>,
     /// Events view state (cursor, zoom, filters, detail popup).
     pub events_view: crate::events::EventsView,
 }
@@ -608,14 +620,12 @@ impl State {
             .and_then(|l| l.get(scroll))
             .map(|l| l.abs_num);
         let target = if forward {
-            // Next marker after current scroll position.
             markers
                 .iter()
                 .filter(|m| include_events || !m.is_event())
                 .find(|m| m.num_ts > current_ts.unwrap_or(f64::MIN))
                 .map(|m| m.line_idx)
         } else {
-            // Prev marker before current scroll position.
             markers
                 .iter()
                 .filter(|m| include_events || !m.is_event())
@@ -624,6 +634,88 @@ impl State {
                 .map(|m| m.line_idx)
         };
         target
+    }
+
+    // ── TX input ───────────────────────────────────────────────────────
+
+    pub fn open_tx_mode(&mut self) {
+        if self
+            .active_pane_id()
+            .as_deref()
+            .is_some_and(|p| self.is_writable(p))
+        {
+            self.tx_mode = true;
+            self.refresh_tx_matches();
+        }
+    }
+
+    pub fn close_tx_mode(&mut self) {
+        self.tx_mode = false;
+        self.tx_matches.clear();
+        self.tx_match_pos = None;
+    }
+
+    pub fn active_pane_commands(&self) -> Vec<String> {
+        let Some(pane) = self.active_pane_id() else {
+            return Vec::new();
+        };
+        self.pane_commands.get(&pane).cloned().unwrap_or_default()
+    }
+
+    pub fn refresh_tx_matches(&mut self) {
+        let typed = self.tx_buffer.to_lowercase();
+        let commands = self.active_pane_commands();
+        self.tx_matches = if typed.is_empty() {
+            (0..commands.len()).collect()
+        } else {
+            let mut scored: Vec<(usize, usize, usize)> = commands
+                .iter()
+                .enumerate()
+                .filter_map(|(i, cmd)| {
+                    let lower = cmd.to_lowercase();
+                    lower.find(&typed).map(|score| (i, score, cmd.len()))
+                })
+                .collect();
+            scored.sort_by_key(|(_, score, len)| (*score, *len));
+            scored.into_iter().map(|(i, _, _)| i).collect()
+        };
+        self.tx_match_pos = None;
+    }
+
+    pub fn cycle_tx_suggestion(&mut self, backward: bool) {
+        let commands = self.active_pane_commands();
+        if commands.is_empty() {
+            return;
+        }
+        if self.tx_matches.is_empty() {
+            self.tx_matches = (0..commands.len()).collect();
+        }
+        let len = self.tx_matches.len();
+        if len == 0 {
+            return;
+        }
+        let next = match self.tx_match_pos {
+            None => {
+                if backward {
+                    len - 1
+                } else {
+                    0
+                }
+            }
+            Some(cur) => {
+                if backward {
+                    (cur + len - 1) % len
+                } else {
+                    (cur + 1) % len
+                }
+            }
+        };
+        self.tx_match_pos = Some(next);
+        if let Some(cmd_idx) = self.tx_matches.get(next).copied() {
+            if let Some(cmd) = commands.get(cmd_idx) {
+                self.tx_buffer = cmd.clone();
+            }
+        }
     }
 }
 
@@ -849,5 +941,56 @@ mod tests {
         assert_eq!(l.message, "boot");
         assert_eq!(l.color.as_deref(), Some("cyan"));
         assert_eq!(l.line_idx, 42);
+    }
+
+    #[test]
+    fn open_tx_mode_only_for_uart() {
+        let mut s = State::default();
+        let mut cfg = cfg_with(vec![("T", vec!["DUT", "UART_DUT"])]);
+        cfg.pane_kinds.insert("DUT".into(), "udp".into());
+        cfg.pane_kinds.insert("UART_DUT".into(), "uart".into());
+        cfg.pane_commands
+            .insert("UART_DUT".into(), vec!["help".into(), "version".into()]);
+        s.apply_config(&cfg);
+
+        s.active_pane = 0;
+        s.open_tx_mode();
+        assert!(!s.tx_mode);
+
+        s.active_pane = 1;
+        s.open_tx_mode();
+        assert!(s.tx_mode);
+    }
+
+    #[test]
+    fn refresh_tx_matches_fuzzy_sorts_by_position_then_len() {
+        let mut s = State::default();
+        let mut cfg = cfg_with(vec![("T", vec!["UART_DUT"])]);
+        cfg.pane_kinds.insert("UART_DUT".into(), "uart".into());
+        cfg.pane_commands.insert(
+            "UART_DUT".into(),
+            vec!["version".into(), "get version".into(), "help".into()],
+        );
+        s.apply_config(&cfg);
+        s.tx_buffer = "ver".into();
+        s.refresh_tx_matches();
+        assert_eq!(s.tx_matches, vec![0, 1]);
+    }
+
+    #[test]
+    fn cycle_tx_suggestion_replaces_buffer() {
+        let mut s = State::default();
+        let mut cfg = cfg_with(vec![("T", vec!["UART_DUT"])]);
+        cfg.pane_kinds.insert("UART_DUT".into(), "uart".into());
+        cfg.pane_commands
+            .insert("UART_DUT".into(), vec!["help".into(), "version".into()]);
+        s.apply_config(&cfg);
+        s.open_tx_mode();
+        s.cycle_tx_suggestion(false);
+        assert_eq!(s.tx_buffer, "help");
+        s.cycle_tx_suggestion(false);
+        assert_eq!(s.tx_buffer, "version");
+        s.cycle_tx_suggestion(true);
+        assert_eq!(s.tx_buffer, "help");
     }
 }
