@@ -26,3 +26,6 @@ optional = true
 [features]
 default = ["tui"]
 tui = ["dep:embed-log-tui"]
+
+[dev-dependencies]
+serde_yaml.workspace = true

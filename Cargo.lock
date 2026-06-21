@@ -1001,6 +1001,7 @@ dependencies = [
  "embed-log-core",
  "embed-log-tui",
  "serde_json",
+ "serde_yaml",
  "serialport",
  "tokio",
  "tracing",
