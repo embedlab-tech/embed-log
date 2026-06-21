@@ -149,13 +149,26 @@ export function sendUdpLine(port, text) {
 }
 
 export function spawnRustServer(configPath, { httpPort } = {}) {
-  const args = [
-    'run', '--quiet', '--package', 'embed-log-cli', '--bin', 'embed-log', '--',
+  const serverArgs = [
     'run', '--config', configPath,
     '--frontend-dir', 'frontend',
     '--no-open-browser',
   ];
-  return spawn('cargo', args, {
+
+  // Use an installed binary from EMBED_LOG_BIN when set (CI install-e2e job);
+  // fall back to `cargo run` for local development.
+  if (process.env.EMBED_LOG_BIN) {
+    return spawn(process.env.EMBED_LOG_BIN, serverArgs, {
+      cwd: _repoRoot,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, RUST_LOG: process.env.RUST_LOG || 'warn' },
+    });
+  }
+
+  return spawn('cargo', [
+    'run', '--quiet', '--package', 'embed-log-cli', '--bin', 'embed-log', '--',
+    ...serverArgs,
+  ], {
     cwd: _repoRoot,
     stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, RUST_LOG: process.env.RUST_LOG || 'warn' },
