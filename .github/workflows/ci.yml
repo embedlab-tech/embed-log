@@ -222,3 +222,134 @@ jobs:
 
       - name: Rust tests Tauri desktop app
         run: cargo test --locked --package embed-log-tauri
+
+
+  package-binary:
+    name: Package release binary
+    runs-on: [self-hosted, Linux]
+    needs: build-cli
+    timeout-minutes: 45
+    env:
+      CI: "true"
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release
+
+      - name: Build release binary
+        run: cargo build --locked --release --package embed-log-cli --bin embed-log
+
+      - name: Verify release binary runs
+        run: ./target/release/embed-log --version
+
+      - name: Package CLI
+        run: ./scripts/package-cli.sh x86_64-unknown-linux-gnu
+
+      - name: Create SHA256SUMS
+        run: |
+          cd dist
+          sha256sum embed-log-x86_64-unknown-linux-gnu.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload release tarball artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-tarball
+          path: |
+            dist/embed-log-x86_64-unknown-linux-gnu.tar.gz
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+  install-e2e:
+    name: Install + e2e (no Rust)
+    runs-on: [self-hosted, Linux]
+    needs: package-binary
+    timeout-minutes: 60
+    env:
+      CI: "true"
+      DEMO_TEST_TICK_MS: "250"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Intentionally NO Rust toolchain — this job tests the real user install path.
+
+      - name: Download release tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: release-tarball
+          path: release-staging
+
+      - name: Verify artifact contents
+        run: |
+          ls -la release-staging/
+          test -f release-staging/embed-log-x86_64-unknown-linux-gnu.tar.gz
+          test -f release-staging/SHA256SUMS
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: tests-ui/package-lock.json
+
+      - name: Install via install.sh (file:// — no HTTP server needed)
+        env:
+          EMBED_LOG_BASE_URL: file://${{ github.workspace }}/release-staging
+          INSTALL_DIR: ${{ runner.temp }}/embed-log-bin
+        run: sh install.sh
+
+      - name: Add install dir to PATH
+        run: echo "${{ runner.temp }}/embed-log-bin" >> "$GITHUB_PATH"
+
+      - name: Verify installed binary
+        run: |
+          which embed-log
+          embed-log --version
+
+      - name: Install UI test dependencies
+        run: npm --prefix tests-ui ci
+
+      - name: Install Playwright Chromium
+        working-directory: tests-ui
+        run: npx playwright install chromium
+
+      - name: UI e2e tests (installed binary)
+        env:
+          EMBED_LOG_BIN: ${{ runner.temp }}/embed-log-bin/embed-log
+        run: npm --prefix tests-ui run test:e2e
+
+      - name: UI regression smoke tests (installed binary)
+        env:
+          EMBED_LOG_BIN: ${{ runner.temp }}/embed-log-bin/embed-log
+        run: npm --prefix tests-ui run test:regression:smoke
+
+      - name: Upload Playwright reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-installed-e2e
+          path: |
+            tests-ui/playwright-report/
+            tests-ui/test-results/
+          if-no-files-found: ignore
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f "${{ runner.temp }}/embed-log-bin/embed-log"
+          rm -rf release-staging
+          if command -v embed-log >/dev/null 2>&1; then
+            echo "ERROR: embed-log still on PATH after cleanup" >&2
+            exit 1
+          fi
+          echo "Cleanup complete — embed-log uninstalled"

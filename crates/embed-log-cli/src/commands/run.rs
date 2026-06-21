@@ -206,7 +206,14 @@ pub(crate) async fn cmd_onboard(
 ) -> Result<()> {
     let config_path = resolve_config_path(config_path);
     run_onboarding(&config_path, open_browser)?;
-    cmd_run(Some(&config_path), frontend_dir, false, false, &RunOverrides::default()).await
+    cmd_run(
+        Some(&config_path),
+        frontend_dir,
+        false,
+        false,
+        &RunOverrides::default(),
+    )
+    .await
 }
 
 /// Resolve a directory path relative to the cwd (absolute paths pass through).
@@ -282,10 +289,7 @@ mod tests {
         } else {
             "/var/logs"
         };
-        assert_eq!(
-            resolve_logs_root(&config_path, abs),
-            PathBuf::from(abs)
-        );
+        assert_eq!(resolve_logs_root(&config_path, abs), PathBuf::from(abs));
     }
 
     #[test]
@@ -293,9 +297,11 @@ mod tests {
         // Config path with no parent component: parent() returns Some(""),
         // so the join produces "logs" (relative to cwd at runtime).
         let config_path = PathBuf::from("embed-log.yml");
-        assert_eq!(resolve_logs_root(&config_path, "logs"), PathBuf::from("logs"));
+        assert_eq!(
+            resolve_logs_root(&config_path, "logs"),
+            PathBuf::from("logs")
+        );
     }
-
 
     #[test]
     fn apply_overrides_host_and_port() {

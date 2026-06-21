@@ -142,8 +142,8 @@ pub(crate) fn cmd_init(output: &Path) -> Result<()> {
 
 /// `embed-log parse` — extract raw log files from an exported session HTML.
 pub(crate) fn cmd_parse(html_path: &Path, output_dir: &Path) -> Result<()> {
-    let html =
-        std::fs::read_to_string(html_path).with_context(|| format!("read {}", html_path.display()))?;
+    let html = std::fs::read_to_string(html_path)
+        .with_context(|| format!("read {}", html_path.display()))?;
 
     let entries = extract_log_data(&html)?;
     std::fs::create_dir_all(output_dir)?;
@@ -328,12 +328,9 @@ mod tests {
 
     #[test]
     fn parse_merge_tabs_bare_pane_name() {
-        let inputs = parse_merge_tabs(&[
-            "Dev".to_string(),
-            "SENSOR".to_string(),
-            "a.log".to_string(),
-        ])
-        .unwrap();
+        let inputs =
+            parse_merge_tabs(&["Dev".to_string(), "SENSOR".to_string(), "a.log".to_string()])
+                .unwrap();
         assert_eq!(inputs.tab_configs.len(), 1);
         assert_eq!(inputs.tab_configs[0]["label"], "Dev");
         assert_eq!(inputs.tab_configs[0]["panes"][0], "SENSOR");

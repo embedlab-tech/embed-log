@@ -233,7 +233,14 @@ async fn main() -> Result<()> {
                 host,
                 ws_port,
             };
-            cmd_run(config.as_ref(), &frontend_dir, open_browser, tui, &overrides).await
+            cmd_run(
+                config.as_ref(),
+                &frontend_dir,
+                open_browser,
+                tui,
+                &overrides,
+            )
+            .await
         }
         Some(Command::Version { config, json }) => misc::cmd_version(config.as_deref(), json),
         Some(Command::Doctor { config, json }) => misc::cmd_doctor(config.as_deref(), json),

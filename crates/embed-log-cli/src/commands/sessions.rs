@@ -388,12 +388,7 @@ fn list_markers(
     Ok(())
 }
 
-fn show_marker(
-    dir: &Path,
-    session_id: &str,
-    marker_index: usize,
-    json: bool,
-) -> Result<()> {
+fn show_marker(dir: &Path, session_id: &str, marker_index: usize, json: bool) -> Result<()> {
     let session = resolve_session(dir, session_id)?;
     let all_markers = load_markers_file(&session.dir)?;
 

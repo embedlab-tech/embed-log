@@ -283,7 +283,14 @@ process.on('exit', () => {
 
 // ── Boot ──
 
-start('cargo', ['run', '--quiet', '--package', 'embed-log-cli', '--bin', 'embed-log', '--', 'run', '--config', config, '--frontend-dir', 'frontend', '--no-open-browser']);
+// Boot the log server. Use an installed binary from EMBED_LOG_BIN when set
+// (e.g. CI install-e2e job); fall back to `cargo run` for local development.
+const serverArgs = ['run', '--config', config, '--frontend-dir', 'frontend', '--no-open-browser'];
+if (process.env.EMBED_LOG_BIN) {
+  start(process.env.EMBED_LOG_BIN, serverArgs);
+} else {
+  start('cargo', ['run', '--quiet', '--package', 'embed-log-cli', '--bin', 'embed-log', '--', ...serverArgs]);
+}
 
 setTimeout(regressionMode ? startRegressionTraffic : startDeterministicTraffic, 1500);
 

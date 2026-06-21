@@ -49,6 +49,11 @@ case "$VERSION" in
   *) base_url="https://github.com/$REPO/releases/download/$VERSION" ;;
 esac
 
+# Allow overriding the download base URL (mirrors, local staging, air-gapped installs).
+if [ -n "${EMBED_LOG_BASE_URL:-}" ]; then
+  base_url="$EMBED_LOG_BASE_URL"
+fi
+
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT INT TERM
 
