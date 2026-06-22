@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Local};
 use serde_json::json;
-use tracing::info;
+use tracing::{info, warn};
 
 const MAX_SNIPPETS: usize = 50;
 
@@ -91,7 +91,21 @@ impl SessionManager {
         let path = self.manifest_path();
         let mut manifest = if path.exists() {
             let text = std::fs::read_to_string(&path)?;
-            serde_json::from_str(&text).unwrap_or_else(|_| json!({}))
+            match serde_json::from_str(&text) {
+                Ok(value) => value,
+                Err(e) => {
+                    // Don't silently discard a corrupt manifest: back it up so
+                    // the bad data is recoverable, then start fresh.
+                    let backup = path.with_extension("json.corrupt");
+                    let _ = std::fs::rename(&path, &backup);
+                    warn!(
+                        "manifest {} is corrupt ({e}); backed up to {} and recreating",
+                        path.display(),
+                        backup.display()
+                    );
+                    json!({})
+                }
+            }
         } else {
             json!({})
         };
@@ -204,6 +218,34 @@ impl SessionManager {
         std::fs::write(&path, serde_json::to_string_pretty(&body)?)
             .with_context(|| format!("save markers {}", path.display()))?;
         Ok(())
+    }
+
+    /// Insert `new_marker`, replacing any existing marker at the same
+    /// `(paneId, lineIdx)`, and persist. With `events_only`, only `kind:
+    /// "event"` markers at that position are replaced (user markers are
+    /// preserved); otherwise any marker there is replaced. Returns the full
+    /// persisted list so the caller can broadcast a `markers_update`.
+    ///
+    /// Shared by the control-API marker.create handler and the event-marker
+    /// writer so the load/replace/save logic lives in one place.
+    pub fn replace_marker(
+        &self,
+        pane_id: &str,
+        line_idx: u64,
+        new_marker: serde_json::Value,
+        events_only: bool,
+    ) -> Result<Vec<serde_json::Value>> {
+        let mut markers = self.load_markers();
+        markers.retain(|m| {
+            let same_pane = m.get("paneId").and_then(|v| v.as_str()) == Some(pane_id);
+            let same_idx = m.get("lineIdx").and_then(|v| v.as_u64()) == Some(line_idx);
+            let is_event = m.get("kind").and_then(|v| v.as_str()).unwrap_or("user") == "event";
+            let drop = same_pane && same_idx && (!events_only || is_event);
+            !drop
+        });
+        markers.push(new_marker);
+        self.save_markers(&markers)?;
+        Ok(markers)
     }
 
     /// Save a snippet to the snippets/ directory and persist its manifest metadata.
@@ -377,6 +419,68 @@ mod tests {
             "absolute",
             None,
         )
+    }
+
+    #[test]
+    fn replace_marker_events_only_preserves_user_markers() {
+        let dir = temp_session_dir("replace-marker-event");
+        let mgr = manager(dir);
+
+        let user = json!({ "paneId": "dut", "lineIdx": 5, "kind": "user", "description": "mine" });
+        let old_event =
+            json!({ "paneId": "dut", "lineIdx": 5, "kind": "event", "description": "old" });
+        mgr.save_markers(&[user.clone(), old_event]).unwrap();
+
+        let new_event =
+            json!({ "paneId": "dut", "lineIdx": 5, "kind": "event", "description": "new" });
+        let markers = mgr.replace_marker("dut", 5, new_event, true).unwrap();
+
+        // User marker survives; the old event at this line is replaced.
+        assert_eq!(markers.len(), 2);
+        assert!(markers.iter().any(|m| m["kind"] == "user"));
+        let events: Vec<_> = markers.iter().filter(|m| m["kind"] == "event").collect();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["description"], "new");
+    }
+
+    #[test]
+    fn replace_marker_non_events_only_overwrites_any_marker_at_line() {
+        let dir = temp_session_dir("replace-marker-any");
+        let mgr = manager(dir);
+
+        let existing =
+            json!({ "paneId": "dut", "lineIdx": 5, "kind": "user", "description": "old" });
+        mgr.save_markers(&[existing]).unwrap();
+
+        let replacement =
+            json!({ "paneId": "dut", "lineIdx": 5, "kind": "user", "description": "new" });
+        let markers = mgr.replace_marker("dut", 5, replacement, false).unwrap();
+
+        assert_eq!(markers.len(), 1);
+        assert_eq!(markers[0]["description"], "new");
+    }
+
+    #[test]
+    fn update_manifest_backs_up_corrupt_file_instead_of_wiping_it() {
+        let dir = temp_session_dir("corrupt-manifest");
+        let mgr = manager(dir.clone());
+        let path = dir.join("manifest.json");
+
+        // Simulate a corrupt manifest on disk.
+        std::fs::write(&path, "{not valid json").unwrap();
+
+        mgr.update_manifest(&json!({ "html_status": "ready" }))
+            .unwrap();
+
+        // The bad content is preserved in a backup, not lost.
+        let backup = dir.join("manifest.json.corrupt");
+        assert!(backup.exists(), "corrupt manifest should be backed up");
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), "{not valid json");
+
+        // The new manifest is valid and contains the update.
+        let rebuilt: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(rebuilt["html_status"], "ready");
     }
 
     #[test]

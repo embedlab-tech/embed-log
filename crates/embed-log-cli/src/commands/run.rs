@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use embed_log_core::config::{load_config, AppConfig};
+use embed_log_core::config::{load_config, resolve_logs_root, AppConfig};
 use embed_log_core::demo::{prepare_demo_file_sources, spawn_demo_traffic};
 use embed_log_core::onboarding as ob;
 use embed_log_core::runtime::LogServer;
@@ -149,10 +149,9 @@ pub(crate) async fn run_server_with_tui(
     // Spawn the server serve loop in the background.
     let server_task = tokio::spawn(async move { server.run().await });
 
-    // Give the server a moment to bind the port before the TUI connects.
-    // The WS client retries on connect failure, so this is a best-effort race
-    // avoidance rather than a hard requirement.
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    // Wait for the server to bind the port before the TUI connects. The WS
+    // client also retries on connect failure, so a timeout here is non-fatal.
+    crate::util::wait_for_port(ws_port, std::time::Duration::from_secs(10)).await;
 
     // Run the TUI on the current thread. It connects to ws://127.0.0.1:port/ws.
     #[cfg(feature = "tui")]
@@ -225,17 +224,6 @@ fn resolve_dir(dir: &Path) -> Result<PathBuf> {
     }
 }
 
-/// Resolve the logs root: absolute `logs.dir` passes through; relative paths
-/// resolve against the config file's parent directory.
-fn resolve_logs_root(config_path: &Path, logs_dir: &str) -> PathBuf {
-    let config_dir = config_path.parent().unwrap_or(Path::new("."));
-    if PathBuf::from(logs_dir).is_absolute() {
-        PathBuf::from(logs_dir)
-    } else {
-        config_dir.join(logs_dir)
-    }
-}
-
 /// CLI overrides for `embed-log run` applied on top of the loaded config.
 /// Each field is `None` when the corresponding flag was not passed.
 #[derive(Debug, Clone, Default)]
@@ -270,37 +258,6 @@ mod tests {
             PathBuf::from("/srv/frontend")
         };
         assert_eq!(resolve_dir(&abs).unwrap(), abs);
-    }
-
-    #[test]
-    fn resolve_logs_root_relative_to_config_dir() {
-        let config_path = PathBuf::from("/etc/app/embed-log.yml");
-        assert_eq!(
-            resolve_logs_root(&config_path, "logs/"),
-            PathBuf::from("/etc/app/logs/")
-        );
-    }
-
-    #[test]
-    fn resolve_logs_root_absolute_passes_through() {
-        let config_path = PathBuf::from("/etc/app/embed-log.yml");
-        let abs = if cfg!(windows) {
-            r"C:\var\logs"
-        } else {
-            "/var/logs"
-        };
-        assert_eq!(resolve_logs_root(&config_path, abs), PathBuf::from(abs));
-    }
-
-    #[test]
-    fn resolve_logs_root_falls_back_for_bare_filename() {
-        // Config path with no parent component: parent() returns Some(""),
-        // so the join produces "logs" (relative to cwd at runtime).
-        let config_path = PathBuf::from("embed-log.yml");
-        assert_eq!(
-            resolve_logs_root(&config_path, "logs"),
-            PathBuf::from("logs")
-        );
     }
 
     #[test]

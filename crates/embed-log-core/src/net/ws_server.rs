@@ -37,15 +37,13 @@ impl SourceRuntimeStats {
         self.bytes.fetch_add(bytes as u64, Ordering::Relaxed);
     }
 
+    // ponytail: only the fields we actually track. Live queue depth/utilization
+    // would need the producer side wired in too; add those back if a consumer
+    // needs real backpressure telemetry.
     fn snapshot(&self, maxsize: usize) -> serde_json::Value {
         serde_json::json!({
             "maxsize": maxsize,
-            "depth": 0,
-            "utilization_pct": 0.0,
-            "enqueued": self.dequeued.load(Ordering::Relaxed),
             "dequeued": self.dequeued.load(Ordering::Relaxed),
-            "peak_depth": 0,
-            "near_full_events": 0,
             "bytes": self.bytes.load(Ordering::Relaxed),
         })
     }
@@ -303,7 +301,15 @@ async fn handle_ws_client(mut socket: WebSocket, state: ServerState) {
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
+                        // A slow client fell behind the broadcast buffer. Tell it
+                        // in-band so the gap isn't silent — the frontend can flag
+                        // missing lines / resync rather than show a seamless feed.
+                        // ponytail: broadcast capacity is the tuning knob if lag is common.
                         warn!("WS client lagged, skipped {n} messages");
+                        let notice = format!("{{\"type\":\"stream_gap\",\"skipped\":{n}}}");
+                        if socket.send(Message::Text(notice.into())).await.is_err() {
+                            break;
+                        }
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
@@ -1198,7 +1204,6 @@ mod tests {
 
         let snapshot = stats.snapshot();
         assert_eq!(snapshot["dut"]["maxsize"], 32);
-        assert_eq!(snapshot["dut"]["enqueued"], 2);
         assert_eq!(snapshot["dut"]["dequeued"], 2);
         assert_eq!(snapshot["dut"]["bytes"], 42);
     }

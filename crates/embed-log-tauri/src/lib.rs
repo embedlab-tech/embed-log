@@ -385,7 +385,7 @@ fn start_log_server(
     let ws_port = config.server.ws_port;
     CURRENT_WS_PORT.store(ws_port, Ordering::SeqCst);
     let frontend_dir = resolve_frontend_dir(&app);
-    let logs_root = resolve_logs_root(&config_path, &config);
+    let logs_root = embed_log_core::config::resolve_logs_root(&config_path, &config.logs.dir);
     let demo_traffic = std::env::var_os("EMBED_LOG_DEMO_TRAFFIC").is_some();
     if demo_traffic {
         if let Err(error) = prepare_demo_file_sources(&config) {
@@ -505,18 +505,6 @@ fn resolve_frontend_dir(app: &tauri::AppHandle) -> PathBuf {
     frontend
 }
 
-fn resolve_logs_root(
-    config_path: &std::path::Path,
-    config: &embed_log_core::config::AppConfig,
-) -> PathBuf {
-    let config_dir = config_path.parent().unwrap_or(std::path::Path::new("."));
-    let logs_dir = PathBuf::from(&config.logs.dir);
-    if logs_dir.is_absolute() {
-        logs_dir
-    } else {
-        config_dir.join(logs_dir)
-    }
-}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -551,23 +539,6 @@ mod tests {
             } else {
                 PathBuf::from("app-default.yml")
             }
-        );
-    }
-
-    #[test]
-    fn tauri_logs_root_resolves_relative_to_config_dir() {
-        let config = embed_log_core::config::AppConfig {
-            logs: embed_log_core::config::LogsConfig {
-                dir: "logs/".to_string(),
-            },
-            ..Default::default()
-        };
-        assert_eq!(
-            resolve_logs_root(
-                std::path::Path::new("/tmp/embed-log/app-config/embed-log.yml"),
-                &config
-            ),
-            PathBuf::from("/tmp/embed-log/app-config/logs/")
         );
     }
 }

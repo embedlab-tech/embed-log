@@ -182,7 +182,6 @@ impl LogSource for UartSource {
         }
 
         let mut parser = create_parser(&parser_type);
-        let mut buf = [0u8; 4096];
 
         loop {
             // Clone the port under the lock, then release before the blocking read.
@@ -190,13 +189,18 @@ impl LogSource for UartSource {
                 let guard = port.lock().await;
                 guard.try_clone()
             };
-            let n = match cloned {
+            // buf must be owned by the closure and returned, otherwise the bytes
+            // read into it are dropped with the closure (arrays are Copy).
+            let (buf, n) = match cloned {
                 Ok(mut port_clone) => {
-                    tokio::task::spawn_blocking(move || port_clone.read(&mut buf))
-                        .await?
-                        .unwrap_or(0)
+                    tokio::task::spawn_blocking(move || {
+                        let mut buf = [0u8; 4096];
+                        let n = port_clone.read(&mut buf).unwrap_or(0);
+                        (buf, n)
+                    })
+                    .await?
                 }
-                Err(_) => 0,
+                Err(_) => ([0u8; 4096], 0),
             };
 
             if n == 0 {
@@ -374,6 +378,43 @@ mod tests {
         assert_eq!(entry.message, "version\r\n");
         assert_eq!(entry.color.as_deref(), Some("yellow"));
 
+        handle.abort();
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn uart_rx_reads_bytes_from_pty_and_emits_log_entry() {
+        use std::io::Write;
+
+        let (mut master, slave) = create_pty_pair();
+
+        let (entry_tx, mut entry_rx) = mpsc::channel::<LogEntry>(8);
+        let source = UartSource::from_port("dut", Box::new(slave), "text");
+
+        let handle = tokio::spawn(async move {
+            let _ = Box::new(source).run(entry_tx).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        // Write a line into the master; the source reads it from the slave.
+        // Keep master alive until after the entry arrives — dropping it closes
+        // the PTY and can discard the slave's unread bytes.
+        let master = tokio::task::spawn_blocking(move || {
+            master.write_all(b"hello world\r\n").unwrap();
+            master
+        })
+        .await
+        .unwrap();
+
+        let entry = timeout(Duration::from_secs(2), entry_rx.recv())
+            .await
+            .expect("timeout waiting for RX log entry")
+            .expect("channel closed before RX entry");
+        assert_eq!(entry.source, "dut");
+        assert_eq!(entry.message, "hello world");
+
+        drop(master);
         handle.abort();
     }
 

@@ -49,6 +49,7 @@ struct ResolvedSource {
 }
 
 /// Loaded plugin data for the config message.
+#[derive(Clone)]
 struct LoadedPlugins {
     /// Plugin definitions: `{ "hex-coap": { "builtin": "hex-coap" } }`
     definitions: serde_json::Value,
@@ -326,269 +327,46 @@ impl LogServer {
         let shared_config_msg = Arc::new(Mutex::new(config_msg.to_string()));
 
         // ── 11. Create export callback ──
-        let export_tabs = tabs_json.clone();
-        let export_labels = pane_labels.clone();
-        let export_frontend = self.frontend_dir.clone();
-        let export_ts_mode = self.config.server.timestamp_mode.to_string();
-        let export_source_files = shared_source_files.clone();
-        let export_html_path = shared_html_path.clone();
-        let export_plugins_definitions = plugins.definitions.clone();
-        let export_pane_plugins = plugins.pane_plugins.clone();
-        let export_plugin_scripts = plugins.scripts.clone();
-        let export_event_rules = event_rules_meta.clone();
-
-        let session_mgr_for_export = session_mgr.clone();
-        let export_first_log_at = first_log_at.clone();
-
-        let on_export: ExportCallback = Arc::new(move || {
-            let fla = export_first_log_at
-                .lock()
-                .unwrap()
-                .map(|dt| dt.to_rfc3339());
-            let export_html = export_html_path.lock().unwrap().clone();
-            let export_sources = export_source_files.lock().unwrap().clone();
-            let (export_markers, export_events, marker_paths) = session_mgr_for_export
-                .lock()
-                .map(|mgr| {
-                    (
-                        mgr.load_markers(),
-                        mgr.load_events(),
-                        vec![mgr.session_dir().join("markers.json")],
-                    )
-                })
-                .unwrap_or_default();
-
-            if session_html_is_current(&export_html, &export_sources, &marker_paths) {
-                if let Ok(mut mgr) = session_mgr_for_export.lock() {
-                    let _ = mgr.mark_html_exported(&export_html);
-                }
-                return Ok(export_html.display().to_string());
-            }
-
-            let exporter = SessionExporter::new(
-                export_html.clone(),
-                export_sources,
-                export_tabs.clone(),
-                export_labels.clone(),
-                export_frontend.clone(),
-                export_ts_mode.clone(),
-                fla,
-            )
-            .with_plugins(
-                export_plugins_definitions.clone(),
-                export_pane_plugins.clone(),
-                export_plugin_scripts.clone(),
-            )
-            .with_markers(export_markers)
-            .with_events(export_events, export_event_rules.clone());
-
-            match exporter.export() {
-                Ok(path) => {
-                    if let Ok(mut mgr) = session_mgr_for_export.lock() {
-                        let _ = mgr.mark_html_exported(&path);
-                    }
-                    Ok(path.display().to_string())
-                }
-                Err(e) => {
-                    let err_msg = e.to_string();
-                    if let Ok(mut mgr) = session_mgr_for_export.lock() {
-                        let _ = mgr.mark_html_error(&err_msg);
-                    }
-                    Err(err_msg)
-                }
-            }
-        });
+        let export_ctx = ExportContext {
+            tabs: tabs_json.clone(),
+            labels: pane_labels.clone(),
+            frontend: self.frontend_dir.clone(),
+            ts_mode: self.config.server.timestamp_mode.to_string(),
+            source_files: shared_source_files.clone(),
+            html_path: shared_html_path.clone(),
+            plugins: plugins.clone(),
+            event_rules: event_rules_meta.clone(),
+            session_mgr: session_mgr.clone(),
+            first_log_at: first_log_at.clone(),
+        };
+        let on_export: ExportCallback = Arc::new(move || export_session(&export_ctx));
 
         // ── 11b. Create rotation callback ──
-        let rotate_logs_root = self.logs_root.clone();
-        let rotate_tab_label = tab_label.to_string();
-        let rotate_source_names: Vec<String> = writer_log_paths.keys().cloned().collect();
-        let rotate_writer_paths = writer_log_paths.clone();
-        let rotate_source_files = shared_source_files.clone();
-        let rotate_html_path = shared_html_path.clone();
-        let rotate_session_mgr = session_mgr.clone();
-        let rotate_first_log_at = first_log_at.clone();
-        let rotate_replay = replay.clone();
-        let rotate_frontend = self.frontend_dir.clone();
-        let rotate_tabs = tabs_json.clone();
-        let rotate_pane_labels = pane_labels.clone();
-        let rotate_pane_kinds = pane_kinds.clone();
-        let rotate_pane_commands = pane_commands.clone();
-        let rotate_frontend_plugins = plugins.definitions.clone();
-        let rotate_pane_plugins = plugins.pane_plugins.clone();
-        let rotate_plugin_scripts = plugins.scripts.clone();
-        let rotate_app_name = self.config.server.app_name.clone();
-        let rotate_job_id = self.config.server.job_id.clone();
-        let rotate_timestamp_mode = self.config.server.timestamp_mode.to_string();
-        let rotate_config_msg = shared_config_msg.clone();
-        let rotate_default_light_theme = self.config.server.default_light_theme.clone();
-        let rotate_default_dark_theme = self.config.server.default_dark_theme.clone();
-        let rotate_event_rules = event_rules_meta.clone();
-
-        let on_rotate: RotateCallback = Arc::new(move || {
-            let (old_session, old_markers, old_events) = {
-                let manager = rotate_session_mgr
-                    .lock()
-                    .map_err(|_| "session manager lock failed".to_string())?;
-                (
-                    manager.build_session_info(),
-                    manager.load_markers(),
-                    manager.load_events(),
-                )
-            };
-            let old_source_files = rotate_source_files.lock().unwrap().clone();
-            let old_html_path = rotate_html_path.lock().unwrap().clone();
-            let old_first_log_at = rotate_first_log_at
-                .lock()
-                .unwrap()
-                .map(|dt| dt.to_rfc3339());
-
-            let new_session_id =
-                make_session_id_for_root(&rotate_logs_root, rotate_job_id.as_deref())
-                    .map_err(|err| err.to_string())?;
-            let new_session_dir = rotate_logs_root.join(&new_session_id);
-            std::fs::create_dir_all(&new_session_dir).map_err(|err| err.to_string())?;
-
-            let mut new_source_files = HashMap::new();
-            for source_name in &rotate_source_names {
-                let log_name = format!(
-                    "{}__{}__{}.log",
-                    slugify(&rotate_tab_label),
-                    slugify(source_name),
-                    slugify(&new_session_id),
-                );
-                let log_path = new_session_dir.join(log_name);
-                new_source_files.insert(source_name.clone(), log_path.display().to_string());
-                if let Some(shared_path) = rotate_writer_paths.get(source_name) {
-                    *shared_path.lock().unwrap() = log_path;
-                }
-            }
-
-            let started_at = Local::now().to_rfc3339();
-            let new_manager = SessionManager::new(
-                &new_session_id,
-                new_session_dir.clone(),
-                &rotate_tabs,
-                new_source_files.clone(),
-                rotate_pane_labels.clone(),
-                rotate_pane_kinds.clone(),
-                rotate_pane_commands.clone(),
-                rotate_frontend_plugins.clone(),
-                rotate_pane_plugins.clone(),
-                rotate_plugin_scripts.clone(),
-                &started_at,
-                &rotate_app_name,
-                None,
-                rotate_job_id.clone(),
-                rotate_timestamp_mode.clone(),
-                None,
-            );
-            new_manager
-                .write_manifest()
-                .map_err(|err| err.to_string())?;
-
-            {
-                let mut source_files = rotate_source_files.lock().unwrap();
-                *source_files = new_source_files;
-            }
-            *rotate_html_path.lock().unwrap() = new_session_dir.join("session.html");
-            *rotate_first_log_at.lock().unwrap() = None;
-            rotate_replay.lock().unwrap().clear();
-
-            let new_session = new_manager.build_session_info();
-            *rotate_session_mgr
-                .lock()
-                .map_err(|_| "session manager lock failed".to_string())? = new_manager;
-
-            let new_config_msg = build_ws_config_message(WsConfigParts {
-                app_name: &rotate_app_name,
-                default_light_theme: &rotate_default_light_theme,
-                default_dark_theme: &rotate_default_dark_theme,
-                session_info: new_session.clone(),
-                pane_labels: &rotate_pane_labels,
-                pane_kinds: &rotate_pane_kinds,
-                pane_commands: rotate_pane_commands.clone(),
-                tabs: &rotate_tabs,
-                frontend_plugins: rotate_frontend_plugins.clone(),
-                pane_plugins: rotate_pane_plugins.clone(),
-                plugin_scripts: rotate_plugin_scripts.clone(),
-                markers: Vec::new(),
-                event_rules: rotate_event_rules.clone(),
-            });
-            *rotate_config_msg
-                .lock()
-                .map_err(|_| "config message lock failed".to_string())? =
-                new_config_msg.to_string();
-
-            let old_export_tabs = rotate_tabs.clone();
-            let old_export_labels = rotate_pane_labels.clone();
-            let old_export_frontend = rotate_frontend.clone();
-            let old_export_ts_mode = rotate_timestamp_mode.clone();
-            let old_export_plugin_definitions = rotate_frontend_plugins.clone();
-            let old_export_pane_plugins = rotate_pane_plugins.clone();
-            let old_export_plugin_scripts = rotate_plugin_scripts.clone();
-            let old_export_event_rules = rotate_event_rules.clone();
-            if let Some(old_manifest_path) =
-                old_html_path.parent().map(|dir| dir.join("manifest.json"))
-            {
-                let _ = update_manifest_file(
-                    &old_manifest_path,
-                    &json!({
-                        "html_status": "updating",
-                        "html_error": serde_json::Value::Null,
-                        "last_export_reason": "rotate",
-                    }),
-                );
-                std::thread::spawn(move || {
-                    let exporter = SessionExporter::new(
-                        old_html_path.clone(),
-                        old_source_files,
-                        old_export_tabs,
-                        old_export_labels,
-                        old_export_frontend,
-                        old_export_ts_mode,
-                        old_first_log_at,
-                    )
-                    .with_plugins(
-                        old_export_plugin_definitions,
-                        old_export_pane_plugins,
-                        old_export_plugin_scripts,
-                    )
-                    .with_markers(old_markers)
-                    .with_events(old_events, old_export_event_rules);
-
-                    match exporter.export() {
-                        Ok(path) => {
-                            let now = Local::now().to_rfc3339();
-                            let _ = update_manifest_file(
-                                &old_manifest_path,
-                                &json!({
-                                    "session_html": path.display().to_string(),
-                                    "html_status": "ready",
-                                    "html_updated_at": now,
-                                    "html_error": serde_json::Value::Null,
-                                    "last_export_reason": "rotate",
-                                }),
-                            );
-                        }
-                        Err(error) => {
-                            let now = Local::now().to_rfc3339();
-                            let _ = update_manifest_file(
-                                &old_manifest_path,
-                                &json!({
-                                    "html_status": "error",
-                                    "html_error": error.to_string(),
-                                    "html_updated_at": now,
-                                    "last_export_reason": "rotate",
-                                }),
-                            );
-                        }
-                    }
-                });
-            }
-
-            Ok((old_session, new_session))
-        });
+        let rotation_ctx = RotationContext {
+            logs_root: self.logs_root.clone(),
+            tab_label: tab_label.to_string(),
+            source_names: writer_log_paths.keys().cloned().collect(),
+            writer_paths: writer_log_paths.clone(),
+            source_files: shared_source_files.clone(),
+            html_path: shared_html_path.clone(),
+            session_mgr: session_mgr.clone(),
+            first_log_at: first_log_at.clone(),
+            replay: replay.clone(),
+            frontend: self.frontend_dir.clone(),
+            tabs: tabs_json.clone(),
+            pane_labels: pane_labels.clone(),
+            pane_kinds: pane_kinds.clone(),
+            pane_commands: pane_commands.clone(),
+            plugins: plugins.clone(),
+            app_name: self.config.server.app_name.clone(),
+            job_id: self.config.server.job_id.clone(),
+            timestamp_mode: self.config.server.timestamp_mode.to_string(),
+            config_msg: shared_config_msg.clone(),
+            default_light_theme: self.config.server.default_light_theme.clone(),
+            default_dark_theme: self.config.server.default_dark_theme.clone(),
+            event_rules: event_rules_meta.clone(),
+        };
+        let on_rotate: RotateCallback = Arc::new(move || rotate_session(&rotation_ctx));
         let shutdown_export = on_export.clone();
 
         // ── 12. Start HTTP + WS server ──
@@ -816,7 +594,7 @@ impl LogServer {
                     let backend = src_cfg
                         .network_backend
                         .clone()
-                        .unwrap_or_else(|| "scapy".to_string());
+                        .unwrap_or_else(|| "mock".to_string());
                     Box::new(NetworkCaptureSource::new(
                         &src_cfg.name,
                         interface,
@@ -961,6 +739,266 @@ fn build_ws_config_message(parts: WsConfigParts<'_>) -> serde_json::Value {
     })
 }
 
+/// Everything the export callback needs, captured once when the server starts.
+struct ExportContext {
+    tabs: Vec<serde_json::Value>,
+    labels: HashMap<String, String>,
+    frontend: PathBuf,
+    ts_mode: String,
+    source_files: Arc<Mutex<HashMap<String, String>>>,
+    html_path: Arc<Mutex<PathBuf>>,
+    plugins: LoadedPlugins,
+    event_rules: serde_json::Value,
+    session_mgr: Arc<Mutex<SessionManager>>,
+    first_log_at: Arc<Mutex<Option<DateTime<Local>>>>,
+}
+
+/// Export the current session to HTML. Skips re-export when the existing HTML
+/// is already newer than every source and marker file.
+fn export_session(ctx: &ExportContext) -> Result<String, String> {
+    let fla = ctx.first_log_at.lock().unwrap().map(|dt| dt.to_rfc3339());
+    let export_html = ctx.html_path.lock().unwrap().clone();
+    let export_sources = ctx.source_files.lock().unwrap().clone();
+    let (export_markers, export_events, marker_paths) = ctx
+        .session_mgr
+        .lock()
+        .map(|mgr| {
+            (
+                mgr.load_markers(),
+                mgr.load_events(),
+                vec![mgr.session_dir().join("markers.json")],
+            )
+        })
+        .unwrap_or_default();
+
+    if session_html_is_current(&export_html, &export_sources, &marker_paths) {
+        if let Ok(mut mgr) = ctx.session_mgr.lock() {
+            let _ = mgr.mark_html_exported(&export_html);
+        }
+        return Ok(export_html.display().to_string());
+    }
+
+    let exporter = SessionExporter::new(
+        export_html.clone(),
+        export_sources,
+        ctx.tabs.clone(),
+        ctx.labels.clone(),
+        ctx.frontend.clone(),
+        ctx.ts_mode.clone(),
+        fla,
+    )
+    .with_plugins(
+        ctx.plugins.definitions.clone(),
+        ctx.plugins.pane_plugins.clone(),
+        ctx.plugins.scripts.clone(),
+    )
+    .with_markers(export_markers)
+    .with_events(export_events, ctx.event_rules.clone());
+
+    match exporter.export() {
+        Ok(path) => {
+            if let Ok(mut mgr) = ctx.session_mgr.lock() {
+                let _ = mgr.mark_html_exported(&path);
+            }
+            Ok(path.display().to_string())
+        }
+        Err(e) => {
+            let err_msg = e.to_string();
+            if let Ok(mut mgr) = ctx.session_mgr.lock() {
+                let _ = mgr.mark_html_error(&err_msg);
+            }
+            Err(err_msg)
+        }
+    }
+}
+
+/// Everything the rotation callback needs, captured once when the server starts.
+struct RotationContext {
+    logs_root: PathBuf,
+    tab_label: String,
+    source_names: Vec<String>,
+    writer_paths: HashMap<String, Arc<Mutex<PathBuf>>>,
+    source_files: Arc<Mutex<HashMap<String, String>>>,
+    html_path: Arc<Mutex<PathBuf>>,
+    session_mgr: Arc<Mutex<SessionManager>>,
+    first_log_at: Arc<Mutex<Option<DateTime<Local>>>>,
+    replay: Arc<Mutex<VecDeque<String>>>,
+    frontend: PathBuf,
+    tabs: Vec<serde_json::Value>,
+    pane_labels: HashMap<String, String>,
+    pane_kinds: HashMap<String, String>,
+    pane_commands: serde_json::Value,
+    plugins: LoadedPlugins,
+    app_name: String,
+    job_id: Option<String>,
+    timestamp_mode: String,
+    config_msg: Arc<Mutex<String>>,
+    default_light_theme: Option<String>,
+    default_dark_theme: Option<String>,
+    event_rules: serde_json::Value,
+}
+
+/// Roll over to a fresh session: create the new session dir + manifest, point
+/// the writers and shared state at it, then export the old session's HTML on a
+/// background thread. Returns `(old_session_info, new_session_info)`.
+fn rotate_session(ctx: &RotationContext) -> Result<(serde_json::Value, serde_json::Value), String> {
+    let (old_session, old_markers, old_events) = {
+        let manager = ctx
+            .session_mgr
+            .lock()
+            .map_err(|_| "session manager lock failed".to_string())?;
+        (
+            manager.build_session_info(),
+            manager.load_markers(),
+            manager.load_events(),
+        )
+    };
+    let old_source_files = ctx.source_files.lock().unwrap().clone();
+    let old_html_path = ctx.html_path.lock().unwrap().clone();
+    let old_first_log_at = ctx.first_log_at.lock().unwrap().map(|dt| dt.to_rfc3339());
+
+    let new_session_id = make_session_id_for_root(&ctx.logs_root, ctx.job_id.as_deref())
+        .map_err(|err| err.to_string())?;
+    let new_session_dir = ctx.logs_root.join(&new_session_id);
+    std::fs::create_dir_all(&new_session_dir).map_err(|err| err.to_string())?;
+
+    let mut new_source_files = HashMap::new();
+    for source_name in &ctx.source_names {
+        let log_name = format!(
+            "{}__{}__{}.log",
+            slugify(&ctx.tab_label),
+            slugify(source_name),
+            slugify(&new_session_id),
+        );
+        let log_path = new_session_dir.join(log_name);
+        new_source_files.insert(source_name.clone(), log_path.display().to_string());
+        if let Some(shared_path) = ctx.writer_paths.get(source_name) {
+            *shared_path.lock().unwrap() = log_path;
+        }
+    }
+
+    let started_at = Local::now().to_rfc3339();
+    let new_manager = SessionManager::new(
+        &new_session_id,
+        new_session_dir.clone(),
+        &ctx.tabs,
+        new_source_files.clone(),
+        ctx.pane_labels.clone(),
+        ctx.pane_kinds.clone(),
+        ctx.pane_commands.clone(),
+        ctx.plugins.definitions.clone(),
+        ctx.plugins.pane_plugins.clone(),
+        ctx.plugins.scripts.clone(),
+        &started_at,
+        &ctx.app_name,
+        None,
+        ctx.job_id.clone(),
+        ctx.timestamp_mode.clone(),
+        None,
+    );
+    new_manager
+        .write_manifest()
+        .map_err(|err| err.to_string())?;
+
+    {
+        let mut source_files = ctx.source_files.lock().unwrap();
+        *source_files = new_source_files;
+    }
+    *ctx.html_path.lock().unwrap() = new_session_dir.join("session.html");
+    *ctx.first_log_at.lock().unwrap() = None;
+    ctx.replay.lock().unwrap().clear();
+
+    let new_session = new_manager.build_session_info();
+    *ctx.session_mgr
+        .lock()
+        .map_err(|_| "session manager lock failed".to_string())? = new_manager;
+
+    let new_config_msg = build_ws_config_message(WsConfigParts {
+        app_name: &ctx.app_name,
+        default_light_theme: &ctx.default_light_theme,
+        default_dark_theme: &ctx.default_dark_theme,
+        session_info: new_session.clone(),
+        pane_labels: &ctx.pane_labels,
+        pane_kinds: &ctx.pane_kinds,
+        pane_commands: ctx.pane_commands.clone(),
+        tabs: &ctx.tabs,
+        frontend_plugins: ctx.plugins.definitions.clone(),
+        pane_plugins: ctx.plugins.pane_plugins.clone(),
+        plugin_scripts: ctx.plugins.scripts.clone(),
+        markers: Vec::new(),
+        event_rules: ctx.event_rules.clone(),
+    });
+    *ctx.config_msg
+        .lock()
+        .map_err(|_| "config message lock failed".to_string())? = new_config_msg.to_string();
+
+    // Export the old session's HTML off the hot path.
+    if let Some(old_manifest_path) = old_html_path.parent().map(|dir| dir.join("manifest.json")) {
+        let _ = update_manifest_file(
+            &old_manifest_path,
+            &json!({
+                "html_status": "updating",
+                "html_error": serde_json::Value::Null,
+                "last_export_reason": "rotate",
+            }),
+        );
+        let old_export_tabs = ctx.tabs.clone();
+        let old_export_labels = ctx.pane_labels.clone();
+        let old_export_frontend = ctx.frontend.clone();
+        let old_export_ts_mode = ctx.timestamp_mode.clone();
+        let old_export_plugins = ctx.plugins.clone();
+        let old_export_event_rules = ctx.event_rules.clone();
+        std::thread::spawn(move || {
+            let exporter = SessionExporter::new(
+                old_html_path.clone(),
+                old_source_files,
+                old_export_tabs,
+                old_export_labels,
+                old_export_frontend,
+                old_export_ts_mode,
+                old_first_log_at,
+            )
+            .with_plugins(
+                old_export_plugins.definitions,
+                old_export_plugins.pane_plugins,
+                old_export_plugins.scripts,
+            )
+            .with_markers(old_markers)
+            .with_events(old_events, old_export_event_rules);
+
+            match exporter.export() {
+                Ok(path) => {
+                    let now = Local::now().to_rfc3339();
+                    let _ = update_manifest_file(
+                        &old_manifest_path,
+                        &json!({
+                            "session_html": path.display().to_string(),
+                            "html_status": "ready",
+                            "html_updated_at": now,
+                            "html_error": serde_json::Value::Null,
+                            "last_export_reason": "rotate",
+                        }),
+                    );
+                }
+                Err(error) => {
+                    let now = Local::now().to_rfc3339();
+                    let _ = update_manifest_file(
+                        &old_manifest_path,
+                        &json!({
+                            "html_status": "error",
+                            "html_error": error.to_string(),
+                            "html_updated_at": now,
+                            "last_export_reason": "rotate",
+                        }),
+                    );
+                }
+            }
+        });
+    }
+
+    Ok((old_session, new_session))
+}
+
 fn session_html_is_current(
     html_path: &Path,
     source_files: &HashMap<String, String>,
@@ -1063,17 +1101,6 @@ fn save_event_marker(
     message: &str,
 ) {
     if let Ok(mgr) = session_manager.lock() {
-        let mut markers: Vec<serde_json::Value> = mgr.load_markers();
-
-        // Remove only event markers at the same (paneId, lineIdx).
-        // User markers (kind != "event") are preserved.
-        markers.retain(|m| {
-            let same_pane = m.get("paneId").and_then(|v| v.as_str()) == Some(source_name);
-            let same_idx = m.get("lineIdx").and_then(|v| v.as_u64()) == Some(line_idx);
-            let is_event = m.get("kind").and_then(|v| v.as_str()).unwrap_or("user") == "event";
-            !(same_pane && same_idx && is_event)
-        });
-
         let now = chrono::Local::now();
         let event_marker = serde_json::json!({
             "paneId": source_name,
@@ -1085,18 +1112,19 @@ fn save_event_marker(
             "severity": severity,
             "createdAt": now.to_rfc3339(),
         });
-        markers.push(event_marker);
 
-        if let Err(e) = mgr.save_markers(&markers) {
-            error!("[{source_name}] failed to save event marker: {e}");
+        // Replace only prior event markers at this line; preserve user markers.
+        match mgr.replace_marker(source_name, line_idx, event_marker, true) {
+            Ok(markers) => {
+                let markers_update = serde_json::json!({
+                    "type": "markers_update",
+                    "markers": markers,
+                    "session": mgr.build_session_info(),
+                });
+                let _ = broadcast_tx.send(markers_update.to_string());
+            }
+            Err(e) => error!("[{source_name}] failed to save event marker: {e}"),
         }
-
-        let markers_update = serde_json::json!({
-            "type": "markers_update",
-            "markers": markers,
-            "session": mgr.build_session_info(),
-        });
-        let _ = broadcast_tx.send(markers_update.to_string());
     }
 }
 
@@ -1789,5 +1817,120 @@ mod tests {
         drop(entry_tx);
         handle.await.unwrap();
         std::fs::remove_dir_all(root).ok();
+    }
+
+    fn empty_plugins() -> LoadedPlugins {
+        LoadedPlugins {
+            definitions: json!({}),
+            pane_plugins: json!({}),
+            scripts: json!({}),
+        }
+    }
+
+    #[test]
+    fn rotate_session_creates_new_session_and_repoints_writers() {
+        let root = temp_dir("rotate-session");
+        let first_dir = root.join("session-1");
+        std::fs::create_dir_all(&first_dir).unwrap();
+        let first_log = first_dir.join("main__dut__session-1.log");
+
+        let writer_path = Arc::new(Mutex::new(first_log.clone()));
+        let mut writer_paths = HashMap::new();
+        writer_paths.insert("dut".to_string(), writer_path.clone());
+
+        let source_files = Arc::new(Mutex::new(HashMap::from([(
+            "dut".to_string(),
+            first_log.display().to_string(),
+        )])));
+        let html_path = Arc::new(Mutex::new(first_dir.join("session.html")));
+        let mgr = test_manager("session-1", first_dir.clone(), first_log.clone());
+        mgr.write_manifest().unwrap();
+        let session_mgr = Arc::new(Mutex::new(mgr));
+
+        let replay = Arc::new(Mutex::new(VecDeque::from(["stale".to_string()])));
+        let config_msg = Arc::new(Mutex::new("old-config".to_string()));
+
+        let mut pane_labels = HashMap::new();
+        pane_labels.insert("dut".to_string(), "DUT".to_string());
+        let mut pane_kinds = HashMap::new();
+        pane_kinds.insert("dut".to_string(), "udp".to_string());
+
+        let ctx = RotationContext {
+            logs_root: root.clone(),
+            tab_label: "main".to_string(),
+            source_names: vec!["dut".to_string()],
+            writer_paths,
+            source_files: source_files.clone(),
+            html_path: html_path.clone(),
+            session_mgr,
+            first_log_at: Arc::new(Mutex::new(Some(Local::now()))),
+            replay: replay.clone(),
+            frontend: root.join("frontend"),
+            tabs: vec![json!({ "label": "Main", "panes": ["dut"] })],
+            pane_labels,
+            pane_kinds,
+            pane_commands: json!({}),
+            plugins: empty_plugins(),
+            app_name: "embed-log".to_string(),
+            job_id: None,
+            timestamp_mode: "absolute".to_string(),
+            config_msg: config_msg.clone(),
+            default_light_theme: None,
+            default_dark_theme: None,
+            event_rules: json!({}),
+        };
+
+        let (old_session, new_session) = rotate_session(&ctx).unwrap();
+        assert_ne!(old_session, new_session, "session info should change");
+
+        // Writer now points into a brand-new session directory under the root.
+        let new_writer = writer_path.lock().unwrap().clone();
+        assert_ne!(new_writer, first_log);
+        let new_dir = new_writer.parent().unwrap();
+        assert!(new_dir.exists() && new_dir != first_dir);
+
+        // Shared state was swapped to the new session.
+        assert_eq!(
+            source_files.lock().unwrap()["dut"],
+            new_writer.display().to_string()
+        );
+        assert!(replay.lock().unwrap().is_empty(), "replay buffer cleared");
+        assert_ne!(*config_msg.lock().unwrap(), "old-config");
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn export_session_skips_when_html_already_current() {
+        let dir = temp_dir("export-skip");
+        let log = dir.join("dut.log");
+        std::fs::write(&log, "[t] hello\n").unwrap();
+        // HTML written after the log → newer mtime → export is skipped.
+        let html = dir.join("session.html");
+        std::fs::write(&html, "<html></html>").unwrap();
+
+        let mgr = test_manager("session-1", dir.clone(), log.clone());
+        mgr.write_manifest().unwrap();
+
+        let ctx = ExportContext {
+            tabs: vec![json!({ "label": "Main", "panes": ["dut"] })],
+            labels: HashMap::from([("dut".to_string(), "DUT".to_string())]),
+            frontend: dir.join("frontend"),
+            ts_mode: "absolute".to_string(),
+            source_files: Arc::new(Mutex::new(HashMap::from([(
+                "dut".to_string(),
+                log.display().to_string(),
+            )]))),
+            html_path: Arc::new(Mutex::new(html.clone())),
+            plugins: empty_plugins(),
+            event_rules: json!({}),
+            session_mgr: Arc::new(Mutex::new(mgr)),
+            first_log_at: Arc::new(Mutex::new(None)),
+        };
+
+        let path = export_session(&ctx).unwrap();
+        assert_eq!(path, html.display().to_string());
+
+        std::fs::remove_dir_all(dir).ok();
     }
 }

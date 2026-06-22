@@ -173,7 +173,14 @@ async fn handle_control_client(mut socket: WebSocket, state: super::ServerState)
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
+                        // Notify the control client in-band so the gap isn't silent.
+                        // ponytail: broadcast capacity is the tuning knob if lag is common.
                         warn!("control WS client lagged, skipped {n} messages");
+                        let notice = format!("{{\"type\":\"stream_gap\",\"skipped\":{n}}}");
+                        if let Err(e) = socket.send(Message::Text(notice.into())).await {
+                            warn!("control WS send error: {e}");
+                            break;
+                        }
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
@@ -709,17 +716,7 @@ async fn handle_marker_create(
             }
         };
 
-        // Load existing markers
-        let mut markers: Vec<serde_json::Value> = mgr.load_markers();
-
-        // Remove existing marker with the same (paneId, lineIdx) to replace it
-        markers.retain(|m| {
-            let same_pane = m.get("paneId").and_then(|v| v.as_str()) == Some(source_id);
-            let same_idx = m.get("lineIdx").and_then(|v| v.as_u64()) == Some(line_idx);
-            !(same_pane && same_idx)
-        });
-
-        // Create new marker in frontend-compatible format
+        // Create new marker in frontend-compatible format.
         let now = chrono::Local::now();
         let new_marker = serde_json::json!({
             "paneId": source_id,
@@ -730,11 +727,10 @@ async fn handle_marker_create(
             "createdAt": now.to_rfc3339(),
             "origin": origin,
         });
-        markers.push(new_marker);
 
-        // Persist via session manager
-        match mgr.save_markers(&markers) {
-            Ok(()) => {
+        // Replace any existing marker at this (paneId, lineIdx) and persist.
+        match mgr.replace_marker(source_id, line_idx, new_marker, false) {
+            Ok(markers) => {
                 let broadcast_payload = serde_json::json!({
                     "type": "markers_update",
                     "markers": markers,

@@ -125,10 +125,12 @@ fn validate_config(config: &mut AppConfig, _config_path: &Path) -> Result<(), Co
                         ctx()
                     )));
                 }
-                let backend = src.network_backend.as_deref().unwrap_or("scapy");
-                if backend != "scapy" && backend != "mock" {
+                // Only the `mock` backend is implemented; reject others at
+                // config load so users fail fast instead of at runtime.
+                let backend = src.network_backend.as_deref().unwrap_or("mock");
+                if backend != "mock" {
                     return Err(ConfigError::validation(format!(
-                        "{}.network_backend must be 'scapy' or 'mock'",
+                        "{}.network_backend must be 'mock' (real packet capture is not implemented)",
                         ctx()
                     )));
                 }
@@ -536,5 +538,48 @@ tabs:
         let err = load_config(&path).unwrap_err();
         assert!(matches!(err, ConfigError::InvalidYaml(_)));
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Write a config to a uniquely-named temp file and load it.
+    fn load_inline(test: &str, body: &str) -> Result<AppConfig, ConfigError> {
+        let path = std::env::temp_dir().join(format!(
+            "embed-log-loader-{}-{test}.yml",
+            std::process::id()
+        ));
+        std::fs::write(&path, body).unwrap();
+        let result = load_config(&path);
+        std::fs::remove_file(&path).ok();
+        result
+    }
+
+    fn network_config(backend_line: &str) -> String {
+        format!(
+            "version: 1\n\
+             logs:\n  dir: logs\n\
+             sources:\n  - name: NET\n    type: network_capture\n    interface: lo\n{backend_line}\
+             tabs:\n  - label: Network\n    panes: [NET]\n"
+        )
+    }
+
+    #[test]
+    fn network_capture_accepts_mock_backend() {
+        let cfg = load_inline("net-mock", &network_config("    network_backend: mock\n")).unwrap();
+        assert_eq!(cfg.sources[0].network_backend.as_deref(), Some("mock"));
+    }
+
+    #[test]
+    fn network_capture_defaults_to_mock_when_backend_omitted() {
+        // No network_backend line: must validate (default is mock, not scapy).
+        load_inline("net-default", &network_config("")).unwrap();
+    }
+
+    #[test]
+    fn network_capture_rejects_unimplemented_backend() {
+        let err =
+            load_inline("net-scapy", &network_config("    network_backend: scapy\n")).unwrap_err();
+        assert!(
+            matches!(err, ConfigError::Validation(msg) if msg.contains("must be 'mock'")),
+            "expected mock-only validation error"
+        );
     }
 }
