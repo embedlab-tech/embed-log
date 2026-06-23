@@ -106,6 +106,42 @@ jobs:
       - name: UI unit tests
         run: npm --prefix tests-ui run test:unit
 
+  backend-hardware-tests:
+    name: Backend hardware tests
+    runs-on: [self-hosted, Linux]
+    needs: unit-tests
+    timeout-minutes: 45
+    env:
+      CI: "true"
+      CARGO_TERM_COLOR: always
+      EMBED_LOG_HARDWARE_UART_PORT: /dev/ttyACM3
+      EMBED_LOG_HARDWARE_UART_BAUD: "115200"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: backend-hardware
+
+      - name: Build CLI
+        run: cargo build --locked --package embed-log-cli --bin embed-log
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python test dependencies
+        run: python -m pip install -e 'sdk/python[dev]'
+
+      - name: Backend UART hardware test
+        run: python -m pytest sdk/python/tests/test_backend_hardware_uart.py -q
+
   e2e-tests:
     name: UI e2e tests
     runs-on: [self-hosted, Linux]
