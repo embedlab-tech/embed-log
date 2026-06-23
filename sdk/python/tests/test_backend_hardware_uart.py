@@ -7,15 +7,18 @@ backend saved the deterministic serial output to the session log file.
 
 from __future__ import annotations
 
-import re
+import json
 import os
+import re
+import shutil
+import signal
 import socket
 import struct
 import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import Generator, Optional
+from typing import Any, Generator, Optional
 
 import pytest
 import yaml
@@ -29,6 +32,7 @@ EXPECTED_LINE_COUNT = 10
 ESP_LOG_RE = re.compile(r"^[IWED] \(\d+\) \S+:\s*(.*)$")
 FILE_TS_RE = re.compile(r"^\[[^\]]+\]\s?(.*)$")
 SEQ_RE = re.compile(r"^#(\d+)\s")
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 class HardwareServer:
@@ -80,9 +84,9 @@ class HardwareServer:
     def stop(self) -> None:
         if self.process is None:
             return
-        self.process.terminate()
+        self.process.send_signal(signal.SIGINT)
         try:
-            self.process.wait(timeout=5)
+            self.process.wait(timeout=10)
         except subprocess.TimeoutExpired:
             self.process.kill()
             self.process.wait()
@@ -178,8 +182,22 @@ def free_port() -> int:
         return sock.getsockname()[1]
 
 
+def run_cli_json(binary: Path, *args: str) -> Any:
+    result = subprocess.run(
+        [str(binary), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return json.loads(result.stdout)
+
+
 @pytest.fixture(scope="session")
 def embed_log_binary() -> Path:
+    installed = shutil.which("embed-log")
+    if installed:
+        return Path(installed)
+
     repo_root = Path(__file__).resolve().parent.parent.parent.parent
     candidates = [
         repo_root / "target" / "debug" / "embed-log",
@@ -188,7 +206,7 @@ def embed_log_binary() -> Path:
     for candidate in candidates:
         if candidate.exists():
             return candidate
-    pytest.skip("embed-log binary not built; run 'cargo build' first")
+    pytest.skip("embed-log binary not found in PATH or target/")
 
 
 @pytest.fixture(scope="session")
@@ -264,6 +282,10 @@ def strip_saved_prefix(line: str) -> str:
     return match.group(1) if match else line
 
 
+def strip_ansi(line: str) -> str:
+    return ANSI_RE.sub("", line)
+
+
 def strip_esp_prefix(line: str) -> str:
     match = ESP_LOG_RE.match(line)
     return match.group(1) if match else line
@@ -271,7 +293,11 @@ def strip_esp_prefix(line: str) -> str:
 
 def normalized_messages(log_path: Path) -> list[str]:
     text = log_path.read_text(encoding="utf-8", errors="replace")
-    return [strip_esp_prefix(strip_saved_prefix(line)) for line in text.splitlines() if line.strip()]
+    return [
+        strip_esp_prefix(strip_ansi(strip_saved_prefix(line)))
+        for line in text.splitlines()
+        if line.strip()
+    ]
 
 
 def wait_for_log_file(logs_dir: Path, timeout: float = 10.0) -> Path:
@@ -285,15 +311,6 @@ def wait_for_log_file(logs_dir: Path, timeout: float = 10.0) -> Path:
     raise AssertionError(f"no log file created under {logs_dir}")
 
 
-def wait_for_summary(log_path: Path, summary: str, timeout: float = 10.0) -> list[str]:
-    deadline = time.time() + timeout
-    last_messages: list[str] = []
-    while time.time() < deadline:
-        last_messages = normalized_messages(log_path)
-        if summary in last_messages:
-            return last_messages
-        time.sleep(0.1)
-    raise AssertionError(f"did not observe {summary!r} in {log_path}: {last_messages}")
 
 
 def extract_first_sequence_block(messages: list[str], count: int) -> list[str]:
@@ -314,14 +331,22 @@ def extract_first_sequence_block(messages: list[str], count: int) -> list[str]:
     raise AssertionError(f"no contiguous #0..#{count - 1} block found in messages: {messages}")
 
 
-def assert_valid_levels(lines: list[str]) -> None:
-    for line in lines:
-        parts = line.split()
-        assert len(parts) >= 2, f"malformed log line: {line!r}"
-        assert parts[1] in VALID_LEVELS, f"invalid level tag in {line!r}"
-
+def wait_for_sequence_block(log_path: Path, count: int, timeout: float = 10.0) -> tuple[list[str], list[str]]:
+    deadline = time.time() + timeout
+    last_messages: list[str] = []
+    while time.time() < deadline:
+        last_messages = normalized_messages(log_path)
+        try:
+            block = extract_first_sequence_block(last_messages, count)
+            return last_messages, block
+        except AssertionError:
+            time.sleep(0.1)
+    raise AssertionError(
+        f"no contiguous #0..#{count - 1} block found in {log_path}: {last_messages}"
+    )
 
 def test_uart_backend_logs_are_saved_deterministically(
+    embed_log_binary: Path,
     hardware_server: tuple[HardwareServer, Path],
 ) -> None:
     from embed_log_sdk import EmbedLogClient
@@ -332,12 +357,49 @@ def test_uart_backend_logs_are_saved_deterministically(
     with EmbedLogClient.from_config(server.config_path, origin="hardware-test") as client:
         client.tx_write("DUT_UART", "pause\n")
         client.tx_write("DUT_UART", "seed 42\n")
-        client.tx_write("DUT_UART", f"emit {EXPECTED_LINE_COUNT}\n")
+        client.tx_write("DUT_UART", "rate 20\n")
+        client.tx_write("DUT_UART", "resume\n")
+        _, sequence_block = wait_for_sequence_block(log_path, EXPECTED_LINE_COUNT, timeout=10.0)
         client.tx_write("DUT_UART", "pause\n")
 
-    messages = wait_for_summary(log_path, f"emitted {EXPECTED_LINE_COUNT} line(s)")
-    assert "seed set to 42 (counter reset)" in messages
+    server.stop()
 
-    sequence_block = extract_first_sequence_block(messages, EXPECTED_LINE_COUNT)
+    sessions = run_cli_json(
+        embed_log_binary,
+        "sessions",
+        "list",
+        "--dir",
+        str(logs_dir),
+        "--json",
+    )["sessions"]
+    assert len(sessions) == 1, f"expected one session, got: {sessions}"
+    session = sessions[0]
+    session_id = session["id"]
+
+    manifest = run_cli_json(
+        embed_log_binary,
+        "sessions",
+        "info",
+        session_id,
+        "--dir",
+        str(logs_dir),
+        "--json",
+    )
+    assert manifest["html_status"] == "ready"
+    session_html = Path(manifest["session_html"])
+    assert session_html.exists(), f"missing exported html: {session_html}"
+
+    source_files = manifest["source_files"]
+    assert set(source_files) == {"DUT_UART"}
+    source_log = Path(source_files["DUT_UART"])
+    assert source_log == log_path
+    assert source_log.exists(), f"missing UART source log: {source_log}"
+
+    messages = normalized_messages(source_log)
+    assert "seed set to 42 (counter reset)" in messages
+    assert "rate set to 20 ms" in messages
+    assert "output resumed" in messages
+    assert "output paused" in messages
     assert_valid_levels(sequence_block)
     assert sequence_block == expected_lines(42, EXPECTED_LINE_COUNT)
+

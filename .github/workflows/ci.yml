@@ -106,16 +106,14 @@ jobs:
       - name: UI unit tests
         run: npm --prefix tests-ui run test:unit
 
-  backend-hardware-tests:
-    name: Backend hardware tests
+  package-cli-linux:
+    name: Package release CLI
     runs-on: [self-hosted, Linux]
     needs: unit-tests
     timeout-minutes: 45
     env:
       CI: "true"
       CARGO_TERM_COLOR: always
-      EMBED_LOG_HARDWARE_UART_PORT: /dev/ttyACM3
-      EMBED_LOG_HARDWARE_UART_BAUD: "115200"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -126,10 +124,48 @@ jobs:
       - name: Cache Rust build outputs
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: backend-hardware
+          shared-key: cli-release
 
-      - name: Build CLI
-        run: cargo build --locked --package embed-log-cli --bin embed-log
+      - name: Build release CLI
+        run: cargo build --locked --release --package embed-log-cli --bin embed-log
+
+      - name: Package release CLI
+        run: ./scripts/package-cli.sh x86_64-unknown-linux-gnu
+
+      - name: Upload release package
+        uses: actions/upload-artifact@v4
+        with:
+          name: embed-log-cli-linux-release
+          path: dist/embed-log-x86_64-unknown-linux-gnu.tar.gz
+          if-no-files-found: error
+
+  backend-hardware-tests:
+    name: Backend hardware tests
+    runs-on: [self-hosted, Linux]
+    needs: package-cli-linux
+    timeout-minutes: 45
+    env:
+      CI: "true"
+      CARGO_TERM_COLOR: always
+      EMBED_LOG_HARDWARE_UART_PORT: /dev/ttyACM3
+      EMBED_LOG_HARDWARE_UART_BAUD: "115200"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download release package
+        uses: actions/download-artifact@v4
+        with:
+          name: embed-log-cli-linux-release
+          path: dist
+
+      - name: Install release binary from package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .tooling/bin
+          tar -xzf dist/embed-log-x86_64-unknown-linux-gnu.tar.gz -C .tooling/bin
+          echo "$PWD/.tooling/bin" >> "$GITHUB_PATH"
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -141,6 +177,15 @@ jobs:
 
       - name: Backend UART hardware test
         run: python -m pytest sdk/python/tests/test_backend_hardware_uart.py -q
+
+      - name: Uninstall release binary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .tooling/bin/embed-log
+          rmdir .tooling/bin 2>/dev/null || true
+          rmdir .tooling 2>/dev/null || true
 
   e2e-tests:
     name: UI e2e tests
