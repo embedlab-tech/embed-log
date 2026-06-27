@@ -409,9 +409,11 @@ fn strip_embedlog_prefixes(text: &str, variants: &[String]) -> String {
     let mut changed = false;
 
     loop {
-        let Some(after_prefix) = strip_bracket_prefix(rest, "SERIAL")
-            .or_else(|| variants.iter().find_map(|variant| strip_bracket_prefix(rest, variant)))
-        else {
+        let Some(after_prefix) = strip_bracket_prefix(rest, "SERIAL").or_else(|| {
+            variants
+                .iter()
+                .find_map(|variant| strip_bracket_prefix(rest, variant))
+        }) else {
             break;
         };
         rest = after_prefix.trim_start();
