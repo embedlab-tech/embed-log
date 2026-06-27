@@ -1157,8 +1157,21 @@ export function scrollPaneToTs(paneId, numTs) {
     }
     if (lo > 0 && Math.abs(_getNumTs(lines[lo - 1], paneId, lo - 1) - numTs) < Math.abs(_getNumTs(lines[lo], paneId, lo) - numTs)) lo--;
 
-    _renderVirtualWindow(paneId, { targetIdx: lo });
-    const div = getRenderedLineElement(paneId, lo);
+    _scrollPaneToRawIndex(paneId, lo);
+}
+
+function _entryServerLineIdx(entry, paneId, idx) {
+    if (_isRawTuple(entry)) {
+        const meta = entry[3];
+        if (meta && typeof meta === "object" && Number.isFinite(meta.lineIdx)) return meta.lineIdx;
+        return null;
+    }
+    return Number.isFinite(entry?.serverLineIdx) ? entry.serverLineIdx : null;
+}
+
+function _scrollPaneToRawIndex(paneId, rawIdx) {
+    _renderVirtualWindow(paneId, { targetIdx: rawIdx });
+    const div = getRenderedLineElement(paneId, rawIdx);
     if (!div) return;
 
     const logEl = document.getElementById("log-" + paneId);
@@ -1166,6 +1179,24 @@ export function scrollPaneToTs(paneId, numTs) {
     state.atBottom[paneId] = false;
     updateJumpBtn(paneId);
     highlightLine(paneId, div);
+}
+
+export function scrollPaneToLineIdx(paneId, lineIdx, fallbackNumTs = null) {
+    const targetLineIdx = Number(lineIdx);
+    const lines = state.rawLines[paneId];
+    if (!lines?.length || !Number.isFinite(targetLineIdx)) {
+        if (fallbackNumTs !== null) scrollPaneToTs(paneId, fallbackNumTs);
+        return;
+    }
+
+    for (let idx = 0; idx < lines.length; idx++) {
+        if (_entryServerLineIdx(lines[idx], paneId, idx) === targetLineIdx) {
+            _scrollPaneToRawIndex(paneId, idx);
+            return;
+        }
+    }
+
+    if (fallbackNumTs !== null) scrollPaneToTs(paneId, fallbackNumTs);
 }
 
 // Middle-click: always clear the filter for this pane, scroll to the line

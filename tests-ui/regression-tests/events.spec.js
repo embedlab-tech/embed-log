@@ -137,6 +137,10 @@ test.describe('event detection', () => {
     await expect(activeTab).toBeVisible();
     const tabText = await activeTab.textContent();
     expect(tabText).not.toContain('Events');
+    await expect(page.locator('.log-line.sync-highlight').first()).toBeVisible();
+
+    await page.locator('.events-tab-btn').click();
+    await expect(page.locator('.events-dot.selected')).toBeVisible();
   });
 
   test('hovering an event dot shows tooltip with event details', async ({ page }) => {
@@ -169,6 +173,10 @@ test.describe('event detection', () => {
     await expect(tooltip).toHaveClass(/visible/);
     const tooltipText = await tooltip.textContent();
     expect(tooltipText).toMatch(/info|warn|error|fatal/);
+
+    await page.locator('[data-event-nav="latest"]').click();
+    await expect(tooltip).toHaveClass(/visible/);
+    await expect(page.locator('.events-dot.selected')).toBeVisible();
   });
 
   test('severity filter checkbox hides matching dots', async ({ page }) => {

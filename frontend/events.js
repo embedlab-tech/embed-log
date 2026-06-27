@@ -10,7 +10,7 @@
 
 import { state, TABS, PANES, paneLabel, formatRelativeTimestamp } from './state.js';
 import { switchTab } from './tabs.js';
-import { scrollPaneToTs } from './lines.js';
+import { scrollPaneToLineIdx, scrollPaneToTs } from './lines.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────
 
@@ -31,6 +31,10 @@ const LEFT_MARGIN   = 134;
 const RIGHT_MARGIN  = 16;
 const TOP_MARGIN    = 8;
 const BOTTOM_MARGIN = 28;
+const SCROLL_LANE_HEIGHT = 28;
+const SCROLL_PX_PER_MS = 0.04; // 40 px/s: readable spacing without huge SVGs.
+const SCROLL_PAD_MS = 1000;
+const SCROLL_EDGE_EPS = 24;
 
 // ── Module state ──────────────────────────────────────────────────────────
 
@@ -40,10 +44,16 @@ let _filterEl   = null;   // source/severity filter bar
 let _eventsTooltipEl  = null;   // hover tooltip
 let _eventsBtn  = null;   // tab-bar button
 
-let _viewRange = null;     // {start, end} in epoch-ms; null = auto-range
-let _panState  = null;     // active drag state
-let _renderRaf = null;     // coalesce event bursts into one SVG rebuild
+let _timelineMode = 'scroll'; // 'scroll' = fixed scale + horizontal scroll, 'zoom' = fit range to viewport
+let _viewRange = null;        // zoom mode {start, end} in epoch-ms; null = auto-range
+let _panState  = null;        // active drag state
+let _renderRaf = null;        // coalesce event bursts into one SVG rebuild
 let _hasRenderedEventSnapshot = false;
+let _selectedEventKey = null;
+let _pendingScrollAnchorMs = null;
+let _renderedRange = null;
+let _renderedInnerW = 0;
+let _renderedLaneH = SCROLL_LANE_HEIGHT;
 
 let _hiddenSources    = new Set();
 let _hiddenSeverities = new Set();
@@ -74,8 +84,14 @@ export function destroyEventsTab() {
     _filterEl   = null;
     _eventsTooltipEl  = null;
     _eventsBtn  = null;
+    _timelineMode = 'scroll';
     _viewRange  = null;
     _panState   = null;
+    _selectedEventKey = null;
+    _pendingScrollAnchorMs = null;
+    _renderedRange = null;
+    _renderedInnerW = 0;
+    _renderedLaneH = SCROLL_LANE_HEIGHT;
     if (_renderRaf !== null) cancelAnimationFrame(_renderRaf);
     _renderRaf = null;
     _hasRenderedEventSnapshot = false;
@@ -102,18 +118,49 @@ export function renderTimeline() {
     const lanes  = _computeLanes();
     const events = _filteredEvents();
 
-    const range  = _effectiveRange();
-    const width  = _svgWrapEl.clientWidth || 800;
-    const innerW = Math.max(50, width - LEFT_MARGIN - RIGHT_MARGIN);
+    const prevScrollLeft = _svgWrapEl.scrollLeft;
+    const wasAtRight = _isScrolledToRight();
+    const clientW = _svgWrapEl.clientWidth || 800;
     const laneCount = Math.max(1, lanes.size);
-    const availH    = _svgWrapEl.clientHeight || 300;
-    const dynLaneH  = Math.max(MIN_LANE_HEIGHT, Math.min(MAX_LANE_HEIGHT, Math.floor((availH - TOP_MARGIN - BOTTOM_MARGIN) / laneCount)));
-    const minHeight = TOP_MARGIN + laneCount * dynLaneH + BOTTOM_MARGIN;
-    const height = Math.max(availH, minHeight);
+    const availH = _svgWrapEl.clientHeight || 300;
 
+    let range, width, innerW, laneH, height;
+    if (_timelineMode === 'scroll') {
+        range = _scrollRange();
+        const span = range.end - range.start || 1;
+        innerW = Math.max(50, span * SCROLL_PX_PER_MS);
+        width = Math.max(clientW, LEFT_MARGIN + RIGHT_MARGIN + Math.ceil(innerW));
+        laneH = SCROLL_LANE_HEIGHT;
+        height = Math.max(availH, TOP_MARGIN + laneCount * laneH + BOTTOM_MARGIN);
+    } else {
+        range = _effectiveRange();
+        width = clientW;
+        innerW = Math.max(50, width - LEFT_MARGIN - RIGHT_MARGIN);
+        laneH = Math.max(MIN_LANE_HEIGHT, Math.min(MAX_LANE_HEIGHT, Math.floor((availH - TOP_MARGIN - BOTTOM_MARGIN) / laneCount)));
+        height = Math.max(availH, TOP_MARGIN + laneCount * laneH + BOTTOM_MARGIN);
+    }
+
+    _renderedRange = range;
+    _renderedInnerW = innerW;
+    _renderedLaneH = laneH;
     _svgWrapEl.innerHTML = '';
-    _svgWrapEl.appendChild(_buildSvg(events, lanes, range, width, height, innerW, dynLaneH));
+    _svgWrapEl.appendChild(_buildSvg(events, lanes, range, width, height, innerW, laneH));
+
+    if (_timelineMode === 'scroll') {
+        if (Number.isFinite(_pendingScrollAnchorMs)) {
+            _centerScrollOnTime(_pendingScrollAnchorMs);
+            _pendingScrollAnchorMs = null;
+        } else if (wasAtRight || !_hasRenderedEventSnapshot) {
+            _scrollToRight();
+        } else {
+            _svgWrapEl.scrollLeft = prevScrollLeft;
+        }
+    } else {
+        _svgWrapEl.scrollLeft = 0;
+    }
+
     _hasRenderedEventSnapshot = state.events.length > 0;
+    _syncModeUi();
 }
 
 function _scheduleTimelineRender() {
@@ -140,10 +187,17 @@ function _buildDom() {
         '<span class="events-title">⚡ Event Timeline</span>' +
         '<span class="events-count"></span>' +
         '<button class="events-nav-toggle" id="events-nav-toggle" title="Include event markers in marker navigation">⚡ in nav</button>' +
+        '<div class="events-step-controls" title="Select and center events without leaving the timeline">' +
+            '<button class="events-btn" data-event-nav="-1" title="Previous event">◀ event</button>' +
+            '<button class="events-btn" data-event-nav="1" title="Next event">event ▶</button>' +
+            '<button class="events-btn" data-event-nav="latest" title="Jump to latest event">Latest</button>' +
+        '</div>' +
         '<div class="events-controls">' +
-            '<button class="events-btn" data-zoom="-1" title="Zoom out">−</button>' +
-            '<button class="events-btn" data-zoom="1" title="Zoom in">+</button>' +
-            '<button class="events-btn" data-zoom="0" title="Reset view">⟳</button>' +
+            '<button class="events-mode-btn" data-events-mode="scroll" title="Fixed scale with horizontal scrolling; follows the right edge while you are at latest">Scroll</button>' +
+            '<button class="events-mode-btn" data-events-mode="zoom" title="Zoom/pan a selected time range into the available screen">Zoom</button>' +
+            '<button class="events-btn events-zoom-btn" data-zoom="-1" title="Zoom out">−</button>' +
+            '<button class="events-btn events-zoom-btn" data-zoom="1" title="Zoom in">+</button>' +
+            '<button class="events-btn events-reset-btn" data-zoom="0" title="Reset view / jump latest">⟳</button>' +
         '</div>';
 
     _svgWrapEl = document.createElement('div');
@@ -155,15 +209,26 @@ function _buildDom() {
     _contentEl.append(header, _svgWrapEl, _filterEl);
     document.getElementById('container').appendChild(_contentEl);
 
-    // Wire zoom buttons
-    header.querySelectorAll('.events-btn').forEach(btn => {
+    // Mode + zoom controls.
+    header.querySelectorAll('[data-events-mode]').forEach(btn => {
+        btn.addEventListener('click', () => _setTimelineMode(btn.dataset.eventsMode));
+    });
+    header.querySelectorAll('[data-zoom]').forEach(btn => {
         btn.addEventListener('click', () => {
             const z = parseInt(btn.dataset.zoom, 10);
+            if (_timelineMode === 'scroll') {
+                if (z === 0) _scrollToRight();
+                return;
+            }
             if (z === 0) _viewRange = null;
             else _zoom(z);
             renderTimeline();
         });
     });
+    header.querySelectorAll('[data-event-nav]').forEach(btn => {
+        btn.addEventListener('click', () => _navigateEvent(btn.dataset.eventNav));
+    });
+    _syncModeUi();
 
     // Toggle event markers in main marker navigation
     const navToggle = document.getElementById('events-nav-toggle');
@@ -226,11 +291,12 @@ function _buildSvg(events, lanes, range, width, height, innerW, laneH) {
         svg.appendChild(label);
     });
 
-    // Time-axis ticks
-    const tickCount = Math.min(8, Math.max(3, Math.floor(innerW / 90)));
-    for (let i = 0; i <= tickCount; i++) {
-        const t = range.start + span * i / tickCount;
+    // Time-axis ticks. In scroll mode ticks are aligned to absolute time
+    // intervals so existing grid lines don't shift when new events extend the
+    // right edge.
+    _timelineTicks(range, innerW).forEach(t => {
         const x = xScale(t);
+        if (x < LEFT_MARGIN - 1 || x > LEFT_MARGIN + innerW + 1) return;
         svg.appendChild(_el('line', {
             x1: x, y1: TOP_MARGIN, x2: x,
             y2: height - BOTTOM_MARGIN + 4,
@@ -242,7 +308,7 @@ function _buildSvg(events, lanes, range, width, height, innerW, laneH) {
         });
         tl.textContent = _formatTime(t);
         svg.appendChild(tl);
-    }
+    });
 
     // Event dots
     events.forEach((ev, i) => {
@@ -250,22 +316,30 @@ function _buildSvg(events, lanes, range, width, height, innerW, laneH) {
         if (laneIdx === undefined) return;
         const cx = xScale(ev.timestamp_num);
         const cy = TOP_MARGIN + laneIdx * laneH + laneH / 2;
+        const selected = _eventKey(ev) === _selectedEventKey;
+        if (selected) {
+            svg.appendChild(_el('line', {
+                x1: cx, y1: TOP_MARGIN, x2: cx, y2: height - BOTTOM_MARGIN + 4,
+                class: 'events-selected-line',
+            }));
+        }
+        // Larger invisible hit target. It is appended before the visual dot and
+        // the dot has pointer-events disabled, so hover/click stays stable.
+        const hit = _el('circle', {
+            cx, cy, r: 11,
+            fill: 'transparent',
+            class: 'events-dot-hit' + (selected ? ' selected' : ''),
+            'data-event-idx': i,
+        });
         const dot = _el('circle', {
-            cx, cy, r: 5,
+            cx, cy, r: selected ? 7 : 5,
             fill: SEVERITY_COLORS[ev.severity] || SEVERITY_COLORS.info,
-            class: 'events-dot',
+            class: 'events-dot' + (selected ? ' selected' : ''),
             'data-event-idx': i,
             'data-severity': ev.severity || 'info',
         });
-        // Larger invisible hit target
-        const hit = _el('circle', {
-            cx, cy, r: 10,
-            fill: 'transparent',
-            class: 'events-dot-hit',
-            'data-event-idx': i,
-        });
-        svg.appendChild(dot);
         svg.appendChild(hit);
+        svg.appendChild(dot);
     });
 
     return svg;
@@ -274,17 +348,35 @@ function _buildSvg(events, lanes, range, width, height, innerW, laneH) {
 // ── Interaction ───────────────────────────────────────────────────────────
 
 function _initInteraction() {
+    _svgWrapEl.addEventListener('wheel', e => {
+        if (_timelineMode !== 'scroll') return;
+        // Treat a normal vertical wheel as horizontal timeline scroll. Shift+wheel
+        // still works naturally because browsers usually put the delta in X.
+        const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+        if (!delta) return;
+        _svgWrapEl.scrollLeft += delta;
+        e.preventDefault();
+    }, { passive: false });
+
     _svgWrapEl.addEventListener('pointerdown', e => {
         if (e.target.closest('.events-dot-hit')) return;   // let click fire
-        const range = _effectiveRange();
-        const innerW = Math.max(50, _svgWrapEl.clientWidth - LEFT_MARGIN - RIGHT_MARGIN);
-        _panState = { startX: e.clientX, range, innerW };
+        if (_timelineMode === 'scroll') {
+            _panState = { mode: 'scroll', startX: e.clientX, scrollLeft: _svgWrapEl.scrollLeft };
+        } else {
+            const range = _effectiveRange();
+            const innerW = Math.max(50, _svgWrapEl.clientWidth - LEFT_MARGIN - RIGHT_MARGIN);
+            _panState = { mode: 'zoom', startX: e.clientX, range, innerW };
+        }
         try { _svgWrapEl.setPointerCapture(e.pointerId); } catch (_) {}
         _svgWrapEl.style.cursor = 'grabbing';
     });
 
     _svgWrapEl.addEventListener('pointermove', e => {
-        if (_panState) {
+        if (_panState?.mode === 'scroll') {
+            _svgWrapEl.scrollLeft = _panState.scrollLeft - (e.clientX - _panState.startX);
+            return;
+        }
+        if (_panState?.mode === 'zoom') {
             const dx = e.clientX - _panState.startX;
             const span = _panState.range.end - _panState.range.start || 1;
             const deltaMs = -dx / _panState.innerW * span;
@@ -322,13 +414,16 @@ function _initInteraction() {
 }
 
 function _onEventClick(ev) {
+    _selectedEventKey = _eventKey(ev);
+    renderTimeline();
+
     const syncTs = (state.timestampMode === 'relative' && Number.isFinite(ev.rel_num))
         ? ev.rel_num
         : ev.timestamp_num;
     state.syncTs = syncTs;
     state.syncTabSwitch = true;
 
-    // Switch to the tab (or unwrapped pane) that contains the event source
+    // Switch to the tab (or unwrapped pane) that contains the event source.
     if (state.unwrap) {
         const paneIdx = PANES.indexOf(ev.source_id);
         if (paneIdx >= 0) switchTab(paneIdx);
@@ -337,8 +432,54 @@ function _onEventClick(ev) {
         if (tabIdx >= 0) switchTab(tabIdx);
     }
 
-    // Scroll the source pane to the event's timestamp in the active timestamp mode.
-    scrollPaneToTs(ev.source_id, syncTs);
+    // Prefer exact backend line_idx when available; timestamp is the fallback.
+    if (Number.isFinite(ev.line_idx)) scrollPaneToLineIdx(ev.source_id, ev.line_idx, syncTs);
+    else scrollPaneToTs(ev.source_id, syncTs);
+}
+
+function _setTimelineMode(mode) {
+    const next = mode === 'zoom' ? 'zoom' : 'scroll';
+    if (_timelineMode === next) return;
+
+    if (next === 'zoom') {
+        _viewRange = _visibleScrollRange() || _effectiveRange();
+    } else {
+        const range = _viewRange || _effectiveRange();
+        _pendingScrollAnchorMs = (range.start + range.end) / 2;
+        _viewRange = null;
+    }
+    _timelineMode = next;
+    renderTimeline();
+}
+
+function _syncModeUi() {
+    _contentEl?.querySelectorAll('[data-events-mode]').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.eventsMode === _timelineMode);
+    });
+    _contentEl?.querySelectorAll('.events-zoom-btn').forEach(btn => {
+        btn.disabled = _timelineMode !== 'zoom';
+    });
+    const reset = _contentEl?.querySelector('.events-reset-btn');
+    if (reset) reset.title = _timelineMode === 'scroll' ? 'Jump to latest event' : 'Reset zoom to all events';
+}
+
+function _navigateEvent(dir) {
+    const events = _filteredEvents();
+    if (!events.length) return;
+    let idx = events.findIndex(ev => _eventKey(ev) === _selectedEventKey);
+    if (dir === 'latest') {
+        idx = events.length - 1;
+    } else {
+        const step = Number(dir) || 1;
+        idx = idx < 0 ? (step > 0 ? 0 : events.length - 1) : Math.max(0, Math.min(events.length - 1, idx + step));
+    }
+    const ev = events[idx];
+    if (!ev) return;
+    _selectedEventKey = _eventKey(ev);
+    if (_timelineMode === 'zoom') _ensureTimeVisibleInZoom(ev.timestamp_num);
+    renderTimeline();
+    _scrollEventIntoView(ev);
+    _showTooltipForEvent(ev);
 }
 
 function _zoom(direction) {
@@ -374,6 +515,19 @@ function _showTooltip(ev, x, y) {
     _eventsTooltipEl.style.left = Math.min(x + 12, window.innerWidth - w - 8) + 'px';
     _eventsTooltipEl.style.top = (y + 12) + 'px';
     _eventsTooltipEl.classList.add('visible');
+}
+
+function _showTooltipForEvent(ev) {
+    if (!_svgWrapEl || !_eventsTooltipEl) return;
+    const x = _timeToRenderedX(ev.timestamp_num);
+    const laneIdx = _computeLanes().get(ev.event_id);
+    if (x === null || laneIdx === undefined) return;
+
+    const rect = _svgWrapEl.getBoundingClientRect();
+    const screenX = rect.left + x - _svgWrapEl.scrollLeft;
+    const y = TOP_MARGIN + laneIdx * _renderedLaneH + _renderedLaneH / 2;
+    const screenY = rect.top + y - _svgWrapEl.scrollTop;
+    _showTooltip(ev, screenX, screenY);
 }
 
 function _hideTooltip() {
@@ -460,7 +614,7 @@ function _computeLanes() {
     return lanes;
 }
 
-function _dataRange() {
+function _rawDataRange() {
     const events = _filteredEvents();
     if (events.length === 0) return { start: 0, end: 1 };
     let min = Infinity, max = -Infinity;
@@ -468,13 +622,100 @@ function _dataRange() {
         const t = ev.timestamp_num;
         if (Number.isFinite(t)) { if (t < min) min = t; if (t > max) max = t; }
     });
-    if (!Number.isFinite(min)) return { start: 0, end: 1 };
-    const span = max - min || 1000;
-    return { start: min - span * 0.05, end: max + span * 0.05 };
+    return Number.isFinite(min) ? { start: min, end: max } : { start: 0, end: 1 };
+}
+
+function _dataRange() {
+    const range = _rawDataRange();
+    const span = range.end - range.start || 1000;
+    return { start: range.start - span * 0.05, end: range.end + span * 0.05 };
+}
+
+function _scrollRange() {
+    const range = _rawDataRange();
+    const end = Math.max(range.end, range.start + 1);
+    return { start: range.start - SCROLL_PAD_MS, end: end + SCROLL_PAD_MS };
 }
 
 function _effectiveRange() {
     return _viewRange || _dataRange();
+}
+
+function _timelineTicks(range, innerW) {
+    const span = range.end - range.start || 1;
+    if (_timelineMode !== 'scroll') {
+        const tickCount = Math.min(8, Math.max(3, Math.floor(innerW / 90)));
+        return Array.from({ length: tickCount + 1 }, (_, i) => range.start + span * i / tickCount);
+    }
+
+    const msPerPx = span / Math.max(1, innerW);
+    const step = _niceTickStep(msPerPx * 110);
+    const ticks = [];
+    const first = Math.ceil(range.start / step) * step;
+    for (let t = first; t <= range.end; t += step) ticks.push(t);
+    return ticks;
+}
+
+function _niceTickStep(targetMs) {
+    const steps = [
+        100, 250, 500,
+        1_000, 2_000, 5_000, 10_000, 15_000, 30_000,
+        60_000, 2 * 60_000, 5 * 60_000, 10 * 60_000, 15 * 60_000, 30 * 60_000,
+        60 * 60_000,
+    ];
+    return steps.find(step => step >= targetMs) || steps[steps.length - 1];
+}
+
+function _eventKey(ev) {
+    return [ev.source_id, ev.line_idx ?? '', ev.event_id, ev.timestamp_num].join('|');
+}
+
+function _isScrolledToRight() {
+    if (!_svgWrapEl) return true;
+    return _svgWrapEl.scrollWidth - _svgWrapEl.scrollLeft - _svgWrapEl.clientWidth <= SCROLL_EDGE_EPS;
+}
+
+function _scrollToRight() {
+    if (!_svgWrapEl) return;
+    _svgWrapEl.scrollLeft = Math.max(0, _svgWrapEl.scrollWidth - _svgWrapEl.clientWidth);
+}
+
+function _timeToRenderedX(ms) {
+    const range = _renderedRange;
+    if (!range || !Number.isFinite(ms)) return null;
+    const span = range.end - range.start || 1;
+    return LEFT_MARGIN + (ms - range.start) / span * _renderedInnerW;
+}
+
+function _centerScrollOnTime(ms) {
+    const x = _timeToRenderedX(ms);
+    if (x === null || !_svgWrapEl) return;
+    _svgWrapEl.scrollLeft = Math.max(0, x - _svgWrapEl.clientWidth / 2);
+}
+
+function _scrollEventIntoView(ev) {
+    if (_timelineMode !== 'scroll') return;
+    const x = _timeToRenderedX(ev.timestamp_num);
+    if (x === null || !_svgWrapEl) return;
+    const left = _svgWrapEl.scrollLeft;
+    const right = left + _svgWrapEl.clientWidth;
+    if (x < left + LEFT_MARGIN || x > right - RIGHT_MARGIN) _centerScrollOnTime(ev.timestamp_num);
+}
+
+function _visibleScrollRange() {
+    if (!_svgWrapEl || !_renderedRange || !_renderedInnerW) return null;
+    const span = _renderedRange.end - _renderedRange.start || 1;
+    const start = _renderedRange.start + Math.max(0, _svgWrapEl.scrollLeft - LEFT_MARGIN) / _renderedInnerW * span;
+    const end = _renderedRange.start + Math.max(0, _svgWrapEl.scrollLeft + _svgWrapEl.clientWidth - LEFT_MARGIN) / _renderedInnerW * span;
+    return end > start ? { start, end } : null;
+}
+
+function _ensureTimeVisibleInZoom(ms) {
+    if (!Number.isFinite(ms)) return;
+    const range = _viewRange || _effectiveRange();
+    if (ms >= range.start && ms <= range.end) return;
+    const span = range.end - range.start || 1000;
+    _viewRange = { start: ms - span / 2, end: ms + span / 2 };
 }
 
 function _formatTime(epochMs) {

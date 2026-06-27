@@ -1050,8 +1050,9 @@ mark.hl {
 .events-nav-toggle:hover { border-color: var(--accent); }
 .events-nav-toggle.active { background: var(--accent); color: var(--header); border-color: var(--accent); }
 .events-count { color: var(--text); opacity: 0.7; font-size: 11px; }
+.events-step-controls { display: flex; gap: 3px; margin-left: 6px; }
 .events-controls { margin-left: auto; display: flex; gap: 3px; }
-.events-btn {
+.events-btn, .events-mode-btn {
     background: var(--panel);
     border: 1px solid var(--border);
     color: var(--text);
@@ -1061,7 +1062,10 @@ mark.hl {
     line-height: 1.5;
     border-radius: 3px;
 }
-.events-btn:hover { border-color: var(--accent); color: var(--accent); }
+.events-btn:hover, .events-mode-btn:hover { border-color: var(--accent); color: var(--accent); }
+.events-btn:disabled { opacity: 0.35; cursor: default; }
+.events-btn:disabled:hover { border-color: var(--border); color: var(--text); }
+.events-mode-btn.active { background: var(--accent); color: var(--header); border-color: var(--accent); }
 
 .events-svg-wrap {
     flex: 1;
@@ -1081,15 +1085,17 @@ mark.hl {
     font-family: var(--font-family, monospace);
 }
 .events-tick { stroke: var(--border); stroke-width: 1; opacity: 0.5; }
+.events-selected-line { stroke: var(--accent); stroke-width: 1.5; opacity: 0.65; stroke-dasharray: 4 3; }
 .events-tick-label {
     fill: var(--text);
     opacity: 0.6;
     font-size: 9px;
     font-family: var(--font-family, monospace);
 }
-.events-dot { stroke: var(--bg); stroke-width: 1.5; cursor: pointer; transition: r 0.1s; }
-.events-dot-hit:hover + .events-dot,
-.events-dot-hit:hover ~ .events-dot { r: 7; }
+.events-dot { stroke: var(--bg); stroke-width: 1.5; cursor: pointer; transition: r 0.1s; pointer-events: none; }
+.events-dot.selected { stroke: var(--accent); stroke-width: 2.5; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--accent) 70%, transparent)); }
+.events-dot-hit { cursor: pointer; pointer-events: all; }
+.events-dot-hit:hover + .events-dot { r: 7; }
 
 .events-empty {
     display: flex;
