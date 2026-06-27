@@ -82,7 +82,7 @@ macOS/Linux: ~/.local/bin/embed-log
 Windows:     %LOCALAPPDATA%\Programs\embed-log\bin\embed-log.exe
 ```
 
-The Windows installer adds its install directory to the user PATH by default. The macOS/Linux installer prints PATH instructions by default, or updates your shell profile when `EMBED_LOG_UPDATE_PATH=1` is set.
+The installers ask before updating PATH when run interactively. Windows still updates the user PATH by default for non-interactive installs; macOS/Linux prints PATH instructions by default for non-interactive installs, or updates your shell profile when `EMBED_LOG_UPDATE_PATH=1` is set. Set `EMBED_LOG_NO_PROMPT=1` for non-interactive installs.
 
 ## Direct downloads
 

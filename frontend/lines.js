@@ -1,6 +1,6 @@
 import {
     state, TABS, PANES, buildTimestampInfo, applyTimestampModeToLine,
-    lineHasTimestampMode,
+    lineHasTimestampMode, resetRelativeTimestampForNextLog,
 } from './state.js';
 import { parseAnsi } from './ansi.js';
 import { analyzeLinePlugins, getLinePluginTooltip, getConfiguredPanePlugins, getPanePluginSettings, setPanePluginSetting } from './pluginRuntime.js';
@@ -1095,6 +1095,8 @@ export function clearPane(paneId) {
 
 document.getElementById("btn-clear")?.addEventListener("click", () => {
     window.wsSend?.({ cmd: "clear_logs", scope: "all" });
+    window.__embedLogDiscardPendingLogMessages?.();
+    resetRelativeTimestampForNextLog();
     PANES.forEach(clearPane);
     _updateToolbarStats();
 });

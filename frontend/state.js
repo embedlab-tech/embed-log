@@ -111,6 +111,9 @@ export const state = {
     sessionTimestampMode: INITIAL_TIMESTAMP_MODE,
     firstLogAt: INITIAL_FIRST_LOG_AT,
     firstLogAtMs: _isoToEpochMs(INITIAL_FIRST_LOG_AT),
+    relativeTimeResetPending: false,
+    relativeTimeResetOriginAbsMs: null,
+    relativeTimeResetOriginRelMs: null,
 
     // ── Event detection ──
     events: [],             // [{event_id, source_id, severity, timestamp_num, ...}]
@@ -129,7 +132,41 @@ export function setTimestampContext({ mode = null, firstLogAt = undefined, reset
         state.firstLogAt = typeof firstLogAt === "string" && firstLogAt.trim() ? firstLogAt.trim() : null;
         state.firstLogAtMs = _isoToEpochMs(state.firstLogAt);
     }
+    if (resetMode) clearRelativeTimestampReset();
     return _enrichExistingTimestampVariants();
+}
+
+export function clearRelativeTimestampReset() {
+    state.relativeTimeResetPending = false;
+    state.relativeTimeResetOriginAbsMs = null;
+    state.relativeTimeResetOriginRelMs = null;
+}
+
+export function resetRelativeTimestampForNextLog() {
+    state.relativeTimeResetPending = true;
+    state.relativeTimeResetOriginAbsMs = null;
+    state.relativeTimeResetOriginRelMs = null;
+}
+
+function _applyRelativeTimestampReset(info) {
+    if (state.relativeTimeResetPending) {
+        if (Number.isFinite(info.absNum)) state.relativeTimeResetOriginAbsMs = info.absNum;
+        if (Number.isFinite(info.relNum)) state.relativeTimeResetOriginRelMs = info.relNum;
+        if (Number.isFinite(state.relativeTimeResetOriginAbsMs) || Number.isFinite(state.relativeTimeResetOriginRelMs)) {
+            state.relativeTimeResetPending = false;
+        }
+    }
+
+    if (Number.isFinite(state.relativeTimeResetOriginAbsMs) && Number.isFinite(info.absNum)) {
+        info.relNum = Math.max(0, info.absNum - state.relativeTimeResetOriginAbsMs);
+        info.relTs = formatRelativeTimestamp(info.relNum);
+        return;
+    }
+
+    if (Number.isFinite(state.relativeTimeResetOriginRelMs) && Number.isFinite(info.relNum)) {
+        info.relNum = Math.max(0, info.relNum - state.relativeTimeResetOriginRelMs);
+        info.relTs = formatRelativeTimestamp(info.relNum);
+    }
 }
 
 export function lineHasTimestampMode(line, mode) {
@@ -197,6 +234,7 @@ export function buildTimestampInfo(ts, meta = {}) {
         info.relTs = formatRelativeTimestamp(info.relNum);
     }
 
+    _applyRelativeTimestampReset(info);
 
     if (!Number.isFinite(info.numTs)) {
         if (state.timestampMode === "relative" && Number.isFinite(info.relNum)) {

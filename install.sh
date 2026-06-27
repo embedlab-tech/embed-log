@@ -13,6 +13,37 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1 || err "required command not found: $1"
 }
 
+is_interactive() {
+  [ "${EMBED_LOG_NO_PROMPT:-0}" != "1" ] && [ -r /dev/tty ] && [ -w /dev/tty ]
+}
+
+prompt_yes_no() {
+  question="$1"
+  default_answer="${2:-Y}"
+
+  if ! is_interactive; then
+    [ "$default_answer" = "Y" ]
+    return
+  fi
+
+  case "$default_answer" in
+    Y) suffix="[Y/n]" ;;
+    N) suffix="[y/N]" ;;
+    *) suffix="[y/n]" ;;
+  esac
+
+  while :; do
+    printf '%s %s ' "$question" "$suffix" >/dev/tty
+    IFS= read -r answer </dev/tty || answer=""
+    case "$answer" in
+      "") [ "$default_answer" = "Y" ]; return ;;
+      y|Y|yes|YES|Yes) return 0 ;;
+      n|N|no|NO|No) return 1 ;;
+      *) printf 'Please answer y or n.\n' >/dev/tty ;;
+    esac
+  done
+}
+
 download() {
   url="$1"
   out="$2"
@@ -23,6 +54,36 @@ download() {
   else
     err "curl or wget is required"
   fi
+}
+
+select_profile() {
+  if [ -n "${PROFILE:-}" ]; then
+    printf '%s\n' "$PROFILE"
+    return
+  fi
+
+  shell_name="$(basename "${SHELL:-sh}")"
+  case "$shell_name" in
+    zsh) printf '%s\n' "$HOME/.zshrc" ;;
+    bash) printf '%s\n' "$HOME/.bashrc" ;;
+    *) printf '%s\n' "$HOME/.profile" ;;
+  esac
+}
+
+add_install_dir_to_path() {
+  profile="$(select_profile)"
+  touch "$profile"
+  path_line="export PATH=\"$INSTALL_DIR:\$PATH\""
+  if ! grep -F "$path_line" "$profile" >/dev/null 2>&1; then
+    {
+      printf '\n# Added by embed-log installer\n'
+      printf '%s\n' "$path_line"
+    } >> "$profile"
+  fi
+  msg "Added $INSTALL_DIR to PATH in $profile."
+  msg "Restart your shell or run:"
+  msg ""
+  msg "  export PATH=\"$INSTALL_DIR:\$PATH\""
 }
 
 case "$(uname -s)" in
@@ -54,6 +115,28 @@ if [ -n "${EMBED_LOG_BASE_URL:-}" ]; then
   base_url="$EMBED_LOG_BASE_URL"
 fi
 
+msg "Embed-log Installer"
+msg "  Embedded log viewer and collection CLI."
+msg ""
+msg "Target: $target"
+msg "Install directory: $INSTALL_DIR"
+msg ""
+
+if is_interactive; then
+  msg "Choose an action:"
+  msg ""
+  msg "  y    Install $BIN (default)"
+  msg "  n    Do nothing"
+  msg ""
+  if prompt_yes_no "Install $BIN now?" Y; then
+    msg "Will install $BIN."
+    msg ""
+  else
+    msg "Nothing changed."
+    exit 0
+  fi
+fi
+
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT INT TERM
 
@@ -80,40 +163,58 @@ mkdir -p "$INSTALL_DIR"
 cp "$tmp_dir/$BIN" "$INSTALL_DIR/$BIN"
 chmod 755 "$INSTALL_DIR/$BIN"
 
+msg ""
+msg "$BIN was installed successfully."
 msg "Installed $BIN to $INSTALL_DIR/$BIN"
+
+resolved_bin="$(command -v "$BIN" 2>/dev/null || true)"
 case ":$PATH:" in
-  *":$INSTALL_DIR:"*) ;;
-  *)
-    msg ""
-    if [ "${EMBED_LOG_UPDATE_PATH:-0}" = "1" ]; then
-      profile="${PROFILE:-}"
-      if [ -z "$profile" ]; then
-        shell_name="$(basename "${SHELL:-sh}")"
-        case "$shell_name" in
-          zsh) profile="$HOME/.zshrc" ;;
-          bash) profile="$HOME/.bashrc" ;;
-          *) profile="$HOME/.profile" ;;
-        esac
-      fi
-      touch "$profile"
-      if ! grep -F "$INSTALL_DIR" "$profile" >/dev/null 2>&1; then
-        {
-          printf '\n# Added by embed-log installer\n'
-          printf 'export PATH="%s:$PATH"\n' "$INSTALL_DIR"
-        } >> "$profile"
-      fi
-      msg "Added $INSTALL_DIR to PATH in $profile"
-      msg "Open a new terminal, or run:"
-      msg "  export PATH=\"$INSTALL_DIR:\$PATH\""
-    else
-      msg "Note: $INSTALL_DIR is not on your PATH. Add it, for example:"
-      msg "  export PATH=\"$INSTALL_DIR:\$PATH\""
-      msg ""
-      msg "Or re-run the installer with automatic shell profile update enabled:"
-      msg "  curl -fsSL https://github.com/$REPO/releases/latest/download/install.sh | EMBED_LOG_UPDATE_PATH=1 sh"
-    fi
-    ;;
+  *":$INSTALL_DIR:"*) install_dir_on_path=1 ;;
+  *) install_dir_on_path=0 ;;
 esac
 
+path_needs_update=0
+if [ "$install_dir_on_path" != "1" ]; then
+  path_needs_update=1
+elif [ -n "$resolved_bin" ] && [ "$resolved_bin" != "$INSTALL_DIR/$BIN" ]; then
+  path_needs_update=1
+fi
+
+if [ "$path_needs_update" = "1" ]; then
+  msg ""
+  if [ -n "$resolved_bin" ] && [ "$resolved_bin" != "$INSTALL_DIR/$BIN" ]; then
+    msg "$BIN was installed, but your shell is not using that install yet."
+    msg "Your shell currently resolves $BIN to: $resolved_bin"
+  else
+    msg "$BIN was installed, but $INSTALL_DIR is not on your PATH yet."
+  fi
+
+  update_path="ask"
+  case "${EMBED_LOG_UPDATE_PATH:-}" in
+    1|true|TRUE|yes|YES|y|Y) update_path="yes" ;;
+    0|false|FALSE|no|NO|n|N) update_path="no" ;;
+  esac
+
+  if [ "$update_path" = "ask" ]; then
+    if is_interactive && prompt_yes_no "Add $INSTALL_DIR to your PATH in $(select_profile) now?" Y; then
+      update_path="yes"
+    else
+      update_path="no"
+    fi
+  fi
+
+  if [ "$update_path" = "yes" ]; then
+    add_install_dir_to_path
+  else
+    msg "Add it manually, for example:"
+    msg ""
+    msg "  export PATH=\"$INSTALL_DIR:\$PATH\""
+    msg ""
+    msg "Or re-run with automatic shell profile update enabled:"
+    msg ""
+    msg "  curl -fsSL https://github.com/$REPO/releases/latest/download/install.sh | EMBED_LOG_UPDATE_PATH=1 sh"
+  fi
+fi
+
 msg ""
-msg "Try: $BIN --help"
+msg "Then run: $BIN"

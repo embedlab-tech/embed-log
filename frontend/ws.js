@@ -59,14 +59,20 @@ export function wsSend(obj) {
 window.wsSend = wsSend;
 
 function clearAllPaneContents() {
-    pendingLogMessages = [];
-    pendingLogFlush = false;
+    discardPendingLogMessages();
     PANES.forEach(paneId => {
         const logEl = document.getElementById("log-" + paneId);
         if (!logEl) return;
         clearPane(paneId);
     });
 }
+
+function discardPendingLogMessages() {
+    pendingLogMessages = [];
+    pendingLogFlush = false;
+}
+
+window.__embedLogDiscardPendingLogMessages = discardPendingLogMessages;
 
 function enqueueLogMessage(entry) {
     pendingLogMessages.push(entry);

@@ -2,7 +2,8 @@ param(
     [string]$Repo = $(if ($env:EMBED_LOG_REPO) { $env:EMBED_LOG_REPO } else { "krezolekcoder/embed-log" }),
     [string]$Version = $(if ($env:EMBED_LOG_VERSION) { $env:EMBED_LOG_VERSION } else { "latest" }),
     [string]$InstallDir = $(if ($env:INSTALL_DIR) { $env:INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA "Programs\embed-log\bin" }),
-    [switch]$NoModifyPath
+    [switch]$NoModifyPath,
+    [switch]$NoPrompt
 )
 
 Set-StrictMode -Version Latest
@@ -14,6 +15,43 @@ function Write-Info($Message) {
 
 function Fail($Message) {
     throw "error: $Message"
+}
+
+function Test-InstallerInteractive {
+    if ($NoPrompt -or $env:EMBED_LOG_NO_PROMPT -eq "1" -or $env:CI -eq "true") {
+        return $false
+    }
+    return [Environment]::UserInteractive
+}
+
+function Confirm-YesNo($Message, [bool]$DefaultYes = $true) {
+    if (-not (Test-InstallerInteractive)) {
+        return $DefaultYes
+    }
+
+    $Suffix = if ($DefaultYes) { "[Y/n]" } else { "[y/N]" }
+    while ($true) {
+        $Answer = Read-Host "$Message $Suffix"
+        if ([string]::IsNullOrWhiteSpace($Answer)) {
+            return $DefaultYes
+        }
+        switch -Regex ($Answer.Trim()) {
+            "^(y|yes)$" { return $true }
+            "^(n|no)$" { return $false }
+            default { Write-Info "Please answer y or n." }
+        }
+    }
+}
+
+function ConvertTo-OptionalYesNo($Value) {
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $null
+    }
+    switch -Regex ($Value.Trim()) {
+        "^(1|true|yes|y)$" { return $true }
+        "^(0|false|no|n)$" { return $false }
+        default { return $null }
+    }
 }
 
 if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
@@ -38,6 +76,32 @@ if ($Version -eq "latest") {
     $BaseUrl = "https://github.com/$Repo/releases/latest/download"
 } else {
     $BaseUrl = "https://github.com/$Repo/releases/download/$Version"
+}
+
+if ($env:EMBED_LOG_BASE_URL) {
+    $BaseUrl = $env:EMBED_LOG_BASE_URL
+}
+
+Write-Info "Embed-log Installer"
+Write-Info "  Embedded log viewer and collection CLI."
+Write-Info ""
+Write-Info "Target: $Target"
+Write-Info "Install directory: $InstallDir"
+Write-Info ""
+
+if (Test-InstallerInteractive) {
+    Write-Info "Choose an action:"
+    Write-Info ""
+    Write-Info "  y    Install embed-log (default)"
+    Write-Info "  n    Do nothing"
+    Write-Info ""
+    if (Confirm-YesNo "Install embed-log now?" $true) {
+        Write-Info "Will install embed-log."
+        Write-Info ""
+    } else {
+        Write-Info "Nothing changed."
+        exit 0
+    }
 }
 
 $TempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("embed-log-install-" + [System.Guid]::NewGuid().ToString("N"))
@@ -74,7 +138,12 @@ try {
     $Destination = Join-Path $InstallDir $Bin
     Copy-Item $ExtractedBin $Destination -Force
 
+    Write-Info ""
+    Write-Info "embed-log was installed successfully."
     Write-Info "Installed embed-log to $Destination"
+
+    $ResolvedCommand = Get-Command "embed-log" -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    $ResolvedPath = if ($ResolvedCommand) { $ResolvedCommand.Definition } else { $null }
 
     $NormalizedInstallDir = $InstallDir.TrimEnd("\")
     $PathEntries = @($env:Path -split ";" | Where-Object { $_ } | ForEach-Object { $_.Trim('"').TrimEnd("\") })
@@ -83,7 +152,8 @@ try {
     if ($NoModifyPath) {
         if (-not $OnProcessPath) {
             Write-Info ""
-            Write-Info "Note: $InstallDir is not on PATH. Add it manually or run:"
+            Write-Info "embed-log was installed, but $InstallDir is not on PATH yet."
+            Write-Info "Add it manually or run:"
             Write-Info "  `$env:Path = `"$InstallDir;`$env:Path`""
         }
     } else {
@@ -92,8 +162,31 @@ try {
         $UserPathEntries = @($UserPath -split ";" | Where-Object { $_ } | ForEach-Object { $_.Trim('"').TrimEnd("\") })
         $OnUserPath = $UserPathEntries | Where-Object { $_ -ieq $NormalizedInstallDir } | Select-Object -First 1
 
-        if (-not $OnUserPath) {
-            $NewUserPath = if ($UserPath.Trim()) { "$UserPath;$InstallDir" } else { $InstallDir }
+        $PathNeedsUpdate = (-not $OnUserPath) -or ($ResolvedPath -and ($ResolvedPath -ine $Destination))
+        $ShouldModifyPath = $false
+        if ($PathNeedsUpdate) {
+            Write-Info ""
+            if ($ResolvedPath -and ($ResolvedPath -ine $Destination)) {
+                Write-Info "embed-log was installed, but your shell is not using that install yet."
+                Write-Info "Your shell currently resolves embed-log to: $ResolvedPath"
+            } elseif (-not $OnProcessPath) {
+                Write-Info "embed-log was installed, but $InstallDir is not on PATH yet."
+            }
+
+            $PathChoice = ConvertTo-OptionalYesNo $env:EMBED_LOG_UPDATE_PATH
+            if ($null -ne $PathChoice) {
+                $ShouldModifyPath = $PathChoice
+            } elseif (Test-InstallerInteractive) {
+                $ShouldModifyPath = Confirm-YesNo "Add $InstallDir to your user PATH now?" $true
+            } else {
+                # Preserve the old Windows behavior for non-interactive installs.
+                $ShouldModifyPath = $true
+            }
+        }
+
+        if ($ShouldModifyPath) {
+            $FilteredUserPathEntries = @($UserPath -split ";" | Where-Object { $_ } | Where-Object { $_.Trim('"').TrimEnd("\") -ine $NormalizedInstallDir })
+            $NewUserPath = if ($FilteredUserPathEntries.Count -gt 0) { "$InstallDir;$($FilteredUserPathEntries -join ';')" } else { $InstallDir }
             [Environment]::SetEnvironmentVariable("Path", $NewUserPath, "User")
             Write-Info "Added $InstallDir to your user PATH. Open a new terminal to use embed-log from anywhere."
         }
@@ -104,7 +197,7 @@ try {
     }
 
     Write-Info ""
-    Write-Info "Try: embed-log --help"
+    Write-Info "Then run: embed-log"
 } finally {
     Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
 }
