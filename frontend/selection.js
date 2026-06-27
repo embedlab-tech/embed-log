@@ -405,18 +405,66 @@ window.applyMarkers = applyMarkers;
 const _tooltipEl = document.createElement("div");
 _tooltipEl.id = "marker-tooltip";
 document.body.appendChild(_tooltipEl);
+let _markerTooltipPinned = false;
 
-document.addEventListener("mouseover", e => {
-    const line = e.target.closest(".log-line.has-marker");
-    if (!line) { _tooltipEl.classList.remove("visible"); return; }
+function _paneIdFromLine(line) {
+    const logEl = line?.closest?.('.log-area');
+    return logEl?.id?.startsWith('log-') ? logEl.id.slice(4) : null;
+}
+
+function _markerForLine(line) {
+    const paneId = _paneIdFromLine(line);
+    const rawIdx = Number(line?.dataset?.idx);
+    if (!paneId || !Number.isFinite(rawIdx)) return null;
+    const marker = (state.markers[paneId] || []).find(m => _markerMatchesRawIndex(paneId, m, rawIdx));
+    return marker ? { paneId, ...marker } : null;
+}
+
+function _hideMarkerTooltip({ force = false } = {}) {
+    if (_markerTooltipPinned && !force) return;
+    _markerTooltipPinned = false;
+    _tooltipEl.classList.remove("visible", "actionable");
+}
+
+function _showMarkerTooltip(line, { action = false } = {}) {
     const desc = line.dataset.markerTooltip || "";
     if (!desc) return;
+    const marker = _markerForLine(line);
+    const isEvent = (marker?.kind || line.dataset.kind) === "event";
+    _markerTooltipPinned = action;
+    const jump = action && isEvent
+        ? '<div class="mt-actions"><button type="button" class="marker-jump-event-btn">Jump to event</button></div>'
+        : '';
+    _tooltipEl.innerHTML = '<span class="mt-label">' + (isEvent ? "Event" : "Marker") + '</span>' + _escHtml(desc) + jump;
+    _tooltipEl.classList.toggle("actionable", action && isEvent);
+    if (action && isEvent) {
+        _tooltipEl.querySelector('.marker-jump-event-btn')?.addEventListener('click', ev => {
+            ev.stopPropagation();
+            _hideMarkerTooltip({ force: true });
+            window.__embedLogJumpToEvent?.(marker);
+        });
+    }
     const rect = line.getBoundingClientRect();
-    _tooltipEl.innerHTML = '<span class="mt-label">' + (line.dataset.kind === "event" ? "Event" : "Marker") + '</span>' + _escHtml(desc);
-    // Position above the line so it doesn't cover log text below
+    // Position above the line so it doesn't cover log text below.
     _tooltipEl.style.left = Math.max(4, rect.left) + "px";
     _tooltipEl.style.bottom = (window.innerHeight - rect.top + 4) + "px";
     _tooltipEl.classList.add("visible");
+}
+
+document.addEventListener("mouseover", e => {
+    const line = e.target.closest(".log-line.has-marker");
+    if (!line) { _hideMarkerTooltip(); return; }
+    if (_markerTooltipPinned) return;
+    _showMarkerTooltip(line);
+});
+
+document.addEventListener("click", e => {
+    const line = e.target.closest(".log-line.has-marker[data-kind='event']");
+    if (!line) {
+        if (!_tooltipEl.contains(e.target)) _hideMarkerTooltip({ force: true });
+        return;
+    }
+    _showMarkerTooltip(line, { action: true });
 });
 
 

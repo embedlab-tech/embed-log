@@ -115,7 +115,7 @@ test.describe('event detection', () => {
     await expect(toggle).not.toHaveClass(/active/);
   });
 
-  test('clicking an event dot switches to the source tab', async ({ page }) => {
+  test('clicking an event dot focuses it, then Jump to log switches to the source tab', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
 
@@ -132,15 +132,18 @@ test.describe('event detection', () => {
       const hit = document.querySelector('.events-dot-hit');
       if (hit) hit.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
+    await expect(page.locator('#events-tab-content')).toBeVisible();
+    await expect(page.locator('.events-dot.selected')).toBeVisible();
+    await expect(page.locator('#events-tooltip.actionable')).toBeVisible();
+    await expect(page.locator('.events-jump-log-btn')).toBeVisible();
+
+    await page.locator('.events-jump-log-btn').click();
     await expect(page.locator('#events-tab-content')).toBeHidden();
     const activeTab = page.locator('.tab-btn.active');
     await expect(activeTab).toBeVisible();
     const tabText = await activeTab.textContent();
     expect(tabText).not.toContain('Events');
     await expect(page.locator('.log-line.sync-highlight').first()).toBeVisible();
-
-    await page.locator('.events-tab-btn').click();
-    await expect(page.locator('.events-dot.selected')).toBeVisible();
   });
 
   test('hovering an event dot shows tooltip with event details', async ({ page }) => {
@@ -177,6 +180,7 @@ test.describe('event detection', () => {
     await page.locator('[data-event-nav="latest"]').click();
     await expect(tooltip).toHaveClass(/visible/);
     await expect(page.locator('.events-dot.selected')).toBeVisible();
+    await expect(page.locator('.events-jump-log-btn')).toBeVisible();
   });
 
   test('severity filter checkbox hides matching dots', async ({ page }) => {
@@ -261,7 +265,7 @@ test.describe('event detection', () => {
     }
   });
 
-  test('exported HTML event dots are clickable and switch to source tab', async ({ page, browser }, testInfo) => {
+  test('exported HTML event dots focus first and Jump to log switches to source tab', async ({ page, browser }, testInfo) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
 
@@ -290,7 +294,13 @@ test.describe('event detection', () => {
         if (hit) hit.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       });
 
-      // Should switch away from the events tab
+      // Click focuses the event and opens an action popup.
+      await expect(exported.locator('#events-tab-content')).toBeVisible();
+      await expect(exported.locator('.events-dot.selected')).toBeVisible();
+      await expect(exported.locator('.events-jump-log-btn')).toBeVisible();
+
+      // Jump action switches away from the events tab.
+      await exported.locator('.events-jump-log-btn').click();
       await expect(exported.locator('#events-tab-content')).toBeHidden();
       const activeTabText = await exported.locator('.tab-btn.active').textContent();
       expect(activeTabText).not.toContain('Events');

@@ -55,6 +55,8 @@ export function renderTabBar() {
 export function switchTab(newIdx) {
     const activeIdx = state.unwrap ? state.activePaneTab : state.activeTab;
 
+    window.__embedLogHideEventsTooltip?.();
+
     // Deactivate the Events timeline tab when switching to a regular tab.
     const wasEvents = state.eventsTabActive;
     if (wasEvents) {

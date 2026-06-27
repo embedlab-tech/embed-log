@@ -928,10 +928,18 @@ mark.hl {
     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
 #marker-tooltip.visible { display: block; }
+#marker-tooltip.actionable { pointer-events: auto; }
 #marker-tooltip .mt-label {
     font-weight: 700;
     color: var(--accent);
     margin-right: 4px;
+}
+#marker-tooltip .mt-actions { margin-top: 7px; display: flex; justify-content: flex-end; }
+#marker-tooltip .marker-jump-event-btn {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-color: var(--accent);
+    color: var(--accent);
 }
 .marker-nav button:hover {
     border-color: var(--accent);
@@ -1164,6 +1172,7 @@ mark.hl {
     box-shadow: 0 4px 18px rgba(0,0,0,0.2);
 }
 #events-tooltip.visible { display: block; }
+#events-tooltip.actionable { pointer-events: auto; }
 .et-head { font-weight: 700; display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
 .et-sev {
     font-size: 9px;
@@ -1186,6 +1195,13 @@ mark.hl {
     background: var(--selection);
     padding: 1px 4px;
     border-radius: 2px;
+}
+.et-actions { margin-top: 7px; display: flex; justify-content: flex-end; }
+.events-jump-log-btn {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-color: var(--accent);
+    color: var(--accent);
 }
 
 /* ── Events tab button ── */

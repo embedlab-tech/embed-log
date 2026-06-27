@@ -32,7 +32,9 @@ const RIGHT_MARGIN  = 16;
 const TOP_MARGIN    = 8;
 const BOTTOM_MARGIN = 28;
 const SCROLL_LANE_HEIGHT = 28;
-const SCROLL_PX_PER_MS = 0.04; // 40 px/s: readable spacing without huge SVGs.
+const SCROLL_DEFAULT_PX_PER_MS = 0.04; // 40 px/s: readable spacing without huge SVGs.
+const SCROLL_MIN_PX_PER_MS = 0.002;
+const SCROLL_MAX_PX_PER_MS = 2;
 const SCROLL_PAD_MS = 1000;
 const SCROLL_EDGE_EPS = 24;
 
@@ -44,13 +46,17 @@ let _filterEl   = null;   // source/severity filter bar
 let _eventsTooltipEl  = null;   // hover tooltip
 let _eventsBtn  = null;   // tab-bar button
 
-let _timelineMode = 'scroll'; // 'scroll' = fixed scale + horizontal scroll, 'zoom' = fit range to viewport
-let _viewRange = null;        // zoom mode {start, end} in epoch-ms; null = auto-range
+let _timelineMode = 'scroll'; // 'scroll' = zoomable horizontal scroll, 'zoom' = fit range to viewport
+let _scrollPxPerMs = SCROLL_DEFAULT_PX_PER_MS;
+let _viewRange = null;        // fit-view mode {start, end} in epoch-ms; null = auto-range
 let _panState  = null;        // active drag state
 let _renderRaf = null;        // coalesce event bursts into one SVG rebuild
 let _hasRenderedEventSnapshot = false;
 let _selectedEventKey = null;
+let _tooltipPinned = false;
+let _tooltipHideTimer = null;
 let _pendingScrollAnchorMs = null;
+let _forceScrollRight = false;
 let _renderedRange = null;
 let _renderedInnerW = 0;
 let _renderedLaneH = SCROLL_LANE_HEIGHT;
@@ -85,10 +91,15 @@ export function destroyEventsTab() {
     _eventsTooltipEl  = null;
     _eventsBtn  = null;
     _timelineMode = 'scroll';
+    _scrollPxPerMs = SCROLL_DEFAULT_PX_PER_MS;
     _viewRange  = null;
     _panState   = null;
     _selectedEventKey = null;
+    _tooltipPinned = false;
+    if (_tooltipHideTimer !== null) clearTimeout(_tooltipHideTimer);
+    _tooltipHideTimer = null;
     _pendingScrollAnchorMs = null;
+    _forceScrollRight = false;
     _renderedRange = null;
     _renderedInnerW = 0;
     _renderedLaneH = SCROLL_LANE_HEIGHT;
@@ -128,7 +139,7 @@ export function renderTimeline() {
     if (_timelineMode === 'scroll') {
         range = _scrollRange();
         const span = range.end - range.start || 1;
-        innerW = Math.max(50, span * SCROLL_PX_PER_MS);
+        innerW = Math.max(50, span * _scrollPxPerMs);
         width = Math.max(clientW, LEFT_MARGIN + RIGHT_MARGIN + Math.ceil(innerW));
         laneH = SCROLL_LANE_HEIGHT;
         height = Math.max(availH, TOP_MARGIN + laneCount * laneH + BOTTOM_MARGIN);
@@ -147,7 +158,10 @@ export function renderTimeline() {
     _svgWrapEl.appendChild(_buildSvg(events, lanes, range, width, height, innerW, laneH));
 
     if (_timelineMode === 'scroll') {
-        if (Number.isFinite(_pendingScrollAnchorMs)) {
+        if (_forceScrollRight) {
+            _scrollToRight();
+            _forceScrollRight = false;
+        } else if (Number.isFinite(_pendingScrollAnchorMs)) {
             _centerScrollOnTime(_pendingScrollAnchorMs);
             _pendingScrollAnchorMs = null;
         } else if (wasAtRight || !_hasRenderedEventSnapshot) {
@@ -193,8 +207,8 @@ function _buildDom() {
             '<button class="events-btn" data-event-nav="latest" title="Jump to latest event">Latest</button>' +
         '</div>' +
         '<div class="events-controls">' +
-            '<button class="events-mode-btn" data-events-mode="scroll" title="Fixed scale with horizontal scrolling; follows the right edge while you are at latest">Scroll</button>' +
-            '<button class="events-mode-btn" data-events-mode="zoom" title="Zoom/pan a selected time range into the available screen">Zoom</button>' +
+            '<button class="events-mode-btn" data-events-mode="scroll" title="Zoomable horizontal timeline; follows the right edge while you are at latest">Scroll</button>' +
+            '<button class="events-mode-btn" data-events-mode="zoom" title="Fit the selected time range to the available screen">Fit</button>' +
             '<button class="events-btn events-zoom-btn" data-zoom="-1" title="Zoom out">−</button>' +
             '<button class="events-btn events-zoom-btn" data-zoom="1" title="Zoom in">+</button>' +
             '<button class="events-btn events-reset-btn" data-zoom="0" title="Reset view / jump latest">⟳</button>' +
@@ -216,11 +230,7 @@ function _buildDom() {
     header.querySelectorAll('[data-zoom]').forEach(btn => {
         btn.addEventListener('click', () => {
             const z = parseInt(btn.dataset.zoom, 10);
-            if (_timelineMode === 'scroll') {
-                if (z === 0) _scrollToRight();
-                return;
-            }
-            if (z === 0) _viewRange = null;
+            if (z === 0) _resetTimelineView();
             else _zoom(z);
             renderTimeline();
         });
@@ -390,9 +400,18 @@ function _initInteraction() {
         const hit = e.target.closest('.events-dot-hit');
         if (hit) {
             const ev = _filteredEvents()[parseInt(hit.getAttribute('data-event-idx'), 10)];
-            if (ev) _showTooltip(ev, e.clientX, e.clientY);
+            if (ev) {
+                // If the user clicked this event and the action popup is open,
+                // don't downgrade it back to a fragile hover tooltip just
+                // because the pointer moved over the dot again.
+                if (_tooltipPinned && _eventKey(ev) === _selectedEventKey) {
+                    _cancelTooltipHide();
+                } else {
+                    _showTooltip(ev, e.clientX, e.clientY);
+                }
+            }
         } else {
-            _hideTooltip();
+            _scheduleTooltipHide();
         }
     });
 
@@ -403,7 +422,7 @@ function _initInteraction() {
         try { _svgWrapEl.releasePointerCapture(e.pointerId); } catch (_) {}
     });
 
-    _svgWrapEl.addEventListener('pointerleave', _hideTooltip);
+    _svgWrapEl.addEventListener('pointerleave', () => _scheduleTooltipHide());
 
     _svgWrapEl.addEventListener('click', e => {
         const hit = e.target.closest('.events-dot-hit');
@@ -416,7 +435,12 @@ function _initInteraction() {
 function _onEventClick(ev) {
     _selectedEventKey = _eventKey(ev);
     renderTimeline();
+    _scrollEventIntoView(ev);
+    _showTooltipForEvent(ev, { action: true });
+}
 
+function _jumpToEventLog(ev) {
+    _hideTooltip({ force: true });
     const syncTs = (state.timestampMode === 'relative' && Number.isFinite(ev.rel_num))
         ? ev.rel_num
         : ev.timestamp_num;
@@ -456,11 +480,10 @@ function _syncModeUi() {
     _contentEl?.querySelectorAll('[data-events-mode]').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.eventsMode === _timelineMode);
     });
-    _contentEl?.querySelectorAll('.events-zoom-btn').forEach(btn => {
-        btn.disabled = _timelineMode !== 'zoom';
-    });
     const reset = _contentEl?.querySelector('.events-reset-btn');
-    if (reset) reset.title = _timelineMode === 'scroll' ? 'Jump to latest event' : 'Reset zoom to all events';
+    if (reset) reset.title = _timelineMode === 'scroll'
+        ? 'Reset zoom scale and jump to latest event'
+        : 'Reset fit range to all events';
 }
 
 function _navigateEvent(dir) {
@@ -479,10 +502,30 @@ function _navigateEvent(dir) {
     if (_timelineMode === 'zoom') _ensureTimeVisibleInZoom(ev.timestamp_num);
     renderTimeline();
     _scrollEventIntoView(ev);
-    _showTooltipForEvent(ev);
+    _showTooltipForEvent(ev, { action: true });
+}
+
+function _resetTimelineView() {
+    if (_timelineMode === 'scroll') {
+        _scrollPxPerMs = SCROLL_DEFAULT_PX_PER_MS;
+        _pendingScrollAnchorMs = null;
+        _forceScrollRight = true;
+        return;
+    }
+    _viewRange = null;
 }
 
 function _zoom(direction) {
+    if (_timelineMode === 'scroll') {
+        const wasAtRight = _isScrolledToRight();
+        const visible = _visibleScrollRange();
+        const center = visible ? (visible.start + visible.end) / 2 : null;
+        const factor = direction > 0 ? 1.7 : 1 / 1.7;
+        _scrollPxPerMs = Math.max(SCROLL_MIN_PX_PER_MS, Math.min(SCROLL_MAX_PX_PER_MS, _scrollPxPerMs * factor));
+        _pendingScrollAnchorMs = wasAtRight ? null : center;
+        return;
+    }
+
     const dataRange = _dataRange();
     const range = _viewRange || _effectiveRange();
     const center = (range.start + range.end) / 2;
@@ -501,23 +544,36 @@ function _zoom(direction) {
 
 // ── Tooltip ───────────────────────────────────────────────────────────────
 
-function _showTooltip(ev, x, y) {
+function _showTooltip(ev, x, y, { action = false } = {}) {
     if (!_eventsTooltipEl) return;
+    _cancelTooltipHide();
+    _tooltipPinned = action;
     const captures = Array.isArray(ev.captures) && ev.captures.length
         ? `<div class="et-captures">${ev.captures.map(c => `<code>${_esc(c)}</code>`).join(' ')}</div>`
+        : '';
+    const actions = action
+        ? '<div class="et-actions"><button type="button" class="events-jump-log-btn">Jump to log</button></div>'
         : '';
     _eventsTooltipEl.innerHTML =
         `<div class="et-head"><span class="et-sev et-sev-${ev.severity}">${ev.severity}</span>${_esc(ev.event_id)}</div>` +
         `<div class="et-meta">${_esc(paneLabel(ev.source_id))} · ${_esc(ev.timestamp || '')} · line ${ev.line_idx ?? '?'}</div>` +
         `<div class="et-msg">${_esc(ev.message || '')}</div>` +
-        captures;
+        captures + actions;
+    _eventsTooltipEl.classList.toggle('actionable', action);
+    if (action) {
+        _eventsTooltipEl.querySelector('.events-jump-log-btn')?.addEventListener('click', e => {
+            e.stopPropagation();
+            _jumpToEventLog(ev);
+        });
+    }
     const w = _eventsTooltipEl.offsetWidth;
-    _eventsTooltipEl.style.left = Math.min(x + 12, window.innerWidth - w - 8) + 'px';
-    _eventsTooltipEl.style.top = (y + 12) + 'px';
+    const h = _eventsTooltipEl.offsetHeight;
+    _eventsTooltipEl.style.left = Math.min(Math.max(8, x + 12), Math.max(8, window.innerWidth - w - 8)) + 'px';
+    _eventsTooltipEl.style.top = Math.min(Math.max(8, y + 12), Math.max(8, window.innerHeight - h - 8)) + 'px';
     _eventsTooltipEl.classList.add('visible');
 }
 
-function _showTooltipForEvent(ev) {
+function _showTooltipForEvent(ev, options = {}) {
     if (!_svgWrapEl || !_eventsTooltipEl) return;
     const x = _timeToRenderedX(ev.timestamp_num);
     const laneIdx = _computeLanes().get(ev.event_id);
@@ -527,12 +583,35 @@ function _showTooltipForEvent(ev) {
     const screenX = rect.left + x - _svgWrapEl.scrollLeft;
     const y = TOP_MARGIN + laneIdx * _renderedLaneH + _renderedLaneH / 2;
     const screenY = rect.top + y - _svgWrapEl.scrollTop;
-    _showTooltip(ev, screenX, screenY);
+    _showTooltip(ev, screenX, screenY, options);
 }
 
-function _hideTooltip() {
-    _eventsTooltipEl?.classList.remove('visible');
+function _cancelTooltipHide() {
+    if (_tooltipHideTimer !== null) {
+        clearTimeout(_tooltipHideTimer);
+        _tooltipHideTimer = null;
+    }
 }
+
+function _scheduleTooltipHide(delay = 450) {
+    if (_tooltipPinned) return;
+    _cancelTooltipHide();
+    _tooltipHideTimer = setTimeout(() => {
+        _tooltipHideTimer = null;
+        _hideTooltip();
+    }, delay);
+}
+
+function _hideTooltip({ force = false } = {}) {
+    _cancelTooltipHide();
+    if (_tooltipPinned && !force) return;
+    _tooltipPinned = false;
+    _eventsTooltipEl?.classList.remove('visible', 'actionable');
+}
+
+window.__embedLogHideEventsTooltip = function () {
+    _hideTooltip({ force: true });
+};
 
 // ── Filtering ─────────────────────────────────────────────────────────────
 
@@ -737,7 +816,27 @@ function _esc(s) {
 
 // ── Tab activation ────────────────────────────────────────────────────────
 
+function _focusEventFromMarker(marker) {
+    const sourceId = marker?.paneId || marker?.source_id;
+    const lineIdx = Number(marker?.lineIdx ?? marker?.line_idx);
+    const ev = _filteredEvents().find(candidate =>
+        candidate.source_id === sourceId && Number(candidate.line_idx) === lineIdx
+    );
+    if (!ev) return false;
+
+    _selectedEventKey = _eventKey(ev);
+    _activateEventsTab();
+    requestAnimationFrame(() => {
+        if (_timelineMode === 'zoom') _ensureTimeVisibleInZoom(ev.timestamp_num);
+        renderTimeline();
+        _scrollEventIntoView(ev);
+        _showTooltipForEvent(ev, { action: true });
+    });
+    return true;
+}
+
 function _activateEventsTab() {
+    _hideTooltip({ force: true });
     document.querySelectorAll('[id^="tab-content-"], [id^="u-tab-content-"]').forEach(el => {
         if (el !== _contentEl) el.style.display = 'none';
     });
@@ -757,4 +856,8 @@ window.__embedLogRenderEventsTab = function (bar) {
     if (state.unwrap) { _eventsBtn.style.display = 'none'; return; }
     _eventsBtn.style.removeProperty('display');
     bar.appendChild(_eventsBtn);
+};
+
+window.__embedLogJumpToEvent = function (marker) {
+    return _focusEventFromMarker(marker || {});
 };
