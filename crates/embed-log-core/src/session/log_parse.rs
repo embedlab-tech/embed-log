@@ -28,6 +28,7 @@ pub(super) fn parse_log_file(
 ) -> Vec<LogEntry> {
     let mut entries = Vec::new();
     let mut pending: Option<LogEntry> = None;
+    let prefix_variants = prefix_variants(pane_id, pane_label);
 
     for raw_line in content.lines() {
         if let Some((ts, text)) = parse_line(raw_line) {
@@ -36,7 +37,7 @@ pub(super) fn parse_log_file(
                 entries.push(entry);
             }
             let is_tx = text.contains("[TX::");
-            let clean_text = strip_embedlog_prefixes(&text, pane_id, pane_label);
+            let clean_text = strip_embedlog_prefixes(&text, &prefix_variants);
 
             let (abs_ts, abs_num, rel_ts, rel_num) = if let Some(ms) = relative_ts_to_ms(&ts) {
                 (None, None, Some(ts.clone()), Some(ms))
@@ -307,8 +308,7 @@ fn ms3(frac: Option<&str>) -> String {
 }
 
 fn relative_ts_to_ms(ts: &str) -> Option<i64> {
-    let re = Regex::new(r"^T\+(\d{1,2}):(\d{2}):(\d{2})\.(\d+)$").unwrap();
-    let caps = re.captures(ts)?;
+    let caps = relative_ts_re().captures(ts)?;
     let h: i64 = caps[1].parse().ok()?;
     let m: i64 = caps[2].parse().ok()?;
     let s: i64 = caps[3].parse().ok()?;
@@ -340,9 +340,16 @@ fn format_absolute_display(dt: &DateTime<Local>) -> String {
 }
 
 fn parse_absolute_to_ms(raw: &str) -> Option<i64> {
-    // Try full ISO: YYYY-MM-DDTHH:MM:SS or YYYY-MM-DD HH:MM:SS
-    let stripped = ansi_prefix_re().replace(raw, "").to_string();
-    let line = stripped.trim();
+    // Try full ISO: YYYY-MM-DDTHH:MM:SS or YYYY-MM-DD HH:MM:SS.
+    // Keep this allocation-free on the hot path; shutdown/export may parse
+    // hundreds of thousands of lines.
+    let line = raw.trim();
+    let line = ansi_prefix_re()
+        .find(line)
+        .filter(|m| m.start() == 0)
+        .map(|m| &line[m.end()..])
+        .unwrap_or(line)
+        .trim_start();
 
     // Try bracket format first.
     let inner = if line.starts_with('[') {
@@ -351,10 +358,8 @@ fn parse_absolute_to_ms(raw: &str) -> Option<i64> {
         Some(line)
     }?;
 
-    // Parse YYYY-MM-DD[THH:MM:SS.mmm]
-    let re =
-        Regex::new(r"^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?").unwrap();
-    let caps = re.captures(inner)?;
+    // Parse YYYY-MM-DD[THH:MM:SS.mmm].
+    let caps = absolute_ts_re().captures(inner)?;
     let year: i32 = caps[1].parse().ok()?;
     let month: u32 = caps[2].parse().ok()?;
     let day: u32 = caps[3].parse().ok()?;
@@ -377,24 +382,59 @@ fn parse_absolute_to_ms(raw: &str) -> Option<i64> {
     Some(local.timestamp_millis())
 }
 
-fn strip_embedlog_prefixes(text: &str, pane_id: Option<&str>, pane_label: Option<&str>) -> String {
-    let mut result = text.to_string();
+fn relative_ts_re() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(r"^T\+(\d{1,2}):(\d{2}):(\d{2})\.(\d+)$").unwrap())
+}
+
+fn absolute_ts_re() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| {
+        Regex::new(r"^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?").unwrap()
+    })
+}
+
+fn prefix_variants(pane_id: Option<&str>, pane_label: Option<&str>) -> Vec<String> {
     let mut variants = std::collections::HashSet::new();
     for value in [pane_id, pane_label].into_iter().flatten() {
         variants.insert(value.to_string());
         variants.insert(value.replace('-', "_"));
         variants.insert(value.replace('_', "-"));
     }
-    for variant in &variants {
-        let pattern = format!(r"(?i)^\s*\[{}\]\s*", regex::escape(variant));
-        if let Ok(re) = Regex::new(&pattern) {
-            result = re.replace(&result, "").to_string();
-        }
+    variants.into_iter().collect()
+}
+
+fn strip_embedlog_prefixes(text: &str, variants: &[String]) -> String {
+    let mut rest = text;
+    let mut changed = false;
+
+    loop {
+        let Some(after_prefix) = strip_bracket_prefix(rest, "SERIAL")
+            .or_else(|| variants.iter().find_map(|variant| strip_bracket_prefix(rest, variant)))
+        else {
+            break;
+        };
+        rest = after_prefix.trim_start();
+        changed = true;
     }
-    // Remove [SERIAL] prefix.
-    let re = Regex::new(r"(?i)^\s*\[SERIAL\]\s*").unwrap();
-    result = re.replace(&result, "").to_string();
-    result
+
+    if changed {
+        rest.to_string()
+    } else {
+        text.to_string()
+    }
+}
+
+fn strip_bracket_prefix<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+    let text = text.trim_start();
+    let after_open = text.strip_prefix('[')?;
+    let end = after_open.find(']')?;
+    let name = &after_open[..end];
+    if name.eq_ignore_ascii_case(prefix) {
+        Some(&after_open[end + 1..])
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -447,6 +487,13 @@ mod tests {
         let content = "[T+00:00:00.000] [TX::UI] ping";
         let entries = parse_log_file(content, None, None);
         assert!(entries[0].is_tx);
+    }
+
+    #[test]
+    fn strips_common_runtime_prefixes_without_regex_per_line() {
+        let content = "[T+00:00:00.000] [SERIAL] [DUT_UART] boot";
+        let entries = parse_log_file(content, Some("DUT_UART"), Some("DUT UART"));
+        assert_eq!(entries[0].text, "boot");
     }
 
     #[test]
