@@ -1,23 +1,25 @@
+use std::io::ErrorKind;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
 use chrono::Local;
 use tokio::sync::mpsc;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use super::traits::{LogSource, TxCommand};
 use crate::models::LogEntry;
 use crate::parsers::create_parser;
+
+const UART_RECONNECT_DELAY: Duration = Duration::from_secs(1);
+type SharedSerialPort = Arc<tokio::sync::Mutex<Option<Box<dyn serialport::SerialPort>>>>;
 
 /// How the UART source obtains its serial port.
 enum PortSource {
     /// Open by path + baud rate at startup.
     Path { port_path: String, baudrate: u32 },
     /// Use an already-opened serial port (e.g., for testing with PTYs).
-    PreOpened {
-        port: Arc<tokio::sync::Mutex<Box<dyn serialport::SerialPort>>>,
-    },
+    PreOpened { port: SharedSerialPort },
 }
 
 /// Reads bytes from a UART serial port, splits by newline, emits [`LogEntry`].
@@ -67,7 +69,7 @@ impl UartSource {
             name: name.into(),
             parser_type: parser_type.into(),
             port_source: PortSource::PreOpened {
-                port: Arc::new(tokio::sync::Mutex::new(port)),
+                port: Arc::new(tokio::sync::Mutex::new(Some(port))),
             },
             tx_rx: None,
         }
@@ -79,24 +81,79 @@ impl UartSource {
         self
     }
 
-    /// Obtain the serial port — either by opening one or returning the pre-opened one.
-    async fn get_port(&self) -> Result<Arc<tokio::sync::Mutex<Box<dyn serialport::SerialPort>>>> {
+    /// Open the configured path-backed serial port once.
+    async fn open_path_port_once(&self) -> Result<Box<dyn serialport::SerialPort>> {
         match &self.port_source {
             PortSource::Path {
                 port_path,
                 baudrate,
-            } => {
-                let path = port_path.clone();
-                let baud = *baudrate;
-                let name = self.name.clone();
-                let port = tokio::task::spawn_blocking(move || {
-                    info!("[{name}] opening serial port {path} @ {baud}");
-                    open_serial_with_fallback(&path, baud, &name)
-                })
-                .await??;
-                Ok(Arc::new(tokio::sync::Mutex::new(port)))
+            } => open_path_port(&self.name, port_path, *baudrate).await,
+            PortSource::PreOpened { .. } => {
+                anyhow::bail!("pre-opened UART source cannot be reopened by path")
             }
+        }
+    }
+
+    /// Obtain the serial port — either by opening one or returning the pre-opened one.
+    ///
+    /// Path-backed ports retry forever so starting embed-log before plugging in a
+    /// USB CDC device still works once the device appears.
+    async fn get_port(&self) -> Result<SharedSerialPort> {
+        match &self.port_source {
+            PortSource::Path { .. } => loop {
+                match self.open_path_port_once().await {
+                    Ok(port) => return Ok(Arc::new(tokio::sync::Mutex::new(Some(port)))),
+                    Err(e) => {
+                        warn!(
+                            "[{}] serial open failed: {e}; retrying in {:?}",
+                            self.name, UART_RECONNECT_DELAY
+                        );
+                        tokio::time::sleep(UART_RECONNECT_DELAY).await;
+                    }
+                }
+            },
             PortSource::PreOpened { port } => Ok(port.clone()),
+        }
+    }
+
+    /// Reopen a path-backed UART and replace the shared port handle used by RX and TX.
+    async fn reconnect_port(
+        &self,
+        port: &SharedSerialPort,
+        reason: &str,
+    ) -> Result<()> {
+        match &self.port_source {
+            PortSource::Path { .. } => {
+                warn!(
+                    "[{}] serial port disconnected ({reason}); reconnecting",
+                    self.name
+                );
+                {
+                    // Drop the stale file descriptor before trying to open the
+                    // re-enumerated USB CDC device. This matters for exclusive
+                    // serial opens and for devices that return with the same path.
+                    let mut guard = port.lock().await;
+                    *guard = None;
+                }
+                loop {
+                    match self.open_path_port_once().await {
+                        Ok(new_port) => {
+                            let mut guard = port.lock().await;
+                            *guard = Some(new_port);
+                            info!("[{}] serial port reconnected", self.name);
+                            return Ok(());
+                        }
+                        Err(e) => {
+                            warn!(
+                                "[{}] serial reconnect failed: {e}; retrying in {:?}",
+                                self.name, UART_RECONNECT_DELAY
+                            );
+                            tokio::time::sleep(UART_RECONNECT_DELAY).await;
+                        }
+                    }
+                }
+            }
+            PortSource::PreOpened { .. } => Ok(()),
         }
     }
 }
@@ -104,13 +161,14 @@ impl UartSource {
 #[async_trait::async_trait]
 impl LogSource for UartSource {
     async fn run(self: Box<Self>, tx: mpsc::Sender<LogEntry>) -> Result<()> {
-        let name = self.name.clone();
-        let parser_type = self.parser_type.clone();
+        let mut this = self;
+        let name = this.name.clone();
+        let parser_type = this.parser_type.clone();
 
         // Obtain the serial port (open by path or use pre-opened).
-        let port = self.get_port().await?;
+        let port = this.get_port().await?;
 
-        let mut tx_rx = self.tx_rx;
+        let mut tx_rx = this.tx_rx.take();
 
         // Spawn a TX writer task if a command receiver was configured.
         if let Some(mut cmd_rx) = tx_rx.take() {
@@ -127,7 +185,10 @@ impl LogSource for UartSource {
                     // Lock the port, clone it, then write in a blocking thread.
                     let cloned = {
                         let guard = tx_port.lock().await;
-                        guard.try_clone()
+                        match guard.as_ref() {
+                            Some(port) => port.try_clone().map_err(|e| format!("clone error: {e}")),
+                            None => Err("serial port is reconnecting".to_string()),
+                        }
                     };
 
                     match cloned {
@@ -171,9 +232,9 @@ impl LogSource for UartSource {
                             }
                         }
                         Err(e) => {
-                            error!("[{tx_name}] TX clone error for '{}': {e}", origin);
+                            error!("[{tx_name}] TX unavailable for '{}': {e}", origin);
                             if let Some(ack) = cmd.ack {
-                                let _ = ack.send(Err(format!("clone error: {e}")));
+                                let _ = ack.send(Err(e));
                             }
                         }
                     }
@@ -187,23 +248,48 @@ impl LogSource for UartSource {
             // Clone the port under the lock, then release before the blocking read.
             let cloned = {
                 let guard = port.lock().await;
-                guard.try_clone()
+                match guard.as_ref() {
+                    Some(port) => port.try_clone().map_err(|e| format!("clone error: {e}")),
+                    None => Err("serial port is reconnecting".to_string()),
+                }
             };
             // buf must be owned by the closure and returned, otherwise the bytes
             // read into it are dropped with the closure (arrays are Copy).
-            let (buf, n) = match cloned {
+            let read_result = match cloned {
                 Ok(mut port_clone) => {
                     tokio::task::spawn_blocking(move || {
                         let mut buf = [0u8; 4096];
-                        let n = port_clone.read(&mut buf).unwrap_or(0);
-                        (buf, n)
+                        match port_clone.read(&mut buf) {
+                            Ok(n) => Ok((buf, n)),
+                            Err(e) => Err(e),
+                        }
                     })
                     .await?
                 }
-                Err(_) => ([0u8; 4096], 0),
+                Err(e) => {
+                    this.reconnect_port(&port, &format!("clone error: {e}")).await?;
+                    parser = create_parser(&parser_type);
+                    continue;
+                }
+            };
+
+            let (buf, n) = match read_result {
+                Ok((buf, n)) => (buf, n),
+                Err(e) if matches!(e.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) => {
+                    continue;
+                }
+                Err(e) if e.kind() == ErrorKind::Interrupted => {
+                    continue;
+                }
+                Err(e) => {
+                    this.reconnect_port(&port, &format!("read error: {e}")).await?;
+                    parser = create_parser(&parser_type);
+                    continue;
+                }
             };
 
             if n == 0 {
+                tokio::time::sleep(Duration::from_millis(25)).await;
                 continue;
             }
 
@@ -235,6 +321,20 @@ impl LogSource for UartSource {
     fn set_tx_receiver(&mut self, rx: mpsc::Receiver<TxCommand>) {
         self.tx_rx = Some(rx);
     }
+}
+
+async fn open_path_port(
+    name: &str,
+    port_path: &str,
+    baudrate: u32,
+) -> Result<Box<dyn serialport::SerialPort>> {
+    let path = port_path.to_string();
+    let name = name.to_string();
+    tokio::task::spawn_blocking(move || {
+        info!("[{name}] opening serial port {path} @ {baudrate}");
+        open_serial_with_fallback(&path, baudrate, &name)
+    })
+    .await?
 }
 
 /// Open a serial port, falling back to non-exclusive mode on platforms where

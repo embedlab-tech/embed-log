@@ -21,6 +21,30 @@ build:
 build-release:
     {{cargo}} build --workspace --release
 
+# Build and install the embed-log CLI system-wide from the current source tree.
+# Defaults to /usr/local/bin. Override: just install /opt/homebrew/bin
+install install_dir="/usr/local/bin":
+    #!/usr/bin/env sh
+    set -eu
+    {{cargo}} build --locked --release --package embed-log-cli --bin embed-log
+    src="target/release/embed-log"
+    install_dir="{{install_dir}}"
+    dest="$install_dir/embed-log"
+    if [ ! -d "$install_dir" ]; then
+      if [ "$(id -u)" -eq 0 ]; then
+        mkdir -p "$install_dir"
+      else
+        sudo mkdir -p "$install_dir"
+      fi
+    fi
+    if [ -w "$install_dir" ]; then
+      install -m 755 "$src" "$dest"
+    else
+      sudo install -m 755 "$src" "$dest"
+    fi
+    echo "Installed embed-log to $dest"
+    "$dest" --version
+
 # Build and package the CLI for an explicit target triple. Example: just package-cli x86_64-unknown-linux-gnu
 package-cli target:
     {{cargo}} build --locked --release --package embed-log-cli --bin embed-log
