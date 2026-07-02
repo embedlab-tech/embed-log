@@ -1,5 +1,5 @@
-import { state, TABS, PANES, PANE_LABELS, setTimestampContext } from './state.js';
-import { appendLineBatch, clearPane, rerenderPane, setTimestampMode } from './lines.js';
+import { state, TABS, PANES, PANE_LABELS, setTimestampContext, resetRelativeTimestampBase } from './state.js';
+import { appendLineBatch, clearPane, rerenderPane, setTimestampMode, refreshStatsUi } from './lines.js';
 import { createTabWithPanes } from './tabcreate.js';
 import { configurePanePlugins, resetPanePlugins } from './pluginRuntime.js';
 
@@ -58,8 +58,13 @@ export function wsSend(obj) {
 // In static exports this is stubbed to a no-op by the bootstrap script.
 window.wsSend = wsSend;
 
-function clearAllPaneContents() {
+function clearAllPaneContents({ resetRelative = false } = {}) {
     discardPendingLogMessages();
+    if (resetRelative) {
+        resetRelativeTimestampBase();
+        state.syncTs = null;
+        state.syncTabSwitch = false;
+    }
     PANES.forEach(paneId => {
         const logEl = document.getElementById("log-" + paneId);
         if (!logEl) return;
@@ -270,6 +275,18 @@ function wsConnect() {
                 input.classList.remove("invalid");
                 input.title = "";
             }
+            return;
+        }
+
+        if (msg.type === "clear_logs") {
+            const pane = typeof msg.pane === "string" && msg.pane ? msg.pane : null;
+            if (pane && pane !== "all") {
+                clearPane(pane);
+            } else {
+                clearAllPaneContents({ resetRelative: true });
+            }
+            refreshStatsUi();
+            window.__embedLogSchedulePersist?.();
             return;
         }
 

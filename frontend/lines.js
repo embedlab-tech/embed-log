@@ -1,6 +1,6 @@
 import {
     state, TABS, PANES, buildTimestampInfo, applyTimestampModeToLine,
-    lineHasTimestampMode, resetRelativeTimestampForNextLog,
+    lineHasTimestampMode, resetRelativeTimestampBase, noteRelativeTimestampCandidate,
 } from './state.js';
 import { parseAnsi } from './ansi.js';
 import { analyzeLinePlugins, getLinePluginTooltip, getConfiguredPanePlugins, getPanePluginSettings, setPanePluginSetting } from './pluginRuntime.js';
@@ -777,6 +777,7 @@ export function appendLineBatch(entries) {
 
     entries.forEach(({ paneId, ts, rawText, isTx, meta = null }) => {
         if (!state.rawLines[paneId]) return;
+        noteRelativeTimestampCandidate(meta);
         state.rawLines[paneId].push([ts, rawText, isTx, meta]);
         if (!newByPane.has(paneId)) newByPane.set(paneId, []);
         newByPane.get(paneId).push([ts, rawText, isTx, meta]);
@@ -1096,7 +1097,9 @@ export function clearPane(paneId) {
 document.getElementById("btn-clear")?.addEventListener("click", () => {
     window.wsSend?.({ cmd: "clear_logs", scope: "all" });
     window.__embedLogDiscardPendingLogMessages?.();
-    resetRelativeTimestampForNextLog();
+    resetRelativeTimestampBase();
+    state.syncTs = null;
+    state.syncTabSwitch = false;
     PANES.forEach(clearPane);
     _updateToolbarStats();
 });
