@@ -12,74 +12,46 @@
 ```bash
 just --list
 just build
-just check
+just build-desktop
 just test
 just verify
 ```
 
-Run browser mode:
+Run the app:
 
 ```bash
-just run embed-log.yml
-just run-headless embed-log.yml
+just run                 # browser UI with demo.yml
+just run web app.yml
+just run headless app.yml
+just run tui app.yml
+just run desktop app.yml
 ```
 
 Run demos:
 
 ```bash
 just demo
-just demo-headless
-just demo-desktop
+just demo headless
+just demo tui
+just demo desktop
 ```
 
-Generate config:
+Tests:
 
 ```bash
-just init embed-log.yml
+just test                # Rust workspace tests
+just test ui-setup       # npm ci + Playwright Chromium install
+just test ui-unit        # frontend unit tests in Node
+just test ui             # default Playwright browser suite
+just test regression     # broader Playwright regression suite
+just test all            # Rust + ui-unit + ui
 ```
 
-Diagnostics:
+Install the CLI from the release build:
 
 ```bash
-just doctor embed-log.yml
-just ports
+just install
 ```
-
-## Release helper commands
-
-Local CLI packaging:
-
-```bash
-just package-cli-current
-```
-
-Explicit target name packaging:
-
-```bash
-just package-cli x86_64-unknown-linux-gnu
-```
-
-Platform-specific helpers:
-
-```bash
-just package-cli-linux
-just package-cli-macos
-just package-cli-windows
-```
-
-Validate release helper scripts:
-
-```bash
-just release-check
-```
-
-Create/push a release tag:
-
-```bash
-just release-tag v0.1.0
-```
-
-See [releasing.md](releasing.md).
 
 ## Workspace layout
 
@@ -161,28 +133,27 @@ The Rust binary embeds `frontend/` through `rust-embed`, but during development 
 
 ## UI tests
 
-Install test dependencies:
+Use the `test` recipe with a UI scope:
 
 ```bash
-just ui-install
-just ui-install-browsers
-```
-
-Run tests:
-
-```bash
-just ui-unit
-just ui-e2e
-just ui-regression
-just ui-all
+just test ui-setup
+just test ui-unit
+just test ui
+just test regression
 ```
 
 ## Tauri development
 
+Build the desktop app:
+
+```bash
+just build-desktop
+```
+
 Run desktop demo:
 
 ```bash
-just demo-desktop
+just demo desktop
 ```
 
 On first run without a config, the Tauri app shows onboarding and writes an `embed-log.yml` to the app config directory. With a valid config, Tauri starts `LogServer` and navigates the webview to the local HTTP server.

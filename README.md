@@ -30,8 +30,8 @@ See [docs/releasing.md](docs/releasing.md) for release and installer details.
 ## Quick start from source
 
 ```bash
-cargo build --workspace
-just demo-headless
+just build
+just demo headless
 ```
 
 Then open:
