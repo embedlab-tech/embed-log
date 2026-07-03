@@ -39,7 +39,6 @@ window.EmbedLogPlugins.register({
 server:
   host: 127.0.0.1
   ws_port: ${httpPort}
-  open_browser: false
 frontend_plugins:
   boom:
     path: boom-plugin.js

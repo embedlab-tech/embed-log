@@ -8,7 +8,6 @@ server:
   host: 127.0.0.1
   ws_port: 8080
   app_name: embed-log demo
-  open_browser: true
   timestamp_mode: absolute
 
 logs:

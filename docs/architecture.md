@@ -58,7 +58,7 @@ Shared library used by both the CLI and Tauri app.
 | `frontend_assets` | Embeds `frontend/` at compile time with `rust-embed`; runtime can fall back to embedded assets when no filesystem frontend exists. |
 | `models` | Core runtime data types like `LogEntry`, `TimestampMode`, ANSI color mapping. |
 | `naming` | Slug helpers for filesystem-safe session/log names. |
-| `net` | HTTP/WebSocket server plus TCP inject/forward servers. |
+| `net` | HTTP/WebSocket server and structured control WebSocket API. |
 | `onboarding` | First-run quick-config builder, serial-port listing, and the shared onboarding HTTP server used by **both** the CLI and the Tauri app. |
 | `parsers` | Stream parsers: text and UDP CBOR datagram parser. |
 | `runtime` | `LogServer`, the main orchestrator. Resolves sources, starts tasks, writes logs, broadcasts messages, rotates/exports sessions. |
@@ -117,8 +117,7 @@ writer task
   └─ broadcasts JSON over tokio broadcast channel
        │
        ├─ WebSocket `/ws` clients receive live messages
-       ├─ TCP forward clients receive raw lines for one source
-       └─ TCP inject clients receive raw lines and can submit JSON/tx commands
+       └─ Control WebSocket clients use `/api/v1/control` for subscribe, inject, TX, and markers
 ```
 
 ## Source types

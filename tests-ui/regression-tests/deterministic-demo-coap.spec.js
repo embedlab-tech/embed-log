@@ -31,7 +31,6 @@ test('deterministic demo traffic drives the CoAP pane plugin', async ({ page }) 
 server:
   host: 127.0.0.1
   ws_port: ${httpPort}
-  open_browser: false
 frontend_plugins:
   hex-coap:
     builtin: hex-coap

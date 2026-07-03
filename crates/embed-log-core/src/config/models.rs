@@ -38,10 +38,6 @@ pub struct SourceConfig {
     pub baudrate: Option<u32>,
     // label
     pub label: Option<String>,
-    // inject/forward
-    pub inject_port: Option<u16>,
-    pub forward_port: Option<u16>,
-    pub forward_ports: Option<Vec<u16>>,
     // network_capture fields
     pub interface: Option<String>,
     #[serde(default)]
@@ -182,14 +178,9 @@ pub struct ServerConfig {
     pub host: String,
     #[serde(default = "ServerConfig::default_ws_port")]
     pub ws_port: u16,
-    pub ws_ui: Option<String>,
     #[serde(default = "ServerConfig::default_app_name")]
     pub app_name: String,
-    #[serde(default)]
-    pub open_browser: bool,
     pub verbosity: Option<String>,
-    #[serde(default)]
-    pub verbose: bool,
     pub job_id: Option<String>,
     pub default_light_theme: Option<String>,
     pub default_dark_theme: Option<String>,
@@ -224,11 +215,8 @@ impl Default for ServerConfig {
         Self {
             host: Self::default_host(),
             ws_port: Self::default_ws_port(),
-            ws_ui: None,
             app_name: Self::default_app_name(),
-            open_browser: false,
             verbosity: None,
-            verbose: false,
             job_id: None,
             default_light_theme: None,
             default_dark_theme: None,

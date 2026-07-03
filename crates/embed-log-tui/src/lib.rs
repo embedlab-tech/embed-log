@@ -2,9 +2,10 @@
 //!
 //! The TUI is a WebSocket client to the unchanged `embed-log-core` server
 //! (`/ws` + `/api/*`), exactly like the browser frontend and the Tauri
-//! webview. It renders the same feature surface (tabs, panes, lines,
-//! selection, markers, events, plugins, TX, sessions, export, onboarding)
-//! with ratatui + crossterm.
+//! webview. It supports live viewing, tabs/panes, scrolling, selection/copy,
+//! markers, events, clear, relative/absolute timestamps, and UART TX with
+//! ratatui + crossterm. It does not execute browser JavaScript plugins or
+//! provide onboarding; use `embed-log run --tui` after creating a config.
 //!
 //! Two entry points:
 //! - [`run_in_process`] — used by `embed-log run --tui` / `demo --tui` when

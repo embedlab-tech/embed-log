@@ -28,12 +28,43 @@ pub fn load_config(path: &Path) -> Result<AppConfig, ConfigError> {
     if version != 1 {
         return Err(ConfigError::UnsupportedVersion(version));
     }
+    reject_removed_fields(&raw)?;
 
     let mut config: AppConfig = serde_yaml::from_value(raw)?;
     config.version = version;
 
     validate_config(&mut config, path)?;
     Ok(config)
+}
+
+/// Reject compatibility-only fields that were removed from the runtime.
+fn reject_removed_fields(raw: &serde_yaml::Value) -> Result<(), ConfigError> {
+    if let Some(server) = raw.get("server").and_then(|v| v.as_mapping()) {
+        for key in ["open_browser", "ws_ui", "verbose"] {
+            if server.contains_key(&serde_yaml::Value::String(key.to_string())) {
+                return Err(ConfigError::validation(format!(
+                    "server.{key} was removed because it had no effect"
+                )));
+            }
+        }
+    }
+
+    let Some(sources) = raw.get("sources").and_then(|v| v.as_sequence()) else {
+        return Ok(());
+    };
+    for (i, source) in sources.iter().enumerate() {
+        let Some(map) = source.as_mapping() else {
+            continue;
+        };
+        for key in ["inject_port", "forward_port", "forward_ports"] {
+            if map.contains_key(&serde_yaml::Value::String(key.to_string())) {
+                return Err(ConfigError::validation(format!(
+                    "sources[{i}].{key} was removed; use the /api/v1/control WebSocket API instead"
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Validate the parsed config, applying defaults and checking constraints.
@@ -56,26 +87,6 @@ fn validate_config(config: &mut AppConfig, _config_path: &Path) -> Result<(), Co
                 ctx(),
                 src.name
             )));
-        }
-
-        // Warn about legacy per-source inject/forward ports.
-        if src.inject_port.is_some() {
-            tracing::warn!(
-                "{}.inject_port is deprecated — use the control API instead",
-                ctx()
-            );
-        }
-        if src.forward_port.is_some() {
-            tracing::warn!(
-                "{}.forward_port is deprecated — use the control API instead",
-                ctx()
-            );
-        }
-        if src.forward_ports.is_some() {
-            tracing::warn!(
-                "{}.forward_ports is deprecated — use the control API instead",
-                ctx()
-            );
         }
 
         let stype = src.source_type.to_lowercase();
@@ -157,10 +168,7 @@ fn validate_config(config: &mut AppConfig, _config_path: &Path) -> Result<(), Co
                             ctx()
                         )));
                     }
-                    for (field, values) in [
-                        ("src_ips", &udp.src_ips),
-                        ("dst_ips", &udp.dst_ips),
-                    ] {
+                    for (field, values) in [("src_ips", &udp.src_ips), ("dst_ips", &udp.dst_ips)] {
                         for value in values {
                             if value.parse::<std::net::IpAddr>().is_err() {
                                 return Err(ConfigError::validation(format!(
@@ -252,10 +260,6 @@ fn validate_config(config: &mut AppConfig, _config_path: &Path) -> Result<(), Co
             )));
         }
     }
-
-    // ── Resolve forward_ports from forward_port singular ──
-    // (The Python version accumulates injects/forwards as flat lists;
-    //  we keep them on the SourceConfig for the runtime to use.)
 
     Ok(())
 }
@@ -352,8 +356,28 @@ mod tests {
     }
 
     #[test]
-    fn legacy_inject_forward_fields_produce_warning_but_parse() {
-        // Configs with legacy fields should still parse (with deprecation warnings).
+    fn removed_server_noop_fields_are_rejected() {
+        let yaml = r#"
+version: 1
+server:
+  open_browser: false
+sources:
+  - name: DUT
+    type: udp
+    port: 6000
+tabs:
+  - label: T
+    panes: [DUT]
+"#;
+        let path = std::env::temp_dir().join("noop-server-field-test.yml");
+        std::fs::write(&path, yaml).unwrap();
+        let err = load_config(&path).unwrap_err().to_string();
+        assert!(err.contains("server.open_browser was removed"), "{err}");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn legacy_inject_forward_fields_are_rejected() {
         let yaml = r#"
 version: 1
 sources:
@@ -368,10 +392,8 @@ tabs:
 "#;
         let path = std::env::temp_dir().join("legacy-test.yml");
         std::fs::write(&path, yaml).unwrap();
-        let cfg = load_config(&path).unwrap();
-        assert_eq!(cfg.sources.len(), 1);
-        assert_eq!(cfg.sources[0].inject_port, Some(5001));
-        assert_eq!(cfg.sources[0].forward_port, Some(5002));
+        let err = load_config(&path).unwrap_err().to_string();
+        assert!(err.contains("inject_port was removed"), "{err}");
         std::fs::remove_file(&path).ok();
     }
 
@@ -651,8 +673,11 @@ tabs:
 
     #[test]
     fn network_capture_rejects_pcap_without_filter() {
-        let err =
-            load_inline("net-pcap-empty", &network_config("    network_backend: pcap\n")).unwrap_err();
+        let err = load_inline(
+            "net-pcap-empty",
+            &network_config("    network_backend: pcap\n"),
+        )
+        .unwrap_err();
         assert!(
             matches!(err, ConfigError::Validation(msg) if msg.contains("requires either udp.* filters or bpf_filter")),
             "expected pcap filter validation error"

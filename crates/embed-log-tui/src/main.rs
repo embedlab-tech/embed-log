@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use clap::{Parser, Subcommand};
 
 /// Terminal UI for embed-log.
@@ -23,12 +21,6 @@ struct Cli {
     /// Shorthand for `embed-log-tui connect <url>`.
     #[arg(long, value_name = "URL")]
     url: Option<String>,
-
-    /// YAML config of a server to launch in-process, then connect the TUI to
-    /// it on loopback. Resolves like `embed-log run`: `embed-log.yml` by
-    /// default.
-    #[arg(short, long, value_name = "PATH")]
-    config: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -56,9 +48,6 @@ fn main() -> anyhow::Result<()> {
             if let Some(url) = cli.url {
                 embed_log_tui::run_client(&url)
             } else {
-                // No subcommand and no --url: nothing to connect to yet.
-                // Phase 11 wires `--config` in-process launch; until then,
-                // require an explicit connection target.
                 anyhow::bail!(
                     "no connection target. Use `embed-log-tui connect <ws-url>` or `--url <ws-url>`, \
                      or launch via `embed-log run --tui` / `embed-log demo --tui`."

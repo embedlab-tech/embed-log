@@ -12,8 +12,8 @@ Global options:
 | --- | --- |
 | `-c, --config <PATH>` | Config file. Falls back to `EMBED_LOG_CONFIG_YML_PATH`, then `embed-log.yml`. |
 | `--frontend-dir <PATH>` | Filesystem frontend directory for development. Defaults to `frontend`. Release binaries can use embedded assets. |
-| `--ui` | Launch the Tauri desktop UI instead of the browser UI. |
-| `--open-browser` | Parsed, but the current CLI already opens the browser by default. |
+| `--tui` | Launch the terminal UI instead of the browser UI. |
+| `--ui` | Launch the beta Tauri desktop UI instead of the browser UI. |
 | `--no-open-browser` | Do not open the default browser. |
 
 ## Run server
@@ -45,7 +45,13 @@ Current behavior:
 - writes session artifacts under `logs.dir`
 - exports `session.html` on Ctrl-C shutdown
 
-Note: the `run` subcommand currently declares `--log-dir`, `--host`, and `--ws-port`, but those overrides are not wired into `cmd_run`; use the config file for those values.
+Useful runtime overrides:
+
+```bash
+embed-log run --config embed-log.yml --host 0.0.0.0 --ws-port 9090 --log-dir /tmp/embed-log-runs
+```
+
+`--host` and `--ws-port` override `server.host` / `server.ws_port` in memory. `--log-dir` overrides `logs.dir` and is resolved relative to the current working directory.
 
 ## Onboarding
 
@@ -87,6 +93,15 @@ embed-log --ui --config embed-log.yml
 ```
 
 The CLI tries to launch the Tauri app directly or through Cargo during development. `EMBED_LOG_TAURI_BIN` can point at a specific Tauri binary.
+
+## Validate config
+
+```bash
+embed-log validate --config embed-log.yml
+embed-log validate --config embed-log.yml --json
+```
+
+Loads the config, runs validation, and prints the resolved server/log/source/tab summary. For packet-capture configs, follow with `embed-log doctor --config <file>` to check the native pcap dependency.
 
 ## Init config
 
@@ -173,6 +188,15 @@ embed-log sessions combined <SESSION_ID> --dir logs --lines 50
 embed-log sessions tail-combined <SESSION_ID> --dir logs --follow
 ```
 
+Read event-detection hits from a session:
+
+```bash
+embed-log sessions events <SESSION_ID> --dir logs
+embed-log sessions events <SESSION_ID> --dir logs --severity fatal
+embed-log sessions events <SESSION_ID> --dir logs --source DUT --contains watchdog
+embed-log sessions events <SESSION_ID> --dir logs --json
+```
+
 Search across session combined streams:
 
 ```bash
@@ -223,14 +247,6 @@ embed-log parse session.html --output parsed/
 ```
 
 Extracts embedded `logData` from a session HTML file and writes per-pane raw log files.
-
-## Smoke test
-
-```bash
-embed-log hello
-```
-
-Prints a simple greeting; useful for checking that the binary runs.
 
 ## Environment variables
 

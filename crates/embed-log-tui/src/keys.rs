@@ -1,7 +1,7 @@
 //! Key dispatch — maps crossterm key events to State mutations + client commands.
 //!
-//! This is the interaction layer (Phases 4–5): scrolling, pane focus, sync,
-//! selection, copy, markers, filter, unwrap, timestamp mode, theme.
+//! This is the interaction layer: scrolling, pane focus, sync, selection,
+//! copy, markers, filter, unwrap, timestamp mode, help, and TX.
 
 use crossterm::event::{KeyCode, KeyModifiers};
 
@@ -40,6 +40,13 @@ pub fn handle_key(
     if key.is_quit() {
         return KeyAction::Quit;
     }
+    if state.show_help {
+        match key.code {
+            KeyCode::Char('?') | KeyCode::Esc => state.show_help = false,
+            _ => {}
+        }
+        return KeyAction::Continue;
+    }
 
     let visible = pane_visible_rows(terminal_height);
 
@@ -50,7 +57,8 @@ pub fn handle_key(
     }
 
     match key.code {
-        // ── TX open ──
+        // ── Help / TX open ──
+        KeyCode::Char('?') => state.show_help = true,
         KeyCode::Char(':') => state.open_tx_mode(),
         KeyCode::Char('i')
             if state

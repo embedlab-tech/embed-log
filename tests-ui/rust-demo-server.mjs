@@ -21,7 +21,6 @@ server:
   host: 127.0.0.1
   ws_port: 8080
   app_name: embed-log e2e
-  open_browser: false
   timestamp_mode: absolute
 logs:
   dir: ${JSON.stringify(logs).slice(1, -1)}
@@ -30,9 +29,6 @@ sources:
     label: DUT UART
     type: udp
     port: 6000
-    # inject_port and forward_port are deprecated; use the control API instead
-    # inject_port: 5001
-    # forward_port: 5101
   - name: HOST
     label: Host Controller
     type: udp

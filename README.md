@@ -46,9 +46,10 @@ Generate a starter config:
 cargo run --package embed-log-cli --bin embed-log -- init --output embed-log.yml
 ```
 
-Run with a config:
+Validate and run with a config:
 
 ```bash
+cargo run --package embed-log-cli --bin embed-log -- validate --config embed-log.yml
 cargo run --package embed-log-cli --bin embed-log -- run --config embed-log.yml
 ```
 
@@ -138,9 +139,26 @@ embed-log sessions marker list <session-id> --search fatal --json
 embed-log sessions marker show <session-id> 1 --json
 ```
 
-## Migration from legacy inject/forward ports
+## Terminal UI
 
-The old per-source `inject_port`, `forward_port`, and `forward_ports` fields are deprecated. Use the single control WebSocket endpoint (`/api/v1/control`) instead. All automation (log injection, forwarding, TX) goes through one connection, routed by configured source name. Legacy fields still parse but produce a deprecation warning.
+Run the server and terminal UI together:
+
+```bash
+embed-log run --config embed-log.yml --tui
+embed-log demo --tui
+```
+
+Or connect the standalone TUI to an already-running server:
+
+```bash
+embed-log-tui connect ws://127.0.0.1:8080/ws
+```
+
+See [docs/tui.md](docs/tui.md) for keybindings and limitations.
+
+## Legacy inject/forward ports removed
+
+The old per-source TCP `inject_port`, `forward_port`, and `forward_ports` config fields have been removed. Use the single control WebSocket endpoint (`/api/v1/control`) instead. All automation (log injection, subscription/forwarding, TX, markers) goes through one connection, routed by configured source name.
 
 ## Documentation
 
@@ -148,6 +166,7 @@ The old per-source `inject_port`, `forward_port`, and `forward_ports` fields are
 - [Configuration](docs/configuration.md)
 - [CLI reference](docs/cli.md)
 - [Development](docs/development.md)
+- [Terminal UI](docs/tui.md)
 - [Tauri desktop app](docs/tauri.md)
 - [Releasing](docs/releasing.md)
 

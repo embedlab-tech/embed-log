@@ -18,8 +18,6 @@ use crate::config::AppConfig;
 use crate::models::{Ansi, LogEntry, TimestampMode};
 use crate::naming::slugify;
 use crate::net::control_ws::SourceInfo;
-use crate::net::forward_server::ForwardServer;
-use crate::net::inject_server::InjectServer;
 use crate::net::ws_server::{
     start_server, ExportCallback, RotateCallback, RuntimeStats, ServerState, SourceRuntimeStats,
 };
@@ -42,8 +40,6 @@ pub struct LogServer {
 struct ResolvedSource {
     name: String,
     source: Box<dyn LogSource>,
-    inject_port: Option<u16>,
-    forward_ports: Vec<u16>,
     label: String,
     source_type: String,
 }
@@ -220,7 +216,7 @@ impl LogServer {
 
         let source_tab_labels = build_source_tab_labels(&self.config.tabs);
 
-        // ── 9. Start sources + writers + inject/forward ──
+        // ── 9. Start sources + writers ──
         for mut src in sources {
             let log_path = writer_log_paths[&src.name].clone();
 
@@ -245,41 +241,6 @@ impl LogServer {
             });
             join_handles.push(reader_handle);
 
-            // Spawn inject server if configured.
-            if let Some(inject_port) = src.inject_port {
-                let inject_name = src.name.clone();
-                let host = self.config.server.host.clone();
-                let inject_entry_tx = entry_tx.clone();
-                let inject_broadcast = broadcast_tx.clone();
-                let inject_handle = tokio::spawn(async move {
-                    let server = InjectServer::new(
-                        inject_name,
-                        host,
-                        inject_port,
-                        inject_entry_tx,
-                        inject_broadcast,
-                    );
-                    if let Err(e) = server.run().await {
-                        error!("[inject:{inject_port}] error: {e}");
-                    }
-                });
-                join_handles.push(inject_handle);
-            }
-
-            // Spawn forward servers if configured.
-            for &fwd_port in &src.forward_ports {
-                let fwd_name = src.name.clone();
-                let host = self.config.server.host.clone();
-                let fwd_broadcast = broadcast_tx.clone();
-                let fwd_handle = tokio::spawn(async move {
-                    let server = ForwardServer::new(fwd_name, host, fwd_port, fwd_broadcast);
-                    if let Err(e) = server.run().await {
-                        error!("[forward:{fwd_port}] error: {e}");
-                    }
-                });
-                join_handles.push(fwd_handle);
-            }
-
             // Spawn writer task.
             let writer_name = src.name.clone();
             let writer_event_matcher = event_matchers.get(&src.name).cloned();
@@ -297,7 +258,10 @@ impl LogServer {
                     source_id: src.name.clone(),
                     source_label: src.label.clone(),
                     source_kind: src.source_type.clone(),
-                    tab_labels: source_tab_labels.get(&src.name).cloned().unwrap_or_default(),
+                    tab_labels: source_tab_labels
+                        .get(&src.name)
+                        .cloned()
+                        .unwrap_or_default(),
                     session_id: session_id.clone(),
                     app_name: self.config.server.app_name.clone(),
                     job_id: self.config.server.job_id.clone(),
@@ -515,25 +479,6 @@ impl LogServer {
     fn resolve_sources(&self) -> Result<Vec<ResolvedSource>> {
         let mut sources = Vec::new();
 
-        let mut inject_map: HashMap<String, u16> = HashMap::new();
-        let mut forward_map: HashMap<String, Vec<u16>> = HashMap::new();
-
-        for src_cfg in &self.config.sources {
-            if let Some(port) = src_cfg.inject_port {
-                inject_map.insert(src_cfg.name.clone(), port);
-            }
-            let mut fwd_ports = Vec::new();
-            if let Some(port) = src_cfg.forward_port {
-                fwd_ports.push(port);
-            }
-            if let Some(ref ports) = src_cfg.forward_ports {
-                fwd_ports.extend(ports);
-            }
-            if !fwd_ports.is_empty() {
-                forward_map.insert(src_cfg.name.clone(), fwd_ports);
-            }
-        }
-
         for src_cfg in &self.config.sources {
             let stype = src_cfg.source_type.to_lowercase();
             let label = src_cfg
@@ -632,8 +577,6 @@ impl LogServer {
             sources.push(ResolvedSource {
                 name: src_cfg.name.clone(),
                 source,
-                inject_port: inject_map.get(&src_cfg.name).copied(),
-                forward_ports: forward_map.get(&src_cfg.name).cloned().unwrap_or_default(),
                 label,
                 source_type: stype,
             });
@@ -1337,7 +1280,10 @@ async fn run_writer(
             "relTs": rel_ts,
             "relNum": rel_num,
         });
-        if let (Some(payload_obj), Some(meta_obj)) = (payload.as_object_mut(), entry.meta.as_ref().and_then(|m| m.as_object())) {
+        if let (Some(payload_obj), Some(meta_obj)) = (
+            payload.as_object_mut(),
+            entry.meta.as_ref().and_then(|m| m.as_object()),
+        ) {
             for (key, value) in meta_obj {
                 payload_obj.insert(key.clone(), value.clone());
             }

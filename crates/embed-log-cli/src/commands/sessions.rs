@@ -54,8 +54,34 @@ pub(crate) enum SessionsCommand {
         #[arg(long, alias = "last")]
         lines: Option<usize>,
     },
+    /// Print recorded event-detection hits from events.jsonl.
+    Events {
+        session_id: String,
+        #[arg(long, alias = "log-dir", default_value = "logs")]
+        dir: PathBuf,
+        /// Print JSONL instead of compact human-readable lines.
+        #[arg(long)]
+        json: bool,
+        /// Restrict to event severity (info, warn, error, fatal).
+        #[arg(long)]
+        severity: Option<String>,
+        /// Restrict to source_id.
+        #[arg(long)]
+        source: Option<String>,
+        /// Substring that must appear in the event message.
+        #[arg(long)]
+        contains: Option<String>,
+        /// Regex that must match the event message.
+        #[arg(long)]
+        regex: Option<String>,
+        /// Stop after printing this many events.
+        #[arg(long)]
+        limit: Option<usize>,
+    },
     /// Search combined JSONL across sessions with structured filters.
-    #[command(long_about = "Search all session combined.jsonl files under a log directory.\n\nExamples:\n  embed-log sessions search --dir logs --source DUT\n  embed-log sessions search --dir logs --source DUT --from 2026-07-03T09:00:00 --to 2026-07-03T15:00:00\n  embed-log sessions search --dir logs --job nightly-42 --kind network_capture --dst-port 5683\n  embed-log sessions search --dir logs --contains panic --regex 'ERROR|WARN'\n\nTime filters accept RFC3339 (with timezone) or local wall-clock forms like 2026-07-03T09:00:00 or 2026-07-03 09:00:00.")]
+    #[command(
+        long_about = "Search all session combined.jsonl files under a log directory.\n\nExamples:\n  embed-log sessions search --dir logs --source DUT\n  embed-log sessions search --dir logs --source DUT --from 2026-07-03T09:00:00 --to 2026-07-03T15:00:00\n  embed-log sessions search --dir logs --job nightly-42 --kind network_capture --dst-port 5683\n  embed-log sessions search --dir logs --contains panic --regex 'ERROR|WARN'\n\nTime filters accept RFC3339 (with timezone) or local wall-clock forms like 2026-07-03T09:00:00 or 2026-07-03 09:00:00."
+    )]
     Search {
         /// Root logs directory containing session subdirectories.
         #[arg(long, alias = "log-dir", default_value = "logs")]
@@ -167,6 +193,21 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             follow,
             lines,
         } => show_session_combined(&dir, &session_id, follow, lines),
+        SessionsCommand::Events {
+            session_id,
+            dir,
+            json,
+            severity,
+            source,
+            contains,
+            regex,
+            limit,
+        } => show_session_events(
+            &dir,
+            &session_id,
+            EventsFilters::compile(severity, source, contains, regex, limit)?,
+            json,
+        ),
         SessionsCommand::Search {
             dir,
             sessions,
@@ -185,19 +226,8 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
         } => search_sessions(
             &dir,
             SearchFilters::compile(
-                sessions,
-                job,
-                sources,
-                kind,
-                from,
-                to,
-                contains,
-                regex,
-                src_port,
-                dst_port,
-                ip,
-                limit,
-                count,
+                sessions, job, sources, kind, from, to, contains, regex, src_port, dst_port, ip,
+                limit, count,
             )?,
         ),
         SessionsCommand::Export {
@@ -568,6 +598,120 @@ fn marker_matches(
 }
 
 #[derive(Debug)]
+struct EventsFilters {
+    severity: Option<String>,
+    source: Option<String>,
+    contains: Option<String>,
+    regex: Option<Regex>,
+    limit: Option<usize>,
+}
+
+impl EventsFilters {
+    fn compile(
+        severity: Option<String>,
+        source: Option<String>,
+        contains: Option<String>,
+        regex: Option<String>,
+        limit: Option<usize>,
+    ) -> Result<Self> {
+        Ok(Self {
+            severity,
+            source,
+            contains,
+            regex: regex.map(|pat| Regex::new(&pat)).transpose()?,
+            limit,
+        })
+    }
+
+    fn matches(&self, event: &serde_json::Value) -> bool {
+        if let Some(severity) = &self.severity {
+            if event.get("severity").and_then(|v| v.as_str()) != Some(severity.as_str()) {
+                return false;
+            }
+        }
+        if let Some(source) = &self.source {
+            if event.get("source_id").and_then(|v| v.as_str()) != Some(source.as_str()) {
+                return false;
+            }
+        }
+        let message = event.get("message").and_then(|v| v.as_str()).unwrap_or("");
+        if let Some(contains) = &self.contains {
+            if !message.contains(contains) {
+                return false;
+            }
+        }
+        if let Some(regex) = &self.regex {
+            if !regex.is_match(message) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+fn show_session_events(
+    dir: &Path,
+    session_id: &str,
+    filters: EventsFilters,
+    json: bool,
+) -> Result<()> {
+    use std::io::{BufRead, BufReader};
+
+    let session = resolve_session(dir, session_id)?;
+    let path = session
+        .manifest
+        .get("events_file")
+        .and_then(|v| v.as_str())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| session.dir.join("events.jsonl"));
+    if !path.exists() {
+        return Ok(());
+    }
+    let file = std::fs::File::open(&path)
+        .with_context(|| format!("open events file {}", path.display()))?;
+    let reader = BufReader::new(file);
+    let mut printed = 0usize;
+
+    for line_result in reader.lines() {
+        let line = line_result.with_context(|| format!("read {}", path.display()))?;
+        let event: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        if !filters.matches(&event) {
+            continue;
+        }
+        printed += 1;
+        if json {
+            println!("{line}");
+        } else {
+            let ts = event
+                .get("timestamp_iso")
+                .or_else(|| event.get("timestamp"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let severity = event
+                .get("severity")
+                .and_then(|v| v.as_str())
+                .unwrap_or("info");
+            let source = event
+                .get("source_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            let name = event
+                .get("event_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("event");
+            let message = event.get("message").and_then(|v| v.as_str()).unwrap_or("");
+            println!("{ts}  {severity:<5}  {source:<16}  {name}: {message}");
+        }
+        if filters.limit.is_some_and(|limit| printed >= limit) {
+            break;
+        }
+    }
+    Ok(())
+}
+
 struct SearchFilters {
     sessions: Vec<String>,
     job: Option<String>,
@@ -639,7 +783,11 @@ impl SearchFilters {
     fn matches_entry(&self, entry: &serde_json::Value) -> bool {
         if !self.sources.is_empty() {
             let source_id = entry.get("source_id").and_then(|v| v.as_str());
-            if !self.sources.iter().any(|source| Some(source.as_str()) == source_id) {
+            if !self
+                .sources
+                .iter()
+                .any(|source| Some(source.as_str()) == source_id)
+            {
                 return false;
             }
         }
@@ -712,9 +860,7 @@ fn parse_search_time(raw: &str) -> Result<DateTime<FixedOffset>> {
             }
         }
     }
-    anyhow::bail!(
-        "invalid time {raw:?} (use RFC3339 or local wall-clock like 2026-07-03T09:00:00)"
-    )
+    anyhow::bail!("invalid time {raw:?} (use RFC3339 or local wall-clock like 2026-07-03T09:00:00)")
 }
 
 fn search_sessions(dir: &Path, filters: SearchFilters) -> Result<()> {
@@ -723,7 +869,10 @@ fn search_sessions(dir: &Path, filters: SearchFilters) -> Result<()> {
     let sessions = load_sessions(dir)?;
     let mut matches = 0usize;
 
-    for session in sessions.iter().filter(|session| filters.matches_session(session)) {
+    for session in sessions
+        .iter()
+        .filter(|session| filters.matches_session(session))
+    {
         let path = match manifest_combined_file(session) {
             Ok(path) => path,
             Err(_) => continue,
@@ -1192,7 +1341,10 @@ mod tests {
     #[test]
     fn parse_search_time_accepts_local_wall_clock() {
         let parsed = parse_search_time("2026-07-03T09:00:00").unwrap();
-        assert_eq!(parsed.format("%Y-%m-%d %H:%M:%S").to_string(), "2026-07-03 09:00:00");
+        assert_eq!(
+            parsed.format("%Y-%m-%d %H:%M:%S").to_string(),
+            "2026-07-03 09:00:00"
+        );
     }
 
     #[test]

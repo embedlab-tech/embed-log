@@ -127,7 +127,8 @@ impl NetworkCaptureSource {
                     };
                     let ts = packet_timestamp_local(&packet.header);
                     let message = format_udp_packet_line(&self.interface, &parsed, &self.payload);
-                    let packet_meta = build_udp_packet_meta(&self.interface, &parsed, &self.payload);
+                    let packet_meta =
+                        build_udp_packet_meta(&self.interface, &parsed, &self.payload);
                     if tx
                         .blocking_send(
                             LogEntry::new(ts, self.name.clone(), message).with_meta(packet_meta),
@@ -449,7 +450,17 @@ mod tests {
     #[tokio::test]
     async fn mock_backend_emits_deterministic_network_events() {
         let (tx, mut rx) = mpsc::channel(2);
-        let source = NetworkCaptureSource::new("net", "lo0", "udp", "mock", Some(0.001), None, None, None, None);
+        let source = NetworkCaptureSource::new(
+            "net",
+            "lo0",
+            "udp",
+            "mock",
+            Some(0.001),
+            None,
+            None,
+            None,
+            None,
+        );
         let handle = tokio::spawn(async move {
             let _ = Box::new(source).run(tx).await;
         });
@@ -519,6 +530,9 @@ mod tests {
         assert_eq!(parsed.src_port, 49152);
         assert_eq!(parsed.dst_port, 5683);
         assert_eq!(parsed.payload_len, 12);
-        assert_eq!(hex_preview(parsed.payload), "40 01 12 34 B3 66 6F 6F 03 62 61 72");
+        assert_eq!(
+            hex_preview(parsed.payload),
+            "40 01 12 34 B3 66 6F 6F 03 62 61 72"
+        );
     }
 }

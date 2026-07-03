@@ -1,26 +1,14 @@
-//! Frame rendering — tab bar, pane content, status bar.
+//! Frame rendering — tab bar, pane content, status bar, and help overlay.
 //!
-//! Phase 2 layout:
-//! ```text
-//! ┌──────────────────────────────────────────────┐
-//! │ [ Device ][ UART ][ CoAP ][ Sensors ][ … ]    │  ← tab bar
-//! ├─────────────────────────┬────────────────────┤
-//! │ DUT Device              │ Host Controller     │  ← pane titles
-//! │ <line rendering: P3>    │ <line rendering:P3> │
-//! │                         │                     │
-//! ├─────────────────────────┴────────────────────┤
-//! ● connected │ session s1 │ abs │ DUT 42 lines   │  ← status bar
-//! └──────────────────────────────────────────────┘
-//! ```
-//!
-//! Phase 3 replaces the pane placeholder with virtualized log lines; Phase 4
-//! adds the unwrap-mode layout. Events tab (Phase 6) appends an extra tab.
+//! The layout is a compact terminal equivalent of the browser viewer: tabs at
+//! the top, one or two log panes in the middle, and connection/session/status
+//! hints at the bottom. Events use a dedicated tab when configured.
 
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Tabs},
+    widgets::{Block, Borders, Clear, Paragraph, Tabs},
     Frame,
 };
 
@@ -43,6 +31,37 @@ pub fn draw(f: &mut Frame, state: &State) {
     draw_tab_bar(f, state, chunks[0]);
     draw_pane_content(f, state, chunks[1]);
     draw_status_bar(f, state, chunks[2]);
+    if state.show_help {
+        draw_help_overlay(f, area);
+    }
+}
+
+fn draw_help_overlay(f: &mut Frame, area: Rect) {
+    let width = area.width.saturating_sub(8).min(88).max(40);
+    let height = area.height.saturating_sub(4).min(22).max(10);
+    let x = area.x + area.width.saturating_sub(width) / 2;
+    let y = area.y + area.height.saturating_sub(height) / 2;
+    let popup = Rect::new(x, y, width, height);
+    let lines = vec![
+        Line::from("q / Ctrl-C        quit"),
+        Line::from("Tab / Shift-Tab  next/previous tab"),
+        Line::from("h/l or ←/→       focus left/right pane"),
+        Line::from("j/k or ↑/↓       scroll active pane"),
+        Line::from("g / G            top / bottom"),
+        Line::from("Enter            sync panes to current line timestamp"),
+        Line::from("Space, v, Esc    select line, visual range, clear selection"),
+        Line::from("c / y            toggle exact/context, copy selection"),
+        Line::from("m, [, ], M       marker toggle/nav/event-marker toggle"),
+        Line::from("t / u / C        timestamp mode, unwrap, clear active pane"),
+        Line::from(": or i           TX mode for writable UART panes"),
+        Line::from("e                events tab when event rules are configured"),
+        Line::from("? / Esc          close this help"),
+    ];
+    f.render_widget(Clear, popup);
+    f.render_widget(
+        Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(" help ")),
+        popup,
+    );
 }
 
 /// Mouse hit in the pane area.
@@ -170,8 +189,7 @@ fn draw_tab_bar(f: &mut Frame, state: &State, area: Rect) {
     f.render_widget(tabs, area);
 }
 
-/// Render the active tab's panes (1 or 2 side by side). Phase 2 shows a
-/// placeholder; Phase 3 draws real log lines.
+/// Render the active tab's panes (1 or 2 side by side).
 fn draw_pane_content(f: &mut Frame, state: &State, area: Rect) {
     // Events tab: render the event timeline instead of panes.
     if state.events_tab_active() {

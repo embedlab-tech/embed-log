@@ -97,11 +97,8 @@ server:
 | --- | --- | --- | --- |
 | `host` | string | `127.0.0.1` | Bind host for the HTTP/WebSocket server. |
 | `ws_port` | integer | `8080` | HTTP/WebSocket port. |
-| `ws_ui` | string? | `null` | Parsed for compatibility; current Rust runtime does not use it. |
 | `app_name` | string | `embed-log` | Shown in UI/session metadata. |
-| `open_browser` | bool | `false` | Parsed for compatibility. Current CLI opens by default unless `--no-open-browser` is used. |
 | `verbosity` | string? | `null` | If set, must be `quiet`, `events`, or `full`. |
-| `verbose` | bool | `false` | Parsed for compatibility. |
 | `job_id` | string? | `null` | Added to session directory name after timestamp. |
 | `default_light_theme` | string? | `null` | Frontend theme default. |
 | `default_dark_theme` | string? | `null` | Frontend theme default. |
@@ -388,17 +385,18 @@ tabs:
     panes: [FILE_WATCH, NET_CAPTURE]
 ```
 
-## Legacy inject/forward ports (deprecated)
+## Removed legacy inject/forward ports
 
-The old per-source `inject_port`, `forward_port`, and `forward_ports` fields are
-**deprecated**.  They still parse and produce a startup warning, but new
-configs should use the single control WebSocket endpoint instead.
+The old per-source TCP fields `inject_port`, `forward_port`, and `forward_ports` have been removed from the runtime. Config validation rejects them.
 
-| Legacy field | Replacement |
+Use the single control WebSocket endpoint instead:
+
+```text
+ws://host:port/api/v1/control
+```
+
+| Removed field | Replacement |
 |---|---|
-| `inject_port: <tcp-port>` | Use the control API's `log.inject` and `tx.write` commands |
-| `forward_port: <tcp-port>` | Use the control API's `subscribe` and `entries()` |
+| `inject_port: <tcp-port>` | Control API `log.inject` and `tx.write` commands |
+| `forward_port: <tcp-port>` | Control API `subscribe` and SDK `entries()` |
 | `forward_ports: [<ports>]` | Same as above; one subscription replaces any number of forward ports |
-
-Migration is straightforward: instead of starting per-source TCP servers, open
-one WebSocket to `ws://host:port/api/v1/control` and send JSON commands.

@@ -18,7 +18,6 @@ use commands::misc;
 use commands::run::{cmd_demo, cmd_onboard, cmd_run, RunOverrides};
 use commands::sessions::{cmd_sessions, SessionsCommand};
 use commands::ui::cmd_ui;
-use util::browser_launch_enabled;
 
 #[derive(Parser)]
 #[command(
@@ -43,10 +42,6 @@ struct Cli {
     #[arg(long)]
     ui: bool,
 
-    /// Open the default browser after starting the web server.
-    #[arg(long, conflicts_with = "no_open_browser")]
-    open_browser: bool,
-
     /// Do not open the default browser after starting the web server.
     #[arg(long)]
     no_open_browser: bool,
@@ -66,10 +61,6 @@ enum Command {
         /// Path to the frontend directory (default: ./frontend)
         #[arg(long, default_value = "frontend")]
         frontend_dir: PathBuf,
-
-        /// Open the default browser after starting the web server.
-        #[arg(long, conflicts_with = "no_open_browser")]
-        open_browser: bool,
 
         /// Do not open the default browser after starting the web server.
         #[arg(long)]
@@ -144,6 +135,7 @@ enum Command {
     },
 
     /// Print a greeting (smoke-test target)
+    #[command(hide = true)]
     Hello,
 
     /// Start the demo server with the embedded demo config.
@@ -163,6 +155,16 @@ enum Command {
         /// Launch the terminal UI (ratatui) instead of the browser.
         #[arg(long)]
         tui: bool,
+    },
+
+    /// Validate a config file and print the resolved runtime summary.
+    Validate {
+        /// YAML config file. Defaults to EMBED_LOG_CONFIG_YML_PATH, then embed-log.yml.
+        #[arg(short, long)]
+        config: Option<PathBuf>,
+        /// Machine-readable JSON output.
+        #[arg(long)]
+        json: bool,
     },
 
     /// Generate a sample embed-log.yml config file.
@@ -220,14 +222,13 @@ async fn main() -> Result<()> {
         Some(Command::Run {
             config,
             frontend_dir,
-            open_browser,
             no_open_browser,
             tui,
             log_dir,
             host,
             ws_port,
         }) => {
-            let open_browser = browser_launch_enabled(open_browser, no_open_browser);
+            let open_browser = !no_open_browser;
             let overrides = RunOverrides {
                 log_dir,
                 host,
@@ -263,6 +264,10 @@ async fn main() -> Result<()> {
             no_open_browser,
         }) => cmd_onboard(config.as_ref(), &frontend_dir, !no_open_browser).await,
 
+        Some(Command::Validate { config, json }) => {
+            let path = crate::config::resolve_config_path(config.as_ref());
+            misc::cmd_validate(&path, json)
+        }
         Some(Command::Init { output }) => misc::cmd_init(&output),
         Some(Command::Merge {
             tabs,
@@ -272,7 +277,7 @@ async fn main() -> Result<()> {
         }) => misc::cmd_merge(&tabs, &output, &timestamp_mode, first_log_at),
         Some(Command::Parse { html, output }) => misc::cmd_parse(&html, &output),
         None => {
-            let open_browser = browser_launch_enabled(cli.open_browser, cli.no_open_browser);
+            let open_browser = !cli.no_open_browser;
             cmd_run(
                 cli.config.as_ref(),
                 &cli.frontend_dir,
@@ -323,7 +328,7 @@ mod tests {
     }
 
     #[test]
-    fn run_alias_accepts_browser_launch_flags() {
+    fn run_alias_accepts_no_open_browser_flag() {
         let cli = Cli::parse_from([
             "embed-log",
             "run",
@@ -351,7 +356,25 @@ mod tests {
             ["embed-log", "sessions", "info", "abc"].as_slice(),
             ["embed-log", "sessions", "export", "abc", "--format", "raw"].as_slice(),
             ["embed-log", "sessions", "combined", "abc", "--lines", "10"].as_slice(),
-            ["embed-log", "sessions", "search", "--source", "DUT", "--from", "2026-07-03T09:00:00"].as_slice(),
+            [
+                "embed-log",
+                "sessions",
+                "events",
+                "abc",
+                "--severity",
+                "fatal",
+            ]
+            .as_slice(),
+            [
+                "embed-log",
+                "sessions",
+                "search",
+                "--source",
+                "DUT",
+                "--from",
+                "2026-07-03T09:00:00",
+            ]
+            .as_slice(),
         ] {
             Cli::parse_from(args);
         }
@@ -359,6 +382,14 @@ mod tests {
 
     #[test]
     fn new_commands_parse() {
+        Cli::parse_from(["embed-log", "validate"]);
+        Cli::parse_from([
+            "embed-log",
+            "validate",
+            "--json",
+            "--config",
+            "embed-log.yml",
+        ]);
         Cli::parse_from(["embed-log", "init"]);
         Cli::parse_from(["embed-log", "init", "-o", "my.yml"]);
         Cli::parse_from(["embed-log", "demo"]);

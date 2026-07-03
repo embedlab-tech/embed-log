@@ -38,7 +38,6 @@ test('live pane plugin decodes CoAP hex strings and can switch to inline all-log
 server:
   host: 127.0.0.1
   ws_port: ${httpPort}
-  open_browser: false
 frontend_plugins:
   hex-coap:
     builtin: hex-coap
@@ -181,7 +180,6 @@ test('exported snapshot preserves CoAP all-logs pane mode', async ({ page, brows
 server:
   host: 127.0.0.1
   ws_port: ${httpPort}
-  open_browser: false
 frontend_plugins:
   hex-coap:
     builtin: hex-coap

@@ -3,7 +3,7 @@
 //! Owns [`State`], a WS client handle, and an input receiver. The loop
 //! `select!`s on:
 //! - inbound server events → mutate `State`
-//! - inbound key events → mutate `State` (tab/pane nav in Phase 4; quit now)
+//! - inbound key events → mutate `State` or quit
 //!
 //! Drawing is rate-limited by a short tick so bursts of WS messages coalesce
 //! into one frame, and so the loop wakes even when idle to refresh the status
@@ -145,7 +145,7 @@ fn handle_message(state: &mut State, msg: ServerMessage) {
         ServerMessage::SessionInfo(s) => state.apply_session_info(&s.session),
         ServerMessage::MarkersUpdate(m) => state.apply_markers(&m.markers),
         ServerMessage::SessionHtmlStatus(_) => {
-            // Phase 9 surfaces this in the status bar.
+            // Export status is currently handled by the browser UI/CLI.
         }
         ServerMessage::SessionRotated(_) => {
             // Server follows with a fresh config; tear down and await it.
@@ -153,7 +153,7 @@ fn handle_message(state: &mut State, msg: ServerMessage) {
         }
         ServerMessage::ClearLogs(c) => state.clear(c.pane.as_deref()),
         ServerMessage::FilterResult(_) => {
-            // Phase 5 surfaces this.
+            // Reserved for future interactive filter UI feedback.
         }
         ServerMessage::SendRawResult(v) => {
             let ok = v.get("ok").and_then(|x| x.as_bool()).unwrap_or(false);

@@ -1,12 +1,12 @@
-//! The grab-bag of leaf subcommands: `version`, `doctor`, `ports`, `hello`,
-//! `init`, `merge`, `parse`. None of them start the server.
+//! The grab-bag of leaf subcommands: `version`, `doctor`, `validate`, `ports`,
+//! `hello`, `init`, `merge`, `parse`. None of them start the server.
 
 use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{Context, Result};
 
-use embed_log_core::config::{load_config, AppConfig};
+use embed_log_core::config::{load_config, resolve_logs_root, AppConfig};
 use embed_log_core::session::SessionExporter;
 
 use crate::demo_config::DEMO_CONFIG;
@@ -51,6 +51,90 @@ pub(crate) fn cmd_version(config_path: Option<&Path>, json: bool) -> Result<()> 
     Ok(())
 }
 
+/// `embed-log validate` — load/validate config and print resolved summary.
+pub(crate) fn cmd_validate(config_path: &Path, json: bool) -> Result<()> {
+    let cfg = load_config(config_path).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let logs_root = resolve_logs_root(config_path, &cfg.logs.dir);
+    let pcap_sources = count_pcap_sources(&cfg);
+    let sources: Vec<_> = cfg
+        .sources
+        .iter()
+        .map(|s| {
+            serde_json::json!({
+                "name": s.name,
+                "label": s.label.as_deref().unwrap_or(&s.name),
+                "kind": s.source_type,
+                "parser": s.parser.parser_type,
+                "writable": s.source_type.eq_ignore_ascii_case("uart"),
+            })
+        })
+        .collect();
+    let tabs: Vec<_> = cfg
+        .tabs
+        .iter()
+        .map(|t| {
+            serde_json::json!({
+                "label": t.label,
+                "panes": t.panes.iter().map(|p| p.source_name()).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "status": "ok",
+                "config": config_path.display().to_string(),
+                "server": {
+                    "host": cfg.server.host,
+                    "ws_port": cfg.server.ws_port,
+                    "app_name": cfg.server.app_name,
+                    "control_api": cfg.server.control_api,
+                },
+                "logs_root": logs_root.display().to_string(),
+                "sources": sources,
+                "tabs": tabs,
+                "pcap_sources": pcap_sources,
+            }))?
+        );
+    } else {
+        println!("config ok: {}", config_path.display());
+        println!(
+            "  server:   http://{}:{}",
+            cfg.server.host, cfg.server.ws_port
+        );
+        println!("  logs:     {}", logs_root.display());
+        println!("  sources:  {}", cfg.sources.len());
+        for source in &cfg.sources {
+            println!(
+                "    - {} [{}] label={}",
+                source.name,
+                source.source_type,
+                source.label.as_deref().unwrap_or(&source.name)
+            );
+        }
+        println!("  tabs:     {}", cfg.tabs.len());
+        for tab in &cfg.tabs {
+            let panes = tab
+                .panes
+                .iter()
+                .map(|p| p.source_name())
+                .collect::<Vec<_>>()
+                .join(", ");
+            println!("    - {}: {}", tab.label, panes);
+        }
+        if pcap_sources > 0 {
+            println!("  pcap sources: {pcap_sources}");
+            println!(
+                "  hint: run `embed-log doctor --config {}` for packet-capture diagnostics",
+                config_path.display()
+            );
+        }
+    }
+    Ok(())
+}
+
 /// `embed-log doctor` — environment/config/runtime diagnostics.
 pub(crate) fn cmd_doctor(config_path: Option<&Path>, json: bool) -> Result<()> {
     let report = build_doctor_report(config_path);
@@ -60,8 +144,14 @@ pub(crate) fn cmd_doctor(config_path: Option<&Path>, json: bool) -> Result<()> {
     }
 
     println!("embed-log doctor");
-    println!("  version:  {}", report["version"].as_str().unwrap_or("unknown"));
-    println!("  status:   {}", report["status"].as_str().unwrap_or("unknown"));
+    println!(
+        "  version:  {}",
+        report["version"].as_str().unwrap_or("unknown")
+    );
+    println!(
+        "  status:   {}",
+        report["status"].as_str().unwrap_or("unknown")
+    );
     if let Some(system) = report.get("system") {
         let os = system["os"].as_str().unwrap_or("unknown");
         let arch = system["arch"].as_str().unwrap_or("unknown");
@@ -180,12 +270,13 @@ fn apply_packet_capture_warnings(out: &mut serde_json::Value, pcap_sources: usiz
         ));
     }
     if !library_found {
-        out["hints"].as_array_mut().unwrap().push(serde_json::json!(
-            format!(
+        out["hints"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!(format!(
                 "native packet-capture library not found; install {}",
                 packet_capture_provider_name()
-            )
-        ));
+            )));
     }
 }
 
@@ -684,6 +775,8 @@ mod tests {
         let report = build_doctor_report(None);
         assert!(report.get("packet_capture").is_some());
         assert!(report["packet_capture"].get("feature_enabled").is_some());
-        assert!(report["packet_capture"].get("candidate_libraries").is_some());
+        assert!(report["packet_capture"]
+            .get("candidate_libraries")
+            .is_some());
     }
 }

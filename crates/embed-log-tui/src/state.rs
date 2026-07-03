@@ -29,7 +29,7 @@ const MAX_LINES_PER_PANE: usize = 100_000;
 /// A stored log line (the post-parse, pre-render form).
 ///
 /// Holds both timestamp variants so the abs/rel toggle is free (no recompute), and
-/// keeps the raw `message` for copy/snippet/export and `data` for ANSI parity.
+/// keeps the raw `message` for copy/export and `data` for ANSI parity.
 #[derive(Debug, Clone, Default)]
 pub struct StoredLine {
     /// Display timestamp (absolute): `"06-14 09:30:45.123"`.
@@ -194,6 +194,8 @@ pub struct State {
     pub tx_status: Option<String>,
     /// Events view state (cursor, zoom, filters, detail popup).
     pub events_view: crate::events::EventsView,
+    /// Whether the keyboard help overlay is visible.
+    pub show_help: bool,
 }
 
 impl State {

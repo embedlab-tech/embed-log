@@ -117,11 +117,7 @@ impl UartSource {
     }
 
     /// Reopen a path-backed UART and replace the shared port handle used by RX and TX.
-    async fn reconnect_port(
-        &self,
-        port: &SharedSerialPort,
-        reason: &str,
-    ) -> Result<()> {
+    async fn reconnect_port(&self, port: &SharedSerialPort, reason: &str) -> Result<()> {
         match &self.port_source {
             PortSource::Path { .. } => {
                 warn!(
@@ -267,7 +263,8 @@ impl LogSource for UartSource {
                     .await?
                 }
                 Err(e) => {
-                    this.reconnect_port(&port, &format!("clone error: {e}")).await?;
+                    this.reconnect_port(&port, &format!("clone error: {e}"))
+                        .await?;
                     parser = create_parser(&parser_type);
                     continue;
                 }
@@ -282,7 +279,8 @@ impl LogSource for UartSource {
                     continue;
                 }
                 Err(e) => {
-                    this.reconnect_port(&port, &format!("read error: {e}")).await?;
+                    this.reconnect_port(&port, &format!("read error: {e}"))
+                        .await?;
                     parser = create_parser(&parser_type);
                     continue;
                 }
