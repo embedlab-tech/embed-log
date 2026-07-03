@@ -1,6 +1,6 @@
 # embed-log
 
-`embed-log` collects UART, UDP, file-tail, and mock network-capture logs, stores them as session artifacts, and serves a browser/Tauri UI for live viewing and static HTML exports.
+`embed-log` collects UART, UDP, file-tail, and network-capture logs, stores them as session artifacts, and serves a browser/Tauri UI for live viewing and static HTML exports.
 
 The current workspace contains:
 

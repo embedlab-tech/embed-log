@@ -128,6 +128,12 @@ embed-log doctor --json
 embed-log doctor --config embed-log.yml
 ```
 
+`doctor` reports the binary version, host system info, config summary, and packet-capture readiness:
+- which OS / architecture the binary is running on
+- whether the binary was built with the `pcap-capture` feature
+- whether the native packet-capture library is installed (`libpcap` on Unix-like systems, `Npcap`/`WinPcap` on Windows)
+- whether the inspected config contains `network_capture` sources using `network_backend: pcap`
+
 Serial ports:
 
 ```bash
@@ -158,6 +164,26 @@ Export a recorded session:
 embed-log sessions export <SESSION_ID> --dir logs --format html --output session.html
 embed-log sessions export <SESSION_ID> --dir logs --format raw --output merged.txt
 ```
+
+Read the session-wide combined JSONL stream:
+
+```bash
+embed-log sessions combined <SESSION_ID> --dir logs
+embed-log sessions combined <SESSION_ID> --dir logs --lines 50
+embed-log sessions tail-combined <SESSION_ID> --dir logs --follow
+```
+
+Search across session combined streams:
+
+```bash
+embed-log sessions search --dir logs --source DUT
+embed-log sessions search --dir logs --source DUT --from 2026-07-03T09:00:00 --to 2026-07-03T15:00:00
+embed-log sessions search --dir logs --job nightly-42 --kind network_capture --dst-port 5683
+embed-log sessions search --dir logs --contains panic --regex 'ERROR|WARN'
+embed-log sessions search --dir logs --source DUT --count
+```
+
+`search` scans `combined.jsonl` files under the selected log directory and prints matching entries as JSONL. It can filter by session id/prefix, job id, source id, source kind, time window, message substring/regex, and packet fields such as source/destination UDP port or IP address.
 
 Formats:
 

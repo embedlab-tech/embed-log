@@ -33,12 +33,12 @@ test.describe('HTML export replay', () => {
   });
   // Per-pane export-html relies on more-dropdown visibility that needs
   // frontend positioning fix. The full toolbar export is covered by test 54.
-// Scenario: Per-pane export creates downloadable HTML snippet with toolbar, tab-bar, panes; WS status hidden; timestamp toggle works
+// Scenario: Per-pane export creates downloadable HTML selection export with toolbar, tab-bar, panes; WS status hidden; timestamp toggle works
 //   Given a live session with a range selected in SENSOR_A
 //   When  the per-pane export-html button is clicked and the saved HTML is reopened in a new browser
 //   Then  toolbar, tab-bar and panes are visible, ws-status is hidden, and timestamp mode toggles Relative→Absolute
 
-  test.skip('opens downloaded HTML snippet and replays regular pane layout', async ({ page, browser }, testInfo) => {
+  test.skip('opens downloaded HTML selection export and replays regular pane layout', async ({ page, browser }, testInfo) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
 
@@ -53,22 +53,22 @@ test.describe('HTML export replay', () => {
     expect(download.suggestedFilename()).toMatch(/^embed-log-exact-.*\.html$/);
     const htmlPath = await saveDownload(download, testInfo);
 
-    const snippet = await openHtmlFile(browser, htmlPath);
+    const exportedSelection = await openHtmlFile(browser, htmlPath);
     try {
-      await expect(snippet.locator('#toolbar')).toBeVisible();
-      await expect(snippet.locator('#tab-bar')).toBeVisible();
-      await expect(snippet.locator('#pane-SENSOR_A')).toBeVisible();
-      await expect(snippet.locator('#pane-SENSOR_B')).toBeVisible();
-      await expect(snippet.locator('#log-SENSOR_A')).toContainText('kind=prefix-cleanup');
-      await expect(snippet.locator('#ws-status')).toBeHidden();
+      await expect(exportedSelection.locator('#toolbar')).toBeVisible();
+      await expect(exportedSelection.locator('#tab-bar')).toBeVisible();
+      await expect(exportedSelection.locator('#pane-SENSOR_A')).toBeVisible();
+      await expect(exportedSelection.locator('#pane-SENSOR_B')).toBeVisible();
+      await expect(exportedSelection.locator('#log-SENSOR_A')).toContainText('kind=prefix-cleanup');
+      await expect(exportedSelection.locator('#ws-status')).toBeHidden();
 
-      await snippet.locator('#btn-settings').click();
-      await expect(snippet.locator('#btn-timestamp-mode')).toHaveText('Relative');
-      await snippet.locator('#btn-timestamp-mode').click();
-      await expect(snippet.locator('#btn-timestamp-mode')).toHaveText('Absolute');
-      await expect(snippet.locator('#log-SENSOR_A .log-line').first().locator('.ts')).toHaveText(/\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}/);
+      await exportedSelection.locator('#btn-settings').click();
+      await expect(exportedSelection.locator('#btn-timestamp-mode')).toHaveText('Relative');
+      await exportedSelection.locator('#btn-timestamp-mode').click();
+      await expect(exportedSelection.locator('#btn-timestamp-mode')).toHaveText('Absolute');
+      await expect(exportedSelection.locator('#log-SENSOR_A .log-line').first().locator('.ts')).toHaveText(/\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}/);
     } finally {
-      await snippet.close();
+      await exportedSelection.close();
     }
   });
 

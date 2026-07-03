@@ -48,10 +48,25 @@ pub struct SourceConfig {
     pub bpf_filter: String,
     pub network_backend: Option<String>,
     pub mock_interval: Option<f64>,
+    #[serde(default)]
+    pub udp: Option<NetworkUdpCaptureConfig>,
+    pub snaplen: Option<u32>,
+    pub promisc: Option<bool>,
     // pcap sub-config
     pub pcap: Option<PcapConfig>,
     // payload sub-config
     pub payload: Option<PayloadConfig>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct NetworkUdpCaptureConfig {
+    #[serde(default)]
+    pub ports: Vec<u16>,
+    pub host: Option<String>,
+    #[serde(default)]
+    pub src_ips: Vec<String>,
+    #[serde(default)]
+    pub dst_ips: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,6 +82,15 @@ pub struct PayloadConfig {
     pub include_preview: bool,
     #[serde(default = "PayloadConfig::default_max_preview_bytes")]
     pub max_preview_bytes: u32,
+}
+
+impl Default for PayloadConfig {
+    fn default() -> Self {
+        Self {
+            include_preview: Self::default_include_preview(),
+            max_preview_bytes: Self::default_max_preview_bytes(),
+        }
+    }
 }
 
 impl PayloadConfig {

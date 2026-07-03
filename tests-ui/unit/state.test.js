@@ -13,10 +13,10 @@ async function importFreshState() {
 }
 
 test('clear action relative reset uses next log as T+00 origin', async () => {
-  const { state, resetRelativeTimestampForNextLog, buildTimestampInfo } = await importFreshState();
+  const { state, resetRelativeTimestampBase, buildTimestampInfo } = await importFreshState();
   state.timestampMode = 'relative';
 
-  resetRelativeTimestampForNextLog();
+  resetRelativeTimestampBase();
 
   const first = buildTimestampInfo('06-01 00:00:05.000', {
     numTs: 5_000,

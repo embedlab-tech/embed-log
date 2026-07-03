@@ -156,6 +156,7 @@ impl LogServer {
             .iter()
             .map(|(name, path)| (name.clone(), Arc::new(Mutex::new(path.clone()))))
             .collect();
+        let combined_path = session_dir.join("combined.jsonl");
         let shared_source_files = Arc::new(Mutex::new(source_files.clone()));
         let shared_html_path = Arc::new(Mutex::new(session_dir.join("session.html")));
 
@@ -186,6 +187,7 @@ impl LogServer {
             session_dir.clone(),
             &tabs_json,
             source_files.clone(),
+            combined_path.display().to_string(),
             pane_labels.clone(),
             pane_kinds.clone(),
             pane_commands.clone(),
@@ -215,6 +217,8 @@ impl LogServer {
         let mut source_tx_senders: HashMap<String, mpsc::Sender<TxCommand>> = HashMap::new();
 
         let mut join_handles: Vec<JoinHandle<()>> = Vec::new();
+
+        let source_tab_labels = build_source_tab_labels(&self.config.tabs);
 
         // ── 9. Start sources + writers + inject/forward ──
         for mut src in sources {
@@ -289,6 +293,15 @@ impl LogServer {
                 ts_mode: self.config.server.timestamp_mode,
                 line_counter: line_counters.get(&src.name).cloned(),
                 event_matcher: writer_event_matcher,
+                source_meta: SourceRuntimeMeta {
+                    source_id: src.name.clone(),
+                    source_label: src.label.clone(),
+                    source_kind: src.source_type.clone(),
+                    tab_labels: source_tab_labels.get(&src.name).cloned().unwrap_or_default(),
+                    session_id: session_id.clone(),
+                    app_name: self.config.server.app_name.clone(),
+                    job_id: self.config.server.job_id.clone(),
+                },
             };
             let writer_handle = tokio::spawn(async move {
                 run_writer(writer_name, log_path, entry_rx, writer_runtime).await;
@@ -601,6 +614,10 @@ impl LogServer {
                         src_cfg.bpf_filter.clone(),
                         backend,
                         src_cfg.mock_interval,
+                        src_cfg.udp.clone(),
+                        src_cfg.payload.clone(),
+                        src_cfg.snaplen,
+                        src_cfg.promisc,
                     ))
                 }
                 other => {
@@ -883,6 +900,7 @@ fn rotate_session(ctx: &RotationContext) -> Result<(serde_json::Value, serde_jso
         new_session_dir.clone(),
         &ctx.tabs,
         new_source_files.clone(),
+        new_session_dir.join("combined.jsonl").display().to_string(),
         ctx.pane_labels.clone(),
         ctx.pane_kinds.clone(),
         ctx.pane_commands.clone(),
@@ -1073,6 +1091,17 @@ fn make_session_id_for_root(logs_root: &Path, job_id: Option<&str>) -> Result<St
     )
 }
 
+#[derive(Clone, Default)]
+struct SourceRuntimeMeta {
+    source_id: String,
+    source_label: String,
+    source_kind: String,
+    tab_labels: Vec<String>,
+    session_id: String,
+    app_name: String,
+    job_id: Option<String>,
+}
+
 struct WriterRuntime {
     broadcast_tx: broadcast::Sender<String>,
     replay: Arc<Mutex<VecDeque<String>>>,
@@ -1083,6 +1112,37 @@ struct WriterRuntime {
     ts_mode: TimestampMode,
     line_counter: Option<Arc<AtomicU64>>,
     event_matcher: Option<crate::config::PatternMatcher>,
+    source_meta: SourceRuntimeMeta,
+}
+
+fn build_source_tab_labels(tabs: &[crate::config::TabConfig]) -> HashMap<String, Vec<String>> {
+    let mut by_source: HashMap<String, Vec<String>> = HashMap::new();
+    for tab in tabs {
+        for pane in &tab.panes {
+            by_source
+                .entry(pane.source_name().to_string())
+                .or_default()
+                .push(tab.label.clone());
+        }
+    }
+    by_source
+}
+
+fn build_combined_log_entry(
+    payload: &serde_json::Value,
+    source_meta: &SourceRuntimeMeta,
+) -> serde_json::Value {
+    let mut combined = payload.clone();
+    if let Some(obj) = combined.as_object_mut() {
+        obj.insert("source_id".to_string(), json!(source_meta.source_id));
+        obj.insert("session_id".to_string(), json!(source_meta.session_id));
+        obj.insert("app_name".to_string(), json!(source_meta.app_name));
+        obj.insert("job_id".to_string(), json!(source_meta.job_id));
+        obj.insert("source_label".to_string(), json!(source_meta.source_label));
+        obj.insert("source_kind".to_string(), json!(source_meta.source_kind));
+        obj.insert("tab_labels".to_string(), json!(source_meta.tab_labels));
+    }
+    combined
 }
 
 /// Create an event marker and broadcast a markers_update.
@@ -1260,7 +1320,7 @@ async fn run_writer(
             .map(|c| c.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
             .unwrap_or(0);
 
-        let payload = json!({
+        let mut payload = json!({
             "type": if is_tx { "tx" } else { "rx" },
             "data": data,
             "timestamp": display_ts,
@@ -1277,6 +1337,18 @@ async fn run_writer(
             "relTs": rel_ts,
             "relNum": rel_num,
         });
+        if let (Some(payload_obj), Some(meta_obj)) = (payload.as_object_mut(), entry.meta.as_ref().and_then(|m| m.as_object())) {
+            for (key, value) in meta_obj {
+                payload_obj.insert(key.clone(), value.clone());
+            }
+        }
+
+        let combined_entry = build_combined_log_entry(&payload, &runtime.source_meta);
+        if let Ok(manager) = runtime.session_manager.lock() {
+            if let Err(e) = manager.append_combined_entry(&combined_entry) {
+                error!("[{source_name}] failed to append combined entry: {e}");
+            }
+        }
 
         let payload_str = payload.to_string();
 
@@ -1391,6 +1463,7 @@ mod tests {
     fn test_manager(session_id: &str, dir: PathBuf, source_file: PathBuf) -> SessionManager {
         let mut source_files = HashMap::new();
         source_files.insert("dut".to_string(), source_file.display().to_string());
+        let combined_file = dir.join("combined.jsonl");
 
         let mut pane_labels = HashMap::new();
         pane_labels.insert("dut".to_string(), "DUT".to_string());
@@ -1403,6 +1476,7 @@ mod tests {
             dir,
             &[json!({ "label": "Main", "panes": ["dut"] })],
             source_files,
+            combined_file.display().to_string(),
             pane_labels,
             pane_kinds,
             json!({}),
@@ -1416,6 +1490,18 @@ mod tests {
             "absolute",
             None,
         )
+    }
+
+    fn test_source_meta(session_id: &str) -> SourceRuntimeMeta {
+        SourceRuntimeMeta {
+            source_id: "dut".to_string(),
+            source_label: "DUT".to_string(),
+            source_kind: "udp".to_string(),
+            tab_labels: vec!["Main".to_string()],
+            session_id: session_id.to_string(),
+            app_name: "embed-log".to_string(),
+            job_id: None,
+        }
     }
 
     async fn wait_file_contains(path: &PathBuf, needle: &str) {
@@ -1473,6 +1559,7 @@ mod tests {
             ts_mode: TimestampMode::Absolute,
             line_counter: None,
             event_matcher: None,
+            source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer(
             "dut".to_string(),
@@ -1506,6 +1593,62 @@ mod tests {
         drop(entry_tx);
         handle.await.unwrap();
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn writer_appends_combined_jsonl_with_source_metadata() {
+        let root = temp_dir("combined-jsonl");
+        let session_dir = root.join("session-1");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        let log_path = session_dir.join("main__dut__session-1.log");
+        let combined_path = session_dir.join("combined.jsonl");
+
+        let path = Arc::new(Mutex::new(log_path.clone()));
+        let (entry_tx, entry_rx) = mpsc::channel(4);
+        let (broadcast_tx, _broadcast_rx) = broadcast::channel(16);
+        let manager = Arc::new(Mutex::new(test_manager(
+            "session-1",
+            session_dir.clone(),
+            log_path.clone(),
+        )));
+
+        let runtime = WriterRuntime {
+            broadcast_tx,
+            replay: Arc::new(Mutex::new(VecDeque::new())),
+            events_replay: Arc::new(Mutex::new(VecDeque::new())),
+            first_log_at: Arc::new(Mutex::new(None)),
+            session_manager: manager,
+            stats: None,
+            ts_mode: TimestampMode::Absolute,
+            line_counter: None,
+            event_matcher: None,
+            source_meta: test_source_meta("session-1"),
+        };
+        let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
+
+        entry_tx
+            .send(LogEntry::new(
+                Local::now(),
+                "dut".to_string(),
+                "boot complete".to_string(),
+            ))
+            .await
+            .unwrap();
+        wait_file_contains(&combined_path, "\"source_label\":\"DUT\"").await;
+        let line = std::fs::read_to_string(&combined_path).unwrap();
+        let first = line.lines().next().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(first).unwrap();
+        assert_eq!(parsed["source_id"], "dut");
+        assert_eq!(parsed["source_label"], "DUT");
+        assert_eq!(parsed["source_kind"], "udp");
+        assert_eq!(parsed["tab_labels"], json!(["Main"]));
+        assert_eq!(parsed["session_id"], "session-1");
+        assert_eq!(parsed["app_name"], "embed-log");
+        assert_eq!(parsed["message"], "boot complete");
+
+        drop(entry_tx);
+        handle.await.unwrap();
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[tokio::test]
@@ -1545,6 +1688,7 @@ mod tests {
             ts_mode: TimestampMode::Absolute,
             line_counter: None,
             event_matcher: Some(matcher),
+            source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
 
@@ -1655,6 +1799,7 @@ mod tests {
             ts_mode: TimestampMode::Absolute,
             line_counter: None,
             event_matcher: Some(matcher),
+            source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
 
@@ -1731,6 +1876,7 @@ mod tests {
             ts_mode: TimestampMode::Absolute,
             line_counter: None,
             event_matcher: Some(matcher),
+            source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
 
@@ -1793,6 +1939,7 @@ mod tests {
             ts_mode: TimestampMode::Absolute,
             line_counter: None,
             event_matcher: None,
+            source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
 

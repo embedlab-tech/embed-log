@@ -17,7 +17,10 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true
 serde_json.workspace = true
+chrono.workspace = true
 serialport = "4"
+libloading = "0.8"
+regex = "1"
 
 [dependencies.embed-log-tui]
 workspace = true
@@ -26,6 +29,7 @@ optional = true
 [features]
 default = ["tui"]
 tui = ["dep:embed-log-tui"]
+pcap-capture = ["embed-log-core/pcap-capture"]
 
 [dev-dependencies]
 serde_yaml.workspace = true

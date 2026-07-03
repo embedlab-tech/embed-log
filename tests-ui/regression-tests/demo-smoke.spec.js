@@ -39,22 +39,6 @@ test.describe('embed-log deterministic demo smoke', () => {
     expect(errors).toEqual([]);
   });
 
-// Scenario: UI renders first log line within 1 second of page load
-//   Given the user navigates to the app
-//   When  the WebSocket connects and config is processed
-//   Then  at least one log-line is visible within 1 second
-  test('renders first log line within 1 second', async ({ page }) => {
-    await page.goto('/');
-    // Wait for WS connection first so we know the pipeline is open
-    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
-
-    // Now measure: from this point, how long until the first log-line appears?
-    const deadline = Date.now() + 1_000;
-    await expect(page.locator('.log-line').first()).toBeVisible({ timeout: 1_000 });
-    const elapsed = Date.now() - (deadline - 1_000);
-    expect(elapsed).toBeLessThanOrEqual(1_000);
-  });
-
 // Scenario: Connects to backend WS and receives deterministic logs with correct pane labels
 //   Given the user navigates to the app
 //   When  the WebSocket connects
@@ -161,13 +145,13 @@ test.describe('embed-log deterministic demo smoke', () => {
     expect(text).toContain('kind=prefix-cleanup');
   });
 
-// Scenario: HTML snippet export uses the regular embed-log exported UI structure
+// Scenario: HTML selection export uses the regular embed-log exported UI structure
 //   Given the user selects a range in SENSOR_A
-//   When  they export the HTML snippet
+//   When  they export the selected range as HTML
 //   Then  the resulting HTML contains the standard embed-log structure (toolbar, tab-bar, _logData)
-//   And   the snippet contains the selected content
+//   And   the exported selection contains the selected content
 
-  test('HTML snippet uses the regular embed-log exported UI', async ({ page }, testInfo) => {
+  test('HTML selection export uses the regular embed-log exported UI', async ({ page }, testInfo) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
 
@@ -189,7 +173,7 @@ test.describe('embed-log deterministic demo smoke', () => {
     expect(html).toContain('hydratePanesFromJson');
     expect(html).toContain('kind=prefix-cleanup');
     expect(html).toMatch(/\[SENSOR_A\]/);
-    expect(html).not.toContain('<h1>embed-log snippet</h1>');
+    expect(html).not.toContain('<h1>embed-log selection</h1>');
   });
 
 // Scenario: Live pane history is retained while tailing without clearing

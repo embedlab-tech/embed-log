@@ -125,12 +125,64 @@ fn validate_config(config: &mut AppConfig, _config_path: &Path) -> Result<(), Co
                         ctx()
                     )));
                 }
-                // Only the `mock` backend is implemented; reject others at
-                // config load so users fail fast instead of at runtime.
                 let backend = src.network_backend.as_deref().unwrap_or("mock");
-                if backend != "mock" {
+                if backend != "mock" && backend != "pcap" {
                     return Err(ConfigError::validation(format!(
-                        "{}.network_backend must be 'mock' (real packet capture is not implemented)",
+                        "{}.network_backend must be 'mock' or 'pcap'",
+                        ctx()
+                    )));
+                }
+                if let Some(snaplen) = src.snaplen {
+                    if snaplen == 0 {
+                        return Err(ConfigError::validation(format!(
+                            "{}.snaplen must be > 0",
+                            ctx()
+                        )));
+                    }
+                }
+                if let Some(udp) = &src.udp {
+                    if udp.ports.is_empty()
+                        && udp.host.is_none()
+                        && udp.src_ips.is_empty()
+                        && udp.dst_ips.is_empty()
+                    {
+                        return Err(ConfigError::validation(format!(
+                            "{}.udp must set at least one of: ports, host, src_ips, dst_ips",
+                            ctx()
+                        )));
+                    }
+                    if udp.ports.contains(&0) {
+                        return Err(ConfigError::validation(format!(
+                            "{}.udp.ports must contain valid UDP port numbers",
+                            ctx()
+                        )));
+                    }
+                    for (field, values) in [
+                        ("src_ips", &udp.src_ips),
+                        ("dst_ips", &udp.dst_ips),
+                    ] {
+                        for value in values {
+                            if value.parse::<std::net::IpAddr>().is_err() {
+                                return Err(ConfigError::validation(format!(
+                                    "{}.udp.{field} contains invalid IP address {:?}",
+                                    ctx(),
+                                    value
+                                )));
+                            }
+                        }
+                    }
+                    if let Some(host) = &udp.host {
+                        if host.parse::<std::net::IpAddr>().is_err() {
+                            return Err(ConfigError::validation(format!(
+                                "{}.udp.host must be a valid IP address",
+                                ctx()
+                            )));
+                        }
+                    }
+                }
+                if backend == "pcap" && src.udp.is_none() && src.bpf_filter.trim().is_empty() {
+                    return Err(ConfigError::validation(format!(
+                        "{}.network_backend 'pcap' requires either udp.* filters or bpf_filter",
                         ctx()
                     )));
                 }
@@ -574,12 +626,36 @@ tabs:
     }
 
     #[test]
-    fn network_capture_rejects_unimplemented_backend() {
+    fn network_capture_accepts_pcap_backend_with_udp_ports() {
+        let cfg = load_inline(
+            "net-pcap",
+            &network_config(
+                "    network_backend: pcap\n    udp:\n      ports: [5683, 5684]\n    snaplen: 256\n",
+            ),
+        )
+        .unwrap();
+        assert_eq!(cfg.sources[0].network_backend.as_deref(), Some("pcap"));
+        assert_eq!(cfg.sources[0].udp.as_ref().unwrap().ports, vec![5683, 5684]);
+        assert_eq!(cfg.sources[0].snaplen, Some(256));
+    }
+
+    #[test]
+    fn network_capture_rejects_unknown_backend() {
         let err =
             load_inline("net-scapy", &network_config("    network_backend: scapy\n")).unwrap_err();
         assert!(
-            matches!(err, ConfigError::Validation(msg) if msg.contains("must be 'mock'")),
-            "expected mock-only validation error"
+            matches!(err, ConfigError::Validation(msg) if msg.contains("must be 'mock' or 'pcap'")),
+            "expected backend validation error"
+        );
+    }
+
+    #[test]
+    fn network_capture_rejects_pcap_without_filter() {
+        let err =
+            load_inline("net-pcap-empty", &network_config("    network_backend: pcap\n")).unwrap_err();
+        assert!(
+            matches!(err, ConfigError::Validation(msg) if msg.contains("requires either udp.* filters or bpf_filter")),
+            "expected pcap filter validation error"
         );
     }
 }

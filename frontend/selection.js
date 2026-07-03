@@ -106,15 +106,6 @@ export function _selectionSetupPane(id) {
     rawBtn.title = "Download selected lines as raw .log file";
     rawBtn.addEventListener("click", e => { e.stopPropagation(); _downloadRaw(id); });
     moreDropdown.appendChild(rawBtn);
-    if (can('sessionApi')) {
-        const snippetBtn = document.createElement("button");
-        snippetBtn.className = "copy-btn";
-        snippetBtn.id = "save-snippet-" + id;
-        snippetBtn.textContent = "Save snippet";
-        snippetBtn.title = "Save selected lines to the session for later review";
-        snippetBtn.addEventListener("click", e => { e.stopPropagation(); _saveSnippet(id); });
-        moreDropdown.appendChild(snippetBtn);
-    }
     actionRow.appendChild(copyBtn);
     // Marker toggle (runtime only) — in the main action row
     if (can('markers')) {
@@ -590,7 +581,7 @@ function _lineRaw(line) {
 }
 
 function _safeFilePart(str) {
-    return String(str || "snippet").replace(/[^0-9A-Za-z_.-]+/g, "-").replace(/^-+|-+$/g, "") || "snippet";
+    return String(str || "selection").replace(/[^0-9A-Za-z_.-]+/g, "-").replace(/^-+|-+$/g, "") || "selection";
 }
 
 function _downloadText(filename, text, type = "text/plain") {
@@ -673,7 +664,7 @@ function _collectRangeEntries(paneId) {
 }
 
 function _rangeBoundsLabel(entries) {
-    if (!entries.length) return "snippet";
+    if (!entries.length) return "selection";
     const first = entries[0].line.ts;
     const last = entries[entries.length - 1].line.ts;
     return `${first}_to_${last}`;
@@ -681,11 +672,11 @@ function _rangeBoundsLabel(entries) {
 
 function _rangeBoundsLabelExact(paneId) {
     const sel = state.selected[paneId];
-    if (!sel?.size) return "snippet";
+    if (!sel?.size) return "selection";
     const indices = Array.from(sel).sort((a, b) => a - b);
     const first = _selectionLine(paneId, indices[0])?.ts;
     const last = _selectionLine(paneId, indices[indices.length - 1])?.ts;
-    if (!first || !last) return "snippet";
+    if (!first || !last) return "selection";
     return `${first}_to_${last}`;
 }
 
@@ -693,7 +684,7 @@ function _escapeRegExp(str) {
     return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function _snippetMessageText(entry, useRendered = false) {
+function _selectionMessageText(entry, useRendered = false) {
     let text = (useRendered ? _lineRenderedPlain(entry.line) : _linePlain(entry.line)).trim();
     const sourcePrefix = new RegExp(`^\\[${_escapeRegExp(entry.paneId)}\\]\\s*`);
     for (let i = 0; i < 4; i++) {
@@ -746,7 +737,7 @@ function _formatRangeRaw(entries, useRendered = false) {
         currentPane = e.paneId;
         paneItems.push({
             idx: e.idx,
-            text: `[${e.line.ts}] [${e.paneId}] ${_snippetMessageText(e, useRendered)}`,
+            text: `[${e.line.ts}] [${e.paneId}] ${_selectionMessageText(e, useRendered)}`,
         });
     });
     flushPane();
@@ -761,7 +752,7 @@ function _buildRangeLogData(entries) {
         if (!logData[e.paneId]) logData[e.paneId] = [];
         logData[e.paneId].push({
             ts: e.line.ts,
-            text: `[${e.paneId}] ${_snippetMessageText(e)}`,
+            text: `[${e.paneId}] ${_selectionMessageText(e)}`,
             isTx: e.line.isTx,
             absTs: e.line.absTs ?? null,
             absNum: Number.isFinite(e.line.absNum) ? e.line.absNum : null,
@@ -872,7 +863,6 @@ function _downloadRawExact(paneId) {
     if (!text) return;
     const label = _rangeBoundsLabelExact(paneId);
     _downloadText(`embed-log-exact-${_safeFilePart(label)}.log`, text + "\n", "text/plain");
-    _saveSnippetToServer(text, [paneId], 'exact', label);
 }
 
 function _downloadRawContext(paneId) {
@@ -880,35 +870,7 @@ function _downloadRawContext(paneId) {
     const text = _formatRangeRaw(entries);
     if (!text) return;
     const label = _rangeBoundsLabel(entries);
-    _downloadText(`embed-log-snippet-${_safeFilePart(label)}.log`, text + "\n", "text/plain");
-    const panes = [...new Set(entries.map(e => e.paneId))];
-    _saveSnippetToServer(text, panes, state.selectionScope, label);
-}
-
-function _saveSnippetToServer(text, panes, scope, label) {
-    if (!window.__embedLogProfile?.capabilities?.sessionApi) return;
-    fetch('/api/session/snippet', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, panes, scope, label }),
-    }).catch(() => {});
-}
-
-function _saveSnippet(paneId) {
-    const sel = state.selected[paneId];
-    if (!sel.size) return;
-    const indices = Array.from(sel).sort((a, b) => a - b);
-    const text = _formatSelectionBlock(paneId, indices, true);
-    if (!text) return;
-    const label = _rangeBoundsLabelExact(paneId);
-    const panes = [paneId];
-    _saveSnippetToServer(text, panes, 'exact', label);
-    const btn = document.getElementById("save-snippet-" + paneId);
-    if (btn) {
-        const prev = btn.textContent;
-        btn.textContent = "Saved";
-        setTimeout(() => { btn.textContent = prev; }, 900);
-    }
+    _downloadText(`embed-log-selection-${_safeFilePart(label)}.log`, text + "\n", "text/plain");
 }
 
 // ---------------------------------------------------------------------------
@@ -926,8 +888,8 @@ function _exportHtml(paneId) {
         exportHtmlSnapshot({
             button: btn,
             logData: _buildRangeLogData(entries),
-            filenamePrefix: `embed-log-snippet-${_safeFilePart(label)}`,
-            title: `snippet ${label}`,
+            filenamePrefix: `embed-log-selection-${_safeFilePart(label)}`,
+            title: `selection ${label}`,
             activeTab: state.activeTab,
         });
     } else {

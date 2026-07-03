@@ -1,19 +1,18 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use chrono::{DateTime, Local};
 use serde_json::json;
 use tracing::{info, warn};
 
-const MAX_SNIPPETS: usize = 50;
-
-/// Manages a single session's artifacts: manifest, markers, snippets.
+/// Manages a single session's artifacts: manifest, markers, and static HTML export.
 pub struct SessionManager {
     session_id: String,
     session_dir: PathBuf,
     tabs: Vec<serde_json::Value>,
     source_files: HashMap<String, String>,
+    combined_file: String,
     pane_labels: HashMap<String, String>,
     pane_kinds: HashMap<String, String>,
     pane_commands: serde_json::Value,
@@ -29,7 +28,6 @@ pub struct SessionManager {
     html_status: String,
     html_updated_at: Option<String>,
     html_error: Option<String>,
-    snippets: Vec<serde_json::Value>,
 }
 
 impl SessionManager {
@@ -39,6 +37,7 @@ impl SessionManager {
         session_dir: PathBuf,
         tabs: &[serde_json::Value],
         source_files: HashMap<String, String>,
+        combined_file: impl Into<String>,
         pane_labels: HashMap<String, String>,
         pane_kinds: HashMap<String, String>,
         pane_commands: serde_json::Value,
@@ -57,6 +56,7 @@ impl SessionManager {
             session_dir,
             tabs: tabs.to_vec(),
             source_files,
+            combined_file: combined_file.into(),
             pane_labels,
             pane_kinds,
             pane_commands,
@@ -72,7 +72,6 @@ impl SessionManager {
             html_status: "pending".to_string(),
             html_updated_at: None,
             html_error: None,
-            snippets: Vec::new(),
         }
     }
 
@@ -179,6 +178,21 @@ impl SessionManager {
         }
     }
 
+    /// Append one combined log entry as a JSON line to combined.jsonl.
+    pub fn append_combined_entry(&self, entry: &serde_json::Value) -> Result<()> {
+        let path = PathBuf::from(&self.combined_file);
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .with_context(|| format!("open combined.jsonl {}", path.display()))?;
+        let line = serde_json::to_string(entry)?;
+        use std::io::Write;
+        writeln!(file, "{line}")
+            .with_context(|| format!("append combined entry to {}", path.display()))?;
+        Ok(())
+    }
+
     /// Append one event as a JSON line to events.jsonl.
     pub fn append_event(&self, event: &serde_json::Value) -> Result<()> {
         let path = self.session_dir.join("events.jsonl");
@@ -248,50 +262,6 @@ impl SessionManager {
         Ok(markers)
     }
 
-    /// Save a snippet to the snippets/ directory and persist its manifest metadata.
-    pub fn save_snippet(
-        &mut self,
-        text: &str,
-        label: Option<&str>,
-        panes: Vec<String>,
-        scope: Option<String>,
-    ) -> Result<serde_json::Value> {
-        if text.trim().is_empty() {
-            bail!("empty snippet");
-        }
-        if self.snippets.len() >= MAX_SNIPPETS {
-            bail!("snippet limit exceeded");
-        }
-
-        let snippets_dir = self.session_dir.join("snippets");
-        std::fs::create_dir_all(&snippets_dir)?;
-
-        let created_at = Local::now().to_rfc3339();
-        let timestamp = Local::now().format("%Y%m%d_%H%M%S");
-        let safe_label = label
-            .map(|l| format!("_{}", slug::slugify(l)))
-            .unwrap_or_default();
-        let filename = format!("snippet{safe_label}_{timestamp}.txt");
-        let path = snippets_dir.join(&filename);
-
-        std::fs::write(&path, text).with_context(|| format!("save snippet {}", path.display()))?;
-
-        let metadata = json!({
-            "filename": filename,
-            "path": path.display().to_string(),
-            "created_at": created_at,
-            "panes": panes,
-            "scope": scope,
-            "label": label,
-            "lines": text.lines().count(),
-            "bytes": text.len(),
-        });
-        self.snippets.push(metadata.clone());
-        self.update_manifest(&json!({ "snippets": self.snippets.clone() }))?;
-        info!("snippet saved: {}", path.display());
-        Ok(metadata)
-    }
-
     /// Build the session info payload sent to the frontend and HTTP clients.
     pub fn build_session_info(&self) -> serde_json::Value {
         let html_path = self.html_path();
@@ -312,7 +282,6 @@ impl SessionManager {
                 "export": "/api/session/export",
                 "rotate": "/api/session/rotate",
                 "sessions": "/api/sessions",
-                "snippet": "/api/session/snippet",
                 "stats": "/api/stats",
                 "health": "/api/health",
             },
@@ -328,6 +297,7 @@ impl SessionManager {
             "plugin_scripts": self.plugin_scripts,
             "sources": self.source_files,
             "source_files": self.source_files,
+            "combined_file": self.combined_file,
         })
     }
 
@@ -351,13 +321,13 @@ impl SessionManager {
             "pane_commands": self.pane_commands,
             "plugin_scripts": self.plugin_scripts,
             "source_files": self.source_files,
+            "combined_file": self.combined_file,
             "session_html": html_path.display().to_string(),
             "events_file": events_path.display().to_string(),
             "last_export_reason": serde_json::Value::Null,
             "html_status": self.html_status,
             "html_updated_at": self.html_updated_at,
             "html_error": self.html_error,
-            "snippets": self.snippets,
         })
     }
 
@@ -403,9 +373,10 @@ mod tests {
 
         SessionManager::new(
             "session-1",
-            dir,
+            dir.clone(),
             &[json!({ "label": "Main", "panes": ["dut"] })],
             source_files,
+            dir.join("combined.jsonl").display().to_string(),
             pane_labels,
             pane_kinds,
             json!({ "dut": ["help"] }),
@@ -511,12 +482,12 @@ mod tests {
             "pane_commands",
             "plugin_scripts",
             "source_files",
+            "combined_file",
             "session_html",
             "last_export_reason",
             "html_status",
             "html_updated_at",
             "html_error",
-            "snippets",
         ] {
             assert!(manifest.get(key).is_some(), "missing manifest key {key}");
         }
@@ -545,10 +516,27 @@ mod tests {
             "pane_kinds",
             "pane_commands",
             "sources",
+            "combined_file",
         ] {
             assert!(session.get(key).is_some(), "missing session key {key}");
         }
 
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn append_combined_entry_writes_jsonl() {
+        let dir = temp_session_dir("combined");
+        let mgr = manager(dir.clone());
+        let payload = json!({ "source_id": "dut", "message": "boot", "source_kind": "udp" });
+        mgr.append_combined_entry(&payload).unwrap();
+        let path = dir.join("combined.jsonl");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<_> = text.lines().collect();
+        assert_eq!(lines.len(), 1);
+        let parsed: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(parsed["source_id"], "dut");
+        assert_eq!(parsed["message"], "boot");
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -566,44 +554,6 @@ mod tests {
         assert_eq!(raw["session_id"], "session-1");
         assert_eq!(raw["markers"], json!(markers));
         assert_eq!(mgr.load_markers(), markers);
-
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn snippet_persistence_records_manifest_metadata_and_rejects_empty_text() {
-        let dir = temp_session_dir("snippet");
-        let mut mgr = manager(dir.clone());
-        mgr.write_manifest().unwrap();
-
-        let metadata = mgr
-            .save_snippet(
-                "line one\nline two\n",
-                Some("Boot Log"),
-                vec!["dut".to_string()],
-                Some("selection".to_string()),
-            )
-            .unwrap();
-
-        assert_eq!(metadata["label"], "Boot Log");
-        assert_eq!(metadata["lines"], 2);
-        assert_eq!(metadata["bytes"], 18);
-        let path = metadata["path"].as_str().unwrap();
-        assert_eq!(
-            std::fs::read_to_string(path).unwrap(),
-            "line one\nline two\n"
-        );
-
-        let manifest_text = std::fs::read_to_string(dir.join("manifest.json")).unwrap();
-        let manifest: serde_json::Value = serde_json::from_str(&manifest_text).unwrap();
-        assert_eq!(manifest["snippets"][0]["label"], "Boot Log");
-        assert_eq!(manifest["snippets"][0]["panes"], json!(["dut"]));
-
-        let err = mgr
-            .save_snippet("", None, Vec::new(), None)
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("empty snippet"));
 
         std::fs::remove_dir_all(dir).unwrap();
     }

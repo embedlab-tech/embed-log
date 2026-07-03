@@ -1,5 +1,6 @@
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// Timestamp display/storage mode.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,6 +46,7 @@ pub struct LogEntry {
     pub message: String,
     pub color: Option<String>,
     pub no_ws: bool,
+    pub meta: Option<Value>,
 }
 
 impl LogEntry {
@@ -59,6 +61,7 @@ impl LogEntry {
             message: message.into(),
             color: None,
             no_ws: false,
+            meta: None,
         }
     }
 
@@ -69,6 +72,11 @@ impl LogEntry {
 
     pub fn with_no_ws(mut self, no_ws: bool) -> Self {
         self.no_ws = no_ws;
+        self
+    }
+
+    pub fn with_meta(mut self, meta: Value) -> Self {
+        self.meta = Some(meta);
         self
     }
 }

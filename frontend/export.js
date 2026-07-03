@@ -156,7 +156,7 @@ export async function exportHtmlSnapshot(options = {}) {
                 paneDataTags += `<script type="application/json" data-pane="${id}">${_safeJson(lines.map(_compactEntry))}</script>\n`;
             });
         } else {
-            // Custom logData passed in (e.g. from snippet export)
+            // Custom logData passed in (e.g. from selection export)
             Object.entries(options.logData).forEach(([paneId, entries]) => {
                 if (!entries || !entries.length) return;
                 paneDataTags += `<script type="application/json" data-pane="${paneId}">${_safeJson(entries.map(e => {
@@ -341,7 +341,7 @@ function _stripAnsi(text) {
 }
 
 // from raw text, producing clean plain text for download.
-// Matches _snippetMessageText in selection.js.
+// Matches _selectionMessageText in selection.js.
 function _cleanMessage(rawText) {
     let text = _stripAnsi(rawText ?? "").trim();
     for (let i = 0; i < 4; i++) {

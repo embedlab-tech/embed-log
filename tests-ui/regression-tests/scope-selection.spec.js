@@ -206,7 +206,7 @@ test.describe('scope-aware selection actions', () => {
     await page.locator('#download-raw-SENSOR_A').click();
     const download = await downloadPromise;
 
-    expect(download.suggestedFilename()).toMatch(/^embed-log-snippet-.*\.log$/);
+    expect(download.suggestedFilename()).toMatch(/^embed-log-selection-.*\.log$/);
     const downloadedPath = await saveDownload(download, testInfo);
     const text = fs.readFileSync(downloadedPath, 'utf-8');
 
@@ -336,7 +336,7 @@ test.describe('scope-aware selection actions', () => {
     await page.locator('#download-raw-SENSOR_A').click();
     const download = await downloadPromise;
 
-    expect(download.suggestedFilename()).toMatch(/^embed-log-snippet-.*\.log$/);
+    expect(download.suggestedFilename()).toMatch(/^embed-log-selection-.*\.log$/);
     const downloadedPath = await saveDownload(download, testInfo);
     const text = fs.readFileSync(downloadedPath, 'utf-8');
 

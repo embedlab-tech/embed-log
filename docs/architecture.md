@@ -62,8 +62,8 @@ Shared library used by both the CLI and Tauri app.
 | `onboarding` | First-run quick-config builder, serial-port listing, and the shared onboarding HTTP server used by **both** the CLI and the Tauri app. |
 | `parsers` | Stream parsers: text and UDP CBOR datagram parser. |
 | `runtime` | `LogServer`, the main orchestrator. Resolves sources, starts tasks, writes logs, broadcasts messages, rotates/exports sessions. |
-| `session` | Session manifest, markers, snippets, and static HTML export. |
-| `sources` | Source implementations: UART, UDP, file tail, mock network capture. |
+| `session` | Session manifest, markers, and static HTML export. |
+| `sources` | Source implementations: UART, UDP, file tail, and network capture (mock or pcap-backed UDP tap). |
 
 ### `crates/embed-log-cli`
 
@@ -128,7 +128,7 @@ writer task
 | `uart` | `sources::uart::UartSource` | Opens a serial port with `serialport`, reads in blocking tasks, parses lines. |
 | `udp` | `sources::udp::UdpSource` | Binds UDP on `0.0.0.0:<port>`. Text parser treats each datagram as newline-terminated; CBOR parser decodes one datagram. |
 | `file` | `sources::file::FileSource` | Creates file if missing, watches parent directory with `notify`, polls/appends from current end. |
-| `network_capture` | `sources::network::NetworkCaptureSource` | Current Rust backend implements `network_backend: mock`. Non-mock backend fails at startup. |
+| `network_capture` | `sources::network::NetworkCaptureSource` | Supports `network_backend: mock` plus `network_backend: pcap` for simplified UDP packet capture with kernel BPF filters. |
 
 ## Parsers
 
@@ -155,7 +155,6 @@ The Axum server serves API routes first, then static frontend assets from `front
 | `/api/session/current` | `GET` | Current session info. |
 | `/api/session/export` | `POST` | Generate/update `session.html`. |
 | `/api/session/rotate` | `POST` | Close current session, start a new one, export old session in background. |
-| `/api/session/snippet` | `POST` | Save selected text to `snippets/`. |
 | `/api/sessions` | `GET` | List sessions under logs root. |
 | `/api/stats` | `GET` | Runtime counters and WebSocket/replay state. |
 | `/sessions/{session_id}/{filename}` | `GET` | Serve session artifacts such as logs, `manifest.json`, `session.html`. |
@@ -178,10 +177,10 @@ A run creates a session directory under `logs.dir`:
 logs/
 └── 2026-06-14_09-30-00__optional-job-id/
     ├── manifest.json
+    ├── combined.jsonl            # structured append-only stream across all sources
+    │                              # includes packet fields for network_capture
     ├── markers.json              # after markers are saved
     ├── session.html              # after export/shutdown/no-client export
-    ├── snippets/                 # after snippets are saved
-    │   └── snippet_label_YYYYMMDD_HHMMSS.txt
     └── <tab>__<source>__<session>.log
 ```
 

@@ -6,7 +6,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-use embed_log_core::config::load_config;
+use embed_log_core::config::{load_config, AppConfig};
 use embed_log_core::session::SessionExporter;
 
 use crate::demo_config::DEMO_CONFIG;
@@ -51,23 +51,269 @@ pub(crate) fn cmd_version(config_path: Option<&Path>, json: bool) -> Result<()> 
     Ok(())
 }
 
-/// `embed-log doctor` — minimal health/version echo.
+/// `embed-log doctor` — environment/config/runtime diagnostics.
 pub(crate) fn cmd_doctor(config_path: Option<&Path>, json: bool) -> Result<()> {
+    let report = build_doctor_report(config_path);
     if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "version": env!("CARGO_PKG_VERSION"),
-                "status": "ok",
-            }))?
-        );
-    } else {
-        println!("embed-log doctor");
-        println!("  version:  {}", env!("CARGO_PKG_VERSION"));
-        println!("  status:   ok");
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
     }
-    let _ = config_path;
+
+    println!("embed-log doctor");
+    println!("  version:  {}", report["version"].as_str().unwrap_or("unknown"));
+    println!("  status:   {}", report["status"].as_str().unwrap_or("unknown"));
+    if let Some(system) = report.get("system") {
+        let os = system["os"].as_str().unwrap_or("unknown");
+        let arch = system["arch"].as_str().unwrap_or("unknown");
+        let family = system["family"].as_str().unwrap_or("unknown");
+        println!("  system:   {os} / {arch} ({family})");
+        if let Some(detail) = system.get("detail").and_then(|v| v.as_str()) {
+            println!("  detail:   {detail}");
+        }
+    }
+
+    if let Some(config) = report.get("config") {
+        if let Some(path) = config.get("path").and_then(|v| v.as_str()) {
+            println!("  config:   {path}");
+        }
+        if let Some(sources) = config.get("sources").and_then(|v| v.as_u64()) {
+            println!("  sources:  {sources}");
+        }
+        if let Some(tabs) = config.get("tabs").and_then(|v| v.as_u64()) {
+            println!("  tabs:     {tabs}");
+        }
+        if let Some(pcap_sources) = config.get("pcap_sources").and_then(|v| v.as_u64()) {
+            println!("  pcap sources: {pcap_sources}");
+        }
+    }
+    if let Some(error) = report.get("config_error").and_then(|v| v.as_str()) {
+        println!("  config error: {error}");
+    }
+
+    let capture = &report["packet_capture"];
+    println!(
+        "  pcap feature: {}",
+        if capture["feature_enabled"].as_bool().unwrap_or(false) {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
+    println!(
+        "  native library: {} ({})",
+        if capture["library_found"].as_bool().unwrap_or(false) {
+            "found"
+        } else {
+            "missing"
+        },
+        capture["provider"].as_str().unwrap_or("unknown")
+    );
+    if let Some(loaded) = capture.get("loaded_from").and_then(|v| v.as_str()) {
+        println!("  loaded from: {loaded}");
+    }
+    if let Some(message) = capture.get("message").and_then(|v| v.as_str()) {
+        println!("  capture:  {message}");
+    }
+    if let Some(hints) = report.get("hints").and_then(|v| v.as_array()) {
+        for hint in hints.iter().filter_map(|v| v.as_str()) {
+            println!("  hint:     {hint}");
+        }
+    }
     Ok(())
+}
+
+fn build_doctor_report(config_path: Option<&Path>) -> serde_json::Value {
+    let version = env!("CARGO_PKG_VERSION");
+    let packet_capture = detect_packet_capture_support();
+    let mut status = "ok".to_string();
+    let mut out = serde_json::json!({
+        "version": version,
+        "status": status,
+        "system": detect_system_info(),
+        "packet_capture": packet_capture,
+        "hints": [],
+    });
+
+    let mut config_info = None;
+    if let Some(path) = config_path {
+        match load_config(path) {
+            Ok(cfg) => {
+                let pcap_sources = count_pcap_sources(&cfg);
+                config_info = Some(serde_json::json!({
+                    "path": path.display().to_string(),
+                    "sources": cfg.sources.len(),
+                    "tabs": cfg.tabs.len(),
+                    "pcap_sources": pcap_sources,
+                }));
+                if pcap_sources > 0 {
+                    apply_packet_capture_warnings(&mut out, pcap_sources);
+                }
+            }
+            Err(error) => {
+                status = "warn".to_string();
+                out["status"] = serde_json::json!(status);
+                out["config_error"] = serde_json::json!(error.to_string());
+            }
+        }
+    }
+    if let Some(config) = config_info {
+        out["config"] = config;
+    }
+    out
+}
+
+fn apply_packet_capture_warnings(out: &mut serde_json::Value, pcap_sources: usize) {
+    let feature_enabled = out["packet_capture"]["feature_enabled"]
+        .as_bool()
+        .unwrap_or(false);
+    let library_found = out["packet_capture"]["library_found"]
+        .as_bool()
+        .unwrap_or(false);
+    if !feature_enabled || !library_found {
+        out["status"] = serde_json::json!("warn");
+    }
+    if !feature_enabled {
+        out["hints"].as_array_mut().unwrap().push(serde_json::json!(
+            format!(
+                "config uses {pcap_sources} pcap network_capture source(s), but this embed-log binary was built without the 'pcap-capture' feature"
+            )
+        ));
+    }
+    if !library_found {
+        out["hints"].as_array_mut().unwrap().push(serde_json::json!(
+            format!(
+                "native packet-capture library not found; install {}",
+                packet_capture_provider_name()
+            )
+        ));
+    }
+}
+
+fn count_pcap_sources(cfg: &AppConfig) -> usize {
+    cfg.sources
+        .iter()
+        .filter(|source| source.source_type.eq_ignore_ascii_case("network_capture"))
+        .filter(|source| {
+            source
+                .network_backend
+                .as_deref()
+                .unwrap_or("mock")
+                .eq_ignore_ascii_case("pcap")
+        })
+        .count()
+}
+
+fn detect_packet_capture_support() -> serde_json::Value {
+    let feature_enabled = cfg!(feature = "pcap-capture");
+    let provider = packet_capture_provider_name();
+    let candidates = packet_capture_library_candidates();
+    let mut loaded_from = None;
+    let mut errors = Vec::new();
+
+    for candidate in &candidates {
+        // SAFETY: We only probe whether the dynamic library can be opened.
+        // The handle is dropped immediately without resolving symbols.
+        let attempt = unsafe { libloading::Library::new(candidate) };
+        match attempt {
+            Ok(lib) => {
+                loaded_from = Some((*candidate).to_string());
+                drop(lib);
+                break;
+            }
+            Err(error) => errors.push(format!("{candidate}: {error}")),
+        }
+    }
+
+    let library_found = loaded_from.is_some();
+    if library_found {
+        errors.clear();
+    }
+    let message = if feature_enabled && library_found {
+        "pcap capture is available"
+    } else if feature_enabled {
+        "pcap capture feature is enabled, but the native packet-capture library is missing"
+    } else if library_found {
+        "native packet-capture library is installed, but this binary was built without the pcap-capture feature"
+    } else {
+        "pcap capture is unavailable in this binary and no native packet-capture library was found"
+    };
+
+    serde_json::json!({
+        "feature_enabled": feature_enabled,
+        "provider": provider,
+        "library_found": library_found,
+        "loaded_from": loaded_from,
+        "candidate_libraries": candidates,
+        "message": message,
+        "errors": errors,
+    })
+}
+
+fn detect_system_info() -> serde_json::Value {
+    let os = std::env::consts::OS;
+    let arch = std::env::consts::ARCH;
+    let family = std::env::consts::FAMILY;
+    let detail = detect_system_detail();
+    serde_json::json!({
+        "os": os,
+        "arch": arch,
+        "family": family,
+        "detail": detail,
+    })
+}
+
+fn detect_system_detail() -> Option<String> {
+    #[cfg(target_family = "unix")]
+    {
+        let output = std::process::Command::new("uname")
+            .args(["-srm"])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let text = String::from_utf8(output.stdout).ok()?;
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    }
+    #[cfg(not(target_family = "unix"))]
+    {
+        None
+    }
+}
+
+fn packet_capture_provider_name() -> &'static str {
+    #[cfg(target_os = "windows")]
+    {
+        "Npcap/WinPcap"
+    }
+    #[cfg(target_os = "macos")]
+    {
+        "libpcap"
+    }
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        "libpcap"
+    }
+}
+
+fn packet_capture_library_candidates() -> Vec<&'static str> {
+    #[cfg(target_os = "windows")]
+    {
+        vec!["wpcap.dll", "Packet.dll"]
+    }
+    #[cfg(target_os = "macos")]
+    {
+        vec!["libpcap.A.dylib", "libpcap.dylib"]
+    }
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        vec!["libpcap.so.1", "libpcap.so", "libpcap.so.0.8"]
+    }
 }
 
 /// `embed-log ports` — list detected serial ports.
@@ -412,5 +658,32 @@ mod tests {
         let grouped = group_entries_by_source(&entries);
         assert_eq!(grouped["a"], vec!["x".to_string(), "y".to_string()]);
         assert_eq!(grouped["unknown"], vec!["no source".to_string()]);
+    }
+
+    #[test]
+    fn packet_capture_candidates_are_non_empty() {
+        assert!(!packet_capture_library_candidates().is_empty());
+    }
+
+    #[test]
+    fn count_pcap_sources_only_counts_network_capture_pcap_backends() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("embed-log-doctor-{}-pcap.yml", std::process::id()));
+        std::fs::write(
+            &path,
+            "version: 1\nlogs:\n  dir: logs\nsources:\n  - name: NET_PCAP\n    type: network_capture\n    interface: lo\n    network_backend: pcap\n    udp:\n      ports: [5683]\n  - name: NET_MOCK\n    type: network_capture\n    interface: lo\n    network_backend: mock\n    bpf_filter: udp\n  - name: UDP_TEXT\n    type: udp\n    port: 6000\ntabs:\n  - label: One\n    panes: [NET_PCAP]\n",
+        )
+        .unwrap();
+        let cfg = load_config(&path).unwrap();
+        std::fs::remove_file(&path).ok();
+        assert_eq!(count_pcap_sources(&cfg), 1);
+    }
+
+    #[test]
+    fn doctor_report_includes_packet_capture_section() {
+        let report = build_doctor_report(None);
+        assert!(report.get("packet_capture").is_some());
+        assert!(report["packet_capture"].get("feature_enabled").is_some());
+        assert!(report["packet_capture"].get("candidate_libraries").is_some());
     }
 }

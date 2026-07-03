@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket};
-use axum::extract::{Json, Path as AxumPath, State, WebSocketUpgrade};
+use axum::extract::{Path as AxumPath, State, WebSocketUpgrade};
 use axum::http::{header, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -176,10 +176,6 @@ pub async fn start_server(
         )
         .route("/api/sessions", axum::routing::get(api_sessions_handler))
         .route("/api/stats", axum::routing::get(api_stats_handler))
-        .route(
-            "/api/session/snippet",
-            axum::routing::post(api_snippet_handler),
-        )
         .route(
             "/sessions/{session_id}/{filename}",
             axum::routing::get(session_file_handler),
@@ -643,87 +639,6 @@ async fn api_export_handler(State(state): State<ServerState>) -> impl IntoRespon
     (status, axum::Json(body))
 }
 
-async fn api_snippet_handler(
-    State(state): State<ServerState>,
-    Json(payload): Json<serde_json::Value>,
-) -> impl IntoResponse {
-    let text = payload
-        .get("text")
-        .or_else(|| payload.get("content"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    if text.trim().is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            axum::Json(serde_json::json!({
-                "ok": false,
-                "error": "empty snippet",
-            })),
-        );
-    }
-
-    let label = payload.get("label").and_then(|v| v.as_str());
-    let scope = payload
-        .get("scope")
-        .and_then(|v| v.as_str())
-        .map(str::to_owned);
-    let panes = payload
-        .get("panes")
-        .and_then(|v| v.as_array())
-        .map(|panes| {
-            panes
-                .iter()
-                .filter_map(|pane| pane.as_str().map(str::to_owned))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    let Some(manager) = &state.session_manager else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            axum::Json(serde_json::json!({
-                "ok": false,
-                "error": "session unavailable",
-            })),
-        );
-    };
-
-    let result = manager
-        .lock()
-        .map_err(|_| "session manager lock failed".to_string())
-        .and_then(|mut manager| {
-            manager
-                .save_snippet(text, label, panes, scope)
-                .map_err(|err| err.to_string())
-        });
-
-    match result {
-        Ok(metadata) => (
-            StatusCode::OK,
-            axum::Json(serde_json::json!({
-                "ok": true,
-                "path": metadata.get("path").cloned().unwrap_or(serde_json::Value::Null),
-                "snippet": metadata,
-                "session": current_session_value(&state),
-            })),
-        ),
-        Err(error) if error.contains("limit") => (
-            StatusCode::CONFLICT,
-            axum::Json(serde_json::json!({
-                "ok": false,
-                "error": error,
-            })),
-        ),
-        Err(error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            axum::Json(serde_json::json!({
-                "ok": false,
-                "error": error,
-            })),
-        ),
-    }
-}
-
 async fn api_stats_handler(State(state): State<ServerState>) -> impl IntoResponse {
     let session_id = state
         .session_manager
@@ -941,9 +856,10 @@ mod tests {
 
         Arc::new(Mutex::new(SessionManager::new(
             "session-1",
-            dir,
+            dir.clone(),
             &[json!({ "label": "Main", "panes": ["dut"] })],
             source_files,
+            dir.join("combined.jsonl").display().to_string(),
             pane_labels,
             pane_kinds,
             json!({}),

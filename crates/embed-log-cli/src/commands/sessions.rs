@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use chrono::{DateTime, FixedOffset, Local, NaiveDateTime, TimeZone};
 use clap::{Subcommand, ValueEnum};
+use regex::Regex;
 
 use embed_log_core::session::SessionExporter;
 
@@ -40,6 +42,63 @@ pub(crate) enum SessionsCommand {
         output: Option<PathBuf>,
         #[arg(long, value_enum, default_value_t = ExportFormat::Html)]
         format: ExportFormat,
+    },
+    /// Print or follow the session-wide combined JSONL stream.
+    #[command(visible_alias = "tail-combined")]
+    Combined {
+        session_id: String,
+        #[arg(long, alias = "log-dir", default_value = "logs")]
+        dir: PathBuf,
+        #[arg(long)]
+        follow: bool,
+        #[arg(long, alias = "last")]
+        lines: Option<usize>,
+    },
+    /// Search combined JSONL across sessions with structured filters.
+    #[command(long_about = "Search all session combined.jsonl files under a log directory.\n\nExamples:\n  embed-log sessions search --dir logs --source DUT\n  embed-log sessions search --dir logs --source DUT --from 2026-07-03T09:00:00 --to 2026-07-03T15:00:00\n  embed-log sessions search --dir logs --job nightly-42 --kind network_capture --dst-port 5683\n  embed-log sessions search --dir logs --contains panic --regex 'ERROR|WARN'\n\nTime filters accept RFC3339 (with timezone) or local wall-clock forms like 2026-07-03T09:00:00 or 2026-07-03 09:00:00.")]
+    Search {
+        /// Root logs directory containing session subdirectories.
+        #[arg(long, alias = "log-dir", default_value = "logs")]
+        dir: PathBuf,
+        /// Restrict to session ids or unique prefixes. Repeatable.
+        #[arg(long = "session")]
+        sessions: Vec<String>,
+        /// Restrict to sessions whose manifest has this job_id.
+        #[arg(long)]
+        job: Option<String>,
+        /// Restrict to one or more source_id values. Repeatable.
+        #[arg(long = "source")]
+        sources: Vec<String>,
+        /// Restrict to source_kind (uart, udp, file, network_capture).
+        #[arg(long)]
+        kind: Option<String>,
+        /// Earliest timestamp_iso to include.
+        #[arg(long)]
+        from: Option<String>,
+        /// Latest timestamp_iso to include.
+        #[arg(long)]
+        to: Option<String>,
+        /// Substring that must appear in the message field.
+        #[arg(long)]
+        contains: Option<String>,
+        /// Regex that must match the message field.
+        #[arg(long)]
+        regex: Option<String>,
+        /// Restrict to packet entries with this UDP source port.
+        #[arg(long = "src-port")]
+        src_port: Option<u16>,
+        /// Restrict to packet entries with this UDP destination port.
+        #[arg(long = "dst-port")]
+        dst_port: Option<u16>,
+        /// Restrict to packet entries whose src_ip or dst_ip matches this address.
+        #[arg(long)]
+        ip: Option<String>,
+        /// Stop after printing this many matching entries.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Print only the number of matches.
+        #[arg(long)]
+        count: bool,
     },
     /// List markers in a session.
     Marker {
@@ -102,6 +161,45 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             dir,
             json,
         } => show_session_info(&dir, &session_id, json),
+        SessionsCommand::Combined {
+            session_id,
+            dir,
+            follow,
+            lines,
+        } => show_session_combined(&dir, &session_id, follow, lines),
+        SessionsCommand::Search {
+            dir,
+            sessions,
+            job,
+            sources,
+            kind,
+            from,
+            to,
+            contains,
+            regex,
+            src_port,
+            dst_port,
+            ip,
+            limit,
+            count,
+        } => search_sessions(
+            &dir,
+            SearchFilters::compile(
+                sessions,
+                job,
+                sources,
+                kind,
+                from,
+                to,
+                contains,
+                regex,
+                src_port,
+                dst_port,
+                ip,
+                limit,
+                count,
+            )?,
+        ),
         SessionsCommand::Export {
             session_id,
             dir,
@@ -184,6 +282,13 @@ fn show_session_info(dir: &Path, session_id: &str, json: bool) -> Result<()> {
         }
         if let Some(status) = session.manifest.get("html_status").and_then(|v| v.as_str()) {
             println!("html:    {status}");
+        }
+        if let Some(combined_file) = session
+            .manifest
+            .get("combined_file")
+            .and_then(|v| v.as_str())
+        {
+            println!("combined: {combined_file}");
         }
         if let Some(source_files) = session
             .manifest
@@ -462,6 +567,260 @@ fn marker_matches(
     true
 }
 
+#[derive(Debug)]
+struct SearchFilters {
+    sessions: Vec<String>,
+    job: Option<String>,
+    sources: Vec<String>,
+    kind: Option<String>,
+    from: Option<DateTime<FixedOffset>>,
+    to: Option<DateTime<FixedOffset>>,
+    contains: Option<String>,
+    regex: Option<Regex>,
+    src_port: Option<u16>,
+    dst_port: Option<u16>,
+    ip: Option<String>,
+    limit: Option<usize>,
+    count: bool,
+}
+
+impl SearchFilters {
+    #[allow(clippy::too_many_arguments)]
+    fn compile(
+        sessions: Vec<String>,
+        job: Option<String>,
+        sources: Vec<String>,
+        kind: Option<String>,
+        from: Option<String>,
+        to: Option<String>,
+        contains: Option<String>,
+        regex: Option<String>,
+        src_port: Option<u16>,
+        dst_port: Option<u16>,
+        ip: Option<String>,
+        limit: Option<usize>,
+        count: bool,
+    ) -> Result<Self> {
+        Ok(Self {
+            sessions,
+            job,
+            sources,
+            kind,
+            from: from.as_deref().map(parse_search_time).transpose()?,
+            to: to.as_deref().map(parse_search_time).transpose()?,
+            contains,
+            regex: regex.map(|pat| Regex::new(&pat)).transpose()?,
+            src_port,
+            dst_port,
+            ip,
+            limit,
+            count,
+        })
+    }
+
+    fn matches_session(&self, session: &SessionRecord) -> bool {
+        if !self.sessions.is_empty()
+            && !self
+                .sessions
+                .iter()
+                .any(|prefix| session.id == *prefix || session.id.starts_with(prefix))
+        {
+            return false;
+        }
+        if let Some(job) = &self.job {
+            let session_job = session.manifest.get("job_id").and_then(|v| v.as_str());
+            if session_job != Some(job.as_str()) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn matches_entry(&self, entry: &serde_json::Value) -> bool {
+        if !self.sources.is_empty() {
+            let source_id = entry.get("source_id").and_then(|v| v.as_str());
+            if !self.sources.iter().any(|source| Some(source.as_str()) == source_id) {
+                return false;
+            }
+        }
+        if let Some(kind) = &self.kind {
+            let source_kind = entry.get("source_kind").and_then(|v| v.as_str());
+            if source_kind != Some(kind.as_str()) {
+                return false;
+            }
+        }
+        if let Some(contains) = &self.contains {
+            let message = entry.get("message").and_then(|v| v.as_str()).unwrap_or("");
+            if !message.contains(contains) {
+                return false;
+            }
+        }
+        if let Some(regex) = &self.regex {
+            let message = entry.get("message").and_then(|v| v.as_str()).unwrap_or("");
+            if !regex.is_match(message) {
+                return false;
+            }
+        }
+        if self.from.is_some() || self.to.is_some() {
+            let timestamp = match entry.get("timestamp_iso").and_then(|v| v.as_str()) {
+                Some(value) => match parse_search_time(value) {
+                    Ok(ts) => ts,
+                    Err(_) => return false,
+                },
+                None => return false,
+            };
+            if let Some(from) = self.from {
+                if timestamp < from {
+                    return false;
+                }
+            }
+            if let Some(to) = self.to {
+                if timestamp > to {
+                    return false;
+                }
+            }
+        }
+        if let Some(src_port) = self.src_port {
+            if entry.get("src_port").and_then(|v| v.as_u64()) != Some(src_port as u64) {
+                return false;
+            }
+        }
+        if let Some(dst_port) = self.dst_port {
+            if entry.get("dst_port").and_then(|v| v.as_u64()) != Some(dst_port as u64) {
+                return false;
+            }
+        }
+        if let Some(ip) = &self.ip {
+            let src_ip = entry.get("src_ip").and_then(|v| v.as_str());
+            let dst_ip = entry.get("dst_ip").and_then(|v| v.as_str());
+            if src_ip != Some(ip.as_str()) && dst_ip != Some(ip.as_str()) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+fn parse_search_time(raw: &str) -> Result<DateTime<FixedOffset>> {
+    if let Ok(dt) = DateTime::parse_from_rfc3339(raw) {
+        return Ok(dt);
+    }
+    for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"] {
+        if let Ok(naive) = NaiveDateTime::parse_from_str(raw, fmt) {
+            if let Some(local_dt) = Local.from_local_datetime(&naive).single() {
+                return Ok(local_dt.fixed_offset());
+            }
+        }
+    }
+    anyhow::bail!(
+        "invalid time {raw:?} (use RFC3339 or local wall-clock like 2026-07-03T09:00:00)"
+    )
+}
+
+fn search_sessions(dir: &Path, filters: SearchFilters) -> Result<()> {
+    use std::io::{BufRead, BufReader};
+
+    let sessions = load_sessions(dir)?;
+    let mut matches = 0usize;
+
+    for session in sessions.iter().filter(|session| filters.matches_session(session)) {
+        let path = match manifest_combined_file(session) {
+            Ok(path) => path,
+            Err(_) => continue,
+        };
+        let file = match std::fs::File::open(&path) {
+            Ok(file) => file,
+            Err(_) => continue,
+        };
+        let reader = BufReader::new(file);
+        for line_result in reader.lines() {
+            let line = match line_result {
+                Ok(line) => line,
+                Err(_) => continue,
+            };
+            let entry: serde_json::Value = match serde_json::from_str(&line) {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            if !filters.matches_entry(&entry) {
+                continue;
+            }
+            matches += 1;
+            if !filters.count {
+                println!("{line}");
+            }
+            if filters.limit.is_some_and(|limit| matches >= limit) {
+                if filters.count {
+                    println!("{matches}");
+                }
+                return Ok(());
+            }
+        }
+    }
+
+    if filters.count {
+        println!("{matches}");
+    }
+    Ok(())
+}
+
+fn manifest_combined_file(session: &SessionRecord) -> Result<PathBuf> {
+    session
+        .manifest
+        .get("combined_file")
+        .and_then(|v| v.as_str())
+        .map(PathBuf::from)
+        .ok_or_else(|| anyhow::anyhow!("manifest missing combined_file"))
+}
+
+fn show_session_combined(
+    dir: &Path,
+    session_id: &str,
+    follow: bool,
+    lines: Option<usize>,
+) -> Result<()> {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    use std::time::Duration;
+
+    let session = resolve_session(dir, session_id)?;
+    let path = manifest_combined_file(&session)?;
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let selected = if let Some(count) = lines {
+        let all: Vec<&str> = text.lines().collect();
+        let start = all.len().saturating_sub(count);
+        all[start..].join("\n")
+    } else {
+        text.trim_end_matches('\n').to_string()
+    };
+    if !selected.is_empty() {
+        println!("{selected}");
+    }
+    if !follow {
+        return Ok(());
+    }
+
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .open(&path)
+        .with_context(|| format!("open {}", path.display()))?;
+    let mut pos = file.metadata()?.len();
+    loop {
+        let len = file.metadata()?.len();
+        if len < pos {
+            pos = 0;
+        }
+        if len > pos {
+            file.seek(SeekFrom::Start(pos))?;
+            let mut buf = String::new();
+            file.read_to_string(&mut buf)?;
+            print!("{buf}");
+            std::io::stdout().flush()?;
+            pos = len;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
+
 fn manifest_source_files(session: &SessionRecord) -> Result<HashMap<String, String>> {
     let source_files = session
         .manifest
@@ -582,7 +941,13 @@ mod tests {
         let dir = root.join(id);
         std::fs::create_dir_all(&dir).unwrap();
         let log_path = dir.join("main__dut__session.log");
+        let combined_path = dir.join("combined.jsonl");
         std::fs::write(&log_path, "[2026-06-13 00:00:00.000] boot\n").unwrap();
+        std::fs::write(
+            &combined_path,
+            "{\"source_id\":\"dut\",\"message\":\"boot\"}\n{\"source_id\":\"dut\",\"message\":\"next\"}\n",
+        )
+        .unwrap();
         let manifest = serde_json::json!({
             "session_id": id,
             "session_dir": dir.display().to_string(),
@@ -591,8 +956,8 @@ mod tests {
             "tabs": [{ "label": "Main", "panes": ["dut"] }],
             "pane_labels": { "dut": "DUT" },
             "source_files": { "dut": log_path.display().to_string() },
+            "combined_file": combined_path.display().to_string(),
             "html_status": "pending",
-            "snippets": [],
         });
         std::fs::write(
             dir.join("manifest.json"),
@@ -775,6 +1140,59 @@ mod tests {
         assert_eq!(with_markers.len(), 1);
         assert_eq!(with_markers[0].id, "s1");
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn manifest_combined_file_reads_manifest_path() {
+        let root = temp_log_dir();
+        write_test_session(&root, "s1");
+        let session = resolve_session(&root, "s1").unwrap();
+        let path = manifest_combined_file(&session).unwrap();
+        assert!(path.ends_with("combined.jsonl"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn search_filters_match_structured_entry() {
+        let filters = SearchFilters::compile(
+            vec!["s1".to_string()],
+            Some("job-1".to_string()),
+            vec!["dut".to_string()],
+            Some("network_capture".to_string()),
+            Some("2026-07-03T09:00:00+00:00".to_string()),
+            Some("2026-07-03T15:00:00+00:00".to_string()),
+            Some("panic".to_string()),
+            Some("panic|fatal".to_string()),
+            Some(49152),
+            Some(5683),
+            Some("127.0.0.1".to_string()),
+            None,
+            false,
+        )
+        .unwrap();
+        let session = SessionRecord {
+            id: "s1".to_string(),
+            dir: PathBuf::from("/tmp/s1"),
+            manifest: serde_json::json!({"job_id": "job-1"}),
+        };
+        let entry = serde_json::json!({
+            "source_id": "dut",
+            "source_kind": "network_capture",
+            "timestamp_iso": "2026-07-03T10:00:00+00:00",
+            "message": "panic in worker",
+            "src_port": 49152,
+            "dst_port": 5683,
+            "src_ip": "127.0.0.1",
+            "dst_ip": "127.0.0.1"
+        });
+        assert!(filters.matches_session(&session));
+        assert!(filters.matches_entry(&entry));
+    }
+
+    #[test]
+    fn parse_search_time_accepts_local_wall_clock() {
+        let parsed = parse_search_time("2026-07-03T09:00:00").unwrap();
+        assert_eq!(parsed.format("%Y-%m-%d %H:%M:%S").to_string(), "2026-07-03 09:00:00");
     }
 
     #[test]

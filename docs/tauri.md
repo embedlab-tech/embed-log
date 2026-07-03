@@ -87,9 +87,9 @@ A session directory looks like:
 <tauri app_config_dir>/logs/
 └── 2026-06-14_09-30-00/
     ├── manifest.json
+    ├── combined.jsonl
     ├── session.html
     ├── markers.json
-    ├── snippets/
     └── <tab>__<source>__<session>.log
 ```
 
