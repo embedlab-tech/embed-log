@@ -261,7 +261,18 @@ function _scheduleVirtualResizeRefresh() {
         PANES.forEach(paneId => {
             const vp = _virtualPanes.get(paneId);
             if (vp) vp.rowHeight = 0;
-            rerenderPane(paneId);
+            // A pane with an active sync-highlight (e.g. just scrolled into
+            // place by a cross-tab click sync) must stay anchored to that
+            // line — row height can change here (e.g. web font finishing
+            // load after this pane's first paint), and re-deriving position
+            // from the now-stale scrollTop would silently drift the synced
+            // line out of view instead of keeping it in focus.
+            const highlightedIdx = state.highlightedIdx[paneId];
+            if (Number.isFinite(highlightedIdx)) {
+                _scrollPaneToRawIndex(paneId, highlightedIdx);
+            } else {
+                rerenderPane(paneId);
+            }
         });
     });
 }
@@ -867,7 +878,12 @@ window.__embedLogInvalidateVirtualMetrics = function () {
         const vp = _virtualPanes.get(paneId);
         if (!vp) return;
         vp.rowHeight = 0;
-        rerenderPane(paneId);
+        const highlightedIdx = state.highlightedIdx[paneId];
+        if (Number.isFinite(highlightedIdx)) {
+            _scrollPaneToRawIndex(paneId, highlightedIdx);
+        } else {
+            rerenderPane(paneId);
+        }
     });
 };
 export function reanalyzePanePlugins(paneId) {

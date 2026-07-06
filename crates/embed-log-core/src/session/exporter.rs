@@ -92,6 +92,7 @@ impl SessionExporter {
     /// Generate the self-contained session HTML file.
     pub fn export(&self) -> Result<PathBuf> {
         let css = self.read_frontend_asset("viewer.css").unwrap_or_default();
+        let css = self.inline_font_urls(&css);
 
         // Parse log files and build entries.
         let mut log_data: HashMap<String, Vec<LogEntry>> = HashMap::new();
@@ -368,8 +369,6 @@ impl SessionExporter {
         html.push_str("<head>\n");
         html.push_str("<meta charset=\"UTF-8\">\n");
         html.push_str(&format!("<title>embed-log — {title}</title>\n"));
-        html.push_str("<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n");
-        html.push_str("<link href=\"https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap\" rel=\"stylesheet\">\n");
         html.push_str("<style>");
         html.push_str(&css);
         html.push_str("</style>\n");
@@ -425,6 +424,41 @@ impl SessionExporter {
         let path = self.frontend_dir.join(filename);
         std::fs::read_to_string(&path).ok()
     }
+
+    /// Read a binary frontend asset (e.g. a font file) from embedded assets or filesystem.
+    fn read_frontend_asset_bytes(&self, filename: &str) -> Option<Vec<u8>> {
+        if let Some(file) = FrontendAssets::get(filename) {
+            return Some(file.data.to_vec());
+        }
+        let path = self.frontend_dir.join(filename);
+        std::fs::read(&path).ok()
+    }
+
+    /// Replace `url('fonts/...')` references in the CSS with base64 data URIs.
+    /// The exported HTML is a standalone file (often opened via `file://`), so
+    /// relative font URLs and the CDN `@font-face` fallback both 404 — embedding
+    /// the bytes directly is the only way the bundled font renders offline.
+    fn inline_font_urls(&self, css: &str) -> String {
+        use base64::Engine;
+        font_url_re()
+            .replace_all(css, |caps: &regex::Captures| {
+                let rel_path = &caps[1];
+                match self.read_frontend_asset_bytes(rel_path) {
+                    Some(bytes) => {
+                        let mime = mime_guess::from_path(rel_path).first_or_octet_stream();
+                        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                        format!("url(data:{mime};base64,{b64})")
+                    }
+                    None => caps[0].to_string(),
+                }
+            })
+            .into_owned()
+    }
+}
+
+fn font_url_re() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(r#"url\('(fonts/[^']+)'\)"#).unwrap())
 }
 
 fn import_single_re() -> &'static Regex {
@@ -605,5 +639,23 @@ mod tests {
         assert_eq!(fmt_bytes(5120), "5.0 kB");
         assert_eq!(fmt_bytes(10240), "10 kB");
         assert_eq!(fmt_bytes(1048576), "1.0 MB");
+    }
+
+    #[test]
+    fn inline_font_urls_embeds_bundled_font_as_data_uri() {
+        let exporter = SessionExporter::new(
+            PathBuf::from("/tmp/unused.html"),
+            HashMap::new(),
+            vec![],
+            HashMap::new(),
+            PathBuf::from("frontend"), // relative to crates/embed-log-core, matches rust-embed folder
+            "absolute".to_string(),
+            None,
+        );
+        let css = "@font-face { src: url('fonts/JetBrainsMono-Regular.woff2'); }";
+        let out = exporter.inline_font_urls(css);
+        assert!(!out.contains("fonts/JetBrainsMono-Regular.woff2"));
+        assert!(out.contains("url(data:font/"));
+        assert!(out.contains(";base64,"));
     }
 }

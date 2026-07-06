@@ -156,6 +156,39 @@ embed-log-tui connect ws://127.0.0.1:8080/ws
 
 See [docs/tui.md](docs/tui.md) for keybindings and limitations.
 
+## Real network packet capture (pcap)
+
+Plain `type: udp` sources (bind a UDP socket on a port and read datagrams) work out of the box, no setup below needed.
+
+For `type: network_capture` sources with `network_backend: pcap` — sniffing UDP traffic straight off a network interface, filtered to specific ports via `udp.ports` — you need the native pcap library, a special build, and interface-open permissions. See [docs/configuration.md](docs/configuration.md) for the full field reference.
+
+1. Install the native capture library:
+   - Linux: `libpcap-dev` (Debian/Ubuntu) or `libpcap-devel` (Fedora/RHEL)
+   - macOS: libpcap ships with the OS, nothing to install
+   - Windows: install [Npcap](https://npcap.com/) (in WinPcap API-compatible mode)
+
+2. Build with the `pcap-capture` feature (disabled by default):
+
+   ```bash
+   cargo build --release -p embed-log-cli --features pcap-capture
+   ```
+
+3. Grant the binary permission to open network interfaces, instead of running the whole app as root:
+
+   ```bash
+   sudo setcap cap_net_raw,cap_net_admin+eip target/release/embed-log
+   ```
+
+   Then run `embed-log` normally as your own user — no `sudo` needed at runtime. (macOS/Windows don't support setcap; run elevated once, or add your user to the OS's packet-capture group per the Npcap/libpcap docs.)
+
+4. Verify readiness:
+
+   ```bash
+   embed-log doctor --config embed-log.yml
+   ```
+
+   Reports whether this binary was built with `pcap-capture`, whether libpcap/Npcap is installed, and whether the given config actually has `network_backend: pcap` sources.
+
 ## Legacy inject/forward ports removed
 
 The old per-source TCP `inject_port`, `forward_port`, and `forward_ports` config fields have been removed. Use the single control WebSocket endpoint (`/api/v1/control`) instead. All automation (log injection, subscription/forwarding, TX, markers) goes through one connection, routed by configured source name.

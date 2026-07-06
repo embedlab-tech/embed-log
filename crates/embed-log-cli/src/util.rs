@@ -59,6 +59,23 @@ pub(crate) fn open_url_in_default_browser(url: &str) -> Result<()> {
         command
     };
 
+    // Put the launcher (and, on Linux, the browser it execs into when none is
+    // already running) in its own process group. Otherwise it inherits the
+    // CLI's foreground process group, and Ctrl+C's SIGINT — delivered by the
+    // terminal to the whole foreground group, not just the CLI's PID — kills
+    // the browser along with the server.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        command.creation_flags(CREATE_NEW_PROCESS_GROUP);
+    }
+
     command
         .spawn()
         .with_context(|| format!("open default browser for {url}"))?;
