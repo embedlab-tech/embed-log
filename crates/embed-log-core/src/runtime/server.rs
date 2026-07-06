@@ -511,16 +511,26 @@ impl LogServer {
 
             if let Some(ref builtin) = plugin_def.builtin {
                 meta.insert("builtin".to_string(), json!(builtin));
-                // Read the builtin plugin JS from frontend/plugin-<name>.js
-                let js_path = self.frontend_dir.join(format!("plugin-{builtin}.js"));
+                // Read the builtin plugin JS from frontend/plugin-<name>.js on disk,
+                // falling back to the compiled-in copy (same as embedded_fallback in
+                // net::ws_server) when no on-disk frontend dir is present.
+                let asset_name = format!("plugin-{builtin}.js");
+                let js_path = self.frontend_dir.join(&asset_name);
                 match std::fs::read_to_string(&js_path) {
                     Ok(js) => {
                         scripts.insert(name.clone(), json!(js));
                         info!("loaded builtin plugin: {name} from {}", js_path.display());
                     }
-                    Err(e) => {
-                        warn!("failed to load builtin plugin {name}: {e}");
-                    }
+                    Err(e) => match crate::frontend_assets::FrontendAssets::get(&asset_name) {
+                        Some(file) => {
+                            let js = String::from_utf8_lossy(&file.data).into_owned();
+                            scripts.insert(name.clone(), json!(js));
+                            info!("loaded builtin plugin: {name} from embedded assets");
+                        }
+                        None => {
+                            warn!("failed to load builtin plugin {name}: {e}");
+                        }
+                    },
                 }
             } else if let Some(ref rel_path) = plugin_def.path {
                 meta.insert("path".to_string(), json!(rel_path));
