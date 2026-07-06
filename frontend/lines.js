@@ -671,17 +671,39 @@ function _renderVirtualWindow(paneId, { targetIdx, forceAtBottom } = {}) {
         if (rawIndex !== undefined) keepRaw.add(rawIndex);
     }
 
-    for (const [rawIndex, el] of vp.rendered) {
-        if (!keepRaw.has(rawIndex)) continue;
-        const ordinal = _ordinalForRawIndex(paneId, vp, rawIndex);
-        el.style.position = "absolute";
-        el.style.top = (ordinal * rowH) + "px";
-        el.style.left = "0";
-        el.style.right = "0";
+    const wrapped = !!state.wrap[paneId];
+    if (!wrapped) {
+        for (const [rawIndex, el] of vp.rendered) {
+            if (!keepRaw.has(rawIndex)) continue;
+            const ordinal = _ordinalForRawIndex(paneId, vp, rawIndex);
+            el.style.position = "absolute";
+            el.style.top = (ordinal * rowH) + "px";
+            el.style.left = "0";
+            el.style.right = "0";
+        }
     }
 
     _ensureRange(paneId, firstOrdinal, lastOrdinal, rx, rowH);
     _pruneToRawSet(paneId, keepRaw);
+
+    // Wrapped rows can span multiple visual lines, so the fixed `ordinal * rowH`
+    // layout above would overlap the next row. Re-stack the rendered window
+    // using each row's actual measured height instead. Rows outside this
+    // window still assume rowH for the spacer/scroll math (an approximation,
+    // same tradeoff virtualized lists with variable row height typically make).
+    if (wrapped) {
+        let top = firstOrdinal * rowH;
+        for (let ordinal = firstOrdinal; ordinal <= lastOrdinal; ordinal++) {
+            const rawIndex = _rawIndexAt(paneId, vp, ordinal);
+            const el = rawIndex !== undefined ? vp.rendered.get(rawIndex) : null;
+            if (!el) continue;
+            el.style.position = "absolute";
+            el.style.top = top + "px";
+            el.style.left = "0";
+            el.style.right = "0";
+            top += el.offsetHeight || rowH;
+        }
+    }
 
     if (forceAtBottom) {
         logEl.scrollTop = logEl.scrollHeight;
@@ -993,6 +1015,9 @@ export function _linesSetupPane(id) {
             state.wrap[id] = !state.wrap[id];
             wrapBtn.classList.toggle("active", state.wrap[id]);
             document.getElementById("log-" + id)?.classList.toggle("wrap", state.wrap[id]);
+            // Rows are absolutely positioned assuming a fixed single-line height;
+            // wrapping makes row height variable, so force a relayout.
+            rerenderPane(id);
         });
     }
 
