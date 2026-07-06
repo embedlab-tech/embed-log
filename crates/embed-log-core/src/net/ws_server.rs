@@ -203,12 +203,18 @@ async fn embedded_fallback(uri: axum::http::Uri) -> impl IntoResponse {
     let path = if path.is_empty() { "index.html" } else { path };
 
     let content_type = if path.ends_with(".css") {
-        "text/css; charset=utf-8"
+        "text/css; charset=utf-8".to_string()
     } else if path.ends_with(".js") {
-        "application/javascript; charset=utf-8"
+        "application/javascript; charset=utf-8".to_string()
+    } else if path.contains('.') {
+        // Binary/other assets (fonts, images, ...): guess from extension
+        // rather than mislabeling them as HTML, which browsers reject for
+        // e.g. @font-face loads.
+        mime_guess::from_path(path).first_or_octet_stream().to_string()
     } else {
-        "text/html; charset=utf-8"
+        "text/html; charset=utf-8".to_string()
     };
+    let content_type = content_type.as_str();
 
     if let Some(file) = FrontendAssets::get(path) {
         return Response::builder()
@@ -831,8 +837,33 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
+    use axum::response::IntoResponse;
     use chrono::Local;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn embedded_fallback_serves_font_with_font_mime_type_not_html() {
+        let uri: axum::http::Uri = "/fonts/JetBrainsMono-Regular.woff2".parse().unwrap();
+        let response = embedded_fallback(uri).await.into_response();
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert_eq!(content_type, "font/woff2");
+    }
+
+    #[tokio::test]
+    async fn embedded_fallback_keeps_css_and_js_content_types() {
+        let uri: axum::http::Uri = "/viewer.css".parse().unwrap();
+        let response = embedded_fallback(uri).await.into_response();
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert_eq!(content_type, "text/css; charset=utf-8");
+    }
 
     fn temp_session_dir(name: &str) -> PathBuf {
         let nanos = Local::now().timestamp_nanos_opt().unwrap_or_default();

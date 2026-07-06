@@ -3,6 +3,24 @@
    Themes: Whitesand (warm light, default) · One Dark (dark default)
    ============================================================ */
 
+/* Bundled so the UI renders correctly even when JetBrains Mono isn't
+   installed system-wide. Font files: fonts/JetBrainsMono-*.woff2
+   (SIL OFL 1.1, see fonts/OFL.txt). */
+@font-face {
+    font-family: 'JetBrains Mono';
+    src: url('fonts/JetBrainsMono-Regular.woff2') format('woff2');
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: 'JetBrains Mono';
+    src: url('fonts/JetBrainsMono-Bold.woff2') format('woff2');
+    font-weight: 700;
+    font-style: normal;
+    font-display: swap;
+}
+
 :root {
     /* --- One Dark (dark) --- */
     --bg:        #282c34;
