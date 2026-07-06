@@ -1119,6 +1119,10 @@ export function clearPane(paneId) {
     window.__embedLogUpdateTimestampModeUi?.();
 }
 
+document.getElementById("btn-jump-all")?.addEventListener("click", () => {
+    PANES.forEach(scrollPaneToBottom);
+});
+
 document.getElementById("btn-clear")?.addEventListener("click", () => {
     window.wsSend?.({ cmd: "clear_logs", scope: "all" });
     window.__embedLogDiscardPendingLogMessages?.();
