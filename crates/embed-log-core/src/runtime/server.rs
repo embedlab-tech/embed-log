@@ -93,24 +93,35 @@ impl LogServer {
             pane_labels.insert(src.name.clone(), src.label.clone());
             pane_kinds.insert(src.name.clone(), src.source_type.clone());
         }
+        for merge in &self.config.merges {
+            pane_labels.insert(merge.name.clone(), merge_label(merge));
+            pane_kinds.insert(merge.name.clone(), "merge".to_string());
+        }
 
         // ── 3b. Load command suggestions from companion YAML ──
-        let source_writability: HashMap<String, bool> = sources
+        let mut source_writability: HashMap<String, bool> = sources
             .iter()
             .map(|src| (src.name.clone(), src.source.writable()))
             .collect();
+        for merge in &self.config.merges {
+            source_writability.insert(merge.name.clone(), false);
+        }
         let pane_commands = crate::config::load_command_suggestions(
             self.config_path.as_deref(),
             &source_writability,
         );
 
         // ── 3c. Load event rules from companion YAML ──
-        let source_names: Vec<String> = sources.iter().map(|src| src.name.clone()).collect();
+        let source_names: Vec<String> = sources
+            .iter()
+            .map(|src| src.name.clone())
+            .chain(self.config.merges.iter().map(|m| m.name.clone()))
+            .collect();
         let event_matchers =
             crate::config::load_event_matchers(self.config_path.as_deref(), &source_names);
 
         // Build source metadata for the control API.
-        let source_metadata: HashMap<String, SourceInfo> = sources
+        let mut source_metadata: HashMap<String, SourceInfo> = sources
             .iter()
             .map(|src| {
                 let info = SourceInfo {
@@ -121,13 +132,26 @@ impl LogServer {
                 (src.name.clone(), info)
             })
             .collect();
+        for merge in &self.config.merges {
+            source_metadata.insert(
+                merge.name.clone(),
+                SourceInfo {
+                    source_type: "merge".to_string(),
+                    label: merge_label(merge),
+                    writable: false,
+                },
+            );
+        }
 
         // Build per-source line counters for stable line_idx.
         use std::sync::atomic::AtomicU64;
-        let line_counters: HashMap<String, Arc<AtomicU64>> = sources
+        let mut line_counters: HashMap<String, Arc<AtomicU64>> = sources
             .iter()
             .map(|src| (src.name.clone(), Arc::new(AtomicU64::new(0))))
             .collect();
+        for merge in &self.config.merges {
+            line_counters.insert(merge.name.clone(), Arc::new(AtomicU64::new(0)));
+        }
 
         // ── 4. Compute log file paths ──
         let tab_label = self
@@ -147,6 +171,17 @@ impl LogServer {
             let log_path = session_dir.join(&log_name);
             source_files.insert(src.name.clone(), log_path.display().to_string());
             log_paths.insert(src.name.clone(), log_path);
+        }
+        for merge in &self.config.merges {
+            let log_name = format!(
+                "{}__{}__{}.log",
+                slugify(tab_label),
+                slugify(&merge.name),
+                slugify(&session_id),
+            );
+            let log_path = session_dir.join(&log_name);
+            source_files.insert(merge.name.clone(), log_path.display().to_string());
+            log_paths.insert(merge.name.clone(), log_path);
         }
         let writer_log_paths: HashMap<String, Arc<Mutex<PathBuf>>> = log_paths
             .iter()
@@ -206,7 +241,10 @@ impl LogServer {
         let replay = Arc::new(Mutex::new(VecDeque::with_capacity(REPLAY_BUFFER_SIZE)));
         let events_replay = Arc::new(Mutex::new(VecDeque::with_capacity(REPLAY_BUFFER_SIZE)));
         let stats = Arc::new(RuntimeStats::new(
-            sources.iter().map(|src| src.name.clone()),
+            sources
+                .iter()
+                .map(|src| src.name.clone())
+                .chain(self.config.merges.iter().map(|m| m.name.clone())),
             self.config.server.queue_size,
         ));
         let mut source_txs: HashMap<String, mpsc::Sender<LogEntry>> = HashMap::new();
@@ -215,6 +253,54 @@ impl LogServer {
         let mut join_handles: Vec<JoinHandle<()>> = Vec::new();
 
         let source_tab_labels = build_source_tab_labels(&self.config.tabs);
+
+        // ── 8b. Set up merge (virtual combined) pseudo-sources ──
+        // Each merge gets its own writer pipeline — identical to a real
+        // source's — fed by relay taps installed below on its constituent
+        // sources' readers. `merge_feeds` maps a constituent source name to
+        // the merge channel(s) it should also forward tagged copies into.
+        let mut merge_feeds: HashMap<String, Vec<mpsc::Sender<LogEntry>>> = HashMap::new();
+        for merge in &self.config.merges {
+            let (merge_tx, merge_rx) = mpsc::channel::<LogEntry>(self.config.server.queue_size);
+
+            let writer_event_matcher = event_matchers.get(&merge.name).cloned();
+            let writer_runtime = WriterRuntime {
+                broadcast_tx: broadcast_tx.clone(),
+                replay: replay.clone(),
+                events_replay: events_replay.clone(),
+                first_log_at: first_log_at.clone(),
+                session_manager: session_mgr.clone(),
+                stats: stats.source(&merge.name),
+                ts_mode: self.config.server.timestamp_mode,
+                line_counter: line_counters.get(&merge.name).cloned(),
+                event_matcher: writer_event_matcher,
+                source_meta: SourceRuntimeMeta {
+                    source_id: merge.name.clone(),
+                    source_label: merge_label(merge),
+                    source_kind: "merge".to_string(),
+                    tab_labels: source_tab_labels
+                        .get(&merge.name)
+                        .cloned()
+                        .unwrap_or_default(),
+                    session_id: session_id.clone(),
+                    app_name: self.config.server.app_name.clone(),
+                    job_id: self.config.server.job_id.clone(),
+                },
+            };
+            let log_path = writer_log_paths[&merge.name].clone();
+            let merge_writer_name = merge.name.clone();
+            let writer_handle = tokio::spawn(async move {
+                run_writer(merge_writer_name, log_path, merge_rx, writer_runtime).await;
+            });
+            join_handles.push(writer_handle);
+
+            for src_name in &merge.of {
+                merge_feeds
+                    .entry(src_name.clone())
+                    .or_default()
+                    .push(merge_tx.clone());
+            }
+        }
 
         // ── 9. Start sources + writers ──
         for mut src in sources {
@@ -231,15 +317,36 @@ impl LogServer {
                 src.source.set_tx_receiver(tx_receiver);
             }
 
-            // Spawn source reader.
+            // Spawn source reader — tapped through a relay if one or more
+            // merges reference this source, otherwise wired directly as before.
             let reader_name = src.name.clone();
-            let reader_entry_tx = entry_tx.clone();
-            let reader_handle = tokio::spawn(async move {
-                if let Err(e) = src.source.run(reader_entry_tx).await {
-                    error!("[{reader_name}] source error: {e}");
+            match merge_feeds.remove(&src.name) {
+                Some(merge_targets) => {
+                    let (raw_tx, raw_rx) = mpsc::channel::<LogEntry>(self.config.server.queue_size);
+                    let relay_handle = tokio::spawn(relay_to_writer_and_merges(
+                        raw_rx,
+                        entry_tx.clone(),
+                        merge_targets,
+                        src.label.clone(),
+                    ));
+                    join_handles.push(relay_handle);
+                    let reader_handle = tokio::spawn(async move {
+                        if let Err(e) = src.source.run(raw_tx).await {
+                            error!("[{reader_name}] source error: {e}");
+                        }
+                    });
+                    join_handles.push(reader_handle);
                 }
-            });
-            join_handles.push(reader_handle);
+                None => {
+                    let reader_entry_tx = entry_tx.clone();
+                    let reader_handle = tokio::spawn(async move {
+                        if let Err(e) = src.source.run(reader_entry_tx).await {
+                            error!("[{reader_name}] source error: {e}");
+                        }
+                    });
+                    join_handles.push(reader_handle);
+                }
+            }
 
             // Spawn writer task.
             let writer_name = src.name.clone();
@@ -1058,6 +1165,36 @@ struct WriterRuntime {
     source_meta: SourceRuntimeMeta,
 }
 
+fn merge_label(merge: &crate::config::MergeConfig) -> String {
+    merge.label.clone().unwrap_or_else(|| merge.name.clone())
+}
+
+/// Forward each entry from `raw_rx` to `writer_tx` unchanged (so the source's
+/// own pipeline is untouched), and to every sender in `merge_targets` as a
+/// tagged clone: message prefixed with `origin`, and `source` set to `origin`
+/// unless it's already a `TX::<origin>` entry (preserved so merged TX lines
+/// keep their styling).
+async fn relay_to_writer_and_merges(
+    mut raw_rx: mpsc::Receiver<LogEntry>,
+    writer_tx: mpsc::Sender<LogEntry>,
+    merge_targets: Vec<mpsc::Sender<LogEntry>>,
+    origin: String,
+) {
+    while let Some(entry) = raw_rx.recv().await {
+        for merge_tx in &merge_targets {
+            let mut tagged = entry.clone();
+            if !tagged.source.starts_with("TX::") {
+                tagged.source = origin.clone();
+            }
+            tagged.message = format!("{origin}: {}", tagged.message);
+            let _ = merge_tx.send(tagged).await;
+        }
+        if writer_tx.send(entry).await.is_err() {
+            break;
+        }
+    }
+}
+
 fn build_source_tab_labels(tabs: &[crate::config::TabConfig]) -> HashMap<String, Vec<String>> {
     let mut by_source: HashMap<String, Vec<String>> = HashMap::new();
     for tab in tabs {
@@ -1395,6 +1532,64 @@ fn open_log_file(
 mod tests {
     use super::*;
     use tokio::time::{sleep, Duration};
+
+    #[tokio::test]
+    async fn relay_forwards_original_and_tags_merge_copy() {
+        let (raw_tx, raw_rx) = mpsc::channel::<LogEntry>(4);
+        let (writer_tx, mut writer_rx) = mpsc::channel::<LogEntry>(4);
+        let (merge_tx, mut merge_rx) = mpsc::channel::<LogEntry>(4);
+
+        tokio::spawn(relay_to_writer_and_merges(
+            raw_rx,
+            writer_tx,
+            vec![merge_tx],
+            "MCU_LINK_TX".to_string(),
+        ));
+
+        raw_tx
+            .send(LogEntry::new(Local::now(), "MCU_LINK_TX", "hello"))
+            .await
+            .unwrap();
+        drop(raw_tx);
+
+        let original = writer_rx.recv().await.unwrap();
+        assert_eq!(original.source, "MCU_LINK_TX");
+        assert_eq!(original.message, "hello");
+
+        let tagged = merge_rx.recv().await.unwrap();
+        assert_eq!(tagged.source, "MCU_LINK_TX");
+        assert_eq!(tagged.message, "MCU_LINK_TX: hello");
+    }
+
+    #[tokio::test]
+    async fn relay_preserves_tx_origin_convention_on_merge_copy() {
+        let (raw_tx, raw_rx) = mpsc::channel::<LogEntry>(4);
+        let (writer_tx, mut writer_rx) = mpsc::channel::<LogEntry>(4);
+        let (merge_tx, mut merge_rx) = mpsc::channel::<LogEntry>(4);
+
+        tokio::spawn(relay_to_writer_and_merges(
+            raw_rx,
+            writer_tx,
+            vec![merge_tx],
+            "MCU_LINK_TX".to_string(),
+        ));
+
+        raw_tx
+            .send(
+                LogEntry::new(Local::now(), "TX::ui", "version\r\n").with_color("yellow"),
+            )
+            .await
+            .unwrap();
+        drop(raw_tx);
+
+        let original = writer_rx.recv().await.unwrap();
+        assert_eq!(original.source, "TX::ui");
+
+        let tagged = merge_rx.recv().await.unwrap();
+        assert_eq!(tagged.source, "TX::ui", "TX::<origin> must survive tagging");
+        assert_eq!(tagged.message, "MCU_LINK_TX: version\r\n");
+        assert_eq!(tagged.color.as_deref(), Some("yellow"));
+    }
 
     fn temp_dir(name: &str) -> PathBuf {
         let nanos = Local::now().timestamp_nanos_opt().unwrap_or_default();

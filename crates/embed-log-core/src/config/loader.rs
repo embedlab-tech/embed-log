@@ -205,9 +205,9 @@ fn validate_config(config: &mut AppConfig, _config_path: &Path) -> Result<(), Co
 
         // Validate parser type
         let parser_type = &src.parser.parser_type;
-        if parser_type != "text" && parser_type != "cbor-datagram" {
+        if parser_type != "text" && parser_type != "cbor-datagram" && parser_type != "slip-coap" {
             return Err(ConfigError::validation(format!(
-                "{}.parser.type unsupported: {parser_type:?} (use 'text' or 'cbor-datagram')",
+                "{}.parser.type unsupported: {parser_type:?} (use 'text', 'cbor-datagram', or 'slip-coap')",
                 ctx()
             )));
         }
@@ -216,6 +216,60 @@ fn validate_config(config: &mut AppConfig, _config_path: &Path) -> Result<(), Co
                 "{}.parser.type 'cbor-datagram' is only valid for UDP sources (got source type {stype:?})",
                 ctx()
             )));
+        }
+        if parser_type == "slip-coap" && stype != "uart" {
+            return Err(ConfigError::validation(format!(
+                "{}.parser.type 'slip-coap' is only valid for UART sources (got source type {stype:?})",
+                ctx()
+            )));
+        }
+    }
+
+    // ── Validate merges ──
+    let mut merge_names: HashSet<String> = HashSet::new();
+    for (i, merge) in config.merges.iter().enumerate() {
+        let ctx = || format!("merges[{i}]");
+
+        if merge.name.is_empty() {
+            return Err(ConfigError::validation(format!(
+                "{}.name must be non-empty",
+                ctx()
+            )));
+        }
+        if source_names.contains(&merge.name) {
+            return Err(ConfigError::validation(format!(
+                "{}.name {:?} collides with an existing source name",
+                ctx(),
+                merge.name
+            )));
+        }
+        if !merge_names.insert(merge.name.clone()) {
+            return Err(ConfigError::validation(format!(
+                "{}.name duplicate: {:?}",
+                ctx(),
+                merge.name
+            )));
+        }
+        if merge.of.len() < 2 {
+            return Err(ConfigError::validation(format!(
+                "{}.of must list at least 2 source names",
+                ctx()
+            )));
+        }
+        let mut seen = HashSet::new();
+        for name in &merge.of {
+            if !source_names.contains(name) {
+                return Err(ConfigError::validation(format!(
+                    "{}.of references unknown source: {name:?}",
+                    ctx()
+                )));
+            }
+            if !seen.insert(name.clone()) {
+                return Err(ConfigError::validation(format!(
+                    "{}.of lists {name:?} more than once",
+                    ctx()
+                )));
+            }
         }
     }
 
@@ -243,7 +297,7 @@ fn validate_config(config: &mut AppConfig, _config_path: &Path) -> Result<(), Co
 
         for (j, pane) in tab.panes.iter().enumerate() {
             let pane_source = pane.source_name();
-            if !source_names.contains(pane_source) {
+            if !source_names.contains(pane_source) && !merge_names.contains(pane_source) {
                 return Err(ConfigError::validation(format!(
                     "{}.panes[{j}] unknown source: {pane_source:?}",
                     ctx()
@@ -394,6 +448,102 @@ tabs:
         std::fs::write(&path, yaml).unwrap();
         let err = load_config(&path).unwrap_err().to_string();
         assert!(err.contains("inject_port was removed"), "{err}");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn merge_config_parses_and_pane_can_reference_it() {
+        let yaml = r#"
+version: 1
+sources:
+  - name: MCU_LINK_TX
+    type: uart
+    port: /dev/ttyUSB0
+  - name: MCU_LINK_RX
+    type: uart
+    port: /dev/ttyUSB1
+merges:
+  - name: MCU_LINK
+    label: MCU Link
+    of: [MCU_LINK_TX, MCU_LINK_RX]
+tabs:
+  - label: T
+    panes: [MCU_LINK]
+"#;
+        let path = std::env::temp_dir().join("merge-valid-test.yml");
+        std::fs::write(&path, yaml).unwrap();
+        let cfg = load_config(&path).unwrap();
+        assert_eq!(cfg.merges.len(), 1);
+        assert_eq!(cfg.merges[0].of, vec!["MCU_LINK_TX", "MCU_LINK_RX"]);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn merge_name_colliding_with_source_is_rejected() {
+        let yaml = r#"
+version: 1
+sources:
+  - name: DUT
+    type: udp
+    port: 6000
+  - name: OTHER
+    type: udp
+    port: 6001
+merges:
+  - name: DUT
+    of: [DUT, OTHER]
+tabs:
+  - label: T
+    panes: [DUT]
+"#;
+        let path = std::env::temp_dir().join("merge-collide-test.yml");
+        std::fs::write(&path, yaml).unwrap();
+        let err = load_config(&path).unwrap_err().to_string();
+        assert!(err.contains("collides with an existing source name"), "{err}");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn merge_of_unknown_source_is_rejected() {
+        let yaml = r#"
+version: 1
+sources:
+  - name: DUT
+    type: udp
+    port: 6000
+merges:
+  - name: MERGED
+    of: [DUT, GHOST]
+tabs:
+  - label: T
+    panes: [DUT]
+"#;
+        let path = std::env::temp_dir().join("merge-unknown-source-test.yml");
+        std::fs::write(&path, yaml).unwrap();
+        let err = load_config(&path).unwrap_err().to_string();
+        assert!(err.contains("unknown source"), "{err}");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn merge_of_with_fewer_than_two_sources_is_rejected() {
+        let yaml = r#"
+version: 1
+sources:
+  - name: DUT
+    type: udp
+    port: 6000
+merges:
+  - name: MERGED
+    of: [DUT]
+tabs:
+  - label: T
+    panes: [DUT]
+"#;
+        let path = std::env::temp_dir().join("merge-too-few-test.yml");
+        std::fs::write(&path, yaml).unwrap();
+        let err = load_config(&path).unwrap_err().to_string();
+        assert!(err.contains("at least 2 source names"), "{err}");
         std::fs::remove_file(&path).ok();
     }
 

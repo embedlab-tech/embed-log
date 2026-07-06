@@ -43,6 +43,23 @@ install install_dir="/usr/local/bin": build
     echo "Installed embed-log to $dest"
     "$dest" --version
 
+# Remove the installed embed-log CLI.
+# Defaults to /usr/local/bin. Override: just uninstall /opt/homebrew/bin
+uninstall install_dir="/usr/local/bin":
+    #!/usr/bin/env sh
+    set -eu
+    dest="{{install_dir}}/embed-log"
+    if [ ! -e "$dest" ]; then
+      echo "Nothing to uninstall at $dest"
+      exit 0
+    fi
+    if [ -w "{{install_dir}}" ]; then
+      rm -f "$dest"
+    else
+      sudo rm -f "$dest"
+    fi
+    echo "Removed $dest"
+
 # Run embed-log in one of four modes: web, headless, tui, desktop.
 # Examples: just run / just run headless demo.yml / just run tui embed-log.yml / just run desktop embed-log.yml
 run mode="web" cfg=config:

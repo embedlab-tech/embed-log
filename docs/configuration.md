@@ -133,7 +133,7 @@ Common optional keys:
 | Key | Notes |
 | --- | --- |
 | `label` | Friendly UI label. Defaults to `name`. |
-| `parser.type` | `text` or `cbor-datagram`. |
+| `parser.type` | `text`, `cbor-datagram`, or `slip-coap`. |
 
 ### UDP source
 
@@ -176,6 +176,23 @@ sources:
 ```
 
 `port` must be a string. The runtime opens the port through the Rust `serialport` crate.
+
+### UART SLIP/CoAP source
+
+```yaml
+sources:
+  - name: COAP_UART
+    label: CoAP UART
+    type: uart
+    port: /dev/ttyUSB2
+    baudrate: 115200
+    parser:
+      type: slip-coap
+```
+
+For device-to-device UART links that carry SLIP-framed UDP datagrams
+encapsulating CoAP messages. Decodes each SLIP frame into a `[dir] t:CON c:GET i:1234 {token} [opts] :: data:N`
+line. `slip-coap` is valid only for UART sources.
 
 ### File source
 
@@ -273,7 +290,53 @@ Validation rules:
 
 - tab label must be non-empty
 - each tab must have 1 or 2 panes
-- every pane must reference an existing source name
+- every pane must reference an existing source name (or a `merges[].name`, see below)
+
+## `merges`
+
+A merge is a virtual pseudo-source that interleaves two or more sources'
+entries into a single stream, each line tagged with its origin source's
+label. Useful when two UART lines (e.g. a bidirectional MCU-to-MCU link's TX
+and RX taps) read more naturally as one chronological conversation than as
+side-by-side panes.
+
+```yaml
+sources:
+  - name: LINK_TX
+    type: uart
+    port: /dev/ttyUSB2
+    parser:
+      type: slip-coap
+  - name: LINK_RX
+    type: uart
+    port: /dev/ttyUSB3
+    parser:
+      type: slip-coap
+
+merges:
+  - name: LINK
+    label: Link (merged)   # optional, defaults to `name`
+    of: [LINK_TX, LINK_RX]
+
+tabs:
+  - label: Link
+    panes: [LINK]           # reference the merge like any other source
+```
+
+A merged line reads as `LINK_TX: <original message>` — prefixed with the
+origin source's label so interleaved lines stay distinguishable. The
+constituent sources (`LINK_TX`, `LINK_RX`) are untouched: they keep writing
+their own unprefixed per-source log files and can still be used in other
+panes/tabs at the same time.
+
+Validation rules:
+
+- `merges` is optional; omitting it changes nothing.
+- `name` must be non-empty, unique, and not collide with any source name.
+- `of` must list at least 2 existing, distinct source names.
+
+Lines interleave in arrival order (not by parsed in-message timestamp) —
+correct for live sources, since entries really do arrive in real time.
 
 ## Frontend plugins
 

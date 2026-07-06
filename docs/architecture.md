@@ -129,6 +129,13 @@ writer task
 | `file` | `sources::file::FileSource` | Creates file if missing, watches parent directory with `notify`, polls/appends from current end. |
 | `network_capture` | `sources::network::NetworkCaptureSource` | Supports `network_backend: mock` plus `network_backend: pcap` for simplified UDP packet capture with kernel BPF filters. |
 
+`merges` (config-only, no `sources::` implementation) declares virtual
+pseudo-sources: `runtime::server` taps each constituent source's reader with
+a small relay (`relay_to_writer_and_merges`) that forwards a copy, tagged
+with its origin label, into the merge's own writer pipeline — reusing the
+same `run_writer`/broadcast/replay/session-log machinery as a real source.
+See `docs/configuration.md#merges`.
+
 ## Parsers
 
 ```text
@@ -139,8 +146,9 @@ bytes/datagram ──▶ StreamParser::feed(&[u8]) ──▶ Vec<String>
 | --- | --- | --- |
 | `text` | UART, UDP, file | UTF-8-ish line splitting with buffering. |
 | `cbor-datagram` | UDP only | Decodes a CBOR datagram and formats key/value output. |
+| `slip-coap` | UART only | Decodes SLIP-framed UDP datagrams carrying CoAP messages (device-to-device links). |
 
-Config validation rejects `cbor-datagram` on non-UDP sources.
+Config validation rejects `cbor-datagram` on non-UDP sources and `slip-coap` on non-UART sources.
 
 ## HTTP/WebSocket API
 

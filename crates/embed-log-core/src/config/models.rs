@@ -171,6 +171,16 @@ pub struct TabConfig {
     pub panes: Vec<PaneConfig>,
 }
 
+/// A virtual pseudo-source that interleaves other sources' entries into one
+/// stream, each line tagged with its origin source's label. Referenced from
+/// `tabs[].panes` exactly like a real source name.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MergeConfig {
+    pub name: String,
+    pub label: Option<String>,
+    pub of: Vec<String>,
+}
+
 /// Server settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
@@ -258,6 +268,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub tabs: Vec<TabConfig>,
     #[serde(default)]
+    pub merges: Vec<MergeConfig>,
+    #[serde(default)]
     pub server: ServerConfig,
     #[serde(default)]
     pub logs: LogsConfig,
@@ -279,6 +291,7 @@ impl Default for AppConfig {
             version: 1,
             sources: Vec::new(),
             tabs: Vec::new(),
+            merges: Vec::new(),
             server: ServerConfig::default(),
             logs: LogsConfig::default(),
             baudrate: Self::default_baudrate(),

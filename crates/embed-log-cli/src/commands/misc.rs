@@ -12,11 +12,19 @@ use embed_log_core::session::SessionExporter;
 use crate::demo_config::DEMO_CONFIG;
 
 /// `embed-log version` — package version plus optional config summary.
+///
+/// `git_sha`/`build_time` come from `build.rs` and don't change between
+/// `cargo build` invocations unless the source actually changed — the
+/// quickest way to tell a stale installed binary from a freshly built one.
 pub(crate) fn cmd_version(config_path: Option<&Path>, json: bool) -> Result<()> {
     let version = env!("CARGO_PKG_VERSION");
+    let git_sha = env!("EMBED_LOG_GIT_SHA");
+    let build_time = env!("EMBED_LOG_BUILD_TIME");
     if json {
         let mut out = serde_json::json!({
             "version": version,
+            "git_sha": git_sha,
+            "build_time": build_time,
         });
         if let Some(path) = config_path {
             match load_config(path) {
@@ -34,7 +42,7 @@ pub(crate) fn cmd_version(config_path: Option<&Path>, json: bool) -> Result<()> 
         }
         println!("{}", serde_json::to_string_pretty(&out)?);
     } else {
-        println!("embed-log {version}");
+        println!("embed-log {version} ({git_sha}, built {build_time})");
         if let Some(path) = config_path {
             match load_config(path) {
                 Ok(cfg) => {

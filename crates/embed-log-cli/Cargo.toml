@@ -33,3 +33,6 @@ pcap-capture = ["embed-log-core/pcap-capture"]
 
 [dev-dependencies]
 serde_yaml.workspace = true
+
+[build-dependencies]
+chrono.workspace = true
