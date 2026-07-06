@@ -13,6 +13,7 @@ pub struct UdpSource {
     name: String,
     port: u16,
     parser_type: String,
+    parser_database: Option<String>,
 }
 
 impl UdpSource {
@@ -29,7 +30,14 @@ impl UdpSource {
             name: name.into(),
             port,
             parser_type: parser_type.into(),
+            parser_database: None,
         }
+    }
+
+    /// Attach the `parser.database` path (used by e.g. `zephyr-dict`).
+    pub fn with_parser_database(mut self, database: Option<String>) -> Self {
+        self.parser_database = database;
+        self
     }
 }
 
@@ -40,7 +48,7 @@ impl LogSource for UdpSource {
         info!("[{}] UDP listening on :{}", self.name, self.port);
 
         let mut buf = vec![0u8; 65536];
-        let mut parser = create_parser(&self.parser_type);
+        let mut parser = create_parser(&self.parser_type, self.parser_database.as_deref());
         let is_text_parser = self.parser_type == "text";
 
         loop {

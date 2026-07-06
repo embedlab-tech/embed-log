@@ -9,6 +9,10 @@ use crate::models::TimestampMode;
 pub struct ParserConfig {
     #[serde(rename = "type", default = "ParserConfig::default_type")]
     pub parser_type: String,
+    /// Path to a Zephyr dictionary-logging `database.json`. Required when
+    /// `type: zephyr-dict`; ignored otherwise.
+    #[serde(default)]
+    pub database: Option<String>,
 }
 
 impl ParserConfig {
@@ -21,6 +25,7 @@ impl Default for ParserConfig {
     fn default() -> Self {
         Self {
             parser_type: "text".to_string(),
+            database: None,
         }
     }
 }

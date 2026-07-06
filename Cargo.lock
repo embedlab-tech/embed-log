@@ -1018,6 +1018,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "base64 0.22.1",
  "chrono",
  "ciborium",
  "futures",
@@ -1032,6 +1033,7 @@ dependencies = [
  "serde_yaml",
  "serialport",
  "slug",
+ "sprintf",
  "thiserror 2.0.18",
  "tokio",
  "tower-http",
@@ -3967,6 +3969,15 @@ dependencies = [
  "gobject-sys",
  "libc",
  "system-deps",
+]
+
+[[package]]
+name = "sprintf"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0e59842c3aac5c7901ea11bbb02e60e5d67263b43d4361dec9303cca8e764eb"
+dependencies = [
+ "thiserror 2.0.18",
 ]
 
 [[package]]

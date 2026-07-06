@@ -133,7 +133,8 @@ Common optional keys:
 | Key | Notes |
 | --- | --- |
 | `label` | Friendly UI label. Defaults to `name`. |
-| `parser.type` | `text`, `cbor-datagram`, or `slip-coap`. |
+| `parser.type` | `text`, `cbor-datagram`, `slip-coap`, or `zephyr-dict`. |
+| `parser.database` | Path to a Zephyr dictionary-logging `database.json`. Required when `parser.type: zephyr-dict`. |
 
 ### UDP source
 
@@ -193,6 +194,37 @@ sources:
 For device-to-device UART links that carry SLIP-framed UDP datagrams
 encapsulating CoAP messages. Decodes each SLIP frame into a `[dir] t:CON c:GET i:1234 {token} [opts] :: data:N`
 line. `slip-coap` is valid only for UART sources.
+
+### Zephyr dictionary-logging source
+
+```yaml
+sources:
+  - name: DUT
+    label: DUT (dict log)
+    type: uart
+    port: /dev/ttyUSB0
+    baudrate: 115200
+    parser:
+      type: zephyr-dict
+      database: build/zephyr/log_dictionary.json
+```
+
+Decodes Zephyr's [dictionary-based logging](https://docs.zephyrproject.org/latest/services/logging/index.html#dictionary-based-logging)
+binary format — ports the wire format read by Zephyr's own
+`scripts/logging/dictionary` Python tools. `parser.database` must point at
+the `database.json` generated for that build (paths, format strings, and
+argument layout are tied to one specific firmware build — decoding logs from
+a different build's binary than the `database.json` was generated for will
+produce garbage or decode errors). Valid for any source type (UART is the
+common case, but `file`/`udp` work too for offline/captured binary streams).
+
+Decoded lines read like `[  <timestamp>] <inf> <source>: <message>`, matching
+the reference tool's output. Supports database format version 3 only (the
+current Zephyr default since 2022); versions 1/2 and the MIPI Sys-T backend
+are not supported. Dynamic field width/precision (`%*d`) in a log's format
+string isn't supported — matches a known limitation in the upstream Python
+parser — the raw format string is shown instead of a rendered value for
+those messages.
 
 ### File source
 

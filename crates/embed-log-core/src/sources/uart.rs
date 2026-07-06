@@ -30,6 +30,7 @@ enum PortSource {
 pub struct UartSource {
     name: String,
     parser_type: String,
+    parser_database: Option<String>,
     port_source: PortSource,
     tx_rx: Option<mpsc::Receiver<TxCommand>>,
 }
@@ -48,6 +49,7 @@ impl UartSource {
         Self {
             name: name.into(),
             parser_type: parser_type.into(),
+            parser_database: None,
             port_source: PortSource::Path {
                 port_path: port_path.into(),
                 baudrate,
@@ -68,6 +70,7 @@ impl UartSource {
         Self {
             name: name.into(),
             parser_type: parser_type.into(),
+            parser_database: None,
             port_source: PortSource::PreOpened {
                 port: Arc::new(tokio::sync::Mutex::new(Some(port))),
             },
@@ -78,6 +81,12 @@ impl UartSource {
     /// Attach a TX command receiver so this source can accept writes.
     pub fn with_tx_receiver(mut self, rx: mpsc::Receiver<TxCommand>) -> Self {
         self.tx_rx = Some(rx);
+        self
+    }
+
+    /// Attach the `parser.database` path (used by e.g. `zephyr-dict`).
+    pub fn with_parser_database(mut self, database: Option<String>) -> Self {
+        self.parser_database = database;
         self
     }
 
@@ -160,6 +169,7 @@ impl LogSource for UartSource {
         let mut this = self;
         let name = this.name.clone();
         let parser_type = this.parser_type.clone();
+        let parser_database = this.parser_database.clone();
 
         // Obtain the serial port (open by path or use pre-opened).
         let port = this.get_port().await?;
@@ -238,7 +248,7 @@ impl LogSource for UartSource {
             });
         }
 
-        let mut parser = create_parser(&parser_type);
+        let mut parser = create_parser(&parser_type, parser_database.as_deref());
 
         loop {
             // Clone the port under the lock, then release before the blocking read.
@@ -265,7 +275,7 @@ impl LogSource for UartSource {
                 Err(e) => {
                     this.reconnect_port(&port, &format!("clone error: {e}"))
                         .await?;
-                    parser = create_parser(&parser_type);
+                    parser = create_parser(&parser_type, parser_database.as_deref());
                     continue;
                 }
             };
@@ -281,7 +291,7 @@ impl LogSource for UartSource {
                 Err(e) => {
                     this.reconnect_port(&port, &format!("read error: {e}"))
                         .await?;
-                    parser = create_parser(&parser_type);
+                    parser = create_parser(&parser_type, parser_database.as_deref());
                     continue;
                 }
             };

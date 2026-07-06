@@ -594,6 +594,7 @@ impl LogServer {
                 .unwrap_or_else(|| src_cfg.name.clone());
 
             let parser_type = src_cfg.parser.parser_type.clone();
+            let parser_database = src_cfg.parser.database.clone();
 
             let source: Box<dyn LogSource> = match stype.as_str() {
                 "uart" => {
@@ -608,12 +609,10 @@ impl LogServer {
                         }
                     };
                     let baudrate = src_cfg.baudrate.unwrap_or(self.config.baudrate);
-                    Box::new(UartSource::new_with_parser(
-                        &src_cfg.name,
-                        port_path,
-                        baudrate,
-                        &parser_type,
-                    ))
+                    Box::new(
+                        UartSource::new_with_parser(&src_cfg.name, port_path, baudrate, &parser_type)
+                            .with_parser_database(parser_database),
+                    )
                 }
                 "udp" => {
                     let port = match &src_cfg.port {
@@ -626,11 +625,10 @@ impl LogServer {
                             continue;
                         }
                     };
-                    Box::new(UdpSource::new_with_parser(
-                        &src_cfg.name,
-                        port,
-                        &parser_type,
-                    ))
+                    Box::new(
+                        UdpSource::new_with_parser(&src_cfg.name, port, &parser_type)
+                            .with_parser_database(parser_database),
+                    )
                 }
                 "file" => {
                     let file_path = match &src_cfg.port {
@@ -643,11 +641,10 @@ impl LogServer {
                             continue;
                         }
                     };
-                    Box::new(FileSource::new_with_parser(
-                        &src_cfg.name,
-                        file_path,
-                        &parser_type,
-                    ))
+                    Box::new(
+                        FileSource::new_with_parser(&src_cfg.name, file_path, &parser_type)
+                            .with_parser_database(parser_database),
+                    )
                 }
                 "network_capture" => {
                     let interface = src_cfg.interface.clone().ok_or_else(|| {

@@ -205,9 +205,12 @@ fn validate_config(config: &mut AppConfig, _config_path: &Path) -> Result<(), Co
 
         // Validate parser type
         let parser_type = &src.parser.parser_type;
-        if parser_type != "text" && parser_type != "cbor-datagram" && parser_type != "slip-coap" {
+        if !matches!(
+            parser_type.as_str(),
+            "text" | "cbor-datagram" | "slip-coap" | "zephyr-dict"
+        ) {
             return Err(ConfigError::validation(format!(
-                "{}.parser.type unsupported: {parser_type:?} (use 'text', 'cbor-datagram', or 'slip-coap')",
+                "{}.parser.type unsupported: {parser_type:?} (use 'text', 'cbor-datagram', 'slip-coap', or 'zephyr-dict')",
                 ctx()
             )));
         }
@@ -222,6 +225,15 @@ fn validate_config(config: &mut AppConfig, _config_path: &Path) -> Result<(), Co
                 "{}.parser.type 'slip-coap' is only valid for UART sources (got source type {stype:?})",
                 ctx()
             )));
+        }
+        if parser_type == "zephyr-dict" {
+            let db = src.parser.database.as_deref().unwrap_or("");
+            if db.trim().is_empty() {
+                return Err(ConfigError::validation(format!(
+                    "{}.parser.database is required for parser.type 'zephyr-dict'",
+                    ctx()
+                )));
+            }
         }
     }
 
@@ -544,6 +556,53 @@ tabs:
         std::fs::write(&path, yaml).unwrap();
         let err = load_config(&path).unwrap_err().to_string();
         assert!(err.contains("at least 2 source names"), "{err}");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn zephyr_dict_parser_parses_with_database_path() {
+        let yaml = r#"
+version: 1
+sources:
+  - name: DUT
+    type: uart
+    port: /dev/ttyUSB0
+    parser:
+      type: zephyr-dict
+      database: /tmp/database.json
+tabs:
+  - label: T
+    panes: [DUT]
+"#;
+        let path = std::env::temp_dir().join("zephyr-dict-valid-test.yml");
+        std::fs::write(&path, yaml).unwrap();
+        let cfg = load_config(&path).unwrap();
+        assert_eq!(cfg.sources[0].parser.parser_type, "zephyr-dict");
+        assert_eq!(
+            cfg.sources[0].parser.database.as_deref(),
+            Some("/tmp/database.json")
+        );
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn zephyr_dict_parser_without_database_is_rejected() {
+        let yaml = r#"
+version: 1
+sources:
+  - name: DUT
+    type: uart
+    port: /dev/ttyUSB0
+    parser:
+      type: zephyr-dict
+tabs:
+  - label: T
+    panes: [DUT]
+"#;
+        let path = std::env::temp_dir().join("zephyr-dict-missing-db-test.yml");
+        std::fs::write(&path, yaml).unwrap();
+        let err = load_config(&path).unwrap_err().to_string();
+        assert!(err.contains("parser.database is required"), "{err}");
         std::fs::remove_file(&path).ok();
     }
 
