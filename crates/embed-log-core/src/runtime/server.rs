@@ -603,8 +603,7 @@ impl LogServer {
                 .clone()
                 .unwrap_or_else(|| src_cfg.name.clone());
 
-            let parser_type = src_cfg.parser.parser_type.clone();
-            let parser_database = src_cfg.parser.database.clone();
+            let parser = src_cfg.parser.clone();
 
             let source: Box<dyn LogSource> = match stype.as_str() {
                 "uart" => {
@@ -620,8 +619,8 @@ impl LogServer {
                     };
                     let baudrate = src_cfg.baudrate.unwrap_or(self.config.baudrate);
                     Box::new(
-                        UartSource::new_with_parser(&src_cfg.name, port_path, baudrate, &parser_type)
-                            .with_parser_database(parser_database),
+                        UartSource::new_with_parser(&src_cfg.name, port_path, baudrate, &parser.parser_type)
+                            .with_parser(parser),
                     )
                 }
                 "udp" => {
@@ -636,8 +635,8 @@ impl LogServer {
                         }
                     };
                     Box::new(
-                        UdpSource::new_with_parser(&src_cfg.name, port, &parser_type)
-                            .with_parser_database(parser_database),
+                        UdpSource::new_with_parser(&src_cfg.name, port, &parser.parser_type)
+                            .with_parser(parser),
                     )
                 }
                 "file" => {
@@ -652,8 +651,8 @@ impl LogServer {
                         }
                     };
                     Box::new(
-                        FileSource::new_with_parser(&src_cfg.name, file_path, &parser_type)
-                            .with_parser_database(parser_database),
+                        FileSource::new_with_parser(&src_cfg.name, file_path, &parser.parser_type)
+                            .with_parser(parser),
                     )
                 }
                 "network_capture" => {
