@@ -5,6 +5,7 @@ use tokio::sync::mpsc;
 use tracing::{info, warn};
 
 use super::traits::LogSource;
+use crate::config::models::ParserConfig;
 use crate::models::LogEntry;
 use crate::parsers::create_parser;
 
@@ -14,8 +15,7 @@ use crate::parsers::create_parser;
 pub struct FileSource {
     name: String,
     file_path: String,
-    parser_type: String,
-    parser_database: Option<String>,
+    parser: ParserConfig,
 }
 
 impl FileSource {
@@ -31,14 +31,21 @@ impl FileSource {
         Self {
             name: name.into(),
             file_path: file_path.into(),
-            parser_type: parser_type.into(),
-            parser_database: None,
+            parser: ParserConfig {
+                parser_type: parser_type.into(),
+                ..ParserConfig::default()
+            },
         }
+    }
+
+    pub fn with_parser(mut self, parser: ParserConfig) -> Self {
+        self.parser = parser;
+        self
     }
 
     /// Attach the `parser.database` path (used by e.g. `zephyr-dict`).
     pub fn with_parser_database(mut self, database: Option<String>) -> Self {
-        self.parser_database = database;
+        self.parser.database = database;
         self
     }
 }
@@ -76,7 +83,7 @@ impl LogSource for FileSource {
 
         // Read from current end of file.
         let mut offset = std::fs::metadata(&path)?.len();
-        let mut parser = create_parser(&self.parser_type, self.parser_database.as_deref());
+        let mut parser = create_parser(&self.parser);
         let mut poll = tokio::time::interval(std::time::Duration::from_millis(250));
 
         loop {
@@ -99,7 +106,7 @@ impl LogSource for FileSource {
                 // File was truncated — reset.
                 if new_len < offset {
                     offset = 0;
-                    parser = create_parser(&self.parser_type, self.parser_database.as_deref());
+                    parser = create_parser(&self.parser);
                 }
                 continue;
             }

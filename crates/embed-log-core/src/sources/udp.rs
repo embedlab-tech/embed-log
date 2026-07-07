@@ -5,6 +5,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
 use super::traits::LogSource;
+use crate::config::models::ParserConfig;
 use crate::models::LogEntry;
 use crate::parsers::create_parser;
 
@@ -12,8 +13,7 @@ use crate::parsers::create_parser;
 pub struct UdpSource {
     name: String,
     port: u16,
-    parser_type: String,
-    parser_database: Option<String>,
+    parser: ParserConfig,
 }
 
 impl UdpSource {
@@ -29,14 +29,21 @@ impl UdpSource {
         Self {
             name: name.into(),
             port,
-            parser_type: parser_type.into(),
-            parser_database: None,
+            parser: ParserConfig {
+                parser_type: parser_type.into(),
+                ..ParserConfig::default()
+            },
         }
+    }
+
+    pub fn with_parser(mut self, parser: ParserConfig) -> Self {
+        self.parser = parser;
+        self
     }
 
     /// Attach the `parser.database` path (used by e.g. `zephyr-dict`).
     pub fn with_parser_database(mut self, database: Option<String>) -> Self {
-        self.parser_database = database;
+        self.parser.database = database;
         self
     }
 }
@@ -48,8 +55,8 @@ impl LogSource for UdpSource {
         info!("[{}] UDP listening on :{}", self.name, self.port);
 
         let mut buf = vec![0u8; 65536];
-        let mut parser = create_parser(&self.parser_type, self.parser_database.as_deref());
-        let is_text_parser = self.parser_type == "text";
+        let mut parser = create_parser(&self.parser);
+        let is_text_parser = self.parser.parser_type == "text";
 
         loop {
             let (len, _addr) = match socket.recv_from(&mut buf).await {

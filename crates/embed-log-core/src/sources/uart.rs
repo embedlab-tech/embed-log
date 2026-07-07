@@ -8,6 +8,7 @@ use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 use super::traits::{LogSource, TxCommand};
+use crate::config::models::ParserConfig;
 use crate::models::LogEntry;
 use crate::parsers::create_parser;
 
@@ -29,8 +30,7 @@ enum PortSource {
 /// `TX::<origin>` log entry is recorded after successful write.
 pub struct UartSource {
     name: String,
-    parser_type: String,
-    parser_database: Option<String>,
+    parser: ParserConfig,
     port_source: PortSource,
     tx_rx: Option<mpsc::Receiver<TxCommand>>,
 }
@@ -48,8 +48,10 @@ impl UartSource {
     ) -> Self {
         Self {
             name: name.into(),
-            parser_type: parser_type.into(),
-            parser_database: None,
+            parser: ParserConfig {
+                parser_type: parser_type.into(),
+                ..ParserConfig::default()
+            },
             port_source: PortSource::Path {
                 port_path: port_path.into(),
                 baudrate,
@@ -69,8 +71,10 @@ impl UartSource {
     ) -> Self {
         Self {
             name: name.into(),
-            parser_type: parser_type.into(),
-            parser_database: None,
+            parser: ParserConfig {
+                parser_type: parser_type.into(),
+                ..ParserConfig::default()
+            },
             port_source: PortSource::PreOpened {
                 port: Arc::new(tokio::sync::Mutex::new(Some(port))),
             },
@@ -84,9 +88,14 @@ impl UartSource {
         self
     }
 
+    pub fn with_parser(mut self, parser: ParserConfig) -> Self {
+        self.parser = parser;
+        self
+    }
+
     /// Attach the `parser.database` path (used by e.g. `zephyr-dict`).
     pub fn with_parser_database(mut self, database: Option<String>) -> Self {
-        self.parser_database = database;
+        self.parser.database = database;
         self
     }
 
@@ -168,8 +177,7 @@ impl LogSource for UartSource {
     async fn run(self: Box<Self>, tx: mpsc::Sender<LogEntry>) -> Result<()> {
         let mut this = self;
         let name = this.name.clone();
-        let parser_type = this.parser_type.clone();
-        let parser_database = this.parser_database.clone();
+        let parser_cfg = this.parser.clone();
 
         // Obtain the serial port (open by path or use pre-opened).
         let port = this.get_port().await?;
@@ -248,7 +256,7 @@ impl LogSource for UartSource {
             });
         }
 
-        let mut parser = create_parser(&parser_type, parser_database.as_deref());
+        let mut parser = create_parser(&parser_cfg);
 
         loop {
             // Clone the port under the lock, then release before the blocking read.
@@ -275,7 +283,7 @@ impl LogSource for UartSource {
                 Err(e) => {
                     this.reconnect_port(&port, &format!("clone error: {e}"))
                         .await?;
-                    parser = create_parser(&parser_type, parser_database.as_deref());
+                    parser = create_parser(&parser_cfg);
                     continue;
                 }
             };
@@ -291,7 +299,7 @@ impl LogSource for UartSource {
                 Err(e) => {
                     this.reconnect_port(&port, &format!("read error: {e}"))
                         .await?;
-                    parser = create_parser(&parser_type, parser_database.as_deref());
+                    parser = create_parser(&parser_cfg);
                     continue;
                 }
             };

@@ -6,11 +6,20 @@ use std::path::{Path, PathBuf};
 /// unchanged; a relative one resolves against the config file's parent
 /// directory. Kept here so the CLI and Tauri frontends can't drift apart.
 pub fn resolve_logs_root(config_path: &Path, logs_dir: &str) -> PathBuf {
-    let logs = PathBuf::from(logs_dir);
-    if logs.is_absolute() {
-        logs
+    resolve_relative_to_config(config_path, logs_dir)
+}
+
+/// Resolve a config-relative path (e.g. `parser.database` for zephyr-dict).
+pub fn resolve_relative_to_config(config_path: &Path, rel: &str) -> PathBuf {
+    let path = PathBuf::from(rel);
+    if path.is_absolute() {
+        path
     } else {
-        config_path.parent().unwrap_or(Path::new(".")).join(logs)
+        let joined = config_path
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join(path);
+        joined.canonicalize().unwrap_or(joined)
     }
 }
 

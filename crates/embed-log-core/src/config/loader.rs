@@ -68,11 +68,11 @@ fn reject_removed_fields(raw: &serde_yaml::Value) -> Result<(), ConfigError> {
 }
 
 /// Validate the parsed config, applying defaults and checking constraints.
-fn validate_config(config: &mut AppConfig, _config_path: &Path) -> Result<(), ConfigError> {
+fn validate_config(config: &mut AppConfig, config_path: &Path) -> Result<(), ConfigError> {
     let mut source_names = HashSet::new();
 
     // ── Validate sources ──
-    for (i, src) in config.sources.iter().enumerate() {
+    for (i, src) in config.sources.iter_mut().enumerate() {
         let ctx = || format!("sources[{i}]");
 
         if src.name.is_empty() {
@@ -207,10 +207,10 @@ fn validate_config(config: &mut AppConfig, _config_path: &Path) -> Result<(), Co
         let parser_type = &src.parser.parser_type;
         if !matches!(
             parser_type.as_str(),
-            "text" | "cbor-datagram" | "slip-coap" | "zephyr-dict"
+            "text" | "cbor-datagram" | "slip-coap" | "zephyr-dict" | "gwl-dict"
         ) {
             return Err(ConfigError::validation(format!(
-                "{}.parser.type unsupported: {parser_type:?} (use 'text', 'cbor-datagram', 'slip-coap', or 'zephyr-dict')",
+                "{}.parser.type unsupported: {parser_type:?} (use 'text', 'cbor-datagram', 'slip-coap', 'zephyr-dict', or 'gwl-dict')",
                 ctx()
             )));
         }
@@ -226,11 +226,27 @@ fn validate_config(config: &mut AppConfig, _config_path: &Path) -> Result<(), Co
                 ctx()
             )));
         }
-        if parser_type == "zephyr-dict" {
+        if parser_type == "zephyr-dict" || parser_type == "gwl-dict" {
             let db = src.parser.database.as_deref().unwrap_or("");
             if db.trim().is_empty() {
                 return Err(ConfigError::validation(format!(
-                    "{}.parser.database is required for parser.type 'zephyr-dict'",
+                    "{}.parser.database is required for parser.type '{parser_type}'",
+                    ctx()
+                )));
+            }
+            let resolved = super::paths::resolve_relative_to_config(config_path, db);
+            src.parser.database = Some(resolved.display().to_string());
+        }
+        if let Some(wire_format) = src.parser.wire_format.as_deref() {
+            if !matches!(wire_format, "binary" | "hex") {
+                return Err(ConfigError::validation(format!(
+                    "{}.parser.wire_format unsupported: {wire_format:?} (use 'binary' or 'hex')",
+                    ctx()
+                )));
+            }
+            if parser_type != "zephyr-dict" {
+                return Err(ConfigError::validation(format!(
+                    "{}.parser.wire_format is only valid for parser.type 'zephyr-dict'",
                     ctx()
                 )));
             }
