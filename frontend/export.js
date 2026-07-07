@@ -36,7 +36,7 @@ export async function exportHtmlSnapshot(options = {}) {
             "profile.js", "renderPane.js", "renderToolbar.js", "viewer.css",
             "pluginRuntime.js", "state.js", "themes.js", "settings.js", "fontsize.js",
             "ansi.js", "lines.js", "tabs.js", "tabcreate.js",
-            "ui.js", "export.js", "selection.js", "events.js", "tsparse.js", "import.js",
+            "ui.js", "export.js", "postprocess.js", "selection.js", "events.js", "tsparse.js", "import.js",
         ];
 
 
@@ -66,7 +66,7 @@ export async function exportHtmlSnapshot(options = {}) {
             return a.endsWith(".js") ? _escJs(_stripModuleSyntax(src)) : src;
         }));
         const [profileJs, renderPaneJs, renderToolbarJs, css, pluginRuntimeJs, stateJs, themesJs, settingsJs, fontsizeJs,
-               ansiJs, linesJs, tabsJs, tabcreateJs, uiJs, exportJs, selectionJs, eventsJs, tsparseJs, importJs] = texts;
+               ansiJs, linesJs, tabsJs, tabcreateJs, uiJs, exportJs, postprocessJs, selectionJs, eventsJs, tsparseJs, importJs] = texts;
 
 
         // ------------------------------------------------------------------
@@ -299,6 +299,7 @@ ${pluginScriptTags}
 <script>${tabcreateJs}</script>
 <script>${uiJs}</script>
 <script>${exportJs}</script>
+<script>${postprocessJs}</script>
 <script>${selectionJs}</script>
 <script>${eventsJs}</script>
 <script>${tsparseJs}</script>

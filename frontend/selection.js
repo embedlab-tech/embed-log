@@ -4,6 +4,7 @@ import { exportHtmlSnapshot } from './export.js';
 import { can } from './profile.js';
 import { switchTab } from './tabs.js';
 import { _escHtml } from './renderPane.js';
+import { denoiseMessage, elapsedTime, ShortcodeTable, estimateTokens } from './postprocess.js';
 // Line selection + copy / export actions
 //
 // Two explicit scopes (toggled per-pane overlay):
@@ -61,6 +62,36 @@ export function _selectionSetupPane(id) {
     scopeRow.appendChild(scopeExact);
     scopeRow.appendChild(scopeContext);
     scopeRow.appendChild(scopeSel);
+
+    // Copy format toggle — "Full" (default, unchanged today's behavior) vs
+    // the CLI-mirroring "Compact"/"JSON" compaction levels (postprocess.js).
+    const formatRow = document.createElement("div");
+    formatRow.className = "format-row";
+
+    const formatFull = document.createElement("button");
+    formatFull.className = "format-btn active";
+    formatFull.id = "format-full-" + id;
+    formatFull.textContent = "Full";
+    formatFull.title = "Full timestamp and source name (today's default)";
+    formatFull.addEventListener("click", e => { e.stopPropagation(); _setCopyFormat(id, "full"); });
+
+    const formatCompact = document.createElement("button");
+    formatCompact.className = "format-btn";
+    formatCompact.id = "format-compact-" + id;
+    formatCompact.textContent = "Compact";
+    formatCompact.title = "Elapsed time + source shortcode + denoised message — most token-efficient for pasting to an agent";
+    formatCompact.addEventListener("click", e => { e.stopPropagation(); _setCopyFormat(id, "compact"); });
+
+    const formatJson = document.createElement("button");
+    formatJson.className = "format-btn";
+    formatJson.id = "format-json-" + id;
+    formatJson.textContent = "JSON";
+    formatJson.title = "One compact JSON object per line";
+    formatJson.addEventListener("click", e => { e.stopPropagation(); _setCopyFormat(id, "json"); });
+
+    formatRow.appendChild(formatFull);
+    formatRow.appendChild(formatCompact);
+    formatRow.appendChild(formatJson);
 
     // Pane selector (lazily rebuilt when scope becomes context-selected)
     const paneSelector = document.createElement("div");
@@ -121,6 +152,7 @@ export function _selectionSetupPane(id) {
     actionRow.appendChild(moreDropdown);
 
     wrap.appendChild(scopeRow);
+    wrap.appendChild(formatRow);
     wrap.appendChild(paneSelector);
     wrap.appendChild(actionRow);
     body.appendChild(wrap);
@@ -177,6 +209,17 @@ function _setScope(paneId, scope) {
     _syncSelectionActions(paneId);
 }
 
+function _setCopyFormat(paneId, format) {
+    state.copyFormat = format;
+    PANES.forEach(id => {
+        ['full', 'compact', 'json'].forEach(f => {
+            const btn = document.getElementById(`format-${f}-${id}`);
+            if (btn) btn.classList.toggle('active', format === f);
+        });
+    });
+    _syncSelectionActions(paneId);
+}
+
 function _toggleMore(paneId) {
     const dd = document.getElementById("more-dropdown-" + paneId);
     if (!dd) return;
@@ -204,12 +247,15 @@ function _syncSelectionActions(paneId) {
         ? selectedCount
         : _countRangeEntries(paneId);
     wrap.classList.toggle("visible", visible);
-    wrap.querySelectorAll(".copy-btn, .scope-btn, .more-toggle").forEach(el =>
+    wrap.querySelectorAll(".copy-btn, .scope-btn, .format-btn, .more-toggle").forEach(el =>
         el.classList.toggle("visible", visible)
     );
 
     if (visible) {
-        copyBtn.textContent = `Copy (${displayCount})`;
+        // Reuses the exact formatting the real copy would produce, so the
+        // estimate can never drift from what actually ends up on the clipboard.
+        const tok = estimateTokens(_pendingCopyText(paneId));
+        copyBtn.textContent = `Copy (${displayCount}, ~${tok} tok)`;
     }
     // Scope-gate secondary actions: marker only in Exact, Export HTML only outside Exact
     const htmlBtn = document.getElementById("export-html-" + paneId);
@@ -684,6 +730,47 @@ function _escapeRegExp(str) {
     return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// "HH:MM:SS.mmm" for a line, mirroring the CLI's `clock_time()` — derived
+// from `absTs` ("MM-DD HH:MM:SS.mmm", the same field format used everywhere
+// else in this codebase), not from `line.ts` (which can already be showing
+// relative time depending on the display's timestamp mode).
+function _clockTimeOf(line) {
+    const absTs = line?.absTs;
+    if (typeof absTs === "string" && absTs.includes(" ")) {
+        return absTs.split(" ").pop();
+    }
+    return line?.ts || "";
+}
+
+// One line in the "compact" or "json" copy format (state.copyFormat) —
+// mirrors format_compact_entry/format_mini_entry in
+// crates/embed-log-cli/src/commands/sessions.rs. `codes` is shared across an
+// entire copy/download action so the same source gets the same shortcode
+// throughout one block.
+function _formatCompactedLine(line, paneId, idx, rawMessage, codes) {
+    const clock = _clockTimeOf(line);
+    const ts = elapsedTime(line, clock);
+    const code = codes.codeFor(paneId);
+    const message = denoiseMessage(rawMessage, clock);
+    if (state.copyFormat === "json") {
+        return JSON.stringify({ t: ts, s: code, i: idx, m: message });
+    }
+    return `${ts} ${code}#${idx} ${message}`;
+}
+
+// The text that _copy()/_copyContext() would actually produce right now —
+// used both for the real copy and for the live token estimate, so the
+// estimate can never drift from what's actually copied.
+function _pendingCopyText(paneId) {
+    if (state.selectionScope === "exact") {
+        const sel = state.selected[paneId];
+        if (!sel?.size) return "";
+        const indices = Array.from(sel).sort((a, b) => a - b);
+        return _formatSelectionBlock(paneId, indices, true) || "";
+    }
+    return _formatRangeRaw(_collectRangeEntries(paneId), true) || "";
+}
+
 function _selectionMessageText(entry, useRendered = false) {
     let text = (useRendered ? _lineRenderedPlain(entry.line) : _linePlain(entry.line)).trim();
     const sourcePrefix = new RegExp(`^\\[${_escapeRegExp(entry.paneId)}\\]\\s*`);
@@ -723,6 +810,10 @@ function _applyMarkerAnnotations(paneId, items) {
 
 
 function _formatRangeRaw(entries, useRendered = false) {
+    // One shared table across the whole (possibly multi-pane) block, so a
+    // source keeps the same shortcode throughout — matches the CLI's
+    // per-invocation ShortcodeTable.
+    const codes = state.copyFormat !== "full" ? new ShortcodeTable() : null;
     const parts = [];
     let currentPane = null;
     let paneItems = [];
@@ -735,10 +826,11 @@ function _formatRangeRaw(entries, useRendered = false) {
     entries.forEach(e => {
         if (e.paneId !== currentPane) flushPane();
         currentPane = e.paneId;
-        paneItems.push({
-            idx: e.idx,
-            text: `[${e.line.ts}] [${e.paneId}] ${_selectionMessageText(e, useRendered)}`,
-        });
+        const rawMessage = _selectionMessageText(e, useRendered);
+        const text = codes
+            ? _formatCompactedLine(e.line, e.paneId, e.idx, rawMessage, codes)
+            : `[${e.line.ts}] [${e.paneId}] ${rawMessage}`;
+        paneItems.push({ idx: e.idx, text });
     });
     flushPane();
     return parts.join("\n");
@@ -764,12 +856,16 @@ function _buildRangeLogData(entries) {
 }
 
 function _formatSelectionBlock(paneId, indices, useRendered = false) {
+    const codes = state.copyFormat !== "full" ? new ShortcodeTable() : null;
     const items = indices
         .map(idx => {
             const line = _selectionLine(paneId, idx);
-            return line
-                ? { idx, text: `${line.ts}  [${paneId}] ${(useRendered ? _lineRenderedPlain(line) : _linePlain(line))}` }
-                : null;
+            if (!line) return null;
+            const raw = useRendered ? _lineRenderedPlain(line) : _linePlain(line);
+            const text = codes
+                ? _formatCompactedLine(line, paneId, idx, raw, codes)
+                : `${line.ts}  [${paneId}] ${raw}`;
+            return { idx, text };
         })
         .filter(Boolean);
     return _applyMarkerAnnotations(paneId, items);
@@ -829,7 +925,7 @@ function _copyExact(paneId) {
         const btn = document.getElementById("copy-" + paneId);
         if (!btn) return;
         const prev = btn.textContent;
-        btn.textContent = "Copied";
+        btn.textContent = `Copied (~${estimateTokens(text)} tok)`;
         setTimeout(() => { btn.textContent = prev; _syncSelectionActions(paneId); }, 900);
     }).catch(() => {});
 }
@@ -842,7 +938,7 @@ function _copyContext(paneId) {
         const btn = document.getElementById("copy-" + paneId);
         if (!btn) return;
         const prev = btn.textContent;
-        btn.textContent = "Copied";
+        btn.textContent = `Copied (~${estimateTokens(text)} tok)`;
         setTimeout(() => { btn.textContent = prev; _syncSelectionActions(paneId); }, 900);
     }).catch(() => {});
 }

@@ -170,6 +170,17 @@ pub(crate) fn cmd_doctor(config_path: Option<&Path>, json: bool) -> Result<()> {
         }
     }
 
+    if let Some(value) = report
+        .get("config_env")
+        .and_then(|v| v.get("value"))
+        .and_then(|v| v.as_str())
+    {
+        println!("  config env: EMBED_LOG_CONFIG_YML_PATH={value}");
+    }
+    if let Some(resolved) = report.get("resolved_config_path").and_then(|v| v.as_str()) {
+        println!("  resolved config: {resolved}");
+    }
+
     if let Some(config) = report.get("config") {
         if let Some(path) = config.get("path").and_then(|v| v.as_str()) {
             println!("  config:   {path}");
@@ -221,24 +232,53 @@ pub(crate) fn cmd_doctor(config_path: Option<&Path>, json: bool) -> Result<()> {
 }
 
 fn build_doctor_report(config_path: Option<&Path>) -> serde_json::Value {
+    build_doctor_report_with_env(
+        config_path,
+        std::env::var("EMBED_LOG_CONFIG_YML_PATH").ok(),
+    )
+}
+
+/// Same as [`build_doctor_report`], but with the `EMBED_LOG_CONFIG_YML_PATH`
+/// value injected rather than read from the real process environment — kept
+/// separate so the env-var precedence is testable without touching global
+/// state (same split `crate::config::resolve_config_path_with_env` already uses).
+fn build_doctor_report_with_env(
+    config_path: Option<&Path>,
+    env_value: Option<String>,
+) -> serde_json::Value {
     let version = env!("CARGO_PKG_VERSION");
     let packet_capture = detect_packet_capture_support();
     let mut status = "ok".to_string();
+    let resolved_path = crate::config::resolve_config_path_with_env(
+        config_path.map(Path::to_path_buf).as_ref(),
+        env_value.clone().map(std::path::PathBuf::from),
+    );
     let mut out = serde_json::json!({
         "version": version,
         "status": status,
         "system": detect_system_info(),
         "packet_capture": packet_capture,
+        "resolved_config_path": resolved_path.display().to_string(),
         "hints": [],
     });
+    if let Some(value) = &env_value {
+        out["config_env"] = serde_json::json!({
+            "var": "EMBED_LOG_CONFIG_YML_PATH",
+            "value": value,
+        });
+    }
 
+    // Reflect the same config `run` would actually load — not just an
+    // explicitly-passed --config — so `doctor` never hides what's really
+    // going to happen. A config that simply doesn't exist yet (fresh
+    // checkout, no --config given) is normal, not a warning.
     let mut config_info = None;
-    if let Some(path) = config_path {
-        match load_config(path) {
+    if resolved_path.exists() {
+        match load_config(&resolved_path) {
             Ok(cfg) => {
                 let pcap_sources = count_pcap_sources(&cfg);
                 config_info = Some(serde_json::json!({
-                    "path": path.display().to_string(),
+                    "path": resolved_path.display().to_string(),
                     "sources": cfg.sources.len(),
                     "tabs": cfg.tabs.len(),
                     "pcap_sources": pcap_sources,
@@ -786,5 +826,28 @@ mod tests {
         assert!(report["packet_capture"]
             .get("candidate_libraries")
             .is_some());
+    }
+
+    #[test]
+    fn doctor_report_includes_resolved_config_path_even_without_explicit_flag() {
+        let report = build_doctor_report_with_env(None, None);
+        assert_eq!(report["resolved_config_path"], "embed-log.yml");
+        assert!(report.get("config_env").is_none());
+    }
+
+    #[test]
+    fn doctor_report_surfaces_config_env_var_when_set() {
+        let report = build_doctor_report_with_env(None, Some("/set/by/env.yml".to_string()));
+        assert_eq!(report["resolved_config_path"], "/set/by/env.yml");
+        assert_eq!(report["config_env"]["value"], "/set/by/env.yml");
+        assert_eq!(report["config_env"]["var"], "EMBED_LOG_CONFIG_YML_PATH");
+    }
+
+    #[test]
+    fn doctor_report_missing_config_is_not_a_warning() {
+        let report = build_doctor_report_with_env(None, Some("/nonexistent/embed-log.yml".to_string()));
+        assert_eq!(report["status"], "ok");
+        assert!(report.get("config").is_none());
+        assert!(report.get("config_error").is_none());
     }
 }

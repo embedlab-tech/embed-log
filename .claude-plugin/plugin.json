@@ -1,0 +1,8 @@
+{
+  "name": "embed-log",
+  "description": "Query embed-log sessions (device/UART/UDP logs, test output, event detections) via the embed-log CLI instead of grepping raw log files.",
+  "version": "0.1.0",
+  "author": {
+    "name": "krezolekcoder"
+  }
+}

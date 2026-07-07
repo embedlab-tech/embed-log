@@ -7,6 +7,7 @@ pub mod naming;
 pub mod net;
 pub mod onboarding;
 pub mod parsers;
+pub mod postprocess;
 pub mod runtime;
 pub mod session;
 pub mod sources;

@@ -26,6 +26,7 @@ export function createTabWithPanes(label, paneIds, { switchTo = true, paneLabels
         state.filters[paneId]     = null;
         state.rawLines[paneId]    = [];
         state.atBottom[paneId]    = true;
+        state.behindLive[paneId]  = false;
         state.highlighted[paneId] = null;
         state.highlightedIdx[paneId] = null;
         state.selected[paneId]    = new Set();

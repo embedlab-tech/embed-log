@@ -5,7 +5,6 @@
 
 const ACTIONS = [
     { id: 'btn-clear',         label: 'Clear',       title: 'Clear all panes',                                              cap: 'clearAll' },
-    { id: 'btn-jump-all',      label: 'Sync',         title: 'Jump every pane to its latest log line' },
     { id: 'btn-export',        label: 'Export HTML',  title: 'Export current session as a self-contained HTML file',          cap: 'exportHtml' },
     { id: 'btn-new-session',   label: 'New session',  title: 'Save current session and start a new one',                     cap: 'sessionApi' },
     { id: 'btn-unwrap',        label: 'Unwrap',       title: 'Unwrap multi-pane tabs into single-pane tabs',                  cap: 'unwrap' },
@@ -17,11 +16,13 @@ const ACTIONS = [
 /**
  * Render the toolbar HTML for a given profile.
  * Returns the full <div id="toolbar">…</div> string.
+ * Three grid columns (left / Live / right) so the Live button sits truly
+ * centered without overlapping the stats or ws-status content — see viewer.css.
  */
 export function renderToolbar(profile) {
     const caps = profile.capabilities;
-    const parts = ['<div id="toolbar">'];
-    parts.push('    <span class="app-name">embed-log</span>');
+    const parts = ['<div id="toolbar">', '    <div class="toolbar-group toolbar-left">'];
+    parts.push('        <span class="app-name">embed-log</span>');
 
     let pendingSep = false;
     ACTIONS.forEach(item => {
@@ -31,20 +32,26 @@ export function renderToolbar(profile) {
         }
         if (item.cap && caps[item.cap] === false) return;
         if (pendingSep) {
-            parts.push('    <div class="sep"></div>');
+            parts.push('        <div class="sep"></div>');
             pendingSep = false;
         }
-        parts.push(`    <button id="${item.id}" title="${_escAttr(item.title)}">${item.label}</button>`);
+        parts.push(`        <button id="${item.id}" title="${_escAttr(item.title)}">${item.label}</button>`);
     });
 
-    parts.push('    <div id="toolbar-stats" class="toolbar-stats"></div>');
+    parts.push('    </div>');
+
+    parts.push(`    <button id="btn-jump-all" class="btn-live" title="${_escAttr('Jump every pane to its latest line and keep tab switches live (Shift+L)')}">Live</button>`);
+
+    parts.push('    <div class="toolbar-group toolbar-right">');
+    parts.push('        <div id="toolbar-stats" class="toolbar-stats"></div>');
     if (caps.wsStatus) {
-        parts.push('    <div id="ws-status" class="disconnected">WS: disconnected</div>');
+        parts.push('        <div id="ws-status" class="disconnected">WS: disconnected</div>');
     }
-    parts.push('    <div id="marker-nav" class="marker-nav" style="display:none">');
-    parts.push('        <button id="marker-nav-prev" title="Previous marker">◀</button>');
-    parts.push('        <span id="marker-nav-idx">1</span>/<span id="marker-nav-total">0</span>');
-    parts.push('        <button id="marker-nav-next" title="Next marker">▶</button>');
+    parts.push('        <div id="marker-nav" class="marker-nav" style="display:none">');
+    parts.push('            <button id="marker-nav-prev" title="Previous marker">◀</button>');
+    parts.push('            <span id="marker-nav-idx">1</span>/<span id="marker-nav-total">0</span>');
+    parts.push('            <button id="marker-nav-next" title="Next marker">▶</button>');
+    parts.push('        </div>');
     parts.push('    </div>');
 
     parts.push('</div>');

@@ -295,6 +295,7 @@ impl SessionExporter {
             "tabcreate.js",
             "ui.js",
             "export.js",
+            "postprocess.js",
             "selection.js",
             "events.js",
             "tsparse.js",

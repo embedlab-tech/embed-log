@@ -10,22 +10,26 @@
 <!-- ── TOOLBAR ────────────────────────────────────────────── -->
 <!-- Canonical toolbar: frontend/toolbar.html -->
 <div id="toolbar">
-    <span class="app-name">embed-log</span>
-    <div class="sep"></div>
-    <button id="btn-clear"    title="Clear all panes">Clear</button>
-    <button id="btn-jump-all" title="Jump every pane to its latest log line">Sync</button>
-    <button id="btn-export"   title="Export current session as a self-contained HTML file">Export HTML</button>
-    <button id="btn-new-session" title="Save current session and start a new one">New session</button>
-    <button id="btn-unwrap"  title="Unwrap multi-pane tabs into single-pane tabs">Unwrap</button>
-    <button id="btn-timestamp-mode" title="Switch timestamps">Absolute</button>
-    <div class="sep"></div>
-    <button id="btn-theme" title="Toggle light / dark theme">🌙</button>
-    <div id="toolbar-stats" class="toolbar-stats"></div>
-    <div id="ws-status" class="disconnected">WS: disconnected</div>
-    <div id="marker-nav" class="marker-nav" style="display:none">
-        <button id="marker-nav-prev" title="Previous marker">◀</button>
-        <span id="marker-nav-idx">1</span>/<span id="marker-nav-total">0</span>
-        <button id="marker-nav-next" title="Next marker">▶</button>
+    <div class="toolbar-group toolbar-left">
+        <span class="app-name">embed-log</span>
+        <div class="sep"></div>
+        <button id="btn-clear"    title="Clear all panes">Clear</button>
+        <button id="btn-export"   title="Export current session as a self-contained HTML file">Export HTML</button>
+        <button id="btn-new-session" title="Save current session and start a new one">New session</button>
+        <button id="btn-unwrap"  title="Unwrap multi-pane tabs into single-pane tabs">Unwrap</button>
+        <button id="btn-timestamp-mode" title="Switch timestamps">Absolute</button>
+        <div class="sep"></div>
+        <button id="btn-theme" title="Toggle light / dark theme">🌙</button>
+    </div>
+    <button id="btn-jump-all" title="Jump every pane to its latest line and keep tab switches live (Shift+L)" class="btn-live">Live</button>
+    <div class="toolbar-group toolbar-right">
+        <div id="toolbar-stats" class="toolbar-stats"></div>
+        <div id="ws-status" class="disconnected">WS: disconnected</div>
+        <div id="marker-nav" class="marker-nav" style="display:none">
+            <button id="marker-nav-prev" title="Previous marker">◀</button>
+            <span id="marker-nav-idx">1</span>/<span id="marker-nav-total">0</span>
+            <button id="marker-nav-next" title="Next marker">▶</button>
+        </div>
     </div>
 </div>
 

@@ -101,11 +101,13 @@ export const state = {
     markers:     {},       // paneId → [{lineIdx, numTs, description, createdAt}]
     markerNavIdx: -1,      // index into flat marker list for navigation
     atBottom:    {},
+    behindLive:  {},       // paneId → true when new lines arrived while scrolled away from bottom
     highlighted: {},
     highlightedIdx: {},
     selected:    {},
     selectionScope:  'exact', // 'exact', 'context', or 'context-selected'
     contextPanes:    {},       // paneId → bool; only used when selectionScope === 'context-selected'
+    copyFormat:      'full',   // 'full' (default, unchanged), 'compact', or 'json' — see postprocess.js
     unwrap:        false,
     timestampMode: INITIAL_TIMESTAMP_MODE,
     sessionTimestampMode: INITIAL_TIMESTAMP_MODE,
@@ -248,6 +250,7 @@ PANES.forEach(id => {
     state.filters[id]     = null;
     state.rawLines[id]    = [];
     state.atBottom[id]    = true;
+    state.behindLive[id]  = false;
 
     state.wrap[id]        = false;
     state.highlighted[id] = null;

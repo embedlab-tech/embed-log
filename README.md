@@ -27,6 +27,19 @@ Release binaries include embedded frontend assets, so users do **not** need Rust
 
 See [docs/releasing.md](docs/releasing.md) for release and installer details.
 
+## Claude Code plugin
+
+This repo bundles a [Claude Code](https://claude.com/claude-code) skill that teaches an AI
+agent to inspect `embed-log` sessions via the CLI (`sessions summary`/`search`/...) instead of
+grepping raw log files. Install it once, in any Claude Code session:
+
+```
+/plugin marketplace add krezolekcoder/embed-log
+/plugin install embed-log@embed-log-tools
+```
+
+It's then available in every project on your machine, not just this repo. Source: `skills/embed-log/SKILL.md`, `.claude-plugin/`.
+
 ## Quick start from source
 
 ```bash

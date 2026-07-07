@@ -87,8 +87,10 @@ test.describe('scope-aware selection actions', () => {
     await end.click({ modifiers: ['Shift'] });
 
     const getDisplayedCount = async () => {
+      // Button text is "Copy (N, ~T tok)" — match the leading count, not the
+      // whole parenthesized group (which now also carries a token estimate).
       const text = await page.locator('#copy-SENSOR_A').textContent();
-      return Number(text.match(/\((\d+)\)/)?.[1] ?? NaN);
+      return Number(text.match(/\((\d+)/)?.[1] ?? NaN);
     };
     const getExpectedCount = async () => page.evaluate(async () => {
       const { state, PANES } = await import('/state.js');

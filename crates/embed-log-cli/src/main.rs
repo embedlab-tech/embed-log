@@ -131,7 +131,7 @@ enum Command {
     /// Inspect and export recorded sessions
     Sessions {
         #[command(subcommand)]
-        command: SessionsCommand,
+        command: Box<SessionsCommand>,
     },
 
     /// Print a greeting (smoke-test target)
@@ -247,7 +247,7 @@ async fn main() -> Result<()> {
         Some(Command::Doctor { config, json }) => misc::cmd_doctor(config.as_deref(), json),
         Some(Command::Ports { json }) => misc::cmd_ports(json),
         Some(Command::Hello) => misc::cmd_hello(),
-        Some(Command::Sessions { command }) => cmd_sessions(command),
+        Some(Command::Sessions { command }) => cmd_sessions(*command),
         Some(Command::Demo {
             config,
             frontend_dir,

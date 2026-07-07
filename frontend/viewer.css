@@ -84,15 +84,71 @@ body {
 
 /* ---- Toolbar ---- */
 #toolbar {
+    display: grid;
+    /* Side columns are `auto` (their own content's natural width — never
+       clipped, never fought over), Live's column is the single `1fr` and
+       absorbs whatever's left. `justify-self: center` on .btn-live then
+       centers it within that leftover gap. This toolbar's two sides are
+       rarely balanced (many buttons left, one WS badge right), so this
+       centers Live in the visually free space between them rather than
+       in the dead-center of the whole window — which would either clip
+       real buttons off the fuller side or require JS-measured columns to
+       force true equal widths. Unlike absolute positioning, grid tracks
+       never overlap, so Live can't overlap the side content either way. */
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
     height: 44px;
     background: var(--header);
     border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
     padding: 0 10px;
-    gap: 8px;
     flex-shrink: 0;
 }
+.toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    /* Deliberately no min-width:0/overflow:hidden here: either one makes a
+       grid item report a 0 automatic-minimum size, so its `auto` column
+       above would collapse below its own content's width instead of sizing
+       to fit it — silently clipping real buttons, which is what happened
+       here even at normal window widths (not just when genuinely too
+       narrow for everything). ponytail: on a truly too-narrow window this
+       now overflows instead of clipping; add a responsive toolbar
+       (wrapping/overflow menu) if that becomes a real complaint. */
+}
+.toolbar-left  { justify-content: flex-start; }
+.toolbar-right { justify-content: flex-end; }
+.toolbar-group button,
+.toolbar-group .app-name,
+.toolbar-group .toolbar-stats {
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.btn-live {
+    justify-self: center;
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 700;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
+}
+.btn-live:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    filter: brightness(1.08);
+}
+/* New lines arrived in a pane while it wasn't following the live tail —
+   fixed amber (not theme-accent) so it reads as "needs attention" regardless
+   of theme or of what the accent color happens to be. */
+.btn-live.behind {
+    background: #e8a93a;
+    border-color: #e8a93a;
+    color: #1a1200;
+    text-shadow: none;
+}
+.btn-live.behind:hover { filter: brightness(1.05); }
 
 #toolbar .app-name {
     font-weight: 700;
@@ -121,7 +177,6 @@ button.active { background: var(--selection); border-color: var(--accent); color
 
 /* WS status badge */
 #ws-status {
-    margin-left: auto;
     font-size: 11px;
     padding: 3px 8px;
     border-radius: 3px;
@@ -679,6 +734,34 @@ body.alt-held .log-line * {
     font-weight: 600;
 }
 .scope-btn.active:hover { color: var(--header); }
+
+/* Copy format toggle row — same visual language as .scope-row/.scope-btn */
+.format-row {
+    display: flex;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+}
+.format-btn {
+    background: var(--panel);
+    color: var(--ansi-0);
+    border: none;
+    padding: 2px 10px;
+    font-size: 10px;
+    cursor: pointer;
+    transition: none;
+    opacity: 0;
+    pointer-events: none;
+}
+.format-btn.visible { opacity: 1; pointer-events: auto; }
+.format-btn:hover { color: var(--accent); }
+.format-btn.active {
+    background: var(--accent);
+    color: var(--header);
+    font-weight: 600;
+}
+.format-btn.active:hover { color: var(--header); }
 
 /* Pane selector (context-selected scope) */
 .pane-selector {

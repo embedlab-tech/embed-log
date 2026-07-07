@@ -829,6 +829,10 @@ export function appendLineBatch(entries) {
         const logEl = document.getElementById("log-" + paneId);
         if (!logEl || !vp) return;
 
+        // New content arrived while this pane wasn't following the live tail —
+        // flag it so the global Live button can show "you're missing logs".
+        if (!state.atBottom[paneId]) state.behindLive[paneId] = true;
+
         const rowH = _measureRowHeight(paneId);
         const midOrdinal = Math.max(0, Math.floor((logEl.scrollTop + logEl.clientHeight / 2) / rowH));
         const targetIdx = state.atBottom[paneId]
@@ -941,6 +945,15 @@ export function canDisplayTimestampMode(mode) {
 export function updateJumpBtn(paneId) {
     document.getElementById("jump-" + paneId)
         .classList.toggle("visible", !state.atBottom[paneId]);
+    if (state.atBottom[paneId]) state.behindLive[paneId] = false;
+    _updateLiveIndicator();
+}
+
+// Global "Live" button flips to the behind-live style whenever any pane has
+// received new lines while the user was scrolled away from its bottom.
+function _updateLiveIndicator() {
+    const behind = PANES.some(id => state.behindLive[id]);
+    document.getElementById("btn-jump-all")?.classList.toggle("behind", behind);
 }
 
 export function scrollPaneToBottom(paneId) {
@@ -1136,7 +1149,24 @@ export function clearPane(paneId) {
 }
 
 document.getElementById("btn-jump-all")?.addEventListener("click", () => {
-    PANES.forEach(scrollPaneToBottom);
+    // Clear any active line-sync so future tab switches follow the live tail
+    // instead of re-scrolling back to the last synced timestamp.
+    state.syncTs = null;
+    state.syncTabSwitch = false;
+    PANES.forEach(paneId => {
+        highlightLine(paneId, null);
+        scrollPaneToBottom(paneId);
+    });
+});
+
+// Shift+L: same as clicking Live. Use e.code (physical key) rather than
+// e.key so it fires regardless of Caps Lock state.
+document.addEventListener("keydown", ev => {
+    if (!ev.shiftKey || ev.ctrlKey || ev.altKey || ev.metaKey || ev.code !== "KeyL") return;
+    const tag = ev.target?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || ev.target?.isContentEditable) return;
+    ev.preventDefault();
+    document.getElementById("btn-jump-all")?.click();
 });
 
 document.getElementById("btn-clear")?.addEventListener("click", () => {
