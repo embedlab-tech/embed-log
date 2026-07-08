@@ -8,6 +8,16 @@ use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 use super::traits::{LogSource, TxCommand};
+
+/// Normalize UART TX for Zephyr/GWL shell: CR-terminated lines (`\r`).
+fn normalize_uart_shell_tx(data: &[u8]) -> Vec<u8> {
+    let mut v = data.to_vec();
+    while matches!(v.last(), Some(b'\n' | b'\r')) {
+        v.pop();
+    }
+    v.push(b'\r');
+    v
+}
 use crate::config::models::ParserConfig;
 use crate::models::LogEntry;
 use crate::parsers::create_parser;
@@ -191,8 +201,8 @@ impl LogSource for UartSource {
             let tx_port = port.clone();
             tokio::spawn(async move {
                 while let Some(cmd) = cmd_rx.recv().await {
-                    let data = cmd.data;
                     let origin = cmd.origin;
+                    let data = normalize_uart_shell_tx(&cmd.data);
                     let data_len = data.len();
                     let data_for_write = data.clone();
 
@@ -444,6 +454,14 @@ mod tests {
 
     #[tokio::test]
     #[cfg(unix)]
+    async fn uart_tx_normalizes_lf_to_cr() {
+        assert_eq!(super::normalize_uart_shell_tx(b"help\n"), b"help\r");
+        assert_eq!(super::normalize_uart_shell_tx(b"version\r\n"), b"version\r");
+        assert_eq!(super::normalize_uart_shell_tx(b"cmd"), b"cmd\r");
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
     async fn uart_tx_writes_exact_bytes_to_pty_and_emits_yellow_tx_entry() {
         let (mut master, slave) = create_pty_pair();
 
@@ -483,7 +501,7 @@ mod tests {
         .unwrap();
         let (master_buf, read_result) = result;
         let n = read_result.unwrap_or(0);
-        assert_eq!(&master_buf[..n], b"version\r\n");
+        assert_eq!(&master_buf[..n], b"version\r");
 
         // Verify a yellow TX::ui LogEntry was emitted.
         let entry = timeout(Duration::from_secs(2), entry_rx.recv())
@@ -491,7 +509,7 @@ mod tests {
             .expect("timeout waiting for TX log entry")
             .expect("channel closed before TX entry");
         assert_eq!(entry.source, "TX::ui");
-        assert_eq!(entry.message, "version\r\n");
+        assert_eq!(entry.message, "version\r");
         assert_eq!(entry.color.as_deref(), Some("yellow"));
 
         handle.abort();
@@ -573,7 +591,7 @@ mod tests {
         .unwrap();
         let (master_buf, read_result) = result;
         let n = read_result.unwrap_or(0);
-        assert_eq!(&master_buf[..n], b"status\n");
+        assert_eq!(&master_buf[..n], b"status\r");
 
         // Verify TX::pytest log entry
         let entry = timeout(Duration::from_secs(2), entry_rx.recv())
@@ -581,7 +599,7 @@ mod tests {
             .expect("timeout")
             .expect("channel closed");
         assert_eq!(entry.source, "TX::pytest");
-        assert_eq!(entry.message, "status\n");
+        assert_eq!(entry.message, "status\r");
         assert_eq!(entry.color.as_deref(), Some("yellow"));
 
         handle.abort();
