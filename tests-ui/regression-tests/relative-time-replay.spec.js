@@ -40,7 +40,7 @@ test('merged static replay toggles between relative and absolute timestamps', as
   runRustMerge([
     '--timestamp-mode', 'relative',
     '--first-log-at', '2026-01-01T12:00:00.000+00:00',
-    '--tab', 'Demo', 'SENSOR_A=READER', logPath,
+    '--tab', 'Demo', 'SENSOR_A=SENSOR', logPath,
     '--output', htmlPath,
   ]);
 
@@ -89,7 +89,7 @@ test('relative-only static replay shows hint when absolute origin is unavailable
 
   runRustMerge([
     '--timestamp-mode', 'relative',
-    '--tab', 'Demo', 'SENSOR_A=READER', logPath,
+    '--tab', 'Demo', 'SENSOR_A=SENSOR', logPath,
     '--output', htmlPath,
   ]);
 

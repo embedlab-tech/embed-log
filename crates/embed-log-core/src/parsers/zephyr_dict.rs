@@ -1,6 +1,6 @@
 //! Zephyr dictionary-logging parser (UART HEX wire format).
 //!
-//! GWL firmware shares one UART between the shell and dictionary logging.
+//! Node firmware shares one UART between the shell and dictionary logging.
 //! Dictionary packets are framed as `##ZLOGV1##` followed by ASCII hex; all
 //! other bytes are passed through as console text. Hex payloads are unhexified
 //! into Zephyr's self-length-prefixed binary message stream and decoded against
@@ -17,7 +17,7 @@ const MSG_TYPE_DROPPED: u8 = 1;
 const LOG_HEX_SEP: &str = "##ZLOGV1##";
 const LOG_HEX_SEP_BYTES: &[u8] = LOG_HEX_SEP.as_bytes();
 /// Minimum trailing lowercase-hex run (chars) to treat as a dictionary burst without
-/// an explicit `##ZLOGV1##` prefix (GWL sometimes omits the marker between bursts).
+/// an explicit `##ZLOGV1##` prefix (Node sometimes omits the marker between bursts).
 const MIN_HEURISTIC_HEX_LEN: usize = 20;
 /// Minimum hex-only text buffer length to enter Hex mode right after a shell prompt.
 const MIN_PROMPT_HEX_LEN: usize = 8;
@@ -1314,10 +1314,10 @@ mod tests {
 
         let msg = encode_normal_message(3, 1, 1, 0x1000, &[], &[]);
         let hex: String = msg.iter().map(|b| format!("{b:02x}")).collect();
-        let input = format!("gwl outside> help\n{LOG_HEX_SEP}{hex}Available commands:\n");
+        let input = format!("node outside> help\n{LOG_HEX_SEP}{hex}Available commands:\n");
         let lines = parser.feed(input.as_bytes());
 
-        assert!(lines.iter().any(|l| l.contains("gwl outside> help")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("node outside> help")), "{lines:?}");
         assert!(lines.iter().any(|l| l.contains("boot ok")), "{lines:?}");
         assert!(lines.iter().any(|l| l == "Available commands:"), "{lines:?}");
     }
@@ -1358,11 +1358,11 @@ mod tests {
 
         let msg = encode_normal_message(3, 1, 1, 0x1000, &[], &[]);
         let hex: String = msg.iter().map(|b| format!("{b:02x}")).collect();
-        let input = format!("{LOG_HEX_SEP}{hex}gwl outside> \r");
+        let input = format!("{LOG_HEX_SEP}{hex}node outside> \r");
         let lines = parser.feed(input.as_bytes());
 
         assert!(lines.iter().any(|l| l.contains("logged")), "{lines:?}");
-        assert!(lines.iter().any(|l| l.trim() == "gwl outside>"), "{lines:?}");
+        assert!(lines.iter().any(|l| l.trim() == "node outside>"), "{lines:?}");
     }
 
     #[test]
@@ -1373,11 +1373,11 @@ mod tests {
 
         let msg = encode_normal_message(3, 1, 1, 0x1000, &[], &[]);
         let hex: String = msg.iter().map(|b| format!("{b:02x}")).collect();
-        let input = format!("gwl outside> {hex}help");
+        let input = format!("node outside> {hex}help");
         let lines = parser.feed(input.as_bytes());
 
         assert!(
-            lines.iter().any(|l| l.trim() == "gwl outside>"),
+            lines.iter().any(|l| l.trim() == "node outside>"),
             "prompt not emitted separately: {lines:?}"
         );
         assert!(
@@ -1385,7 +1385,7 @@ mod tests {
             "dict not decoded: {lines:?}"
         );
         assert!(
-            !lines.iter().any(|l| l.contains("gwl outside> 00")),
+            !lines.iter().any(|l| l.contains("node outside> 00")),
             "hex leaked into text line: {lines:?}"
         );
     }
@@ -1426,9 +1426,9 @@ mod tests {
     }
 
     #[test]
-    fn reader_boot_prefix_hex_decodes_without_separator() {
-        let dir = temp_dir("reader-prefix");
-        let db_path = write_test_db(&dir, &[(0x0e00_2ef8, "reader boot ok\n")]);
+    fn node_boot_prefix_hex_decodes_without_separator() {
+        let dir = temp_dir("node-prefix");
+        let db_path = write_test_db(&dir, &[(0x0e00_2ef8, "node boot ok\n")]);
         let mut parser = ZephyrDictParser::new(&db_path);
 
         let msg = encode_normal_message(3, 1, 1, 0x0e00_2ef8, &[], &[]);
@@ -1437,7 +1437,7 @@ mod tests {
         let lines = parser.feed(input.as_bytes());
 
         assert!(
-            lines.iter().any(|l| l.contains("reader boot ok")),
+            lines.iter().any(|l| l.contains("node boot ok")),
             "{lines:?}"
         );
         assert!(

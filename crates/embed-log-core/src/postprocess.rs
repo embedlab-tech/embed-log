@@ -54,7 +54,7 @@ fn uptime_counter_re() -> &'static Regex {
 
 /// Strip ANSI/terminal-control sequences (SGR color codes, cursor movement,
 /// erase-line, OSC sequences). Real example from a live session: a shell
-/// prompt echo like `gwl outside> \x1b[13D\x1b[J[00000000] <inf> ...`.
+/// prompt echo like `node outside> \x1b[13D\x1b[J[00000000] <inf> ...`.
 pub fn strip_ansi(text: &str) -> String {
     ansi_re().replace_all(text, "").into_owned()
 }
@@ -165,10 +165,10 @@ mod tests {
 
     #[test]
     fn strip_ansi_removes_color_and_cursor_control() {
-        let msg = "gwl outside> \u{1b}[13D\u{1b}[J[00000000] <inf> rv8263: interrupt configured";
+        let msg = "node outside> \u{1b}[13D\u{1b}[J[00000000] <inf> rv8263: interrupt configured";
         assert_eq!(
             strip_ansi(msg),
-            "gwl outside> [00000000] <inf> rv8263: interrupt configured"
+            "node outside> [00000000] <inf> rv8263: interrupt configured"
         );
     }
 
@@ -236,7 +236,7 @@ mod tests {
             "absTs": "07-06 14:31:31.877",
             "timestamp": "07-06 14:31:31.877",
             "timestamp_iso": "2026-07-06T14:31:31.877+02:00",
-            "source_id": "READER",
+            "source_id": "RELAY",
             "color": "red",
             "line_idx": 0,
         });

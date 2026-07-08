@@ -75,7 +75,7 @@ export function elapsedTime(line, fallbackClock) {
 }
 
 // Source-name shortcodes derived from the source's own name — initials of
-// its `_`/`-`-separated words ("CONTROLLER" -> "C", "MCU_LINK_RX" -> "MLR",
+// its `_`/`-`-separated words ("COUNTER" -> "C", "MCU_LINK_RX" -> "MLR",
 // "NODE-RED-COAP" -> "NRC") — rather than an arbitrary scan-order letter, so
 // codes are mnemonic and mostly stable across runs (the same source tends to
 // get the same code regardless of when it's first seen). On a collision

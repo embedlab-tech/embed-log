@@ -900,7 +900,7 @@ fn clock_time(entry: &serde_json::Value) -> String {
 
 /// [`CompactionLevel::Ultra`] source-name shortcodes for `--format
 /// compact`/`mini-jsonl`: derived from the source's own name — initials of
-/// its `_`/`-`-separated words (`CONTROLLER` -> `C`, `MCU_LINK_RX` -> `MLR`,
+/// its `_`/`-`-separated words (`COUNTER` -> `C`, `MCU_LINK_RX` -> `MLR`,
 /// `NODE-RED-COAP` -> `NRC`) — rather than an arbitrary scan-order letter, so
 /// codes are mnemonic and mostly stable across runs (the same source tends
 /// to get the same code regardless of when it's first seen). On a collision
@@ -2438,14 +2438,14 @@ mod tests {
     #[test]
     fn format_mini_entry_denoises_message() {
         let entry = serde_json::json!({
-            "source_id": "READER",
-            "message": "gwl outside> \u{1b}[13D\u{1b}[J[00000000] <inf> rv8263: interrupt configured",
+            "source_id": "RELAY",
+            "message": "node outside> \u{1b}[13D\u{1b}[J[00000000] <inf> rv8263: interrupt configured",
             "timestamp_iso": "2026-07-06T14:31:31.877+02:00",
         });
         let mut codes = ShortcodeTable::default();
         assert_eq!(
             format_mini_entry(&entry, &mut codes)["m"],
-            "gwl outside> [00000000] <inf> rv8263: interrupt configured"
+            "node outside> [00000000] <inf> rv8263: interrupt configured"
         );
     }
 
@@ -2459,7 +2459,7 @@ mod tests {
             "relNum": 83_644.0,
         });
         let b = serde_json::json!({
-            "source_id": "CONTROLLER",
+            "source_id": "COUNTER",
             "message": "hi",
             "timestamp_iso": "2026-07-06T14:31:31.877+02:00",
             "relNum": 1_000.0,
@@ -2474,18 +2474,18 @@ mod tests {
     fn shortcode_table_collision_falls_back_to_longer_prefix() {
         let mut codes = ShortcodeTable::default();
         // Both reduce to "C" as bare initials — second one must not overwrite the first.
-        assert_eq!(codes.code_for("CONTROLLER"), "C");
+        assert_eq!(codes.code_for("COUNTER"), "C");
         assert_eq!(codes.code_for("CLIENT"), "CL");
         // Repeat calls are stable.
-        assert_eq!(codes.code_for("CONTROLLER"), "C");
+        assert_eq!(codes.code_for("COUNTER"), "C");
         assert_eq!(codes.code_for("CLIENT"), "CL");
     }
 
     #[test]
     fn shortcode_table_uses_meaningful_initials() {
         let mut codes = ShortcodeTable::default();
-        assert_eq!(codes.code_for("CONTROLLER"), "C");
-        assert_eq!(codes.code_for("READER"), "R");
+        assert_eq!(codes.code_for("COUNTER"), "C");
+        assert_eq!(codes.code_for("RELAY"), "R");
         assert_eq!(codes.code_for("MCU_LINK"), "ML");
         assert_eq!(codes.code_for("MCU_LINK_RX"), "MLR");
         assert_eq!(codes.code_for("MCU_LINK_TX"), "MLT");
@@ -2540,7 +2540,7 @@ mod tests {
         std::fs::write(
             dir.join("combined.jsonl"),
             concat!(
-                "{\"source_id\":\"CONTROLLER\",\"message\":\"boot\",\"timestamp_iso\":\"2026-07-06T14:31:18+02:00\"}\n",
+                "{\"source_id\":\"COUNTER\",\"message\":\"boot\",\"timestamp_iso\":\"2026-07-06T14:31:18+02:00\"}\n",
                 "{\"source_id\":\"PYTEST\",\"message\":\"Timeout waiting for event='dcf_edhoc'\",\"timestamp_iso\":\"2026-07-06T14:41:23+02:00\"}\n",
             ),
         )

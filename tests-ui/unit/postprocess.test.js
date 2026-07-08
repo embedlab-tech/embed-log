@@ -63,14 +63,14 @@ test('elapsedTime falls back when relNum is missing', () => {
 test('ShortcodeTable derives meaningful initials and reuses them', () => {
   const codes = new ShortcodeTable();
   assert.equal(codes.codeFor('PYTEST'), 'P');
-  assert.equal(codes.codeFor('CONTROLLER'), 'C');
+  assert.equal(codes.codeFor('COUNTER'), 'C');
   assert.equal(codes.codeFor('PYTEST'), 'P');
 });
 
 test('ShortcodeTable uses initials of each underscore/hyphen-separated word', () => {
   const codes = new ShortcodeTable();
-  assert.equal(codes.codeFor('CONTROLLER'), 'C');
-  assert.equal(codes.codeFor('READER'), 'R');
+  assert.equal(codes.codeFor('COUNTER'), 'C');
+  assert.equal(codes.codeFor('RELAY'), 'R');
   assert.equal(codes.codeFor('MCU_LINK'), 'ML');
   assert.equal(codes.codeFor('MCU_LINK_RX'), 'MLR');
   assert.equal(codes.codeFor('MCU_LINK_TX'), 'MLT');
@@ -81,9 +81,9 @@ test('ShortcodeTable uses initials of each underscore/hyphen-separated word', ()
 test('ShortcodeTable falls back to a longer prefix on collision', () => {
   const codes = new ShortcodeTable();
   // Both reduce to "C" as bare initials — second one must not overwrite the first.
-  assert.equal(codes.codeFor('CONTROLLER'), 'C');
+  assert.equal(codes.codeFor('COUNTER'), 'C');
   assert.equal(codes.codeFor('CLIENT'), 'CL');
-  assert.equal(codes.codeFor('CONTROLLER'), 'C');
+  assert.equal(codes.codeFor('COUNTER'), 'C');
   assert.equal(codes.codeFor('CLIENT'), 'CL');
 });
 

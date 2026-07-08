@@ -460,7 +460,7 @@ mod tests {
             pane_labels: {
                 let mut m = HashMap::new();
                 m.insert("DUT".into(), "DUT Device".into());
-                m.insert("HOST".into(), "Host Controller".into());
+                m.insert("HOST".into(), "Host Debug".into());
                 m.insert("UART_DUT".into(), "UART Main".into());
                 m
             },

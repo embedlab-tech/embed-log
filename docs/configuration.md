@@ -426,7 +426,7 @@ sources:
     port: 6000
 
   - name: HOST
-    label: Host Controller
+    label: Host Debug
     type: udp
     port: 6001
 

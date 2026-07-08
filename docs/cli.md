@@ -251,11 +251,11 @@ record:
   session lengths since it never encodes hour-of-day, and it directly answers "how far into the
   run is this." The absolute anchor isn't lost — `sessions summary <id>` shows it. Source names
   are shortcoded rather than spelled out — derived from the source's own name (initials of its
-  `_`/`-`-separated words: `CONTROLLER` → `C`, `MCU_LINK_RX` → `MLR`, `NODE-RED-COAP` → `NRC`),
+  `_`/`-`-separated words: `COUNTER` → `C`, `MCU_LINK_RX` → `MLR`, `NODE-RED-COAP` → `NRC`),
   falling back to a longer prefix on a rare collision, so codes stay mnemonic instead of arbitrary
   and mostly stable across runs. The first time each timestamp convention or source code is used
   in a given command's output, a one-line explanation is printed to **stderr** (never stdout, so
-  scripts/agents parsing output see only clean data) — e.g. `sessions: source code C = CONTROLLER`.
+  scripts/agents parsing output see only clean data) — e.g. `sessions: source code C = COUNTER`.
   If a search spans multiple sessions, elapsed times are relative to each entry's *own* session
   start — scope with `--session <id>` for unambiguous
   elapsed times across a single run.

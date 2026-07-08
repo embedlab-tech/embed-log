@@ -7,7 +7,7 @@ test('normalizes config messages with safe collection defaults', () => {
   const command = normalizeConfig({
     type: 'config',
     tabs: [{ label: 'DevA', panes: ['A'] }],
-    pane_labels: { A: 'Reader' },
+    pane_labels: { A: 'Sensor' },
     pane_kinds: { A: 'udp' },
     pane_commands: { A: ['send_raw'] },
     session: { id: 's1', timestamp_mode: 'relative' },
@@ -20,7 +20,7 @@ test('normalizes config messages with safe collection defaults', () => {
 
   assert.equal(command.type, 'config');
   assert.deepEqual(command.tabs, [{ label: 'DevA', panes: ['A'] }]);
-  assert.deepEqual(command.paneLabels, { A: 'Reader' });
+  assert.deepEqual(command.paneLabels, { A: 'Sensor' });
   assert.deepEqual(command.paneKinds, { A: 'udp' });
   assert.deepEqual(command.paneCommands, { A: ['send_raw'] });
   assert.deepEqual(command.session, { id: 's1', timestamp_mode: 'relative' });

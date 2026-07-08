@@ -3,7 +3,7 @@
 
 Sends realistic embedded device logs over UDP to multiple sources:
   - Port 6000 (DUT): main device UART simulation
-  - Port 6001 (HOST): test controller / host logs
+  - Port 6001 (HOST): host debug logs
   - Port 6002 (SENSORS): CBOR-encoded sensor data
 
 Usage:
@@ -204,7 +204,7 @@ def main():
 
     print(f"Sending demo traffic every {args.rate}s")
     print(f"  DUT      → UDP :6000  (device UART simulation)")
-    print(f"  HOST     → UDP :6001  (test controller)")
+    print(f"  HOST     → UDP :6001  (host debug logs)")
     if not args.no_cbor:
         print(f"  SENSORS  → UDP :6002  (CBOR sensor data)")
     print(f"  Ctrl+C to stop\n")

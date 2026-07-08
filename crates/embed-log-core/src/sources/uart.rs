@@ -9,7 +9,7 @@ use tracing::{error, info, warn};
 
 use super::traits::{LogSource, TxCommand};
 
-/// Normalize UART TX for Zephyr/GWL shell: CR-terminated lines (`\r`).
+/// Normalize UART TX for a Zephyr shell: CR-terminated lines (`\r`).
 fn normalize_uart_shell_tx(data: &[u8]) -> Vec<u8> {
     let mut v = data.to_vec();
     while matches!(v.last(), Some(b'\n' | b'\r')) {
