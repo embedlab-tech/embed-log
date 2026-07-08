@@ -1,354 +1,220 @@
-#!/usr/bin/env bash
-#
-# embed-log installer
-#
-# Usage:
-#   curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.sh | bash
-#   ./install.sh                          install from the local checkout (when run in the repo)
-#   ./install.sh --main                   install latest commit from main branch
-#   ./install.sh --develop                install latest commit from develop branch
-#
-# Installs embed-log globally via pipx.  Requires Python >= 3.10.
-# Works on macOS, Linux, and (via WSL/Git-Bash) Windows.
-#
-# Environment overrides (take precedence over CLI args):
-#   EMBED_LOG_INSTALL_MODE  install|update              (default: install)
-#   EMBED_LOG_REF_TYPE      release|branch|tag|commit  (default: release)
-#   EMBED_LOG_REF           ref value                   (default: latest)
-#   EMBED_LOG_REPO          fork/other repo             (default: krezolekcoder/embed-log)
-#   EMBED_LOG_REPO_URL      git URL                     (default: https://github.com/krezolekcoder/embed-log.git)
+#!/bin/sh
+set -eu
 
-set -euo pipefail
+REPO="${EMBED_LOG_REPO:-krezolekcoder/embed-log}"
+BIN="embed-log"
+VERSION="${EMBED_LOG_VERSION:-latest}"
+INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 
-# ─────────────────────────────────────────────────────────────────
-# Config
-# ─────────────────────────────────────────────────────────────────
+msg() { printf '%s\n' "$*"; }
+err() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
-INSTALL_TMPDIR=""
-REPO="krezolekcoder/embed-log"
-REPO_URL="https://github.com/${REPO}.git"
-MIN_PY="3.10"
-INSTALL_REF_TYPE="${EMBED_LOG_REF_TYPE:-release}"
-INSTALL_REF="${EMBED_LOG_REF:-latest}"
-OVERRIDE_REPO="${EMBED_LOG_REPO:-$REPO}"
-OVERRIDE_REPO_URL="${EMBED_LOG_REPO_URL:-https://github.com/${OVERRIDE_REPO}.git}"
-INSTALL_MODE="${EMBED_LOG_INSTALL_MODE:-install}"
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 || err "required command not found: $1"
+}
 
-INSTALLER_VERSION="1.0.0"
-# If a --<branch> argument is passed, treat it as a branch install.
-# Environment variables take precedence, so only parse if they're unset.
-if [ $# -ge 1 ] && [ -z "${EMBED_LOG_REF_TYPE+x}" ] && [ -z "${EMBED_LOG_REF+x}" ]; then
-  case "$1" in
-    --*)
-      INSTALL_REF_TYPE="branch"
-      INSTALL_REF="${1#--}"
-      shift
-      ;;
+is_interactive() {
+  [ "${EMBED_LOG_NO_PROMPT:-0}" != "1" ] && [ -r /dev/tty ] && [ -w /dev/tty ]
+}
+
+prompt_yes_no() {
+  question="$1"
+  default_answer="${2:-Y}"
+
+  if ! is_interactive; then
+    [ "$default_answer" = "Y" ]
+    return
+  fi
+
+  case "$default_answer" in
+    Y) suffix="[Y/n]" ;;
+    N) suffix="[y/N]" ;;
+    *) suffix="[y/n]" ;;
   esac
-fi
 
-# ─────────────────────────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────────────────────────
-
-have_cmd() { command -v "$1" >/dev/null 2>&1; }
-
-print_info() { printf '\033[36membed-log\033[0m %s\n' "$*"; }
-print_ok()  { printf '  \033[32m✓\033[0m %s\n' "$*"; }
-print_warn(){ printf '  \033[33m⚠\033[0m %s\n' "$*"; }
-die() {
-  printf '\n  \033[31m✕\033[0m %s\n' "$1" >&2
-  exit 1
-}
-
-_write_version() {
-  local dir="$1" sha="$2"
-  # Read version from the source pyproject.toml (matches the fetched ref)
-  local version
-  version=$(grep -E '^version = ' "$dir/pyproject.toml" 2>/dev/null | sed 's/^version = "\(.*\)"/\1/')
-  [ -n "$version" ] || version="0.0.0"
-  cat > "$dir/backend/_version.py" <<VERSION_EOF
-# Auto-generated. Do not edit manually.
-# Install scripts populate __commit__ before pipx install.
-__version__ = "$version"
-__commit__ = "$sha"
-VERSION_EOF
-}
-_write_install_source() {
-  local dir="$1" source_kind="$2" repo="$3" repo_url="$4" ref_type="$5" ref="$6" local_path="$7"
-  cat > "$dir/backend/_install_source.py" <<SOURCE_EOF
-# Auto-generated. Install scripts populate these before pipx install.
-__source_kind__ = "$source_kind"
-__repo__ = "$repo"
-__repo_url__ = "$repo_url"
-__ref_type__ = "$ref_type"
-__ref__ = "$ref"
-__local_path__ = "$local_path"
-SOURCE_EOF
-}
-
-
-# ─────────────────────────────────────────────────────────────────
-# Python version check
-# ─────────────────────────────────────────────────────────────────
-
-pick_python() {
-  for c in python3 python; do
-    if have_cmd "$c"; then
-      echo "$c"
-      return 0
-    fi
+  while :; do
+    printf '%s %s ' "$question" "$suffix" >/dev/tty
+    IFS= read -r answer </dev/tty || answer=""
+    case "$answer" in
+      "") [ "$default_answer" = "Y" ]; return ;;
+      y|Y|yes|YES|Yes) return 0 ;;
+      n|N|no|NO|No) return 1 ;;
+      *) printf 'Please answer y or n.\n' >/dev/tty ;;
+    esac
   done
-  return 1
 }
 
-ver_ge() {
-  # Returns 0 (true) if $1 >= $2 using semver-aware sort
-  [ "$(printf '%s\n' "$1" "$2" | sort -V | tail -n1)" = "$1" ]
+download() {
+  url="$1"
+  out="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$out"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q "$url" -O "$out"
+  else
+    err "curl or wget is required"
+  fi
 }
 
-print_info "Checking Python..."
+select_profile() {
+  if [ -n "${PROFILE:-}" ]; then
+    printf '%s\n' "$PROFILE"
+    return
+  fi
 
-PY="$(pick_python || true)"
-[ -n "$PY" ] || die "\
-Python not found (need >= ${MIN_PY}).
-
-  Install Python 3.10 or later from:
-    https://python.org
-
-  Or via your system package manager:
-
-    macOS : brew install python
-    Ubuntu: sudo apt install python3 python3-pip python3-venv
-    Fedora: sudo dnf install python3
-    Arch  : sudo pacman -S python python-pip"
-
-PY_VER="$("$PY" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null)" || die "Failed to run Python interpreter ($PY)."
-
-ver_ge "$PY_VER" "$MIN_PY" || die "\
-Python ${PY_VER} is too old — version ${MIN_PY} or later is required.
-
-  Upgrade Python on your system and try again."
-
-print_ok "Python ${PY_VER} — using $PY"
-_resolve_requested_ref() {
-  case "$INSTALL_REF_TYPE" in
-    release)
-      [ "$INSTALL_REF" = "latest" ] || {
-        echo "$INSTALL_REF"
-        return 0
-      }
-      have_cmd curl || die "curl is required to resolve the latest release."
-      curl -fsSL "https://api.github.com/repos/${OVERRIDE_REPO}/releases/latest" | \
-        "$PY" -c 'import json,sys; data=json.load(sys.stdin); tag=data.get("tag_name"); sys.exit(1) if not tag else None; print(tag)'
-      ;;
-    *)
-      echo "$INSTALL_REF"
-      ;;
+  shell_name="$(basename "${SHELL:-sh}")"
+  case "$shell_name" in
+    zsh) printf '%s\n' "$HOME/.zshrc" ;;
+    bash) printf '%s\n' "$HOME/.bashrc" ;;
+    *) printf '%s\n' "$HOME/.profile" ;;
   esac
 }
-RESOLVED_INSTALL_REF="$(_resolve_requested_ref)" || die "Failed to resolve install ref."
-print_ok "Install ref ${INSTALL_REF_TYPE}:${INSTALL_REF} -> ${RESOLVED_INSTALL_REF}"
 
-
-# ─────────────────────────────────────────────────────────────────
-# pipx
-# ─────────────────────────────────────────────────────────────────
-
-install_pipx() {
-  # macOS — prefer Homebrew (avoids PEP 668 issues)
-  if have_cmd brew && [ "$(uname -s)" = "Darwin" ]; then
-    print_info "Installing pipx via Homebrew..."
-    brew install pipx
-    return 0
+add_install_dir_to_path() {
+  profile="$(select_profile)"
+  touch "$profile"
+  path_line="export PATH=\"$INSTALL_DIR:\$PATH\""
+  if ! grep -F "$path_line" "$profile" >/dev/null 2>&1; then
+    {
+      printf '\n# Added by embed-log installer\n'
+      printf '%s\n' "$path_line"
+    } >> "$profile"
   fi
-
-  # Linux — try to guide toward system package first
-  if have_cmd apt-get; then
-    die "\
-pipx is required but not found.
-
-  Install it with:
-
-    sudo apt update && sudo apt install -y pipx python3-venv
-
-  Then re-run this installer."
-
-  elif have_cmd dnf; then
-    die "\
-pipx is required but not found.
-
-  Install it with:
-
-    sudo dnf install pipx
-
-  Then re-run this installer."
-
-  elif have_cmd pacman; then
-    die "\
-pipx is required but not found.
-
-  Install it with:
-
-    sudo pacman -S python-pipx
-
-  Then re-run this installer."
-  fi
-
-  # Fallback: pip install --user
-  print_info "Installing pipx via pip..."
-  "$PY" -m pip install --user pipx 2>&1 || die "\
-Failed to install pipx via pip.
-
-  Try installing pipx manually:
-    python3 -m pip install --user pipx
-  or use your system package manager, then re-run."
+  msg "Added $INSTALL_DIR to PATH in $profile."
+  msg "Restart your shell or run:"
+  msg ""
+  msg "  export PATH=\"$INSTALL_DIR:\$PATH\""
 }
 
-# --- Ensure pipx is available ---
+case "$(uname -s)" in
+  Darwin) os="apple-darwin" ;;
+  Linux) os="unknown-linux-gnu" ;;
+  *) err "unsupported OS: $(uname -s). This installer supports macOS and Linux." ;;
+esac
 
-if ! have_cmd pipx; then
-  install_pipx
+case "$(uname -m)" in
+  x86_64|amd64) arch="x86_64" ;;
+  arm64|aarch64) arch="aarch64" ;;
+  *) err "unsupported CPU architecture: $(uname -m)" ;;
+esac
 
-  # After install, pipx may not be in PATH yet for this shell session.
-  # Ensure pipx's bin dir is on PATH before we try to use it.
-  if ! have_cmd pipx; then
-    # refresh PATH from profile files as a best-effort
-    export PATH="$HOME/.local/bin:$HOME/.local/pipx/bin:$PATH"
-    hash -r 2>/dev/null || true
-  fi
+target="$arch-$os"
+case "$target" in
+  x86_64-unknown-linux-gnu|aarch64-apple-darwin|x86_64-apple-darwin) ;;
+  *) err "no prebuilt $BIN CLI release is currently published for $target" ;;
+esac
+archive="$BIN-$target.tar.gz"
 
-  if ! have_cmd pipx; then
-    die "\
-pipx was installed but is not yet in your PATH.
+case "$VERSION" in
+  latest) base_url="https://github.com/$REPO/releases/latest/download" ;;
+  *) base_url="https://github.com/$REPO/releases/download/$VERSION" ;;
+esac
 
-  Add pipx to your shell profile manually:
-
-    echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc
-    # or ~/.zshrc / ~/.config/fish/config.fish
-
-  Then restart your terminal or run:
-
-    export PATH=\"\$HOME/.local/bin:\$PATH\"
-
-  and re-run this installer."
-
-  fi
+# Allow overriding the download base URL (mirrors, local staging, air-gapped installs).
+if [ -n "${EMBED_LOG_BASE_URL:-}" ]; then
+  base_url="$EMBED_LOG_BASE_URL"
 fi
 
-# Ensure pipx's bin directories are on PATH for the rest of the script
-"$PY" -m pipx ensurepath >/dev/null 2>&1 || true
-export PATH="$HOME/.local/bin:$HOME/.local/pipx/bin:$PATH"
-hash -r 2>/dev/null || true
+msg "Embed-log Installer"
+msg "  Embedded log viewer and collection CLI."
+msg ""
+msg "Target: $target"
+msg "Install directory: $INSTALL_DIR"
+msg ""
 
-print_ok "pipx ready"
-
-# ─────────────────────────────────────────────────────────────────
-# Install embed-log
-# ─────────────────────────────────────────────────────────────────
-
-# Detect local clone vs. remote install
-INSTALL_SRC=""
-
-# Check if BASH_SOURCE points to a real file (local clone)
-if [ -n "${BASH_SOURCE[0]:-}" ]; then
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || true)"
-  if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/pyproject.toml" ] && [ -d "$SCRIPT_DIR/backend" ]; then
-    INSTALL_SRC="$SCRIPT_DIR"
-  fi
-fi
-
-
-if [ -n "$INSTALL_SRC" ]; then
-  print_info "Installing from local repository at ${INSTALL_SRC}..."
-  PIPX_SRC="$INSTALL_SRC"
-  _commit=""
-  if have_cmd git && git -C "$INSTALL_SRC" rev-parse --git-dir >/dev/null 2>&1; then
-    _commit="$(git -C "$INSTALL_SRC" rev-parse --short HEAD 2>/dev/null || true)"
-  fi
-  if [ -n "$_commit" ]; then
-    _write_version "$PIPX_SRC" "$_commit"
-  fi
-  _write_install_source "$PIPX_SRC" "local" "$OVERRIDE_REPO" "$OVERRIDE_REPO_URL" "$INSTALL_REF_TYPE" "$INSTALL_REF" "$INSTALL_SRC"
-else
-  print_info "Fetching embed-log from GitHub (${OVERRIDE_REPO})..."
-  if have_cmd git; then
-    [ -n "${HOME:-}" ] || die "HOME is not set."
-    CACHE_BASE="$HOME/.cache/embed-log"
-    CACHE_SRC="$CACHE_BASE/src"
-    [ -e "$CACHE_SRC" ] && rm -rf "$CACHE_SRC"
-    mkdir -p "$CACHE_BASE"
-    git init "$CACHE_SRC" >/dev/null 2>&1 || die "Failed to prepare embed-log cache directory."
-    git -C "$CACHE_SRC" remote add origin "$OVERRIDE_REPO_URL" >/dev/null 2>&1 || die "Failed to configure embed-log repository origin."
-    git -C "$CACHE_SRC" fetch --depth=1 origin "$RESOLVED_INSTALL_REF" >/dev/null 2>&1 || die "\
-Failed to fetch embed-log ref '${RESOLVED_INSTALL_REF}'.
-
-  Check that the ref exists and try again."
-    git -C "$CACHE_SRC" checkout --detach FETCH_HEAD >/dev/null 2>&1 || die "Failed to checkout embed-log ref '${RESOLVED_INSTALL_REF}'."
-
-    PIPX_SRC="$CACHE_SRC"
-    _commit="$(git -C "$PIPX_SRC" rev-parse --short HEAD 2>/dev/null || true)"
-    if [ -n "$_commit" ]; then
-      _write_version "$PIPX_SRC" "$_commit"
-    fi
-    _write_install_source "$PIPX_SRC" "git" "$OVERRIDE_REPO" "$OVERRIDE_REPO_URL" "$INSTALL_REF_TYPE" "$INSTALL_REF" ""
+if is_interactive; then
+  msg "Choose an action:"
+  msg ""
+  msg "  y    Install $BIN (default)"
+  msg "  n    Do nothing"
+  msg ""
+  if prompt_yes_no "Install $BIN now?" Y; then
+    msg "Will install $BIN."
+    msg ""
   else
-    print_warn "git not found — downloading source archive instead."
-    INSTALL_TMPDIR="$(mktemp -d)"
-    ARCHIVE_URL="https://github.com/${OVERRIDE_REPO}/archive/${RESOLVED_INSTALL_REF}.tar.gz"
-    print_info "Downloading ${ARCHIVE_URL}..."
-    curl -fsSL "$ARCHIVE_URL" | tar xz -C "$INSTALL_TMPDIR" || die "\
-Failed to download embed-log source from GitHub.
-
-  Check your internet connection and try again."
-
-    EXTRACTED="$(cd "$INSTALL_TMPDIR" && ls -d * 2>/dev/null | head -1)"
-    [ -n "$EXTRACTED" ] || die "Downloaded archive has unexpected structure."
-    PIPX_SRC="${INSTALL_TMPDIR}/${EXTRACTED}"
-    _write_version "$PIPX_SRC" "archive"
-    _write_install_source "$PIPX_SRC" "archive" "$OVERRIDE_REPO" "$OVERRIDE_REPO_URL" "$INSTALL_REF_TYPE" "$INSTALL_REF" ""
+    msg "Nothing changed."
+    exit 0
   fi
 fi
 
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT INT TERM
 
-# Replace an existing pipx install cleanly before reinstalling.
-if pipx uninstall embed-log >/dev/null 2>&1; then
-  print_info "Removed existing embed-log installation."
-fi
+need_cmd tar
+need_cmd grep
 
-INSTALL_CMD=(pipx install "$PIPX_SRC")
-print_info "Running: ${INSTALL_CMD[*]}"
-"${INSTALL_CMD[@]}" || die "\
-Failed to install embed-log via pipx.
+msg "Installing $BIN for $target"
+msg "Downloading $archive"
+download "$base_url/$archive" "$tmp_dir/$archive"
+download "$base_url/SHA256SUMS" "$tmp_dir/SHA256SUMS"
 
-  If installation fails, try:
-    pipx uninstall embed-log
-    pipx install ${PIPX_SRC}"
-
-# Clean up temp dir if we created one
-if [ -n "$INSTALL_TMPDIR" ] && [ -d "$INSTALL_TMPDIR" ]; then
-  rm -rf "$INSTALL_TMPDIR"
-fi
-
-# ─────────────────────────────────────────────────────────────────
-# Done
-# ─────────────────────────────────────────────────────────────────
-
-echo ""
-if [ "$INSTALL_MODE" = "update" ]; then
-  print_ok "embed-log updated!"
+msg "Verifying checksum"
+if command -v sha256sum >/dev/null 2>&1; then
+  (cd "$tmp_dir" && grep "  $archive\$" SHA256SUMS | sha256sum -c -) >/dev/null
+elif command -v shasum >/dev/null 2>&1; then
+  (cd "$tmp_dir" && grep "  $archive\$" SHA256SUMS | shasum -a 256 -c -) >/dev/null
 else
-  print_ok "embed-log installed!"
+  err "sha256sum or shasum is required for checksum verification"
 fi
-echo ""
-echo "  Run from any directory:"
-echo ""
-echo "    embed-log --help"
-echo ""
-echo "  Quick start:"
-echo ""
-echo "    embed-log onboard"
-echo "    embed-log init --sample uart --output embed-log.yml"
-echo "    embed-log run --config embed-log.yml"
-echo ""
-echo "  If the command is not found, open a new terminal (PATH refresh)."
+
+tar -xzf "$tmp_dir/$archive" -C "$tmp_dir"
+
+mkdir -p "$INSTALL_DIR"
+cp "$tmp_dir/$BIN" "$INSTALL_DIR/$BIN"
+chmod 755 "$INSTALL_DIR/$BIN"
+
+msg ""
+msg "$BIN was installed successfully."
+msg "Installed $BIN to $INSTALL_DIR/$BIN"
+
+resolved_bin="$(command -v "$BIN" 2>/dev/null || true)"
+case ":$PATH:" in
+  *":$INSTALL_DIR:"*) install_dir_on_path=1 ;;
+  *) install_dir_on_path=0 ;;
+esac
+
+path_needs_update=0
+if [ "$install_dir_on_path" != "1" ]; then
+  path_needs_update=1
+elif [ -n "$resolved_bin" ] && [ "$resolved_bin" != "$INSTALL_DIR/$BIN" ]; then
+  path_needs_update=1
+fi
+
+if [ "$path_needs_update" = "1" ]; then
+  msg ""
+  if [ -n "$resolved_bin" ] && [ "$resolved_bin" != "$INSTALL_DIR/$BIN" ]; then
+    msg "$BIN was installed, but your shell is not using that install yet."
+    msg "Your shell currently resolves $BIN to: $resolved_bin"
+  else
+    msg "$BIN was installed, but $INSTALL_DIR is not on your PATH yet."
+  fi
+
+  update_path="ask"
+  case "${EMBED_LOG_UPDATE_PATH:-}" in
+    1|true|TRUE|yes|YES|y|Y) update_path="yes" ;;
+    0|false|FALSE|no|NO|n|N) update_path="no" ;;
+  esac
+
+  if [ "$update_path" = "ask" ]; then
+    if is_interactive && prompt_yes_no "Add $INSTALL_DIR to your PATH in $(select_profile) now?" Y; then
+      update_path="yes"
+    else
+      update_path="no"
+    fi
+  fi
+
+  if [ "$update_path" = "yes" ]; then
+    add_install_dir_to_path
+  else
+    msg "Add it manually, for example:"
+    msg ""
+    msg "  export PATH=\"$INSTALL_DIR:\$PATH\""
+    msg ""
+    msg "Or re-run with automatic shell profile update enabled:"
+    msg ""
+    msg "  curl -fsSL https://github.com/$REPO/releases/latest/download/install.sh | EMBED_LOG_UPDATE_PATH=1 sh"
+  fi
+fi
+
+msg ""
+msg "Then run: $BIN"

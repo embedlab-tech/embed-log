@@ -1,0 +1,436 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format:
+    name: Format check
+    runs-on: [self-hosted, Linux]
+    timeout-minutes: 20
+    env:
+      CI: "true"
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  build-cli:
+    name: Build CLI
+    runs-on: [self-hosted, Linux]
+    needs: format
+    timeout-minutes: 45
+    env:
+      CI: "true"
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: cli
+
+      - name: Show Rust versions
+        run: |
+          rustc --version
+          cargo --version
+          rustup show
+
+      - name: Build CLI
+        run: cargo build --locked --package embed-log-cli --bin embed-log
+
+  unit-tests:
+    name: Unit tests
+    runs-on: [self-hosted, Linux]
+    needs: build-cli
+    timeout-minutes: 60
+    env:
+      CI: "true"
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: cli
+
+      - name: Clippy CLI/core
+        run: cargo clippy --locked --package embed-log-core --package embed-log-cli --all-targets -- -D warnings
+
+      - name: Rust unit tests CLI/core
+        run: cargo test --locked --package embed-log-core --package embed-log-cli
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: tests-ui/package-lock.json
+
+      - name: Install UI test dependencies
+        run: npm --prefix tests-ui ci
+
+      - name: UI unit tests
+        run: npm --prefix tests-ui run test:unit
+
+  package-cli-linux:
+    name: Package release CLI
+    runs-on: [self-hosted, Linux]
+    needs: unit-tests
+    timeout-minutes: 45
+    env:
+      CI: "true"
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: cli-release
+
+      - name: Build release CLI
+        run: cargo build --locked --release --package embed-log-cli --bin embed-log
+
+      - name: Package release CLI
+        run: ./scripts/package-cli.sh x86_64-unknown-linux-gnu
+
+      - name: Upload release package
+        uses: actions/upload-artifact@v4
+        with:
+          name: embed-log-cli-linux-release
+          path: dist/embed-log-x86_64-unknown-linux-gnu.tar.gz
+          if-no-files-found: error
+
+  backend-hardware-tests:
+    name: Backend hardware tests
+    runs-on: [self-hosted, Linux]
+    needs: package-cli-linux
+    timeout-minutes: 45
+    env:
+      CI: "true"
+      CARGO_TERM_COLOR: always
+      EMBED_LOG_HARDWARE_UART_PORT: /dev/ttyACM3
+      EMBED_LOG_HARDWARE_UART_BAUD: "115200"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download release package
+        uses: actions/download-artifact@v4
+        with:
+          name: embed-log-cli-linux-release
+          path: dist
+
+      - name: Install release binary from package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .tooling/bin
+          tar -xzf dist/embed-log-x86_64-unknown-linux-gnu.tar.gz -C .tooling/bin
+          echo "$PWD/.tooling/bin" >> "$GITHUB_PATH"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python test dependencies
+        run: python -m pip install -e 'sdk/python[dev]'
+
+      - name: Backend UART hardware test
+        run: python -m pytest sdk/python/tests/test_backend_hardware_uart.py -q
+
+      - name: Uninstall release binary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .tooling/bin/embed-log
+          rmdir .tooling/bin 2>/dev/null || true
+          rmdir .tooling 2>/dev/null || true
+
+  e2e-tests:
+    name: UI e2e tests
+    runs-on: [self-hosted, Linux]
+    needs: unit-tests
+    timeout-minutes: 90
+    env:
+      CI: "true"
+      CARGO_TERM_COLOR: always
+      DEMO_TEST_TICK_MS: "250"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: e2e
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: tests-ui/package-lock.json
+
+      - name: Install UI test dependencies
+        run: npm --prefix tests-ui ci
+
+      - name: Install Playwright Chromium
+        working-directory: tests-ui
+        run: npx playwright install chromium
+
+      - name: UI e2e tests
+        run: npm --prefix tests-ui run test:e2e
+
+      - name: UI regression smoke tests
+        run: npm --prefix tests-ui run test:regression:smoke
+
+      - name: UI regression data/source/plugin tests
+        run: npm --prefix tests-ui run test:regression:data
+
+      - name: UI regression interaction tests
+        run: npm --prefix tests-ui run test:regression:interaction
+
+      - name: UI regression event tests
+        run: npm --prefix tests-ui run test:regression:events
+
+      - name: UI regression session/export tests
+        run: npm --prefix tests-ui run test:regression:sessions
+
+      - name: Upload Playwright reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ runner.os }}
+          path: |
+            tests-ui/playwright-report/
+            tests-ui/test-results/
+          if-no-files-found: ignore
+
+  tauri-linux:
+    name: Tauri Linux build
+    runs-on: [self-hosted, Linux]
+    needs: build-cli
+    timeout-minutes: 60
+    env:
+      CI: "true"
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: tauri-linux
+
+      - name: Check Tauri Linux system dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v pkg-config >/dev/null 2>&1 || {
+            echo "pkg-config is missing. Install the Tauri Linux dependencies listed in the workflow." >&2
+            exit 1
+          }
+          pkg-config --exists gtk+-3.0 gdk-3.0 gdk-pixbuf-2.0 cairo openssl
+          if pkg-config --exists webkit2gtk-4.1 javascriptcoregtk-4.1; then
+            echo "Found WebKitGTK 4.1"
+          elif pkg-config --exists webkit2gtk-4.0 javascriptcoregtk-4.0; then
+            echo "Found WebKitGTK 4.0"
+          else
+            echo "WebKitGTK development files are missing. Install libwebkit2gtk-4.1-dev, or libwebkit2gtk-4.0-dev on older Ubuntu/Debian." >&2
+            exit 1
+          fi
+          pkg-config --exists ayatana-appindicator3-0.1 librsvg-2.0
+          command -v patchelf >/dev/null 2>&1 || {
+            echo "patchelf is missing." >&2
+            exit 1
+          }
+
+      - name: Build Tauri desktop app
+        run: cargo build --locked --package embed-log-tauri --bin embed-log-tauri
+
+      - name: Clippy Tauri desktop app
+        run: cargo clippy --locked --package embed-log-tauri --all-targets -- -D warnings
+
+      - name: Rust tests Tauri desktop app
+        run: cargo test --locked --package embed-log-tauri
+
+
+  package-binary:
+    name: Package release binary
+    runs-on: [self-hosted, Linux]
+    needs: build-cli
+    timeout-minutes: 45
+    env:
+      CI: "true"
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release
+
+      - name: Build release binary
+        run: cargo build --locked --release --package embed-log-cli --bin embed-log
+
+      - name: Verify release binary runs
+        run: ./target/release/embed-log --version
+
+      - name: Package CLI
+        run: ./scripts/package-cli.sh x86_64-unknown-linux-gnu
+
+      - name: Create SHA256SUMS
+        run: |
+          cd dist
+          sha256sum embed-log-x86_64-unknown-linux-gnu.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload release tarball artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-tarball
+          path: |
+            dist/embed-log-x86_64-unknown-linux-gnu.tar.gz
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+  install-e2e:
+    name: Install + e2e (no Rust)
+    runs-on: [self-hosted, Linux]
+    needs: package-binary
+    timeout-minutes: 60
+    env:
+      CI: "true"
+      DEMO_TEST_TICK_MS: "250"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Intentionally NO Rust toolchain — this job tests the real user install path.
+
+      - name: Download release tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: release-tarball
+          path: release-staging
+
+      - name: Verify artifact contents
+        run: |
+          ls -la release-staging/
+          test -f release-staging/embed-log-x86_64-unknown-linux-gnu.tar.gz
+          test -f release-staging/SHA256SUMS
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: tests-ui/package-lock.json
+
+      - name: Install via install.sh (file:// — no HTTP server needed)
+        env:
+          EMBED_LOG_BASE_URL: file://${{ github.workspace }}/release-staging
+          INSTALL_DIR: ${{ runner.temp }}/embed-log-bin
+        run: sh install.sh
+
+      - name: Add install dir to PATH
+        run: echo "${{ runner.temp }}/embed-log-bin" >> "$GITHUB_PATH"
+
+      - name: Verify installed binary
+        run: |
+          which embed-log
+          embed-log --version
+
+      - name: Install UI test dependencies
+        run: npm --prefix tests-ui ci
+
+      - name: Install Playwright Chromium
+        working-directory: tests-ui
+        run: npx playwright install chromium
+
+      - name: UI e2e tests (installed binary)
+        env:
+          EMBED_LOG_BIN: ${{ runner.temp }}/embed-log-bin/embed-log
+        run: npm --prefix tests-ui run test:e2e
+
+      - name: UI regression smoke tests (installed binary)
+        env:
+          EMBED_LOG_BIN: ${{ runner.temp }}/embed-log-bin/embed-log
+        run: npm --prefix tests-ui run test:regression:smoke
+
+      - name: Upload Playwright reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-installed-e2e
+          path: |
+            tests-ui/playwright-report/
+            tests-ui/test-results/
+          if-no-files-found: ignore
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f "${{ runner.temp }}/embed-log-bin/embed-log"
+          rm -rf release-staging
+          if command -v embed-log >/dev/null 2>&1; then
+            echo "ERROR: embed-log still on PATH after cleanup" >&2
+            exit 1
+          fi
+          echo "Cleanup complete — embed-log uninstalled"

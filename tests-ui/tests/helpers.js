@@ -64,6 +64,10 @@ export async function selectedLineTicks(page, paneId) {
   );
 }
 
+export async function waitForWs(page) {
+  await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+}
+
 export async function saveDownload(download, testInfo, filename) {
   const out = testInfo.outputPath(filename || download.suggestedFilename());
   await download.saveAs(out);
@@ -84,5 +88,3 @@ export function collectPageErrors(page) {
   });
   return errors;
 }
-
-

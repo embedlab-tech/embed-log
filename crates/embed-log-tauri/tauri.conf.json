@@ -1,0 +1,35 @@
+{
+  "$schema": null,
+  "productName": "embed-log",
+  "version": "0.1.0",
+  "identifier": "com.embed-log.app",
+  "build": {
+    "frontendDist": "../../frontend",
+    "devUrl": "http://localhost:8080",
+    "beforeDevCommand": "",
+    "beforeBuildCommand": ""
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "embed-log",
+        "width": 1200,
+        "height": 800,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/256x256.png"
+    ]
+  }
+}

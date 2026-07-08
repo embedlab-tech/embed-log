@@ -155,6 +155,24 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
 
     let currentSession = null;
 
+    function tauriInvoke() {
+        return window.__TAURI__?.core?.invoke || null;
+    }
+
+    async function openSessionUrl(url) {
+        if (!url) return;
+        const invoke = tauriInvoke();
+        if (invoke) {
+            try {
+                await invoke("open_external_url", { url });
+                return;
+            } catch (_) {
+                // Fall back to browser behavior below.
+            }
+        }
+        window.open(url, "_blank", "noopener");
+    }
+
     function updateCurrentButtons() {
         const status = currentSession?.html_status || (currentSession?.html_ready ? "ready" : "pending");
 
@@ -231,7 +249,7 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
 
     function openCurrentSessionHtml() {
         if (!currentSession?.html_ready || !currentSession?.html) return;
-        window.open(currentSession.html, "_blank", "noopener");
+        openSessionUrl(currentSession.html);
     }
 
     async function createCleanSession() {
@@ -316,6 +334,10 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
                 htmlLink.textContent = "open html";
                 if (s.html_ready && s.html) {
                     htmlLink.href = s.html;
+                    htmlLink.addEventListener("click", ev => {
+                        ev.preventDefault();
+                        openSessionUrl(s.html);
+                    });
                 } else {
                     htmlLink.href = "#";
                     htmlLink.classList.add("disabled");
@@ -327,6 +349,10 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
                 manifestLink.rel = "noopener";
                 manifestLink.textContent = "manifest";
                 manifestLink.href = s.manifest || "#";
+                manifestLink.addEventListener("click", ev => {
+                    ev.preventDefault();
+                    openSessionUrl(manifestLink.href);
+                });
 
                 actions.appendChild(htmlLink);
                 actions.appendChild(manifestLink);

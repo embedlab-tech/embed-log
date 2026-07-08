@@ -36,7 +36,7 @@ export async function exportHtmlSnapshot(options = {}) {
             "profile.js", "renderPane.js", "renderToolbar.js", "viewer.css",
             "pluginRuntime.js", "state.js", "themes.js", "settings.js", "fontsize.js",
             "ansi.js", "lines.js", "tabs.js", "tabcreate.js",
-            "ui.js", "export.js", "selection.js", "tsparse.js", "import.js",
+            "ui.js", "export.js", "postprocess.js", "selection.js", "events.js", "tsparse.js", "import.js",
         ];
 
 
@@ -66,7 +66,7 @@ export async function exportHtmlSnapshot(options = {}) {
             return a.endsWith(".js") ? _escJs(_stripModuleSyntax(src)) : src;
         }));
         const [profileJs, renderPaneJs, renderToolbarJs, css, pluginRuntimeJs, stateJs, themesJs, settingsJs, fontsizeJs,
-               ansiJs, linesJs, tabsJs, tabcreateJs, uiJs, exportJs, selectionJs, tsparseJs, importJs] = texts;
+               ansiJs, linesJs, tabsJs, tabcreateJs, uiJs, exportJs, postprocessJs, selectionJs, eventsJs, tsparseJs, importJs] = texts;
 
 
         // ------------------------------------------------------------------
@@ -115,6 +115,8 @@ export async function exportHtmlSnapshot(options = {}) {
             `window.__embedLogInitialThemeState = ${_safeJson(themeState)};\n` +
             `window.__embedLogInitialTimestampMode = ${_safeJson(state.timestampMode)};\n` +
             `window.__embedLogFirstLogAt = ${_safeJson(state.firstLogAt)};\n` +
+            `window.__embedLogEventRules = ${_safeJson(state.eventRules || {})};\n` +
+            `window.__embedLogEvents = ${_safeJson(state.events || [])};\n` +
             `window.__embedLogInitialFontSize = ${state.fontSize};`;
 
 
@@ -154,7 +156,7 @@ export async function exportHtmlSnapshot(options = {}) {
                 paneDataTags += `<script type="application/json" data-pane="${id}">${_safeJson(lines.map(_compactEntry))}</script>\n`;
             });
         } else {
-            // Custom logData passed in (e.g. from snippet export)
+            // Custom logData passed in (e.g. from selection export)
             Object.entries(options.logData).forEach(([paneId, entries]) => {
                 if (!entries || !entries.length) return;
                 paneDataTags += `<script type="application/json" data-pane="${paneId}">${_safeJson(entries.map(e => {
@@ -206,6 +208,16 @@ export async function exportHtmlSnapshot(options = {}) {
         });
         if (typeof applyMarkers === "function") applyMarkers();
         if (typeof window.__embedLogOnMarkers === "function") window.__embedLogOnMarkers();
+    }
+    var _eventRules = window.__embedLogEventRules || {};
+    var _hasRules = Object.keys(_eventRules).some(function (k) { return Array.isArray(_eventRules[k]) && _eventRules[k].length > 0; });
+    if (_hasRules) {
+        state.eventRules = _eventRules;
+        state.eventsEnabled = true;
+        if (typeof initEventsTab === "function") initEventsTab();
+        var _events = window.__embedLogEvents || [];
+        _events.forEach(function (ev) { if (typeof addEvent === "function") addEvent(ev); });
+        if (typeof renderTabBar === "function") renderTabBar();
     }
     if (${activeTabIdx} !== 0) switchTab(${activeTabIdx});
     (function () {
@@ -287,7 +299,9 @@ ${pluginScriptTags}
 <script>${tabcreateJs}</script>
 <script>${uiJs}</script>
 <script>${exportJs}</script>
+<script>${postprocessJs}</script>
 <script>${selectionJs}</script>
+<script>${eventsJs}</script>
 <script>${tsparseJs}</script>
 <script>${importJs}</script>
 <script>${bootstrapJs}</script>
@@ -328,7 +342,7 @@ function _stripAnsi(text) {
 }
 
 // from raw text, producing clean plain text for download.
-// Matches _snippetMessageText in selection.js.
+// Matches _selectionMessageText in selection.js.
 function _cleanMessage(rawText) {
     let text = _stripAnsi(rawText ?? "").trim();
     for (let i = 0; i < 4; i++) {

@@ -1,0 +1,22 @@
+version: 1
+server:
+  host: 127.0.0.1
+  ws_port: 8080
+logs:
+  dir: logs
+sources:
+  - name: COAP_NET
+    label: CoAP UDP Capture
+    type: network_capture
+    interface: en0
+    network_backend: pcap
+    udp:
+      ports: [5683, 5684]
+    snaplen: 256
+    promisc: false
+    payload:
+      include_preview: true
+      max_preview_bytes: 192
+tabs:
+  - label: Network
+    panes: [COAP_NET]

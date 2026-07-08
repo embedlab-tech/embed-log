@@ -370,21 +370,27 @@ export function analyzeLinePlugins(paneId, line) {
     refs.forEach(ref => {
         const plugin = _registry.get(ref.name);
         if (!plugin) return;
-        const raw = plugin.analyzeLine({
-            paneId,
-            options: _effectiveOptionsForPanePlugin(paneId, ref, plugin),
-            rawText: line.rawText ?? '',
-            html: line.html ?? '',
-            isTx: !!line.isTx,
-            timestamp: line.ts ?? '',
-            absTs: line.absTs ?? null,
-            absNum: line.absNum ?? null,
-            relTs: line.relTs ?? null,
-            relNum: line.relNum ?? null,
-            utils: {
-                escapeHtml: _escapeHtml,
-            },
-        });
+        let raw;
+        try {
+            raw = plugin.analyzeLine({
+                paneId,
+                options: _effectiveOptionsForPanePlugin(paneId, ref, plugin),
+                rawText: line.rawText ?? '',
+                html: line.html ?? '',
+                isTx: !!line.isTx,
+                timestamp: line.ts ?? '',
+                absTs: line.absTs ?? null,
+                absNum: line.absNum ?? null,
+                relTs: line.relTs ?? null,
+                relNum: line.relNum ?? null,
+                utils: {
+                    escapeHtml: _escapeHtml,
+                },
+            });
+        } catch (_) {
+            // Plugin failure is isolated — raw log rendering continues.
+            return;
+        }
         const clean = _sanitizeAnalysis(raw);
         if (!clean) return;
         pluginData[ref.name] = clean;

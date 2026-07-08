@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "embed-log-sdk"
+version = "0.1.0"
+description = "Python SDK for embed-log live log viewer"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = [
+    "pyyaml>=6.0",
+    "websocket-client>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.urls]
+repository = "https://github.com/krezolekcoder/embed-log"
+
+[tool.setuptools.packages.find]
+include = ["embed_log_sdk*"]

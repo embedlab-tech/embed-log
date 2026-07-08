@@ -1,14 +1,25 @@
 {
-  "name": "embed-log-ui-tests",
+  "name": "embed-log-rs-ui-tests",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "test": "playwright test",
+    "test:e2e": "playwright test",
+    "test:unit": "node --test unit/*.test.js",
+    "test:all": "npm run test:unit && npm run test:e2e",
+    "test:regression": "playwright test --config=playwright.regression.config.js",
+    "test:regression:categorized": "node regression-categories.mjs all",
+    "test:regression:smoke": "node regression-categories.mjs smoke",
+    "test:regression:data": "node regression-categories.mjs data",
+    "test:regression:interaction": "node regression-categories.mjs interaction",
+    "test:regression:events": "node regression-categories.mjs events",
+    "test:regression:sessions": "node regression-categories.mjs sessions",
+    "test:regression:list": "node regression-categories.mjs list",
     "test:headed": "playwright test --headed",
     "test:debug": "playwright test --debug",
     "test:ui": "playwright test --ui",
-    "install-browsers": "playwright install"
+    "install-browsers": "playwright install chromium"
   },
   "devDependencies": {
     "@playwright/test": "^1.53.0"

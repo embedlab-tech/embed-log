@@ -1,0 +1,14 @@
+{
+  "name": "embed-log-tools",
+  "description": "Claude Code tooling for the embed-log CLI.",
+  "owner": {
+    "name": "krezolekcoder"
+  },
+  "plugins": [
+    {
+      "name": "embed-log",
+      "source": ".",
+      "description": "Skill for querying embed-log sessions (device/UART/UDP logs, test output, event detections) via the embed-log CLI instead of grepping raw log files."
+    }
+  ]
+}

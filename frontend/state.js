@@ -101,19 +101,34 @@ export const state = {
     markers:     {},       // paneId → [{lineIdx, numTs, description, createdAt}]
     markerNavIdx: -1,      // index into flat marker list for navigation
     atBottom:    {},
+    behindLive:  {},       // paneId → true when new lines arrived while scrolled away from bottom
     highlighted: {},
     highlightedIdx: {},
     selected:    {},
     selectionScope:  'exact', // 'exact', 'context', or 'context-selected'
     contextPanes:    {},       // paneId → bool; only used when selectionScope === 'context-selected'
+    copyFormat:      'full',   // 'full' (default, unchanged) or 'compact' — see postprocess.js
     unwrap:        false,
     timestampMode: INITIAL_TIMESTAMP_MODE,
     sessionTimestampMode: INITIAL_TIMESTAMP_MODE,
     firstLogAt: INITIAL_FIRST_LOG_AT,
     firstLogAtMs: _isoToEpochMs(INITIAL_FIRST_LOG_AT),
+    useClientRelativeBase: false,
+    clientRelativeBaseMs: null,
+
+    // ── Event detection ──
+    events: [],             // [{event_id, source_id, severity, timestamp_num, ...}]
+    eventsEnabled: false,   // true when config has ≥1 event rule
+    eventsTabActive: false, // true while the Events timeline tab is shown
+    includeEventMarkers: false, // nav includes kind:"event" markers when true
+    eventRules: {},         // source → [{name, severity}] from config message
 };
 
 export function setTimestampContext({ mode = null, firstLogAt = undefined, resetMode = false } = {}) {
+    if (resetMode) {
+        state.useClientRelativeBase = false;
+        state.clientRelativeBaseMs = null;
+    }
     if (mode === "absolute" || mode === "relative") {
         state.sessionTimestampMode = mode;
         if (resetMode) state.timestampMode = mode;
@@ -123,6 +138,22 @@ export function setTimestampContext({ mode = null, firstLogAt = undefined, reset
         state.firstLogAtMs = _isoToEpochMs(state.firstLogAt);
     }
     return _enrichExistingTimestampVariants();
+}
+
+export function resetRelativeTimestampBase() {
+    state.useClientRelativeBase = true;
+    state.clientRelativeBaseMs = null;
+    state.firstLogAt = null;
+    state.firstLogAtMs = null;
+}
+
+export function noteRelativeTimestampCandidate(meta = {}) {
+    if (!state.useClientRelativeBase || Number.isFinite(state.clientRelativeBaseMs)) return;
+    if (!meta || typeof meta !== "object") return;
+    const absMs = Number.isFinite(meta.absNum)
+        ? meta.absNum
+        : (Number.isFinite(meta.numTs) ? meta.numTs : _isoToEpochMs(meta.timestampIso));
+    if (Number.isFinite(absMs)) state.clientRelativeBaseMs = absMs;
 }
 
 export function lineHasTimestampMode(line, mode) {
@@ -185,11 +216,16 @@ export function buildTimestampInfo(ts, meta = {}) {
         info.absTs = _formatAbsoluteTimestampFromMs(info.absNum);
     }
 
-    if ((!info.relTs || !Number.isFinite(info.relNum)) && Number.isFinite(info.absNum) && Number.isFinite(state.firstLogAtMs)) {
+    if (state.useClientRelativeBase && Number.isFinite(info.absNum)) {
+        if (!Number.isFinite(state.clientRelativeBaseMs)) {
+            state.clientRelativeBaseMs = info.absNum;
+        }
+        info.relNum = Math.max(0, info.absNum - state.clientRelativeBaseMs);
+        info.relTs = formatRelativeTimestamp(info.relNum);
+    } else if ((!info.relTs || !Number.isFinite(info.relNum)) && Number.isFinite(info.absNum) && Number.isFinite(state.firstLogAtMs)) {
         info.relNum = Math.max(0, info.absNum - state.firstLogAtMs);
         info.relTs = formatRelativeTimestamp(info.relNum);
     }
-
 
     if (!Number.isFinite(info.numTs)) {
         if (state.timestampMode === "relative" && Number.isFinite(info.relNum)) {
@@ -214,6 +250,7 @@ PANES.forEach(id => {
     state.filters[id]     = null;
     state.rawLines[id]    = [];
     state.atBottom[id]    = true;
+    state.behindLive[id]  = false;
 
     state.wrap[id]        = false;
     state.highlighted[id] = null;

@@ -1,41 +1,26 @@
-
 version: 1
-
+baudrate: 115200
 server:
   host: 127.0.0.1
   ws_port: 8080
-  app_name: embed-log
-  open_browser: true
-  verbosity: full
-  timestamp_mode: absolute
-
 logs:
-  dir: logs/double_uart_udp_two_tabs/
-
-baudrate: 115200
-
+  dir: logs
 sources:
   - name: DUT_UART
     label: DUT UART
     type: uart
     port: /dev/ttyUSB0
-    inject_port: 5001
-
-  - name: AUX_UART
-    label: AUX UART
+  - name: HOST_UART
+    label: Host UART
     type: uart
     port: /dev/ttyUSB1
-    inject_port: 5002
-
-  - name: PYTEST_UDP
-    label: PYTEST UDP
+    baudrate: 921600
+  - name: AUX_UDP
+    label: Auxiliary UDP
     type: udp
-    port: 6000
-    inject_port: 5003
-
+    port: 6002
 tabs:
-  - label: Device
-    panes: [DUT_UART, AUX_UART]
-
-  - label: CI
-    panes: [PYTEST_UDP]
+  - label: Main
+    panes: [DUT_UART, HOST_UART]
+  - label: Auxiliary
+    panes: [AUX_UDP]

@@ -1,284 +1,203 @@
-<#
-.SYNOPSIS
-    embed-log installer for Windows (PowerShell 7+)
-.DESCRIPTION
-    Installs embed-log globally via pipx. Requires Python >= 3.10 and PowerShell 7+.
-    Run from PowerShell:
-        iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.ps1'))
-#>
+param(
+    [string]$Repo = $(if ($env:EMBED_LOG_REPO) { $env:EMBED_LOG_REPO } else { "krezolekcoder/embed-log" }),
+    [string]$Version = $(if ($env:EMBED_LOG_VERSION) { $env:EMBED_LOG_VERSION } else { "latest" }),
+    [string]$InstallDir = $(if ($env:INSTALL_DIR) { $env:INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA "Programs\embed-log\bin" }),
+    [switch]$NoModifyPath,
+    [switch]$NoPrompt
+)
 
-$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
 
-$Repo = 'krezolekcoder/embed-log'
-$RepoUrl = "https://github.com/$Repo.git"
-$MinPy = [Version]'3.10'
-$InstallRefType = if ($env:EMBED_LOG_REF_TYPE) { $env:EMBED_LOG_REF_TYPE } else { 'release' }
-$InstallRef = if ($env:EMBED_LOG_REF) { $env:EMBED_LOG_REF } else { 'latest' }
-$OverrideRepo = if ($env:EMBED_LOG_REPO) { $env:EMBED_LOG_REPO } else { $Repo }
-$OverrideRepoUrl = if ($env:EMBED_LOG_REPO_URL) { $env:EMBED_LOG_REPO_URL } else { "https://github.com/$OverrideRepo.git" }
-$InstallMode = if ($env:EMBED_LOG_INSTALL_MODE) { $env:EMBED_LOG_INSTALL_MODE } else { 'install' }
-
-function Write-Info { Write-Host "embed-log $args" -ForegroundColor Cyan }
-function Write-OK { Write-Host "  ✓ $args" -ForegroundColor Green }
-function Write-Warn { Write-Host "  ⚠ $args" -ForegroundColor Yellow }
-function Die {
-    Write-Host "`n  ✕ $args" -ForegroundColor Red
-    exit 1
+function Write-Info($Message) {
+    Write-Host $Message
 }
 
-function Have-Cmd {
-    param([string]$Cmd)
-    return [bool](Get-Command $Cmd -ErrorAction SilentlyContinue)
+function Fail($Message) {
+    throw "error: $Message"
 }
 
-function Invoke-Pipx {
-    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Args)
-    if (Have-Cmd 'pipx') {
-        & pipx @Args
-    } else {
-        & $script:python -m pipx @Args
+function Test-InstallerInteractive {
+    if ($NoPrompt -or $env:EMBED_LOG_NO_PROMPT -eq "1" -or $env:CI -eq "true") {
+        return $false
     }
+    return [Environment]::UserInteractive
 }
 
-function Write-VersionFile {
-    param([string]$Dir, [string]$Commit)
-    $versionFile = Join-Path $Dir 'backend\_version.py'
-    $projFile = Join-Path $Dir 'pyproject.toml'
-    $version = "0.0.0"
-    if (Test-Path $projFile) {
-        $line = Get-Content $projFile | Select-String '^version = ' | Select-Object -First 1
-        if ($line) {
-            $version = ($line -replace '^version = "(.*)"', '$1').Trim()
+function Confirm-YesNo($Message, [bool]$DefaultYes = $true) {
+    if (-not (Test-InstallerInteractive)) {
+        return $DefaultYes
+    }
+
+    $Suffix = if ($DefaultYes) { "[Y/n]" } else { "[y/N]" }
+    while ($true) {
+        $Answer = Read-Host "$Message $Suffix"
+        if ([string]::IsNullOrWhiteSpace($Answer)) {
+            return $DefaultYes
+        }
+        switch -Regex ($Answer.Trim()) {
+            "^(y|yes)$" { return $true }
+            "^(n|no)$" { return $false }
+            default { Write-Info "Please answer y or n." }
         }
     }
-    @"
-# Auto-generated. Do not edit manually.
-# Install scripts populate __commit__ before pipx install.
-__version__ = "$version"
-__commit__ = "$Commit"
-"@ | Set-Content -Path $versionFile -Encoding UTF8
-}
-function Write-InstallSourceFile {
-    param(
-        [string]$Dir,
-        [string]$SourceKind,
-        [string]$Repo,
-        [string]$RepoUrl,
-        [string]$RefType,
-        [string]$Ref,
-        [string]$LocalPath
-    )
-    $sourceFile = Join-Path $Dir 'backend\_install_source.py'
-    @"
-# Auto-generated. Install scripts populate these before pipx install.
-__source_kind__ = "$SourceKind"
-__repo__ = "$Repo"
-__repo_url__ = "$RepoUrl"
-__ref_type__ = "$RefType"
-__ref__ = "$Ref"
-__local_path__ = "$LocalPath"
-"@ | Set-Content -Path $sourceFile -Encoding UTF8
 }
 
-
-
-Write-Info "Checking Python..."
-
-$python = $null
-foreach ($c in @('py', 'python3', 'python')) {
-    if (Have-Cmd $c) {
-        $python = $c
-        break
+function ConvertTo-OptionalYesNo($Value) {
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $null
+    }
+    switch -Regex ($Value.Trim()) {
+        "^(1|true|yes|y)$" { return $true }
+        "^(0|false|no|n)$" { return $false }
+        default { return $null }
     }
 }
 
-if (-not $python) {
-    Die @"
-Python not found (need >= $MinPy).
-
-  Install Python 3.10 or later from:
-    https://python.org
-
-  Make sure to check "Add Python to PATH" during installation,
-  then open a new PowerShell window and try again.
-"@
-}
-
-$pyVerStr = & $python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
-if (-not $pyVerStr) {
-    Die "Failed to run Python interpreter ($python)."
-}
-
-$pyVer = [Version]::new($pyVerStr)
-if ($pyVer -lt $MinPy) {
-    Die @"
-Python $pyVerStr is too old — version $MinPy or later is required.
-
-  Upgrade Python from https://python.org and try again.
-"@
-}
-
-Write-OK "Python $pyVerStr — using $python"
-function Resolve-RequestedRef {
-    if ($InstallRefType -ne 'release') {
-        return $InstallRef
-    }
-    if ($InstallRef -ne 'latest') {
-        return $InstallRef
-    }
-    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$OverrideRepo/releases/latest"
-    if (-not $release.tag_name) {
-        Die "Failed to resolve latest release tag."
-    }
-    return $release.tag_name
-}
-
-
-if (-not (Have-Cmd 'pipx')) {
-    Write-Info "pipx not found — installing via pip..."
-    & $python -m pip install --user pipx 2>&1 | Out-Null
-    if (-not $?) {
-        Die @"
-Failed to install pipx via pip.
-
-  Try:
-    python -m pip install --user pipx
-  or:
-    pip install --user pipx
-
-  Then restart PowerShell and try again.
-"@
-    }
-}
-
-$userScripts = & $python -c "import os, site; print(os.path.join(site.USER_BASE, 'Scripts'))" 2>$null
-if ($userScripts) {
-    $env:Path = "$userScripts;$env:Path"
-}
-$env:Path = [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:Path
-$env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + $env:Path
-
-& $python -m pipx ensurepath 2>&1 | Out-Null
-& $python -m pipx --version 2>$null | Out-Null
-if (-not $?) {
-    Die @"
-pipx was installed but could not be started.
-
-  Restart PowerShell and try again.
-  If that still fails, run:
-    python -m pip install --user pipx
-    python -m pipx ensurepath
-"@
-}
-
-Write-OK "pipx ready"
-$ResolvedInstallRef = Resolve-RequestedRef
-Write-OK "Install ref $InstallRefType`:$InstallRef -> $ResolvedInstallRef"
-
-$installSrc = $null
-$tmpRoot = $null
-$localRoot = $PSScriptRoot
-if ($localRoot -and (Test-Path (Join-Path $localRoot 'pyproject.toml')) -and (Test-Path (Join-Path $localRoot 'backend'))) {
-    Write-Info "Installing from local repository at $localRoot..."
-    $installSrc = $localRoot
-    if (Have-Cmd 'git') {
-        $sha = & git -C $localRoot rev-parse --short HEAD 2>$null
-        if ($sha) {
-            Write-VersionFile -Dir $localRoot -Commit $sha
-        }
-    }
-    Write-InstallSourceFile -Dir $localRoot -SourceKind 'local' -Repo $OverrideRepo -RepoUrl $OverrideRepoUrl -RefType $InstallRefType -Ref $InstallRef -LocalPath $localRoot
-} elseif (Have-Cmd 'git') {
-    Write-Info "Installing embed-log from GitHub ($OverrideRepo)..."
-    if (-not $env:USERPROFILE) {
-        Die "USERPROFILE is not set."
-    }
-    $cacheBase = Join-Path $env:USERPROFILE '.cache\embed-log'
-    $cacheRoot = Join-Path $cacheBase 'src'
-    $null = New-Item -ItemType Directory -Force -Path $cacheBase
-    if (Test-Path $cacheRoot) {
-        Remove-Item -Recurse -Force $cacheRoot
-    }
-    & git init $cacheRoot 2>&1 | Out-Null
-    if (-not $?) {
-        Die "Failed to prepare embed-log cache directory."
-    }
-    & git -C $cacheRoot remote add origin $OverrideRepoUrl 2>&1 | Out-Null
-    if (-not $?) {
-        Die "Failed to configure embed-log repository origin."
-    }
-    & git -C $cacheRoot fetch --depth=1 origin $ResolvedInstallRef 2>&1 | Out-Null
-    if (-not $?) {
-        Die "Failed to fetch embed-log ref '$ResolvedInstallRef'."
-    }
-    & git -C $cacheRoot checkout --detach FETCH_HEAD 2>&1 | Out-Null
-    if (-not $?) {
-        Die "Failed to checkout embed-log ref '$ResolvedInstallRef'."
-    }
-    $installSrc = $cacheRoot
-    $sha = & git -C $cacheRoot rev-parse --short HEAD 2>$null
-    if ($sha) {
-        Write-VersionFile -Dir $cacheRoot -Commit $sha
-    }
-    Write-InstallSourceFile -Dir $cacheRoot -SourceKind 'git' -Repo $OverrideRepo -RepoUrl $OverrideRepoUrl -RefType $InstallRefType -Ref $InstallRef -LocalPath ''
-} else {
-    Write-Warn "git not found — downloading source archive instead."
-    $tmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("embed-log-" + [System.Guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Force -Path $tmpRoot | Out-Null
-    $archivePath = Join-Path $tmpRoot 'embed-log.tar.gz'
-    $archiveUrl = "https://github.com/$OverrideRepo/archive/$ResolvedInstallRef.tar.gz"
-    Write-Info "Downloading $archiveUrl..."
-    Invoke-WebRequest -Uri $archiveUrl -OutFile $archivePath
-    & $python -c "import tarfile; tarfile.open(r'''$archivePath''', 'r:gz').extractall(r'''$tmpRoot''')"
-    if (-not $?) {
-        Die "Failed to extract embed-log source archive."
-    }
-    $srcDir = Get-ChildItem -Path $tmpRoot -Directory | Select-Object -First 1
-    if (-not $srcDir) {
-        Die "Downloaded archive has unexpected structure."
-    }
-    $installSrc = $srcDir.FullName
-    Write-VersionFile -Dir $srcDir.FullName -Commit 'archive'
-    Write-InstallSourceFile -Dir $srcDir.FullName -SourceKind 'archive' -Repo $OverrideRepo -RepoUrl $OverrideRepoUrl -RefType $InstallRefType -Ref $InstallRef -LocalPath ''
+if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
+    Fail "this installer supports Windows only"
 }
 
 try {
-    Invoke-Pipx uninstall embed-log 2>&1 | Out-Null
-    if ($?) {
-        Write-Info "Removed existing embed-log installation."
-    }
-
-    Invoke-Pipx install $installSrc 2>&1
-    if (-not $?) {
-        Die @"
-Failed to install embed-log via pipx.
-
-  If installation fails, try:
-    pipx uninstall embed-log
-    pipx install $installSrc
-"@
-    }
-} finally {
-    if ($tmpRoot -and (Test-Path $tmpRoot)) {
-        Remove-Item -Recurse -Force $tmpRoot
-    }
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+} catch {
+    # Not needed on modern PowerShell, keep compatibility best-effort.
 }
 
-if ($InstallMode -eq 'update') {
-    Write-OK "embed-log updated!"
+$Bin = "embed-log.exe"
+$RuntimeArch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+switch -Regex ($RuntimeArch) {
+    "^(AMD64|x86_64)$" { $Target = "x86_64-pc-windows-msvc"; break }
+    default { Fail "no prebuilt embed-log CLI release is currently published for Windows $RuntimeArch" }
+}
+
+$ArchiveName = "embed-log-$Target.zip"
+if ($Version -eq "latest") {
+    $BaseUrl = "https://github.com/$Repo/releases/latest/download"
 } else {
-    Write-OK "embed-log installed!"
+    $BaseUrl = "https://github.com/$Repo/releases/download/$Version"
 }
 
-Write-Host ""
-Write-Host "  Run from any terminal:"
-Write-Host ""
-Write-Host "    embed-log --help"
-Write-Host ""
-Write-Host "  Quick start:"
-Write-Host ""
-Write-Host "    embed-log onboard"
-Write-Host "    embed-log init --sample uart --output embed-log.yml"
-Write-Host "    embed-log run --config embed-log.yml"
-Write-Host ""
-Write-Host "  If the command is not found, open a new terminal (PATH refresh)."
+if ($env:EMBED_LOG_BASE_URL) {
+    $BaseUrl = $env:EMBED_LOG_BASE_URL
+}
+
+Write-Info "Embed-log Installer"
+Write-Info "  Embedded log viewer and collection CLI."
+Write-Info ""
+Write-Info "Target: $Target"
+Write-Info "Install directory: $InstallDir"
+Write-Info ""
+
+if (Test-InstallerInteractive) {
+    Write-Info "Choose an action:"
+    Write-Info ""
+    Write-Info "  y    Install embed-log (default)"
+    Write-Info "  n    Do nothing"
+    Write-Info ""
+    if (Confirm-YesNo "Install embed-log now?" $true) {
+        Write-Info "Will install embed-log."
+        Write-Info ""
+    } else {
+        Write-Info "Nothing changed."
+        exit 0
+    }
+}
+
+$TempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("embed-log-install-" + [System.Guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Force -Path $TempDir | Out-Null
+
+try {
+    $ArchivePath = Join-Path $TempDir $ArchiveName
+    $ChecksumsPath = Join-Path $TempDir "SHA256SUMS"
+
+    Write-Info "Installing embed-log for $Target"
+    Write-Info "Downloading $ArchiveName"
+    Invoke-WebRequest -Uri "$BaseUrl/$ArchiveName" -OutFile $ArchivePath -UseBasicParsing
+    Invoke-WebRequest -Uri "$BaseUrl/SHA256SUMS" -OutFile $ChecksumsPath -UseBasicParsing
+
+    Write-Info "Verifying checksum"
+    $ChecksumLine = Get-Content $ChecksumsPath | Where-Object { $_ -match "\s+$([regex]::Escape($ArchiveName))$" } | Select-Object -First 1
+    if (-not $ChecksumLine) {
+        Fail "checksum entry for $ArchiveName was not found in SHA256SUMS"
+    }
+
+    $ExpectedHash = (($ChecksumLine -split "\s+") | Where-Object { $_ })[0].ToUpperInvariant()
+    $ActualHash = (Get-FileHash -Algorithm SHA256 -Path $ArchivePath).Hash.ToUpperInvariant()
+    if ($ActualHash -ne $ExpectedHash) {
+        Fail "checksum mismatch for $ArchiveName`nexpected: $ExpectedHash`nactual:   $ActualHash"
+    }
+
+    Expand-Archive -Path $ArchivePath -DestinationPath $TempDir -Force
+    $ExtractedBin = Join-Path $TempDir $Bin
+    if (-not (Test-Path $ExtractedBin)) {
+        Fail "archive did not contain $Bin"
+    }
+
+    New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+    $Destination = Join-Path $InstallDir $Bin
+    Copy-Item $ExtractedBin $Destination -Force
+
+    Write-Info ""
+    Write-Info "embed-log was installed successfully."
+    Write-Info "Installed embed-log to $Destination"
+
+    $ResolvedCommand = Get-Command "embed-log" -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    $ResolvedPath = if ($ResolvedCommand) { $ResolvedCommand.Definition } else { $null }
+
+    $NormalizedInstallDir = $InstallDir.TrimEnd("\")
+    $PathEntries = @($env:Path -split ";" | Where-Object { $_ } | ForEach-Object { $_.Trim('"').TrimEnd("\") })
+    $OnProcessPath = $PathEntries | Where-Object { $_ -ieq $NormalizedInstallDir } | Select-Object -First 1
+
+    if ($NoModifyPath) {
+        if (-not $OnProcessPath) {
+            Write-Info ""
+            Write-Info "embed-log was installed, but $InstallDir is not on PATH yet."
+            Write-Info "Add it manually or run:"
+            Write-Info "  `$env:Path = `"$InstallDir;`$env:Path`""
+        }
+    } else {
+        $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+        if (-not $UserPath) { $UserPath = "" }
+        $UserPathEntries = @($UserPath -split ";" | Where-Object { $_ } | ForEach-Object { $_.Trim('"').TrimEnd("\") })
+        $OnUserPath = $UserPathEntries | Where-Object { $_ -ieq $NormalizedInstallDir } | Select-Object -First 1
+
+        $PathNeedsUpdate = (-not $OnUserPath) -or ($ResolvedPath -and ($ResolvedPath -ine $Destination))
+        $ShouldModifyPath = $false
+        if ($PathNeedsUpdate) {
+            Write-Info ""
+            if ($ResolvedPath -and ($ResolvedPath -ine $Destination)) {
+                Write-Info "embed-log was installed, but your shell is not using that install yet."
+                Write-Info "Your shell currently resolves embed-log to: $ResolvedPath"
+            } elseif (-not $OnProcessPath) {
+                Write-Info "embed-log was installed, but $InstallDir is not on PATH yet."
+            }
+
+            $PathChoice = ConvertTo-OptionalYesNo $env:EMBED_LOG_UPDATE_PATH
+            if ($null -ne $PathChoice) {
+                $ShouldModifyPath = $PathChoice
+            } elseif (Test-InstallerInteractive) {
+                $ShouldModifyPath = Confirm-YesNo "Add $InstallDir to your user PATH now?" $true
+            } else {
+                # Preserve the old Windows behavior for non-interactive installs.
+                $ShouldModifyPath = $true
+            }
+        }
+
+        if ($ShouldModifyPath) {
+            $FilteredUserPathEntries = @($UserPath -split ";" | Where-Object { $_ } | Where-Object { $_.Trim('"').TrimEnd("\") -ine $NormalizedInstallDir })
+            $NewUserPath = if ($FilteredUserPathEntries.Count -gt 0) { "$InstallDir;$($FilteredUserPathEntries -join ';')" } else { $InstallDir }
+            [Environment]::SetEnvironmentVariable("Path", $NewUserPath, "User")
+            Write-Info "Added $InstallDir to your user PATH. Open a new terminal to use embed-log from anywhere."
+        }
+
+        if (-not $OnProcessPath) {
+            $env:Path = "$InstallDir;$env:Path"
+        }
+    }
+
+    Write-Info ""
+    Write-Info "Then run: embed-log"
+} finally {
+    Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
+}

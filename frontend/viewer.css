@@ -3,6 +3,24 @@
    Themes: Whitesand (warm light, default) · One Dark (dark default)
    ============================================================ */
 
+/* Bundled so the UI renders correctly even when JetBrains Mono isn't
+   installed system-wide. Font files: fonts/JetBrainsMono-*.woff2
+   (SIL OFL 1.1, see fonts/OFL.txt). */
+@font-face {
+    font-family: 'JetBrains Mono';
+    src: url('fonts/JetBrainsMono-Regular.woff2') format('woff2');
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: 'JetBrains Mono';
+    src: url('fonts/JetBrainsMono-Bold.woff2') format('woff2');
+    font-weight: 700;
+    font-style: normal;
+    font-display: swap;
+}
+
 :root {
     /* --- One Dark (dark) --- */
     --bg:        #282c34;
@@ -66,15 +84,71 @@ body {
 
 /* ---- Toolbar ---- */
 #toolbar {
+    display: grid;
+    /* Side columns are `auto` (their own content's natural width — never
+       clipped, never fought over), Live's column is the single `1fr` and
+       absorbs whatever's left. `justify-self: center` on .btn-live then
+       centers it within that leftover gap. This toolbar's two sides are
+       rarely balanced (many buttons left, one WS badge right), so this
+       centers Live in the visually free space between them rather than
+       in the dead-center of the whole window — which would either clip
+       real buttons off the fuller side or require JS-measured columns to
+       force true equal widths. Unlike absolute positioning, grid tracks
+       never overlap, so Live can't overlap the side content either way. */
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
     height: 44px;
     background: var(--header);
     border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
     padding: 0 10px;
-    gap: 8px;
     flex-shrink: 0;
 }
+.toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    /* Deliberately no min-width:0/overflow:hidden here: either one makes a
+       grid item report a 0 automatic-minimum size, so its `auto` column
+       above would collapse below its own content's width instead of sizing
+       to fit it — silently clipping real buttons, which is what happened
+       here even at normal window widths (not just when genuinely too
+       narrow for everything). ponytail: on a truly too-narrow window this
+       now overflows instead of clipping; add a responsive toolbar
+       (wrapping/overflow menu) if that becomes a real complaint. */
+}
+.toolbar-left  { justify-content: flex-start; }
+.toolbar-right { justify-content: flex-end; }
+.toolbar-group button,
+.toolbar-group .app-name,
+.toolbar-group .toolbar-stats {
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.btn-live {
+    justify-self: center;
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 700;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
+}
+.btn-live:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    filter: brightness(1.08);
+}
+/* New lines arrived in a pane while it wasn't following the live tail —
+   fixed amber (not theme-accent) so it reads as "needs attention" regardless
+   of theme or of what the accent color happens to be. */
+.btn-live.behind {
+    background: #e8a93a;
+    border-color: #e8a93a;
+    color: #1a1200;
+    text-shadow: none;
+}
+.btn-live.behind:hover { filter: brightness(1.05); }
 
 #toolbar .app-name {
     font-weight: 700;
@@ -103,7 +177,6 @@ button.active { background: var(--selection); border-color: var(--accent); color
 
 /* WS status badge */
 #ws-status {
-    margin-left: auto;
     font-size: 11px;
     padding: 3px 8px;
     border-radius: 3px;
@@ -586,7 +659,18 @@ button.active { background: var(--selection); border-color: var(--accent); color
     cursor: pointer;
     user-select: none;
 }
-body.alt-held .log-line {
+body:not(.alt-held) .log-line,
+body:not(.alt-held) .log-line * {
+    -webkit-user-select: none;
+    user-select: none;
+}
+body:not(.alt-held) .log-line::selection,
+body:not(.alt-held) .log-line *::selection {
+    background: transparent;
+}
+body.alt-held .log-line,
+body.alt-held .log-line * {
+    -webkit-user-select: text;
     user-select: text;
 }
 .log-line:hover  { background: var(--selection); }
@@ -650,6 +734,34 @@ body.alt-held .log-line {
     font-weight: 600;
 }
 .scope-btn.active:hover { color: var(--header); }
+
+/* Copy format toggle row — same visual language as .scope-row/.scope-btn */
+.format-row {
+    display: flex;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+}
+.format-btn {
+    background: var(--panel);
+    color: var(--ansi-0);
+    border: none;
+    padding: 2px 10px;
+    font-size: 10px;
+    cursor: pointer;
+    transition: none;
+    opacity: 0;
+    pointer-events: none;
+}
+.format-btn.visible { opacity: 1; pointer-events: auto; }
+.format-btn:hover { color: var(--accent); }
+.format-btn.active {
+    background: var(--accent);
+    color: var(--header);
+    font-weight: 600;
+}
+.format-btn.active:hover { color: var(--header); }
 
 /* Pane selector (context-selected scope) */
 .pane-selector {
@@ -917,12 +1029,26 @@ mark.hl {
     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
 #marker-tooltip.visible { display: block; }
+#marker-tooltip.actionable { pointer-events: auto; }
 #marker-tooltip .mt-label {
     font-weight: 700;
     color: var(--accent);
     margin-right: 4px;
 }
+#marker-tooltip .mt-actions { margin-top: 7px; display: flex; justify-content: flex-end; }
+#marker-tooltip .marker-jump-event-btn {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-color: var(--accent);
+    color: var(--accent);
+}
 .marker-nav button:hover {
+    border-color: var(--accent);
+}
+
+.marker-nav-events.active {
+    background: var(--accent);
+    color: var(--header);
     border-color: var(--accent);
 }
 
@@ -986,3 +1112,198 @@ mark.hl {
 .marker-input-cancel:hover {
     color: var(--accent);
 }
+/* ── Severity colours (semantic, constant across themes) ── */
+:root {
+    --event-info:  #3b82f6;
+    --event-warn:  #eab308;
+    --event-error: #ef4444;
+    --event-fatal: #991b1b;
+}
+
+/* ── Event marker indicators on log lines (Phase 6) ── */
+.log-line.has-marker[data-kind="event"][data-severity="info"]  { border-left-color: var(--event-info); }
+.log-line.has-marker[data-kind="event"][data-severity="warn"]  { border-left-color: var(--event-warn); }
+.log-line.has-marker[data-kind="event"][data-severity="error"] { border-left-color: var(--event-error); }
+.log-line.has-marker[data-kind="event"][data-severity="fatal"] { border-left-color: var(--event-fatal); }
+
+/* ── Events timeline tab (Phase 5) ── */
+.events-content {
+    flex-direction: column;
+    background: var(--bg);
+    overflow: hidden;
+}
+
+.events-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: var(--header);
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    flex-shrink: 0;
+}
+.events-title { font-weight: 700; color: var(--accent); white-space: nowrap; }
+
+.events-nav-toggle {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 1px 8px;
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 1.5;
+    border-radius: 3px;
+    white-space: nowrap;
+}
+.events-nav-toggle:hover { border-color: var(--accent); }
+.events-nav-toggle.active { background: var(--accent); color: var(--header); border-color: var(--accent); }
+.events-count { color: var(--text); opacity: 0.7; font-size: 11px; }
+.events-step-controls { display: flex; gap: 3px; margin-left: 6px; }
+.events-controls { margin-left: auto; display: flex; gap: 3px; }
+.events-btn, .events-mode-btn {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 1px 8px;
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1.5;
+    border-radius: 3px;
+}
+.events-btn:hover, .events-mode-btn:hover { border-color: var(--accent); color: var(--accent); }
+.events-btn:disabled { opacity: 0.35; cursor: default; }
+.events-btn:disabled:hover { border-color: var(--border); color: var(--text); }
+.events-mode-btn.active { background: var(--accent); color: var(--header); border-color: var(--accent); }
+
+.events-svg-wrap {
+    flex: 1;
+    overflow: auto;
+    cursor: grab;
+    background: var(--bg);
+    min-height: 120px;
+}
+.events-svg-wrap:active { cursor: inherit; }
+
+.events-timeline-svg { display: block; user-select: none; }
+.events-lane-bg { fill: var(--selection); opacity: 0.3; }
+.events-lane-line { stroke: var(--border); stroke-width: 1; }
+.events-lane-label {
+    fill: var(--text);
+    font-size: 10px;
+    font-family: var(--font-family, monospace);
+}
+.events-tick { stroke: var(--border); stroke-width: 1; opacity: 0.5; }
+.events-selected-line { stroke: var(--accent); stroke-width: 1.5; opacity: 0.65; stroke-dasharray: 4 3; }
+.events-tick-label {
+    fill: var(--text);
+    opacity: 0.6;
+    font-size: 9px;
+    font-family: var(--font-family, monospace);
+}
+.events-dot { stroke: var(--bg); stroke-width: 1.5; cursor: pointer; transition: r 0.1s; pointer-events: none; }
+.events-dot.selected { stroke: var(--accent); stroke-width: 2.5; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--accent) 70%, transparent)); }
+.events-dot-hit { cursor: pointer; pointer-events: all; }
+.events-dot-hit:hover + .events-dot { r: 7; }
+
+.events-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text);
+    opacity: 0.5;
+    font-size: 13px;
+}
+
+/* ── Events filter bar ── */
+.events-filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 5px 12px;
+    background: var(--header);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.events-filter-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+}
+.events-filter-label {
+    color: var(--text);
+    opacity: 0.5;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-size: 9px;
+    margin-right: 2px;
+}
+.events-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    font-size: 11px;
+    color: var(--text);
+}
+.events-chip input { margin: 0; cursor: pointer; }
+.events-chip:has(input:not(:checked)) { opacity: 0.4; }
+.events-sev-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+/* ── Events hover tooltip ── */
+#events-tooltip {
+    position: fixed;
+    z-index: 9999;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 11px;
+    font-size: 11px;
+    line-height: 1.5;
+    max-width: 420px;
+    pointer-events: none;
+    display: none;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.2);
+}
+#events-tooltip.visible { display: block; }
+#events-tooltip.actionable { pointer-events: auto; }
+.et-head { font-weight: 700; display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+.et-sev {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: #fff;
+}
+.et-sev-info  { background: var(--event-info); }
+.et-sev-warn  { background: var(--event-warn); color: #000; }
+.et-sev-error { background: var(--event-error); }
+.et-sev-fatal { background: var(--event-fatal); }
+.et-meta { opacity: 0.6; font-size: 10px; margin-bottom: 4px; }
+.et-msg { white-space: pre-wrap; word-break: break-word; }
+.et-captures { margin-top: 4px; display: flex; gap: 4px; flex-wrap: wrap; }
+.et-captures code {
+    font-family: var(--font-family, monospace);
+    font-size: 10px;
+    background: var(--selection);
+    padding: 1px 4px;
+    border-radius: 2px;
+}
+.et-actions { margin-top: 7px; display: flex; justify-content: flex-end; }
+.events-jump-log-btn {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+/* ── Events tab button ── */
+.events-tab-btn { border-color: var(--border); }

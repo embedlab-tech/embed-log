@@ -1,26 +1,15 @@
-
 version: 1
-
 server:
   host: 127.0.0.1
   ws_port: 8080
-  app_name: embed-log
-  open_browser: true
-  verbosity: full
-  timestamp_mode: absolute
-
 logs:
-  dir: logs/single_uart_single_tab/
-
-baudrate: 115200
-
+  dir: logs
 sources:
   - name: DUT_UART
     label: DUT UART
     type: uart
     port: /dev/ttyUSB0
-    inject_port: 5001
-
+    baudrate: 115200
 tabs:
   - label: Device
     panes: [DUT_UART]

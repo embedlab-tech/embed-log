@@ -1,0 +1,38 @@
+[package]
+name = "embed-log-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+default = []
+pcap-capture = ["dep:pcap"]
+
+[dependencies]
+tokio.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+slug.workspace = true
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["fs"] }
+serialport = "4"
+notify = "7"
+ciborium = "0.2"
+regex = "1"
+rust-embed = "8"
+mime_guess = "2"
+libc = "0.2"
+pcap = { version = "2", optional = true }
+sprintf = "0.4.3"
+base64 = "0.22"
+
+[dev-dependencies]
+serde_yaml.workspace = true

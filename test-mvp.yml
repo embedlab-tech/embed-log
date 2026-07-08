@@ -1,0 +1,26 @@
+version: 1
+
+server:
+  host: 127.0.0.1
+  ws_port: 8080
+  app_name: embed-log MVP
+  open_browser: false
+  timestamp_mode: absolute
+
+logs:
+  dir: logs/
+
+sources:
+  - name: DUT
+    type: udp
+    port: 6000
+
+  - name: PYTEST
+    type: udp
+    port: 6001
+
+tabs:
+  - label: Device
+    panes: [DUT]
+  - label: CI
+    panes: [PYTEST]

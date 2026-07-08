@@ -1,341 +1,231 @@
 # embed-log
 
-[embed-lab](https://embedlab.tech/) · live log aggregation for embedded development and CI.
+`embed-log` collects UART, UDP, file-tail, and network-capture logs, stores them as session artifacts, and serves a browser/Tauri UI for live viewing and static HTML exports.
 
-`embed-log` reads logs from UART, UDP, files, and simplified network packet captures, stores each run as a session, and shows the logs live in a browser UI.
+The current workspace contains:
 
-## Install / uninstall
+- `embed-log` CLI: run the log server, inspect sessions, export/merge logs.
+- `embed-log-tauri` desktop app: wraps the same server in a Tauri shell with onboarding helpers.
+- `embed-log-core`: shared config, sources, parsers, runtime, HTTP/WebSocket server, and session export logic.
+- `frontend/`: browser UI assets embedded into release binaries.
 
-### macOS / Linux
+## Install
 
-Install latest release:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.sh | bash
-```
-
-Uninstall:
+macOS/Linux latest release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/krezolekcoder/embed-log/main/uninstall.sh | bash
+curl -fsSL https://github.com/krezolekcoder/embed-log/releases/latest/download/install.sh | sh
 ```
 
-### Windows PowerShell 7+
-
-Install latest release:
+Windows PowerShell latest release:
 
 ```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/krezolekcoder/embed-log/main/install.ps1'))
+irm https://github.com/krezolekcoder/embed-log/releases/latest/download/install.ps1 | iex
 ```
 
-Uninstall:
+Release binaries include embedded frontend assets, so users do **not** need Rust, Cargo, or a separate `frontend/` directory.
 
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass; iex ((New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/krezolekcoder/embed-log/main/uninstall.ps1'))
+See [docs/releasing.md](docs/releasing.md) for release and installer details.
+
+## Claude Code plugin
+
+This repo bundles a [Claude Code](https://claude.com/claude-code) skill that teaches an AI
+agent to inspect `embed-log` sessions via the CLI (`sessions summary`/`search`/...) instead of
+grepping raw log files. Install it once, in any Claude Code session:
+
+```
+/plugin marketplace add krezolekcoder/embed-log
+/plugin install embed-log@embed-log-tools
 ```
 
-## Update an existing install
+It's then available in every project on your machine, not just this repo. Source: `skills/embed-log/SKILL.md`, `.claude-plugin/`.
 
-Use the installer scripts for first install. After `embed-log` is installed, update through the CLI:
+## Quick start from source
 
 ```bash
-embed-log update
-embed-log update --sha <sha>
+just build
+just demo headless
 ```
 
-`embed-log update --sha <sha>` refuses commits older than the latest release unless you pass `--allow-rollback`.
+Then open:
 
+```text
+http://127.0.0.1:8080/
+```
 
-## Quick start
-
-**Want to see it working now?** Run `embed-log demo` — no config, no hardware, opens in the browser immediately. See [Demo without hardware](#demo-without-hardware).
-
-**Setting up with real devices:**
-
-**Step 1** — find serial ports:
+Generate a starter config:
 
 ```bash
-embed-log ports
+cargo run --package embed-log-cli --bin embed-log -- init --output embed-log.yml
 ```
 
-**Step 2** — generate a config (double UART + UDP by default):
+Validate and run with a config:
 
 ```bash
-embed-log init
+cargo run --package embed-log-cli --bin embed-log -- validate --config embed-log.yml
+cargo run --package embed-log-cli --bin embed-log -- run --config embed-log.yml
 ```
 
-This writes `embed-log.yml`. Edit the `port:` values to match your devices.
+## Control API
 
-To start from a specific sample:
+Embed-log exposes a single structured JSON WebSocket endpoint for SDK and automation:
+
+```text
+ws://127.0.0.1:8080/api/v1/control
+```
+
+### Commands
+
+| Command | Purpose |
+|---------|---------|
+| `hello` | Get sources, labels, types, writability, session id |
+| `subscribe` | Subscribe to log entries by source name |
+| `unsubscribe` | Remove source subscriptions |
+| `log.inject` | Inject a log entry into the source pipeline and UI |
+| `tx.write` | Write bytes to a writable source (UART) |
+| `marker.create` | Create a marker on a log line |
+
+### `subscribe` / `log.entry`
+
+Subscribe to sources and receive structured events replacing the legacy per-source forward ports:
+
+```json
+{
+  "type": "log.entry",
+  "source_id": "DUT_UART",
+  "origin": "SERIAL",
+  "message": "boot complete",
+  "timestamp_iso": "2026-06-14T12:00:00.123Z",
+  "line_idx": 42,
+  "color": null,
+  "is_tx": false
+}
+```
+
+Source-name routing replaces the old `InjectClient`/`ForwardClient` per-port model.
+
+## Python SDK
+
+A synchronous Python SDK is available at `sdk/python/`:
+
+```python
+from embed_log_sdk import EmbedLogClient
+
+with EmbedLogClient.from_config("embed-log.yml", origin="pytest") as client:
+    client.inject_log("DUT_UART", "test: assertion passed", color="cyan")
+    client.tx_write("DUT_UART", "version\r\n")
+    client.subscribe(["DUT_UART"])
+    for entry in client.entries(timeout=5.0):
+        print(entry.source_id, entry.message)
+```
+
+## Watcher
+
+The watcher (`embed_log_sdk.watcher`) observes log entries matching regex patterns, writes JSONL evidence, and optionally creates UI markers:
 
 ```bash
-embed-log init --list                                    # see all samples
-embed-log init --sample single_uart_single_tab           # pick one
+python sdk/python/examples/watcher_run.py --config watcher.yml --timeout 30
 ```
 
-**Step 3** — validate the config:
+## Companion UART command files
 
-```bash
-embed-log doctor --config embed-log.yml
-```
-
-**Step 4** — start the UI:
-
-```bash
-embed-log run --config embed-log.yml
-```
-
-Open `http://127.0.0.1:8080/`. Stop with `Ctrl+C`.
-
-Or set the config once for this shell:
-
-```bash
-export EMBED_LOG_CONFIG_YML_PATH="$PWD/embed-log.yml"
-embed-log run
-```
-
-Windows PowerShell:
-
-```powershell
-$env:EMBED_LOG_CONFIG_YML_PATH = "C:\path\to\embed-log.yml"
-embed-log run
-```
-
-
-### UART TX autocomplete (optional)
-
-embed-log can show TX command suggestions in the browser UI. Focus a UART input field and press `Tab` to cycle matching commands.
-
-**Generate alongside a new config:**
-
-```bash
-embed-log init --add-uart-shell
-```
-
-This writes `embed-log.commands.yml` next to `embed-log.yml` with starter commands for every UART source.
-
-**Generate for an existing config:**
-
-```bash
-embed-log init --config embed-log.yml --add-uart-shell
-```
-
-This generates only the commands file; the config is not modified.
-
-`embed-log run` loads `<config-stem>.commands.yml` automatically when it is next to the config file. Edit the commands to match the shell your firmware actually supports.
-
-
-### Demo without hardware
-
-The fastest way to see embed-log in action — no devices, no config needed:
-
-```bash
-embed-log demo
-```
-
-This starts a local server with simulated traffic across 7 tabs (UART, UDP, CBOR, CoAP, network capture). Open `http://127.0.0.1:8080/` and stop with `Ctrl+C`.
-
-Useful flags:
-
-```bash
-embed-log demo --fast            # faster ticks for testing
-embed-log demo --tick-ms 200     # custom tick interval (default: 500)
-embed-log demo --print-config    # show the demo config and exit
-embed-log demo --no-browser      # don't auto-open the browser
-```
-
-To see the full demo config (sources, tabs, plugins):
-
-```bash
-embed-log demo --print-config
-```
-
-## Config reference
-
-### Example: two UART devices
+Place a `<config-stem>.commands.yml` alongside your config to provide Tab-cycling command suggestions:
 
 ```yaml
-version: 1
-
-server:
-  host: 127.0.0.1
-  ws_port: 8080
-  app_name: embed-log
-  open_browser: true
-  timestamp_mode: absolute
-
-logs:
-  dir: logs/
-
-baudrate: 115200
-
 sources:
-  - name: DUT
-    type: uart
-    port: /dev/ttyUSB0
-
-  - name: AUX
-    type: uart
-    port: /dev/ttyUSB1
-
-tabs:
-  - label: Devices
-    panes: [DUT, AUX]
+  DUT_UART:
+    - "help\r\n"
+    - "version\r\n"
+    - "status\r\n"
 ```
 
-### Example: one UART plus one UDP source
+The fallback `embed-log.commands.yml` is checked in the config directory and current working directory.
 
-Useful when a test runner, for example `PYTEST`, sends logs over UDP.
+## Marker CLI inspection
 
-```yaml
-version: 1
-
-server:
-  host: 127.0.0.1
-  ws_port: 8080
-  app_name: embed-log
-  open_browser: true
-  timestamp_mode: absolute
-
-logs:
-  dir: logs/
-
-baudrate: 115200
-
-sources:
-  - name: DUT
-    type: uart
-    port: /dev/ttyUSB0
-
-  - name: PYTEST
-    type: udp
-    port: 6000
-
-tabs:
-  - label: Desk
-    panes: [DUT, PYTEST]
-```
-
-
-## Ready-made config samples
-
-List all samples:
+List and inspect markers created by the watcher or UI:
 
 ```bash
-embed-log init --list
+embed-log sessions marker list <session-id>
+embed-log sessions marker show <session-id> <marker-index>
+embed-log sessions marker list <session-id> --search fatal --json
+embed-log sessions marker show <session-id> 1 --json
 ```
 
-Generate from a sample:
+## Terminal UI
+
+Run the server and terminal UI together:
 
 ```bash
-embed-log init --sample double_uart_udp_two_tabs --output embed-log.yml
+embed-log run --config embed-log.yml --tui
+embed-log demo --tui
 ```
 
-| Sample | Use when |
-|---|---|
-| `single_uart_single_tab` | One UART source in one tab |
-| `double_uart_single_tab` | Two UART panes side-by-side in one tab |
-| `double_uart_udp_two_tabs` | Two UART panes plus one UDP/pytest tab |
-| `double_uart_network_two_tabs` | Two UART panes plus a packet-capture network tab |
-| `double_uart_udp_coap_two_tabs` | Two UART panes plus UDP panes using the CoAP plugin |
-| `single_file_single_tab` | One file-tail source in one tab |
-| `double_uart_file_two_tabs` | Two UART panes plus a file-tail log tab |
-| `double_uart_minimal_single_tab` | Minimal two-UART single-tab layout |
-| `double_uart_udp_multi_baud_two_tabs` | Two UARTs with different baudrates plus a UDP tab |
-| `double_uart_file_udp_coap_three_tabs` | Two UARTs, file tailing, UDP, and CoAP across three tabs |
-| `single_network_single_tab` | Simplified packet capture in one tab |
-| `three_udp_cbor_two_tabs` | Two CBOR UDP sources plus one text UDP monitor |
-| `reference_full_annotated` | Every config option documented inline |
-
-The same files are in `config-samples/` in this repo.
-
-
-## Agents / quick repo orientation
+Or connect the standalone TUI to an already-running server:
 
 ```bash
-embed-log doctor
-embed-log onboard --samples
-embed-log init --list
+embed-log-tui connect ws://127.0.0.1:8080/ws
 ```
 
-`embed-log onboard --json` prints stable machine-readable orientation: version, install source, active config, samples, commands, docs, and next steps.
+See [docs/tui.md](docs/tui.md) for keybindings and limitations.
 
+## Real network packet capture (pcap)
 
-## Common commands
+Plain `type: udp` sources (bind a UDP socket on a port and read datagrams) work out of the box, no setup below needed.
 
-```bash
-embed-log init                            # generate default config
-embed-log init --list                     # list available samples
-embed-log init --add-uart-shell           # config + TX command suggestions
-embed-log init --config x.yml --add-uart-shell  # TX suggestions for existing config
-embed-log doctor --config embed-log.yml   # validate config
-embed-log run --config embed-log.yml      # start the UI
-embed-log demo                            # simulated traffic, no hardware
-embed-log demo --fast                    # faster ticks for testing
-embed-log demo --print-config            # show demo config and exit
-embed-log ports                           # list serial ports
-embed-log onboard                         # practical CLI orientation
-embed-log sessions list                   # list saved sessions
-embed-log update                          # install the latest release
-embed-log update --sha <sha>              # install a specific commit
-embed-log version
-```
+For `type: network_capture` sources with `network_backend: pcap` — sniffing UDP traffic straight off a network interface, filtered to specific ports via `udp.ports` — you need the native pcap library, a special build, and interface-open permissions. See [docs/configuration.md](docs/configuration.md) for the full field reference.
 
-## Sessions and exported reports
+1. Install the native capture library:
+   - Linux: `libpcap-dev` (Debian/Ubuntu) or `libpcap-devel` (Fedora/RHEL)
+   - macOS: libpcap ships with the OS, nothing to install
+   - Windows: install [Npcap](https://npcap.com/) (in WinPcap API-compatible mode)
 
-Every run is saved under the configured `logs.dir` as a session. The UI can export a portable `session.html` report.
+2. Build with the `pcap-capture` feature (disabled by default):
 
-CLI session commands:
+   ```bash
+   cargo build --release -p embed-log-cli --features pcap-capture
+   ```
 
-```bash
-embed-log sessions list
-embed-log sessions info <session-id>
-embed-log sessions export <session-id>
-```
+3. Grant the binary permission to open network interfaces, instead of running the whole app as root:
 
-Merge existing raw log files into a standalone HTML report:
+   ```bash
+   sudo setcap cap_net_raw,cap_net_admin+eip target/release/embed-log
+   ```
 
-```bash
-embed-log merge --tab "My Report" SENSOR_A sensor.log --output report.html
-```
+   Then run `embed-log` normally as your own user — no `sudo` needed at runtime. (macOS/Windows don't support setcap; run elevated once, or add your user to the OS's packet-capture group per the Npcap/libpcap docs.)
 
-## Install from source
+4. Verify readiness:
 
-Use this only if you want the latest `main` branch or local development.
+   ```bash
+   embed-log doctor --config embed-log.yml
+   ```
 
-```bash
-git clone https://github.com/krezolekcoder/embed-log.git
-cd embed-log
-./install.sh
-```
+   Reports whether this binary was built with `pcap-capture`, whether libpcap/Npcap is installed, and whether the given config actually has `network_backend: pcap` sources.
 
-Developer setup:
+## Legacy inject/forward ports removed
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-pip install -e .
-```
+The old per-source TCP `inject_port`, `forward_port`, and `forward_ports` config fields have been removed. Use the single control WebSocket endpoint (`/api/v1/control`) instead. All automation (log injection, subscription/forwarding, TX, markers) goes through one connection, routed by configured source name.
 
-## More documentation
+## Documentation
 
-- `docs/README.md` — documentation index
-- `docs/ARCHITECTURE.md` — end-to-end system flow
-- `docs/BACKEND.md` / `docs/FRONTEND.md` — subsystem details
-- `docs/TESTING.md` — test strategy and commands
+- [Architecture](docs/architecture.md)
+- [Configuration](docs/configuration.md)
+- [CLI reference](docs/cli.md)
+- [Development](docs/development.md)
+- [Terminal UI](docs/tui.md)
+- [Tauri desktop app](docs/tauri.md)
+- [Releasing](docs/releasing.md)
 
-## Testing this repo
+## Repository layout
 
-Backend tests:
-
-```bash
-python3 -m unittest discover -s tests -v
-```
-
-UI tests:
-
-```bash
-cd tests-ui
-npm test
+```text
+crates/embed-log-core/     Shared runtime, config, sources, parsers, HTTP/WS, sessions
+crates/embed-log-cli/      CLI binary named `embed-log`
+crates/embed-log-tauri/    Tauri desktop binary
+frontend/                  Live/static viewer UI, embedded into release binaries
+sdk/python/                Python SDK, watcher, examples
+config-samples/            Example YAML configs (no legacy fields)
+scripts/                   Release packaging helpers
+docs/                      Current docs
+justfile                   Common development/release commands
 ```

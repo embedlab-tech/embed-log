@@ -1,6 +1,6 @@
 import {
     state, TABS, PANES, buildTimestampInfo, applyTimestampModeToLine,
-    lineHasTimestampMode,
+    lineHasTimestampMode, resetRelativeTimestampBase, noteRelativeTimestampCandidate,
 } from './state.js';
 import { parseAnsi } from './ansi.js';
 import { analyzeLinePlugins, getLinePluginTooltip, getConfiguredPanePlugins, getPanePluginSettings, setPanePluginSetting } from './pluginRuntime.js';
@@ -47,11 +47,13 @@ function _escapeHtml(text) {
 
 export function buildStoredLine(paneId, ts, rawText, isTx, meta = null) {
     const html = parseAnsi(rawText);
+    const lineMeta = typeof meta === "object" && meta !== null
+        ? meta
+        : (Number.isFinite(meta) ? { numTs: meta } : {});
     const line = {
         paneId,
-        ...buildTimestampInfo(ts, typeof meta === "object" && meta !== null
-            ? meta
-            : (Number.isFinite(meta) ? { numTs: meta } : {})),
+        ...buildTimestampInfo(ts, lineMeta),
+        serverLineIdx: Number.isFinite(lineMeta.lineIdx) ? lineMeta.lineIdx : null,
         html,
         rawText,
         isTx,
@@ -251,10 +253,35 @@ document.addEventListener("click", ev => {
     _hidePluginInfo();
 });
 
+let _resizeRefreshRaf = null;
+function _scheduleVirtualResizeRefresh() {
+    if (_resizeRefreshRaf !== null) return;
+    _resizeRefreshRaf = requestAnimationFrame(() => {
+        _resizeRefreshRaf = null;
+        PANES.forEach(paneId => {
+            const vp = _virtualPanes.get(paneId);
+            if (vp) vp.rowHeight = 0;
+            // A pane with an active sync-highlight (e.g. just scrolled into
+            // place by a cross-tab click sync) must stay anchored to that
+            // line — row height can change here (e.g. web font finishing
+            // load after this pane's first paint), and re-deriving position
+            // from the now-stale scrollTop would silently drift the synced
+            // line out of view instead of keeping it in focus.
+            const highlightedIdx = state.highlightedIdx[paneId];
+            if (Number.isFinite(highlightedIdx)) {
+                _scrollPaneToRawIndex(paneId, highlightedIdx);
+            } else {
+                rerenderPane(paneId);
+            }
+        });
+    });
+}
+
 window.addEventListener("resize", () => {
     if (_pluginInfoEl.classList.contains("visible") && _pluginInfoAnchorEl) {
         _positionPluginInfo(_pluginInfoAnchorEl);
     }
+    _scheduleVirtualResizeRefresh();
 });
 document.addEventListener("keydown", ev => {
     if (ev.key === "Escape") _hidePluginInfo();
@@ -280,12 +307,16 @@ export function applyLineDom(div, line, paneId, idx, filterRx) {
         state.highlighted[paneId] = div;
     }
 
-    const markerDescription = _markerDescription(paneId, idx);
-    div.classList.toggle("has-marker", markerDescription !== null);
-    if (markerDescription !== null) {
-        div.dataset.markerTooltip = markerDescription;
+    const marker = _markerAt(paneId, idx, line);
+    div.classList.toggle("has-marker", marker !== null);
+    if (marker !== null) {
+        div.dataset.markerTooltip = marker.description || "";
+        div.dataset.kind = marker.kind || "user";
+        div.dataset.severity = marker.severity || "";
     } else {
         delete div.dataset.markerTooltip;
+        delete div.dataset.kind;
+        delete div.dataset.severity;
     }
     if (!matchesFilter(line, filterRx)) {
         div.style.display = "none";
@@ -453,12 +484,14 @@ function _ordinalForRawIndex(paneId, vp, rawIndex) {
     return Math.max(0, Math.min(Math.max(0, visible.length - 1), lo));
 }
 
-function _markerDescription(paneId, idx) {
+function _markerAt(paneId, idx, line = null) {
     const markers = state.markers[paneId];
     if (!markers) return null;
     for (const m of markers) {
+        const isEvent = (m.kind || "user") === "event";
+        const lineKey = isEvent && Number.isFinite(line?.serverLineIdx) ? line.serverLineIdx : idx;
         const end = m.endIdx ?? m.lineIdx;
-        if (idx >= m.lineIdx && idx <= end) return m.description || "";
+        if (lineKey >= m.lineIdx && lineKey <= end) return m;
     }
     return null;
 }
@@ -550,6 +583,22 @@ export function ensureLineVisible(paneId, rawIndex, { align = "center" } = {}) {
     }
 }
 
+window.__embedLogEnsureLineVisible = function (paneId, rawIndex, options) {
+    ensureLineVisible(paneId, rawIndex, options || {});
+};
+
+window.__embedLogFindRawIndexContaining = function (paneId, text) {
+    const needle = String(text ?? "");
+    const lines = state.rawLines[paneId] || [];
+    for (let i = 0; i < lines.length; i++) {
+        const line = getLine(paneId, i);
+        if (!line) continue;
+        const haystack = `${line.rawText || ""} ${line.html || ""} ${line.ts || ""} ${line.pluginFilterText || ""}`;
+        if (haystack.includes(needle)) return i;
+    }
+    return -1;
+};
+
 export function rerenderRenderedLines(paneId) {
     const vp = _virtualPanes.get(paneId);
     if (!vp) return;
@@ -633,17 +682,39 @@ function _renderVirtualWindow(paneId, { targetIdx, forceAtBottom } = {}) {
         if (rawIndex !== undefined) keepRaw.add(rawIndex);
     }
 
-    for (const [rawIndex, el] of vp.rendered) {
-        if (!keepRaw.has(rawIndex)) continue;
-        const ordinal = _ordinalForRawIndex(paneId, vp, rawIndex);
-        el.style.position = "absolute";
-        el.style.top = (ordinal * rowH) + "px";
-        el.style.left = "0";
-        el.style.right = "0";
+    const wrapped = !!state.wrap[paneId];
+    if (!wrapped) {
+        for (const [rawIndex, el] of vp.rendered) {
+            if (!keepRaw.has(rawIndex)) continue;
+            const ordinal = _ordinalForRawIndex(paneId, vp, rawIndex);
+            el.style.position = "absolute";
+            el.style.top = (ordinal * rowH) + "px";
+            el.style.left = "0";
+            el.style.right = "0";
+        }
     }
 
     _ensureRange(paneId, firstOrdinal, lastOrdinal, rx, rowH);
     _pruneToRawSet(paneId, keepRaw);
+
+    // Wrapped rows can span multiple visual lines, so the fixed `ordinal * rowH`
+    // layout above would overlap the next row. Re-stack the rendered window
+    // using each row's actual measured height instead. Rows outside this
+    // window still assume rowH for the spacer/scroll math (an approximation,
+    // same tradeoff virtualized lists with variable row height typically make).
+    if (wrapped) {
+        let top = firstOrdinal * rowH;
+        for (let ordinal = firstOrdinal; ordinal <= lastOrdinal; ordinal++) {
+            const rawIndex = _rawIndexAt(paneId, vp, ordinal);
+            const el = rawIndex !== undefined ? vp.rendered.get(rawIndex) : null;
+            if (!el) continue;
+            el.style.position = "absolute";
+            el.style.top = top + "px";
+            el.style.left = "0";
+            el.style.right = "0";
+            top += el.offsetHeight || rowH;
+        }
+    }
 
     if (forceAtBottom) {
         logEl.scrollTop = logEl.scrollHeight;
@@ -739,6 +810,7 @@ export function appendLineBatch(entries) {
 
     entries.forEach(({ paneId, ts, rawText, isTx, meta = null }) => {
         if (!state.rawLines[paneId]) return;
+        noteRelativeTimestampCandidate(meta);
         state.rawLines[paneId].push([ts, rawText, isTx, meta]);
         if (!newByPane.has(paneId)) newByPane.set(paneId, []);
         newByPane.get(paneId).push([ts, rawText, isTx, meta]);
@@ -756,6 +828,10 @@ export function appendLineBatch(entries) {
         const vp = _getVirtual(paneId);
         const logEl = document.getElementById("log-" + paneId);
         if (!logEl || !vp) return;
+
+        // New content arrived while this pane wasn't following the live tail —
+        // flag it so the global Live button can show "you're missing logs".
+        if (!state.atBottom[paneId]) state.behindLive[paneId] = true;
 
         const rowH = _measureRowHeight(paneId);
         const midOrdinal = Math.max(0, Math.floor((logEl.scrollTop + logEl.clientHeight / 2) / rowH));
@@ -806,7 +882,12 @@ window.__embedLogInvalidateVirtualMetrics = function () {
         const vp = _virtualPanes.get(paneId);
         if (!vp) return;
         vp.rowHeight = 0;
-        rerenderPane(paneId);
+        const highlightedIdx = state.highlightedIdx[paneId];
+        if (Number.isFinite(highlightedIdx)) {
+            _scrollPaneToRawIndex(paneId, highlightedIdx);
+        } else {
+            rerenderPane(paneId);
+        }
     });
 };
 export function reanalyzePanePlugins(paneId) {
@@ -864,6 +945,15 @@ export function canDisplayTimestampMode(mode) {
 export function updateJumpBtn(paneId) {
     document.getElementById("jump-" + paneId)
         .classList.toggle("visible", !state.atBottom[paneId]);
+    if (state.atBottom[paneId]) state.behindLive[paneId] = false;
+    _updateLiveIndicator();
+}
+
+// Global "Live" button flips to the behind-live style whenever any pane has
+// received new lines while the user was scrolled away from its bottom.
+function _updateLiveIndicator() {
+    const behind = PANES.some(id => state.behindLive[id]);
+    document.getElementById("btn-jump-all")?.classList.toggle("behind", behind);
 }
 
 export function scrollPaneToBottom(paneId) {
@@ -881,6 +971,11 @@ export function scrollPaneToBottom(paneId) {
 }
 export function _linesSetupPane(id) {
     const logEl = document.getElementById("log-" + id);
+    if (window.ResizeObserver && logEl.dataset.resizeObserverBound !== "1") {
+        logEl.dataset.resizeObserverBound = "1";
+        const resizeObserver = new ResizeObserver(() => _scheduleVirtualResizeRefresh());
+        resizeObserver.observe(logEl);
+    }
     logEl.addEventListener("scroll", () => {
         state.atBottom[id] = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
         updateJumpBtn(id);
@@ -949,6 +1044,9 @@ export function _linesSetupPane(id) {
             state.wrap[id] = !state.wrap[id];
             wrapBtn.classList.toggle("active", state.wrap[id]);
             document.getElementById("log-" + id)?.classList.toggle("wrap", state.wrap[id]);
+            // Rows are absolutely positioned assuming a fixed single-line height;
+            // wrapping makes row height variable, so force a relayout.
+            rerenderPane(id);
         });
     }
 
@@ -1050,8 +1148,33 @@ export function clearPane(paneId) {
     window.__embedLogUpdateTimestampModeUi?.();
 }
 
+document.getElementById("btn-jump-all")?.addEventListener("click", () => {
+    // Clear any active line-sync so future tab switches follow the live tail
+    // instead of re-scrolling back to the last synced timestamp.
+    state.syncTs = null;
+    state.syncTabSwitch = false;
+    PANES.forEach(paneId => {
+        highlightLine(paneId, null);
+        scrollPaneToBottom(paneId);
+    });
+});
+
+// Shift+L: same as clicking Live. Use e.code (physical key) rather than
+// e.key so it fires regardless of Caps Lock state.
+document.addEventListener("keydown", ev => {
+    if (!ev.shiftKey || ev.ctrlKey || ev.altKey || ev.metaKey || ev.code !== "KeyL") return;
+    const tag = ev.target?.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || ev.target?.isContentEditable) return;
+    ev.preventDefault();
+    document.getElementById("btn-jump-all")?.click();
+});
+
 document.getElementById("btn-clear")?.addEventListener("click", () => {
     window.wsSend?.({ cmd: "clear_logs", scope: "all" });
+    window.__embedLogDiscardPendingLogMessages?.();
+    resetRelativeTimestampBase();
+    state.syncTs = null;
+    state.syncTabSwitch = false;
     PANES.forEach(clearPane);
     _updateToolbarStats();
 });
@@ -1112,8 +1235,21 @@ export function scrollPaneToTs(paneId, numTs) {
     }
     if (lo > 0 && Math.abs(_getNumTs(lines[lo - 1], paneId, lo - 1) - numTs) < Math.abs(_getNumTs(lines[lo], paneId, lo) - numTs)) lo--;
 
-    _renderVirtualWindow(paneId, { targetIdx: lo });
-    const div = getRenderedLineElement(paneId, lo);
+    _scrollPaneToRawIndex(paneId, lo);
+}
+
+function _entryServerLineIdx(entry, paneId, idx) {
+    if (_isRawTuple(entry)) {
+        const meta = entry[3];
+        if (meta && typeof meta === "object" && Number.isFinite(meta.lineIdx)) return meta.lineIdx;
+        return null;
+    }
+    return Number.isFinite(entry?.serverLineIdx) ? entry.serverLineIdx : null;
+}
+
+function _scrollPaneToRawIndex(paneId, rawIdx) {
+    _renderVirtualWindow(paneId, { targetIdx: rawIdx });
+    const div = getRenderedLineElement(paneId, rawIdx);
     if (!div) return;
 
     const logEl = document.getElementById("log-" + paneId);
@@ -1121,6 +1257,24 @@ export function scrollPaneToTs(paneId, numTs) {
     state.atBottom[paneId] = false;
     updateJumpBtn(paneId);
     highlightLine(paneId, div);
+}
+
+export function scrollPaneToLineIdx(paneId, lineIdx, fallbackNumTs = null) {
+    const targetLineIdx = Number(lineIdx);
+    const lines = state.rawLines[paneId];
+    if (!lines?.length || !Number.isFinite(targetLineIdx)) {
+        if (fallbackNumTs !== null) scrollPaneToTs(paneId, fallbackNumTs);
+        return;
+    }
+
+    for (let idx = 0; idx < lines.length; idx++) {
+        if (_entryServerLineIdx(lines[idx], paneId, idx) === targetLineIdx) {
+            _scrollPaneToRawIndex(paneId, idx);
+            return;
+        }
+    }
+
+    if (fallbackNumTs !== null) scrollPaneToTs(paneId, fallbackNumTs);
 }
 
 // Middle-click: always clear the filter for this pane, scroll to the line

@@ -1,43 +1,28 @@
-# UDP source with CBOR datagram parser
-# Each UDP datagram is decoded as a CBOR map; keys become the line content.
-# Useful for structured binary sensor data sent over UDP.
-
 version: 1
-
 server:
   host: 127.0.0.1
   ws_port: 8080
-  app_name: embed-log
-  open_browser: true
-  verbosity: full
-  timestamp_mode: absolute
-
 logs:
-  dir: logs/three_udp_cbor_two_tabs/
-
+  dir: logs
 sources:
   - name: SENSOR_A
+    label: Sensor A CBOR
     type: udp
     port: 6000
-    inject_port: 5001
     parser:
       type: cbor-datagram
-
   - name: SENSOR_B
+    label: Sensor B CBOR
     type: udp
     port: 6001
-    inject_port: 5002
     parser:
       type: cbor-datagram
-
-  - name: TEXT_MONITOR
+  - name: DUT_TEXT
+    label: DUT text
     type: udp
     port: 6002
-    inject_port: 5003
-    # Default text parser is used when no parser is specified
-
 tabs:
   - label: Sensors
     panes: [SENSOR_A, SENSOR_B]
-  - label: Monitor
-    panes: [TEXT_MONITOR]
+  - label: Device
+    panes: [DUT_TEXT]

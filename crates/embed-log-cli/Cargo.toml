@@ -1,0 +1,48 @@
+[package]
+name = "embed-log-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Collects UART, UDP, file-tail, and network-capture logs and serves a live viewer"
+
+[[bin]]
+name = "embed-log"
+path = "src/main.rs"
+
+[package.metadata.deb]
+name = "embed-log"
+depends = "$auto"
+copyright = "2026, krezolekcoder"
+license-file = ["../../LICENSE", "0"]
+assets = [
+    ["target/release/embed-log", "usr/bin/", "755"],
+]
+
+[dependencies]
+embed-log-core.workspace = true
+tokio.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+serialport = "4"
+libloading = "0.8"
+regex = "1"
+
+[dependencies.embed-log-tui]
+workspace = true
+optional = true
+
+[features]
+default = ["tui"]
+tui = ["dep:embed-log-tui"]
+pcap-capture = ["embed-log-core/pcap-capture"]
+
+[dev-dependencies]
+serde_yaml.workspace = true
+
+[build-dependencies]
+chrono.workspace = true

@@ -4,6 +4,7 @@ import { exportHtmlSnapshot } from './export.js';
 import { can } from './profile.js';
 import { switchTab } from './tabs.js';
 import { _escHtml } from './renderPane.js';
+import { denoiseMessage, elapsedTime, ShortcodeTable, estimateTokens } from './postprocess.js';
 // Line selection + copy / export actions
 //
 // Two explicit scopes (toggled per-pane overlay):
@@ -62,6 +63,28 @@ export function _selectionSetupPane(id) {
     scopeRow.appendChild(scopeContext);
     scopeRow.appendChild(scopeSel);
 
+    // Copy format toggle — "Full" (default, unchanged today's behavior) vs
+    // the CLI-mirroring "Compact" compaction level (postprocess.js).
+    const formatRow = document.createElement("div");
+    formatRow.className = "format-row";
+
+    const formatFull = document.createElement("button");
+    formatFull.className = "format-btn active";
+    formatFull.id = "format-full-" + id;
+    formatFull.textContent = "Full";
+    formatFull.title = "Full timestamp and source name (today's default)";
+    formatFull.addEventListener("click", e => { e.stopPropagation(); _setCopyFormat(id, "full"); });
+
+    const formatCompact = document.createElement("button");
+    formatCompact.className = "format-btn";
+    formatCompact.id = "format-compact-" + id;
+    formatCompact.textContent = "Compact";
+    formatCompact.title = "Elapsed time + source shortcode + denoised message — most token-efficient for pasting to an agent";
+    formatCompact.addEventListener("click", e => { e.stopPropagation(); _setCopyFormat(id, "compact"); });
+
+    formatRow.appendChild(formatFull);
+    formatRow.appendChild(formatCompact);
+
     // Pane selector (lazily rebuilt when scope becomes context-selected)
     const paneSelector = document.createElement("div");
     paneSelector.className = "pane-selector";
@@ -106,15 +129,6 @@ export function _selectionSetupPane(id) {
     rawBtn.title = "Download selected lines as raw .log file";
     rawBtn.addEventListener("click", e => { e.stopPropagation(); _downloadRaw(id); });
     moreDropdown.appendChild(rawBtn);
-    if (can('sessionApi')) {
-        const snippetBtn = document.createElement("button");
-        snippetBtn.className = "copy-btn";
-        snippetBtn.id = "save-snippet-" + id;
-        snippetBtn.textContent = "Save snippet";
-        snippetBtn.title = "Save selected lines to the session for later review";
-        snippetBtn.addEventListener("click", e => { e.stopPropagation(); _saveSnippet(id); });
-        moreDropdown.appendChild(snippetBtn);
-    }
     actionRow.appendChild(copyBtn);
     // Marker toggle (runtime only) — in the main action row
     if (can('markers')) {
@@ -130,6 +144,7 @@ export function _selectionSetupPane(id) {
     actionRow.appendChild(moreDropdown);
 
     wrap.appendChild(scopeRow);
+    wrap.appendChild(formatRow);
     wrap.appendChild(paneSelector);
     wrap.appendChild(actionRow);
     body.appendChild(wrap);
@@ -186,6 +201,17 @@ function _setScope(paneId, scope) {
     _syncSelectionActions(paneId);
 }
 
+function _setCopyFormat(paneId, format) {
+    state.copyFormat = format;
+    PANES.forEach(id => {
+        ['full', 'compact'].forEach(f => {
+            const btn = document.getElementById(`format-${f}-${id}`);
+            if (btn) btn.classList.toggle('active', format === f);
+        });
+    });
+    _syncSelectionActions(paneId);
+}
+
 function _toggleMore(paneId) {
     const dd = document.getElementById("more-dropdown-" + paneId);
     if (!dd) return;
@@ -213,12 +239,15 @@ function _syncSelectionActions(paneId) {
         ? selectedCount
         : _countRangeEntries(paneId);
     wrap.classList.toggle("visible", visible);
-    wrap.querySelectorAll(".copy-btn, .scope-btn, .more-toggle").forEach(el =>
+    wrap.querySelectorAll(".copy-btn, .scope-btn, .format-btn, .more-toggle").forEach(el =>
         el.classList.toggle("visible", visible)
     );
 
     if (visible) {
-        copyBtn.textContent = `Copy (${displayCount})`;
+        // Reuses the exact formatting the real copy would produce, so the
+        // estimate can never drift from what actually ends up on the clipboard.
+        const tok = estimateTokens(_pendingCopyText(paneId));
+        copyBtn.textContent = `Copy (${displayCount}, ~${tok} tok)`;
     }
     // Scope-gate secondary actions: marker only in Exact, Export HTML only outside Exact
     const htmlBtn = document.getElementById("export-html-" + paneId);
@@ -234,11 +263,30 @@ function _flatMarkerList() {
     const all = [];
     Object.keys(state.markers).forEach(paneId => {
         (state.markers[paneId] || []).forEach(m => {
+            if ((m.kind || "user") === "event" && !state.includeEventMarkers) return;
             all.push({ paneId, ...m });
         });
     });
     all.sort((a, b) => (a.numTs ?? 0) - (b.numTs ?? 0));
     return all;
+}
+
+function _markerMatchesRawIndex(paneId, marker, rawIdx) {
+    const line = getLine(paneId, rawIdx);
+    const isEvent = (marker.kind || "user") === "event";
+    const lineKey = isEvent && Number.isFinite(line?.serverLineIdx) ? line.serverLineIdx : rawIdx;
+    const end = marker.endIdx ?? marker.lineIdx;
+    return lineKey >= marker.lineIdx && lineKey <= end;
+}
+
+function _markerRawIndex(marker) {
+    const paneId = marker.paneId;
+    if ((marker.kind || "user") !== "event") return marker.lineIdx;
+    const lines = state.rawLines[paneId] || [];
+    for (let i = 0; i < lines.length; i++) {
+        if (_markerMatchesRawIndex(paneId, marker, i)) return i;
+    }
+    return marker.lineIdx;
 }
 
 function _markerLineIdx(paneId) {
@@ -361,24 +409,21 @@ export function applyMarkers() {
         const logEl = document.getElementById("log-" + paneId);
         if (!logEl) return;
         const paneMarkers = byPane[paneId] || [];
-        // Build a lookup: lineIdx → description (mark every line in a range)
-        const byLine = {};
-        paneMarkers.forEach(m => {
-            const end = m.endIdx ?? m.lineIdx;
-            for (let i = m.lineIdx; i <= end; i++) {
-                if (byLine[i] === undefined) byLine[i] = m.description;
-            }
-        });
         const windowEl = logEl.querySelector(".log-window");
         if (!windowEl) return;
         Array.from(windowEl.children).forEach(div => {
             const idx = parseInt(div.dataset.idx, 10);
-            const hasMarker = byLine[idx] !== undefined;
+            const m = paneMarkers.find(marker => _markerMatchesRawIndex(paneId, marker, idx));
+            const hasMarker = m !== undefined;
             div.classList.toggle("has-marker", hasMarker);
             if (hasMarker) {
-                div.dataset.markerTooltip = byLine[idx];
+                div.dataset.markerTooltip = m.description || "";
+                div.dataset.kind = m.kind || "user";
+                div.dataset.severity = m.severity || "";
             } else {
                 delete div.dataset.markerTooltip;
+                delete div.dataset.kind;
+                delete div.dataset.severity;
             }
         });
     });
@@ -389,18 +434,66 @@ window.applyMarkers = applyMarkers;
 const _tooltipEl = document.createElement("div");
 _tooltipEl.id = "marker-tooltip";
 document.body.appendChild(_tooltipEl);
+let _markerTooltipPinned = false;
 
-document.addEventListener("mouseover", e => {
-    const line = e.target.closest(".log-line.has-marker");
-    if (!line) { _tooltipEl.classList.remove("visible"); return; }
+function _paneIdFromLine(line) {
+    const logEl = line?.closest?.('.log-area');
+    return logEl?.id?.startsWith('log-') ? logEl.id.slice(4) : null;
+}
+
+function _markerForLine(line) {
+    const paneId = _paneIdFromLine(line);
+    const rawIdx = Number(line?.dataset?.idx);
+    if (!paneId || !Number.isFinite(rawIdx)) return null;
+    const marker = (state.markers[paneId] || []).find(m => _markerMatchesRawIndex(paneId, m, rawIdx));
+    return marker ? { paneId, ...marker } : null;
+}
+
+function _hideMarkerTooltip({ force = false } = {}) {
+    if (_markerTooltipPinned && !force) return;
+    _markerTooltipPinned = false;
+    _tooltipEl.classList.remove("visible", "actionable");
+}
+
+function _showMarkerTooltip(line, { action = false } = {}) {
     const desc = line.dataset.markerTooltip || "";
     if (!desc) return;
+    const marker = _markerForLine(line);
+    const isEvent = (marker?.kind || line.dataset.kind) === "event";
+    _markerTooltipPinned = action;
+    const jump = action && isEvent
+        ? '<div class="mt-actions"><button type="button" class="marker-jump-event-btn">Jump to event</button></div>'
+        : '';
+    _tooltipEl.innerHTML = '<span class="mt-label">' + (isEvent ? "Event" : "Marker") + '</span>' + _escHtml(desc) + jump;
+    _tooltipEl.classList.toggle("actionable", action && isEvent);
+    if (action && isEvent) {
+        _tooltipEl.querySelector('.marker-jump-event-btn')?.addEventListener('click', ev => {
+            ev.stopPropagation();
+            _hideMarkerTooltip({ force: true });
+            window.__embedLogJumpToEvent?.(marker);
+        });
+    }
     const rect = line.getBoundingClientRect();
-    _tooltipEl.innerHTML = '<span class="mt-label">Marker</span>' + _escHtml(desc);
-    // Position above the line so it doesn't cover log text below
+    // Position above the line so it doesn't cover log text below.
     _tooltipEl.style.left = Math.max(4, rect.left) + "px";
     _tooltipEl.style.bottom = (window.innerHeight - rect.top + 4) + "px";
     _tooltipEl.classList.add("visible");
+}
+
+document.addEventListener("mouseover", e => {
+    const line = e.target.closest(".log-line.has-marker");
+    if (!line) { _hideMarkerTooltip(); return; }
+    if (_markerTooltipPinned) return;
+    _showMarkerTooltip(line);
+});
+
+document.addEventListener("click", e => {
+    const line = e.target.closest(".log-line.has-marker[data-kind='event']");
+    if (!line) {
+        if (!_tooltipEl.contains(e.target)) _hideMarkerTooltip({ force: true });
+        return;
+    }
+    _showMarkerTooltip(line, { action: true });
 });
 
 
@@ -416,7 +509,6 @@ function _updateMarkerNav() {
     navEl.style.display = "";
     const total = document.getElementById("marker-nav-total");
     if (total) total.textContent = String(flat.length);
-    // Clamp nav index
     if (state.markerNavIdx < 0 || state.markerNavIdx >= flat.length) {
         state.markerNavIdx = 0;
     }
@@ -444,16 +536,18 @@ document.getElementById("marker-nav-next")?.addEventListener("click", () => {
 
 function _jumpMarker(m) {
     const paneId = m.paneId;
+    const rawIdx = _markerRawIndex(m);
     // Switch to the tab containing this pane
     const tabIdx = TABS.findIndex(t => t.panes.includes(paneId));
     if (tabIdx >= 0) switchTab(tabIdx);
-    ensureLineVisible(paneId, m.lineIdx, { align: "center" });
-    const div = document.querySelector(`#log-${paneId} [data-idx="${m.lineIdx}"]`);
+    ensureLineVisible(paneId, rawIdx, { align: "center" });
+    const div = document.querySelector(`#log-${paneId} [data-idx="${rawIdx}"]`);
     if (!div) return;
     const logEl = document.getElementById("log-" + paneId);
     if (!logEl) return;
     state.atBottom[paneId] = false;
-    onLineClick(paneId, m.numTs, div);
+    const line = getLine(paneId, rawIdx);
+    onLineClick(paneId, line?.numTs ?? m.numTs, div);
     _updateMarkerNavBtn();
 }
 function _applySelection(paneId) {
@@ -478,6 +572,10 @@ function _selectIndexRange(paneId, startIdx, endIdx) {
     state.selected[paneId] = sel;
     _applySelection(paneId);
 }
+
+window.__embedLogTestSelectRange = function (paneId, startIdx, endIdx) {
+    _selectIndexRange(paneId, startIdx, endIdx);
+};
 
 function _clearOtherSelections(keepPane) {
     PANES.forEach(id => {
@@ -521,7 +619,7 @@ function _lineRaw(line) {
 }
 
 function _safeFilePart(str) {
-    return String(str || "snippet").replace(/[^0-9A-Za-z_.-]+/g, "-").replace(/^-+|-+$/g, "") || "snippet";
+    return String(str || "selection").replace(/[^0-9A-Za-z_.-]+/g, "-").replace(/^-+|-+$/g, "") || "selection";
 }
 
 function _downloadText(filename, text, type = "text/plain") {
@@ -604,7 +702,7 @@ function _collectRangeEntries(paneId) {
 }
 
 function _rangeBoundsLabel(entries) {
-    if (!entries.length) return "snippet";
+    if (!entries.length) return "selection";
     const first = entries[0].line.ts;
     const last = entries[entries.length - 1].line.ts;
     return `${first}_to_${last}`;
@@ -612,11 +710,11 @@ function _rangeBoundsLabel(entries) {
 
 function _rangeBoundsLabelExact(paneId) {
     const sel = state.selected[paneId];
-    if (!sel?.size) return "snippet";
+    if (!sel?.size) return "selection";
     const indices = Array.from(sel).sort((a, b) => a - b);
     const first = _selectionLine(paneId, indices[0])?.ts;
     const last = _selectionLine(paneId, indices[indices.length - 1])?.ts;
-    if (!first || !last) return "snippet";
+    if (!first || !last) return "selection";
     return `${first}_to_${last}`;
 }
 
@@ -624,7 +722,44 @@ function _escapeRegExp(str) {
     return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function _snippetMessageText(entry, useRendered = false) {
+// "HH:MM:SS.mmm" for a line, mirroring the CLI's `clock_time()` — derived
+// from `absTs` ("MM-DD HH:MM:SS.mmm", the same field format used everywhere
+// else in this codebase), not from `line.ts` (which can already be showing
+// relative time depending on the display's timestamp mode).
+function _clockTimeOf(line) {
+    const absTs = line?.absTs;
+    if (typeof absTs === "string" && absTs.includes(" ")) {
+        return absTs.split(" ").pop();
+    }
+    return line?.ts || "";
+}
+
+// One line in the "compact" copy format (state.copyFormat === "compact") —
+// mirrors format_compact_entry in crates/embed-log-cli/src/commands/sessions.rs.
+// `codes` is shared across an entire copy/download action so the same source
+// gets the same shortcode throughout one block.
+function _formatCompactedLine(line, paneId, idx, rawMessage, codes) {
+    const clock = _clockTimeOf(line);
+    const ts = elapsedTime(line, clock);
+    const code = codes.codeFor(paneId);
+    const message = denoiseMessage(rawMessage, clock);
+    return `${ts} ${code}#${idx} ${message}`;
+}
+
+// The text that _copy()/_copyContext() would actually produce right now —
+// used both for the real copy and for the live token estimate, so the
+// estimate can never drift from what's actually copied.
+function _pendingCopyText(paneId) {
+    if (state.selectionScope === "exact") {
+        const sel = state.selected[paneId];
+        if (!sel?.size) return "";
+        const indices = Array.from(sel).sort((a, b) => a - b);
+        return _formatSelectionBlock(paneId, indices, true) || "";
+    }
+    return _formatRangeRaw(_collectRangeEntries(paneId), true) || "";
+}
+
+function _selectionMessageText(entry, useRendered = false) {
     let text = (useRendered ? _lineRenderedPlain(entry.line) : _linePlain(entry.line)).trim();
     const sourcePrefix = new RegExp(`^\\[${_escapeRegExp(entry.paneId)}\\]\\s*`);
     for (let i = 0; i < 4; i++) {
@@ -663,6 +798,10 @@ function _applyMarkerAnnotations(paneId, items) {
 
 
 function _formatRangeRaw(entries, useRendered = false) {
+    // One shared table across the whole (possibly multi-pane) block, so a
+    // source keeps the same shortcode throughout — matches the CLI's
+    // per-invocation ShortcodeTable.
+    const codes = state.copyFormat !== "full" ? new ShortcodeTable() : null;
     const parts = [];
     let currentPane = null;
     let paneItems = [];
@@ -675,10 +814,11 @@ function _formatRangeRaw(entries, useRendered = false) {
     entries.forEach(e => {
         if (e.paneId !== currentPane) flushPane();
         currentPane = e.paneId;
-        paneItems.push({
-            idx: e.idx,
-            text: `[${e.line.ts}] [${e.paneId}] ${_snippetMessageText(e, useRendered)}`,
-        });
+        const rawMessage = _selectionMessageText(e, useRendered);
+        const text = codes
+            ? _formatCompactedLine(e.line, e.paneId, e.idx, rawMessage, codes)
+            : `[${e.line.ts}] [${e.paneId}] ${rawMessage}`;
+        paneItems.push({ idx: e.idx, text });
     });
     flushPane();
     return parts.join("\n");
@@ -692,7 +832,7 @@ function _buildRangeLogData(entries) {
         if (!logData[e.paneId]) logData[e.paneId] = [];
         logData[e.paneId].push({
             ts: e.line.ts,
-            text: `[${e.paneId}] ${_snippetMessageText(e)}`,
+            text: `[${e.paneId}] ${_selectionMessageText(e)}`,
             isTx: e.line.isTx,
             absTs: e.line.absTs ?? null,
             absNum: Number.isFinite(e.line.absNum) ? e.line.absNum : null,
@@ -704,12 +844,16 @@ function _buildRangeLogData(entries) {
 }
 
 function _formatSelectionBlock(paneId, indices, useRendered = false) {
+    const codes = state.copyFormat !== "full" ? new ShortcodeTable() : null;
     const items = indices
         .map(idx => {
             const line = _selectionLine(paneId, idx);
-            return line
-                ? { idx, text: `${line.ts}  [${paneId}] ${(useRendered ? _lineRenderedPlain(line) : _linePlain(line))}` }
-                : null;
+            if (!line) return null;
+            const raw = useRendered ? _lineRenderedPlain(line) : _linePlain(line);
+            const text = codes
+                ? _formatCompactedLine(line, paneId, idx, raw, codes)
+                : `${line.ts}  [${paneId}] ${raw}`;
+            return { idx, text };
         })
         .filter(Boolean);
     return _applyMarkerAnnotations(paneId, items);
@@ -769,7 +913,7 @@ function _copyExact(paneId) {
         const btn = document.getElementById("copy-" + paneId);
         if (!btn) return;
         const prev = btn.textContent;
-        btn.textContent = "Copied";
+        btn.textContent = `Copied (~${estimateTokens(text)} tok)`;
         setTimeout(() => { btn.textContent = prev; _syncSelectionActions(paneId); }, 900);
     }).catch(() => {});
 }
@@ -782,7 +926,7 @@ function _copyContext(paneId) {
         const btn = document.getElementById("copy-" + paneId);
         if (!btn) return;
         const prev = btn.textContent;
-        btn.textContent = "Copied";
+        btn.textContent = `Copied (~${estimateTokens(text)} tok)`;
         setTimeout(() => { btn.textContent = prev; _syncSelectionActions(paneId); }, 900);
     }).catch(() => {});
 }
@@ -803,7 +947,6 @@ function _downloadRawExact(paneId) {
     if (!text) return;
     const label = _rangeBoundsLabelExact(paneId);
     _downloadText(`embed-log-exact-${_safeFilePart(label)}.log`, text + "\n", "text/plain");
-    _saveSnippetToServer(text, [paneId], 'exact', label);
 }
 
 function _downloadRawContext(paneId) {
@@ -811,35 +954,7 @@ function _downloadRawContext(paneId) {
     const text = _formatRangeRaw(entries);
     if (!text) return;
     const label = _rangeBoundsLabel(entries);
-    _downloadText(`embed-log-snippet-${_safeFilePart(label)}.log`, text + "\n", "text/plain");
-    const panes = [...new Set(entries.map(e => e.paneId))];
-    _saveSnippetToServer(text, panes, state.selectionScope, label);
-}
-
-function _saveSnippetToServer(text, panes, scope, label) {
-    if (!window.__embedLogProfile?.capabilities?.sessionApi) return;
-    fetch('/api/session/snippet', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, panes, scope, label }),
-    }).catch(() => {});
-}
-
-function _saveSnippet(paneId) {
-    const sel = state.selected[paneId];
-    if (!sel.size) return;
-    const indices = Array.from(sel).sort((a, b) => a - b);
-    const text = _formatSelectionBlock(paneId, indices, true);
-    if (!text) return;
-    const label = _rangeBoundsLabelExact(paneId);
-    const panes = [paneId];
-    _saveSnippetToServer(text, panes, 'exact', label);
-    const btn = document.getElementById("save-snippet-" + paneId);
-    if (btn) {
-        const prev = btn.textContent;
-        btn.textContent = "Saved";
-        setTimeout(() => { btn.textContent = prev; }, 900);
-    }
+    _downloadText(`embed-log-selection-${_safeFilePart(label)}.log`, text + "\n", "text/plain");
 }
 
 // ---------------------------------------------------------------------------
@@ -857,8 +972,8 @@ function _exportHtml(paneId) {
         exportHtmlSnapshot({
             button: btn,
             logData: _buildRangeLogData(entries),
-            filenamePrefix: `embed-log-snippet-${_safeFilePart(label)}`,
-            title: `snippet ${label}`,
+            filenamePrefix: `embed-log-selection-${_safeFilePart(label)}`,
+            title: `selection ${label}`,
             activeTab: state.activeTab,
         });
     } else {
@@ -898,6 +1013,8 @@ document.addEventListener("pointerdown", e => {
     const logArea = line.closest(".log-area");
     if (!logArea) return;
     if (e.altKey) { _altSelection = true; return; }
+    e.preventDefault();
+    window.getSelection()?.removeAllRanges();
     hidePluginOverlays();
 
 
@@ -948,6 +1065,8 @@ document.addEventListener("pointerup", () => {
         _altSelection = false;
         const text = window.getSelection()?.toString();
         if (text) navigator.clipboard.writeText(text).catch(() => {});
+    } else {
+        window.getSelection()?.removeAllRanges();
     }
     _drag = null;
 });
@@ -1039,5 +1158,10 @@ document.addEventListener("keyup", e => {
 window.addEventListener("blur", () => document.body.classList.remove("alt-held"));
 // Update marker nav when markers arrive from server
 window.__embedLogOnMarkers = () => {
+    _updateMarkerNav();
+};
+// Events tab calls this to toggle event-marker inclusion in navigation.
+window.__embedLogToggleEventMarkers = function () {
+    state.includeEventMarkers = !state.includeEventMarkers;
     _updateMarkerNav();
 };
