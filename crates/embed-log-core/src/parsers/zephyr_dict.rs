@@ -1,16 +1,10 @@
-//! Zephyr dictionary-logging parser.
+//! Zephyr dictionary-logging parser (UART HEX wire format).
 //!
-//! Ports the wire format understood by Zephyr's
-//! `scripts/logging/dictionary` Python tools (`log_parser_v3.py` /
-//! `log_database.py`): a binary stream of self-length-prefixed messages,
-//! decoded against a `database.json` built at compile time (via
-//! `database_gen.py` from the firmware ELF) that maps format-string/log
-//! source pointers back to human-readable text.
-//!
-//! Scope: database format version 3 only (the current Zephyr default —
-//! `LogDatabase.ZEPHYR_DICT_LOG_VER` — since 2022). Versions 1/2 use a
-//! different bit-packed header and MIPI Sys-T output is a different backend
-//! entirely; both are skipped here. Add if a real project still needs them.
+//! GWL firmware shares one UART between the shell and dictionary logging.
+//! Dictionary packets are framed as `##ZLOGV1##` followed by ASCII hex; all
+//! other bytes are passed through as console text. Hex payloads are unhexified
+//! into Zephyr's self-length-prefixed binary message stream and decoded against
+//! `log_dictionary.json` from the matching west build.
 
 use std::collections::HashMap;
 
@@ -21,38 +15,28 @@ use super::traits::StreamParser;
 const MSG_TYPE_NORMAL: u8 = 0;
 const MSG_TYPE_DROPPED: u8 = 1;
 const LOG_HEX_SEP: &str = "##ZLOGV1##";
+const LOG_HEX_SEP_BYTES: &[u8] = LOG_HEX_SEP.as_bytes();
+/// Minimum trailing lowercase-hex run (chars) to treat as a dictionary burst without
+/// an explicit `##ZLOGV1##` prefix (GWL sometimes omits the marker between bursts).
+const MIN_HEURISTIC_HEX_LEN: usize = 20;
+/// Minimum hex-only text buffer length to enter Hex mode right after a shell prompt.
+const MIN_PROMPT_HEX_LEN: usize = 8;
 
-/// Dictionary wire format on the serial port.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WireFormat {
-    Binary,
+enum MuxMode {
+    Text,
     Hex,
 }
 
-impl WireFormat {
-    pub fn from_config(value: Option<&str>) -> Self {
-        match value.unwrap_or("binary") {
-            "hex" => Self::Hex,
-            _ => Self::Binary,
-        }
-    }
-}
-
-/// Zephyr dictionary-logging parser for a raw byte stream (UART/UDP/file).
-///
-/// Buffers incomplete messages across `feed()` calls: each message declares
-/// its own length in its header, so — unlike SLIP — there's no delimiter
-/// byte to resync on. On an unrecognized message type (framing desync) the
-/// buffer is dropped and decoding resumes from the next `feed()` call.
-///
-/// When [`WireFormat::Hex`] is selected, incoming UART bytes are treated as
-/// ASCII hex (optionally prefixed with `##ZLOGV1##`) before binary parsing.
+/// Dictionary-logging parser for mixed shell + `##ZLOGV1##` HEX UART captures.
 pub struct ZephyrDictParser {
     state: LoadState,
-    wire_format: WireFormat,
-    buf: Vec<u8>,
-    hex_buf: Vec<u8>,
-    decoded_line_count: usize,
+    mux_mode: MuxMode,
+    text_buf: Vec<u8>,
+    hex_collect: String,
+    hex_unhexified: usize,
+    hex_parse_stopped: bool,
+    dict_buf: Vec<u8>,
     reported_load_error: bool,
 }
 
@@ -63,11 +47,7 @@ enum LoadState {
 
 impl ZephyrDictParser {
     pub fn new(database_path: &str) -> Self {
-        Self::with_options(database_path, WireFormat::Binary, false)
-    }
-
-    pub fn with_options(database_path: &str, wire_format: WireFormat, gwl: bool) -> Self {
-        let state = match Database::load(database_path, gwl) {
+        let state = match Database::load(database_path) {
             Ok(db) => LoadState::Ready(db),
             Err(e) => {
                 tracing::error!("zephyr-dict: failed to load database {database_path:?}: {e}");
@@ -76,89 +56,207 @@ impl ZephyrDictParser {
         };
         Self {
             state,
-            wire_format,
-            buf: Vec::new(),
-            hex_buf: Vec::new(),
-            decoded_line_count: 0,
+            mux_mode: MuxMode::Text,
+            text_buf: Vec::new(),
+            hex_collect: String::new(),
+            hex_unhexified: 0,
+            hex_parse_stopped: false,
+            dict_buf: Vec::new(),
             reported_load_error: false,
         }
     }
 
-    fn refresh_binary_from_hex(&mut self) {
-        if self.hex_buf.len() > 512 * 1024 {
-            if let Some(idx) = find_subslice(&self.hex_buf, LOG_HEX_SEP.as_bytes()) {
-                self.hex_buf.drain(0..idx);
-            } else {
-                let keep = self.hex_buf.len().saturating_sub(256 * 1024);
-                self.hex_buf.drain(0..keep);
-            }
-            self.decoded_line_count = 0;
+    fn emit_text_line(&mut self) -> Option<String> {
+        let line = String::from_utf8_lossy(&self.text_buf)
+            .trim_end_matches('\r')
+            .to_string();
+        self.text_buf.clear();
+        if line.is_empty() {
+            None
+        } else {
+            Some(line)
         }
-        self.buf = extract_hex_logdata(&self.hex_buf);
     }
 
-    fn decode_all_messages(&self, db: &Database) -> Vec<String> {
-        let mut buf = self.buf.clone();
+    fn try_flush_prompt_before_hex(&mut self, lines: &mut Vec<String>) {
+        if self.text_buf.ends_with(b"outside> ") || self.text_buf.ends_with(b"inside> ") {
+            if let Some(line) = self.emit_text_line() {
+                lines.push(line);
+            }
+        }
+    }
+
+    fn try_split_on_separator(&mut self, lines: &mut Vec<String>) {
+        let Some(pos) = find_subslice(&self.text_buf, LOG_HEX_SEP_BYTES) else {
+            return;
+        };
+        let mut tail = self.text_buf.split_off(pos);
+        if let Some(line) = self.emit_text_line() {
+            lines.push(line);
+        }
+        tail.drain(..LOG_HEX_SEP_BYTES.len());
+        self.mux_mode = MuxMode::Hex;
+        self.reset_hex_collect();
+        for b in tail {
+            self.handle_hex_byte(b, lines);
+        }
+    }
+
+    fn try_promote_hex_text_buf(&mut self, lines: &mut Vec<String>) {
+        if self.text_buf.is_empty() {
+            return;
+        }
+        if self.text_buf.iter().all(|&b| is_lower_hex(b)) && self.text_buf.len() >= MIN_PROMPT_HEX_LEN
+        {
+            self.hex_collect = String::from_utf8_lossy(&self.text_buf).into_owned();
+            self.hex_unhexified = 0;
+            self.text_buf.clear();
+            self.mux_mode = MuxMode::Hex;
+            self.try_incremental_hex_decode(lines);
+            return;
+        }
+
+        let n = self.text_buf.len();
+        let mut start = n;
+        while start > 0 && is_lower_hex(self.text_buf[start - 1]) {
+            start -= 1;
+        }
+        let run_len = n - start;
+        if run_len < MIN_HEURISTIC_HEX_LEN {
+            return;
+        }
+        if start > 0 {
+            let prev = self.text_buf[start - 1];
+            if prev.is_ascii_alphanumeric() && prev != b' ' {
+                return;
+            }
+        }
+        let hex_part = self.text_buf.drain(start..).collect::<Vec<_>>();
+        if let Some(line) = self.emit_text_line() {
+            lines.push(line);
+        }
+        self.hex_collect = String::from_utf8_lossy(&hex_part).into_owned();
+        self.hex_unhexified = 0;
+        self.mux_mode = MuxMode::Hex;
+        self.try_incremental_hex_decode(lines);
+    }
+
+    fn reset_hex_collect(&mut self) {
+        self.hex_collect.clear();
+        self.hex_unhexified = 0;
+        self.hex_parse_stopped = false;
+    }
+
+    fn try_incremental_hex_decode(&mut self, lines: &mut Vec<String>) {
+        if self.hex_parse_stopped {
+            return;
+        }
+        loop {
+            let pending = &self.hex_collect[self.hex_unhexified..];
+            if pending.len() < 2 {
+                break;
+            }
+            let even = pending.len() - (pending.len() % 2);
+            let Some(bytes) = unhexify_chunk(&pending[..even], 2) else {
+                break;
+            };
+            self.hex_unhexified += even;
+            self.dict_buf.extend(bytes);
+            lines.extend(self.decode_pending_dict_messages());
+        }
+    }
+
+    fn handle_hex_byte(&mut self, b: u8, lines: &mut Vec<String>) {
+        if is_lower_hex(b) {
+            self.hex_collect.push(b as char);
+            self.try_incremental_hex_decode(lines);
+        } else if matches!(b, b'\r' | b'\n') {
+            if !self.hex_collect.is_empty() {
+                self.flush_hex_block(lines);
+            }
+            self.mux_mode = MuxMode::Text;
+        } else if b == b'\t' || b == b' ' {
+            // skip framing whitespace between separator and hex body
+        } else if b == b'#' {
+            self.flush_hex_block(lines);
+            self.mux_mode = MuxMode::Text;
+            self.text_buf.push(b);
+            self.try_split_on_separator(lines);
+        } else {
+            self.flush_hex_block(lines);
+            self.mux_mode = MuxMode::Text;
+            self.handle_text_byte(b, lines);
+        }
+    }
+
+    fn handle_text_byte(&mut self, b: u8, lines: &mut Vec<String>) {
+        if b == b'\n' || b == b'\r' {
+            if let Some(line) = self.emit_text_line() {
+                lines.push(line);
+            }
+            return;
+        }
+        if is_lower_hex(b) {
+            self.try_flush_prompt_before_hex(lines);
+        }
+        self.text_buf.push(b);
+        self.try_split_on_separator(lines);
+        if self.mux_mode == MuxMode::Text {
+            self.try_promote_hex_text_buf(lines);
+        }
+    }
+
+    fn flush_hex_block(&mut self, lines: &mut Vec<String>) {
+        self.try_incremental_hex_decode(lines);
+        self.reset_hex_collect();
+    }
+
+    fn decode_pending_dict_messages(&mut self) -> Vec<String> {
+        let LoadState::Ready(db) = &self.state else {
+            return Vec::new();
+        };
         let mut lines = Vec::new();
         loop {
-            match take_one_message(&buf, db) {
+            match take_one_message(&self.dict_buf, db) {
                 TakeResult::NeedMore => break,
                 TakeResult::Consumed { len, mut output } => {
-                    buf.drain(0..len);
+                    self.dict_buf.drain(0..len);
                     lines.append(&mut output);
                 }
-                TakeResult::Stop => break,
+                TakeResult::Stop => {
+                    self.dict_buf.clear();
+                    self.hex_parse_stopped = true;
+                    break;
+                }
             }
         }
         lines
+    }
+
+    fn process_byte(&mut self, b: u8, lines: &mut Vec<String>) {
+        match self.mux_mode {
+            MuxMode::Text => self.handle_text_byte(b, lines),
+            MuxMode::Hex => self.handle_hex_byte(b, lines),
+        }
     }
 }
 
 impl StreamParser for ZephyrDictParser {
     fn feed(&mut self, data: &[u8]) -> Vec<String> {
-        let db = match &self.state {
-            LoadState::Ready(db) => db,
-            LoadState::Failed(err) => {
-                if self.reported_load_error {
-                    return Vec::new();
-                }
-                self.reported_load_error = true;
-                return vec![format!(
-                    "[zephyr-dict: database not loaded ({err}); check parser.database — dropping incoming bytes]"
-                )];
+        if let LoadState::Failed(err) = &self.state {
+            if self.reported_load_error {
+                return Vec::new();
             }
-        };
-
-        if self.wire_format == WireFormat::Hex {
-            self.hex_buf.extend_from_slice(data);
-            self.refresh_binary_from_hex();
-            let all_lines = match &self.state {
-                LoadState::Ready(db) => self.decode_all_messages(db),
-                LoadState::Failed(_) => return Vec::new(),
-            };
-            let new_lines = if self.decoded_line_count < all_lines.len() {
-                all_lines[self.decoded_line_count..].to_vec()
-            } else {
-                Vec::new()
-            };
-            self.decoded_line_count = all_lines.len();
-            return new_lines;
+            self.reported_load_error = true;
+            return vec![format!(
+                "[zephyr-dict: database not loaded ({err}); check parser.database — dropping incoming bytes]"
+            )];
         }
 
-        self.buf.extend_from_slice(data);
         let mut lines = Vec::new();
-
-        loop {
-            match take_one_message(&self.buf, db) {
-                TakeResult::NeedMore => break,
-                TakeResult::Consumed { len, mut output } => {
-                    self.buf.drain(0..len);
-                    lines.append(&mut output);
-                }
-                TakeResult::Stop => break,
-            }
+        for &b in data {
+            self.process_byte(b, &mut lines);
         }
-
         lines
     }
 }
@@ -169,8 +267,12 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .position(|window| window == needle)
 }
 
-fn unhexify_chunk(hexstr: &str) -> Option<Vec<u8>> {
-    if hexstr.len() < 20 {
+fn is_lower_hex(b: u8) -> bool {
+    matches!(b, b'0'..=b'9' | b'a'..=b'f')
+}
+
+fn unhexify_chunk(hexstr: &str, min_hex_len: usize) -> Option<Vec<u8>> {
+    if hexstr.len() < min_hex_len.max(2) {
         return None;
     }
     let mut end = hexstr.len();
@@ -212,75 +314,40 @@ fn hex_nibble(byte: &u8) -> Option<u8> {
     }
 }
 
-fn extract_hex_runs(text: &str) -> Vec<u8> {
-    let mut parts: Vec<u8> = Vec::new();
-    let mut idx = 0;
-    let bytes = text.as_bytes();
-    while idx < bytes.len() {
-        let ch = bytes[idx] as char;
-        if !ch.is_ascii_hexdigit() {
-            idx += 1;
-            continue;
-        }
-        let start = idx;
-        while idx < bytes.len() && (bytes[idx] as char).is_ascii_hexdigit() {
-            idx += 1;
-        }
-        if let Some(packet) = unhexify_chunk(std::str::from_utf8(&bytes[start..idx]).unwrap_or("")) {
-            parts.extend(packet);
-        }
-    }
-    parts
-}
-
-fn extract_hex_logdata(raw: &[u8]) -> Vec<u8> {
-    let text = String::from_utf8_lossy(raw);
-    let mut parts: Vec<u8> = Vec::new();
-    let mut search_from = 0usize;
-
-    while let Some(rel) = text[search_from..].find(LOG_HEX_SEP) {
-        let sep_start = search_from + rel;
-        let mut idx = sep_start + LOG_HEX_SEP.len();
-        let mut hexchars = String::new();
-        while idx < text.len() {
-            let ch = text.as_bytes()[idx] as char;
-            if ch.is_ascii_hexdigit() {
-                hexchars.push(ch);
-                idx += 1;
-            } else if matches!(ch, '\r' | '\n' | '\t' | ' ') {
-                idx += 1;
-            } else {
-                break;
-            }
-        }
-        if !hexchars.is_empty() {
-            if let Some(packet) = unhexify_chunk(&hexchars) {
-                parts.extend(packet);
-            }
-        }
-        search_from = idx;
-    }
-
-    if !parts.is_empty() {
-        return parts;
-    }
-
-    extract_hex_runs(&text)
-}
-
-fn formalize_gwl_fmt_string(fmt: &str) -> String {
+/// Normalize format strings from the dictionary database for Rust `sprintf`.
+///
+/// Mirrors Zephyr's `log_parser.py::formalize_fmt_string` plus `inttypes.h` /
+/// `size_t` macros that may appear literally in `log_strings` ELF entries.
+fn formalize_fmt_string(fmt: &str, is_64bit: bool) -> String {
     let mut s = fmt.to_string();
+
+    let (zu, zd, zi) = if is_64bit {
+        ("%lu", "%ld", "%ld")
+    } else {
+        ("%u", "%d", "%d")
+    };
     for (src, dst) in [
-        ("%zu", "%u"),
-        ("%zd", "%d"),
-        ("%zi", "%d"),
         ("%PRIu32", "%u"),
         ("%PRId32", "%d"),
         ("%PRIx32", "%x"),
+        ("%PRIu64", "%llu"),
+        ("%PRId64", "%lld"),
+        ("%PRIx64", "%llx"),
+        ("%zu", zu),
+        ("%zd", zd),
+        ("%zi", zi),
     ] {
         s = s.replace(src, dst);
     }
-    s
+
+    for spec in ['d', 'i', 'o', 'u', 'x', 'X'] {
+        s = s.replace(&format!("%ll{spec}"), &format!("%l{spec}"));
+        if matches!(spec, 'x' | 'X') {
+            s = s.replace(&format!("%#ll{spec}"), &format!("%#l{spec}"));
+        }
+        s = s.replace(&format!("%hh{spec}"), &format!("%h{spec}"));
+    }
+    s.replace("%p", "0x%x")
 }
 
 enum TakeResult {
@@ -930,7 +997,7 @@ impl Database {
         }
     }
 
-    fn load(path: &str, gwl: bool) -> Result<Self, String> {
+    fn load(path: &str) -> Result<Self, String> {
         let text = std::fs::read_to_string(path).map_err(|e| format!("read {path:?}: {e}"))?;
         let raw: RawDatabase =
             serde_json::from_str(&text).map_err(|e| format!("parse {path:?}: {e}"))?;
@@ -942,14 +1009,11 @@ impl Database {
             ));
         }
 
+        let is_64bit = raw.target.bits.unwrap_or(32) == 64;
         let mut string_mappings = HashMap::with_capacity(raw.string_mappings.len());
         for (addr, s) in raw.string_mappings {
             if let Ok(addr) = addr.parse::<u64>() {
-                let value = if gwl {
-                    formalize_gwl_fmt_string(&s)
-                } else {
-                    s
-                };
+                let value = formalize_fmt_string(&s, is_64bit);
                 string_mappings.insert(addr, value);
             }
         }
@@ -1107,6 +1171,12 @@ mod tests {
         msg
     }
 
+    fn feed_hex(parser: &mut ZephyrDictParser, msg: &[u8]) -> Vec<String> {
+        let hex: String = msg.iter().map(|b| format!("{b:02x}")).collect();
+        let line = format!("{LOG_HEX_SEP}{hex}\n");
+        parser.feed(line.as_bytes())
+    }
+
     #[test]
     fn decodes_simple_string_only_message() {
         let dir = temp_dir("simple");
@@ -1115,7 +1185,7 @@ mod tests {
         let mut parser = ZephyrDictParser::new(&db_path);
 
         let msg = encode_normal_message(3, 1, 42, 0x1000, &[], &[]);
-        let lines = parser.feed(&msg);
+        let lines = feed_hex(&mut parser, &msg);
 
         assert_eq!(lines.len(), 1);
         assert!(lines[0].contains("<inf> app: hello world"), "{}", lines[0]);
@@ -1133,7 +1203,7 @@ mod tests {
         args.extend_from_slice(&(255u32).to_le_bytes());
         let msg = encode_normal_message(1, 1, 7, 0x2000, &args, &[]);
 
-        let lines = parser.feed(&msg);
+        let lines = feed_hex(&mut parser, &msg);
         assert_eq!(lines.len(), 1);
         assert!(lines[0].contains("count=-5 hex=0xff"), "{}", lines[0]);
         assert!(lines[0].contains("<err>"), "{}", lines[0]);
@@ -1149,7 +1219,7 @@ mod tests {
         args.extend_from_slice(&(0x4000u32).to_le_bytes());
         let msg = encode_normal_message(3, 1, 1, 0x3000, &args, &[]);
 
-        let lines = parser.feed(&msg);
+        let lines = feed_hex(&mut parser, &msg);
         assert_eq!(lines.len(), 1);
         assert!(lines[0].contains("name=widget"), "{}", lines[0]);
     }
@@ -1161,7 +1231,7 @@ mod tests {
         let mut parser = ZephyrDictParser::new(&db_path);
 
         let msg = encode_normal_message(0, 1, 1, 0x1000, &[], &[]);
-        let lines = parser.feed(&msg);
+        let lines = feed_hex(&mut parser, &msg);
         assert_eq!(lines, vec!["raw printk"]);
     }
 
@@ -1173,7 +1243,7 @@ mod tests {
 
         let mut msg = vec![MSG_TYPE_DROPPED];
         msg.extend_from_slice(&7u16.to_le_bytes());
-        let lines = parser.feed(&msg);
+        let lines = feed_hex(&mut parser, &msg);
         assert_eq!(lines, vec!["--- 7 messages dropped ---"]);
     }
 
@@ -1184,10 +1254,12 @@ mod tests {
         let mut parser = ZephyrDictParser::new(&db_path);
 
         let msg = encode_normal_message(3, 1, 1, 0x1000, &[], &[]);
-        let (a, b) = msg.split_at(msg.len() / 2);
+        let hex: String = msg.iter().map(|b| format!("{b:02x}")).collect();
+        let line = format!("{LOG_HEX_SEP}{hex}\n");
+        let (a, b) = line.split_at(line.len() / 2);
 
-        assert!(parser.feed(a).is_empty());
-        let lines = parser.feed(b);
+        assert!(parser.feed(a.as_bytes()).is_empty());
+        let lines = parser.feed(b.as_bytes());
         assert_eq!(lines.len(), 1);
         assert!(lines[0].contains("hello"));
     }
@@ -1200,7 +1272,7 @@ mod tests {
 
         let extra = vec![0xABu8; 20];
         let msg = encode_normal_message(3, 1, 1, 0x1000, &[], &extra);
-        let lines = parser.feed(&msg);
+        let lines = feed_hex(&mut parser, &msg);
 
         // 1 message line + 2 hexdump lines (16 + 4 bytes)
         assert_eq!(lines.len(), 3);
@@ -1215,7 +1287,7 @@ mod tests {
 
         let mut buf = vec![0xFF]; // unknown type
         buf.extend_from_slice(&encode_normal_message(3, 1, 1, 0x1000, &[], &[]));
-        let lines = parser.feed(&buf);
+        let lines = feed_hex(&mut parser, &buf);
         assert!(lines.is_empty(), "expected stop before any decoded line, got: {lines:?}");
     }
 
@@ -1223,11 +1295,11 @@ mod tests {
     fn decodes_hex_wire_format_message() {
         let dir = temp_dir("hexwire");
         let db_path = write_test_db(&dir, &[(0x1000, "hello world\n")]);
-        let mut parser = ZephyrDictParser::with_options(&db_path, WireFormat::Hex, false);
+        let mut parser = ZephyrDictParser::new(&db_path);
 
         let msg = encode_normal_message(3, 1, 42, 0x1000, &[], &[]);
         let hex_body: String = msg.iter().map(|b| format!("{b:02x}")).collect();
-        let hex_line = format!("{LOG_HEX_SEP}\r\n{hex_body}");
+        let hex_line = format!("{LOG_HEX_SEP}\r\n{hex_body}\n");
         let lines = parser.feed(hex_line.as_bytes());
 
         assert_eq!(lines.len(), 1);
@@ -1235,13 +1307,157 @@ mod tests {
     }
 
     #[test]
+    fn mixed_shell_and_dict() {
+        let dir = temp_dir("mixed");
+        let db_path = write_test_db(&dir, &[(0x1000, "boot ok\n")]);
+        let mut parser = ZephyrDictParser::new(&db_path);
+
+        let msg = encode_normal_message(3, 1, 1, 0x1000, &[], &[]);
+        let hex: String = msg.iter().map(|b| format!("{b:02x}")).collect();
+        let input = format!("gwl outside> help\n{LOG_HEX_SEP}{hex}Available commands:\n");
+        let lines = parser.feed(input.as_bytes());
+
+        assert!(lines.iter().any(|l| l.contains("gwl outside> help")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("boot ok")), "{lines:?}");
+        assert!(lines.iter().any(|l| l == "Available commands:"), "{lines:?}");
+    }
+
+    #[test]
+    fn separator_split_across_feed_calls() {
+        let dir = temp_dir("sep-split");
+        let db_path = write_test_db(&dir, &[(0x1000, "split ok\n")]);
+        let mut parser = ZephyrDictParser::new(&db_path);
+
+        let msg = encode_normal_message(3, 1, 1, 0x1000, &[], &[]);
+        let hex: String = msg.iter().map(|b| format!("{b:02x}")).collect();
+        let line = format!("prefix\n{LOG_HEX_SEP}{hex}\n");
+        let sep_start = line.find(LOG_HEX_SEP).unwrap();
+        let (a, b) = line.split_at(sep_start + LOG_HEX_SEP.len());
+
+        let first = parser.feed(a.as_bytes());
+        assert!(first.iter().any(|l| l == "prefix"));
+        let second = parser.feed(b.as_bytes());
+        assert!(second.iter().any(|l| l.contains("split ok")), "{second:?}");
+    }
+
+    #[test]
+    fn false_separator_prefix_passes_through_as_text() {
+        let dir = temp_dir("false-sep");
+        let db_path = write_test_db(&dir, &[(0x1000, "unused\n")]);
+        let mut parser = ZephyrDictParser::new(&db_path);
+
+        let lines = parser.feed(b"noise ##ZLO not a frame\n");
+        assert_eq!(lines, vec!["noise ##ZLO not a frame"]);
+    }
+
+    #[test]
+    fn hex_then_prompt_emits_on_carriage_return() {
+        let dir = temp_dir("hex-prompt");
+        let db_path = write_test_db(&dir, &[(0x1000, "logged\n")]);
+        let mut parser = ZephyrDictParser::new(&db_path);
+
+        let msg = encode_normal_message(3, 1, 1, 0x1000, &[], &[]);
+        let hex: String = msg.iter().map(|b| format!("{b:02x}")).collect();
+        let input = format!("{LOG_HEX_SEP}{hex}gwl outside> \r");
+        let lines = parser.feed(input.as_bytes());
+
+        assert!(lines.iter().any(|l| l.contains("logged")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.trim() == "gwl outside>"), "{lines:?}");
+    }
+
+    #[test]
+    fn prompt_then_hex_without_separator_decodes_dict() {
+        let dir = temp_dir("prompt-hex-nosep");
+        let db_path = write_test_db(&dir, &[(0x1000, "network ok\n")]);
+        let mut parser = ZephyrDictParser::new(&db_path);
+
+        let msg = encode_normal_message(3, 1, 1, 0x1000, &[], &[]);
+        let hex: String = msg.iter().map(|b| format!("{b:02x}")).collect();
+        let input = format!("gwl outside> {hex}help");
+        let lines = parser.feed(input.as_bytes());
+
+        assert!(
+            lines.iter().any(|l| l.trim() == "gwl outside>"),
+            "prompt not emitted separately: {lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("network ok")),
+            "dict not decoded: {lines:?}"
+        );
+        assert!(
+            !lines.iter().any(|l| l.contains("gwl outside> 00")),
+            "hex leaked into text line: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn separator_in_middle_of_text_buffer() {
+        let dir = temp_dir("sep-middle");
+        let db_path = write_test_db(&dir, &[(0x1000, "mid ok\n")]);
+        let mut parser = ZephyrDictParser::new(&db_path);
+
+        let msg = encode_normal_message(3, 1, 1, 0x1000, &[], &[]);
+        let hex: String = msg.iter().map(|b| format!("{b:02x}")).collect();
+        let input = format!("noise before {LOG_HEX_SEP}{hex}\n");
+        let lines = parser.feed(input.as_bytes());
+
+        assert!(lines.iter().any(|l| l.trim_end() == "noise before"), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("mid ok")), "{lines:?}");
+    }
+
+    #[test]
+    fn continuous_hex_without_newline_decodes_incrementally() {
+        let dir = temp_dir("cont-hex");
+        let db_path = write_test_db(&dir, &[(0x1000, "incremental ok\n")]);
+        let mut parser = ZephyrDictParser::new(&db_path);
+
+        let msg = encode_normal_message(3, 1, 1, 0x1000, &[], &[]);
+        let hex: String = msg.iter().map(|b| format!("{b:02x}")).collect();
+        let lines = parser.feed(hex.as_bytes());
+
+        assert!(
+            lines.iter().any(|l| l.contains("incremental ok")),
+            "expected decoded line, got {lines:?}"
+        );
+        assert!(
+            !lines.iter().any(|l| l.chars().all(|c| c.is_ascii_hexdigit())),
+            "raw hex leaked: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn reader_boot_prefix_hex_decodes_without_separator() {
+        let dir = temp_dir("reader-prefix");
+        let db_path = write_test_db(&dir, &[(0x0e00_2ef8, "reader boot ok\n")]);
+        let mut parser = ZephyrDictParser::new(&db_path);
+
+        let msg = encode_normal_message(3, 1, 1, 0x0e00_2ef8, &[], &[]);
+        let hex: String = msg.iter().map(|b| format!("{b:02x}")).collect();
+        let input = format!("{hex}*** Booting Zephyr OS build abc ***\n");
+        let lines = parser.feed(input.as_bytes());
+
+        assert!(
+            lines.iter().any(|l| l.contains("reader boot ok")),
+            "{lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("Booting Zephyr")),
+            "{lines:?}"
+        );
+        assert!(
+            !lines.iter().any(|l| l.starts_with(&hex[..8])),
+            "raw hex leaked: {lines:?}"
+        );
+    }
+
+    #[test]
     fn missing_database_file_reports_error_once_then_drops_bytes() {
         let mut parser = ZephyrDictParser::new("/nonexistent/database.json");
-        let first = parser.feed(b"\x00\x01\x02");
+        let first = parser.feed(b"000102");
         assert_eq!(first.len(), 1);
         assert!(first[0].contains("database not loaded"), "{}", first[0]);
 
-        let second = parser.feed(b"\x00\x01\x02");
+        let second = parser.feed(b"000102");
         assert!(second.is_empty());
     }
 }

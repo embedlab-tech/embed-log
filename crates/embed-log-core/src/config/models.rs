@@ -10,13 +10,9 @@ pub struct ParserConfig {
     #[serde(rename = "type", default = "ParserConfig::default_type")]
     pub parser_type: String,
     /// Path to a Zephyr dictionary-logging `database.json`. Required when
-    /// `type: zephyr-dict` or `gwl-dict`; ignored otherwise.
+    /// `type: zephyr-dict`; ignored otherwise.
     #[serde(default)]
     pub database: Option<String>,
-    /// Wire format for dictionary packets: `binary` (default) or `hex`.
-    /// GWL firmware uses ASCII hex with optional `##ZLOGV1##` separators.
-    #[serde(default)]
-    pub wire_format: Option<String>,
 }
 
 impl ParserConfig {
@@ -30,7 +26,6 @@ impl Default for ParserConfig {
         Self {
             parser_type: "text".to_string(),
             database: None,
-            wire_format: None,
         }
     }
 }
