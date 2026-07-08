@@ -899,16 +899,22 @@ fn clock_time(entry: &serde_json::Value) -> String {
 }
 
 /// [`CompactionLevel::Ultra`] source-name shortcodes for `--format
-/// compact`/`mini-jsonl`: `A`, `B`, `C`, ... in first-seen order (`S26`, `S27`,
-/// ... beyond 26 — no real session in this codebase has come close to that
-/// many distinct sources, so simple beats a base-26 scheme here). Announces
-/// each new mapping to stderr the moment it's assigned, rather than requiring
-/// a lookahead pass over data that may be streamed (`combined --follow`) —
-/// the legend builds up alongside the output instead of needing to be known
-/// upfront.
+/// compact`/`mini-jsonl`: derived from the source's own name — initials of
+/// its `_`/`-`-separated words (`CONTROLLER` -> `C`, `MCU_LINK_RX` -> `MLR`,
+/// `NODE-RED-COAP` -> `NRC`) — rather than an arbitrary scan-order letter, so
+/// codes are mnemonic and mostly stable across runs (the same source tends
+/// to get the same code regardless of when it's first seen). On a collision
+/// between two differently-named sources whose initials coincide, falls back
+/// to the shortest unique prefix of the full name — source names are already
+/// guaranteed unique by config validation (`sources[i].name duplicate` is a
+/// load error), so this always terminates. Announces each new mapping to
+/// stderr the moment it's assigned, rather than requiring a lookahead pass
+/// over data that may be streamed (`combined --follow`) — the legend builds
+/// up alongside the output instead of needing to be known upfront.
 #[derive(Default)]
 struct ShortcodeTable {
     codes: std::collections::HashMap<String, String>,
+    used: std::collections::HashSet<String>,
 }
 
 impl ShortcodeTable {
@@ -916,18 +922,37 @@ impl ShortcodeTable {
         if let Some(code) = self.codes.get(source_id) {
             return code.clone();
         }
-        let code = Self::nth_code(self.codes.len());
+        let code = self.assign(source_id);
         eprintln!("sessions: source code {code} = {source_id}");
+        self.used.insert(code.clone());
         self.codes.insert(source_id.to_string(), code.clone());
         code
     }
 
-    fn nth_code(n: usize) -> String {
-        if n < 26 {
-            ((b'A' + n as u8) as char).to_string()
-        } else {
-            format!("S{n}")
+    fn assign(&self, source_id: &str) -> String {
+        let initials = Self::initials(source_id);
+        if !self.used.contains(&initials) {
+            return initials;
         }
+        // Collision: widen to progressively longer prefixes of the full name.
+        // Char-based (not byte slicing) so this can't panic on a non-ASCII
+        // source name.
+        let chars: Vec<char> = source_id.chars().collect();
+        (2..=chars.len())
+            .map(|len| chars[..len].iter().collect::<String>().to_ascii_uppercase())
+            .find(|candidate| !self.used.contains(candidate))
+            .unwrap_or_else(|| source_id.to_ascii_uppercase())
+    }
+
+    /// First letter of each `_`/`-`-separated word, uppercased. A name with
+    /// no separators reduces to just its own first letter.
+    fn initials(source_id: &str) -> String {
+        source_id
+            .split(['_', '-'])
+            .filter(|segment| !segment.is_empty())
+            .filter_map(|segment| segment.chars().next())
+            .map(|c| c.to_ascii_uppercase())
+            .collect()
     }
 }
 
@@ -2357,7 +2382,7 @@ mod tests {
         let mut codes = ShortcodeTable::default();
         assert_eq!(
             format_compact_entry(&with_idx, &mut codes),
-            "12:00:01.123 A#1234 panic: watchdog reset"
+            "12:00:01.123 D#1234 panic: watchdog reset"
         );
 
         let without_idx = serde_json::json!({
@@ -2365,10 +2390,10 @@ mod tests {
             "message": "hello",
             "timestamp_iso": "2026-07-03T12:00:01.123+00:00",
         });
-        // Same source as above ("DUT") — same table reused, so it keeps code "A".
+        // Same source as above ("DUT") — same table reused, so it keeps code "D".
         assert_eq!(
             format_compact_entry(&without_idx, &mut codes),
-            "12:00:01.123 A hello"
+            "12:00:01.123 D hello"
         );
     }
 
@@ -2388,7 +2413,7 @@ mod tests {
         let mut codes = ShortcodeTable::default();
         let mini = format_mini_entry(&packet, &mut codes);
         assert_eq!(mini["t"], "12:00:01.123");
-        assert_eq!(mini["s"], "A");
+        assert_eq!(mini["s"], "C");
         assert_eq!(mini["i"], 42);
         assert_eq!(mini["src"], "192.168.1.2:49152");
         assert_eq!(mini["dst"], "224.0.1.187:5683");
@@ -2406,7 +2431,7 @@ mod tests {
         let mut codes = ShortcodeTable::default();
         assert_eq!(
             format_compact_entry(&entry, &mut codes),
-            "15:41:23.644 A#3603 [ERROR] Timeout waiting for event='dcf_edhoc'"
+            "15:41:23.644 P#3603 [ERROR] Timeout waiting for event='dcf_edhoc'"
         );
     }
 
@@ -2439,10 +2464,33 @@ mod tests {
             "timestamp_iso": "2026-07-06T14:31:31.877+02:00",
             "relNum": 1_000.0,
         });
-        assert_eq!(format_compact_entry(&a, &mut codes), "1:23.644 A hi");
-        assert_eq!(format_compact_entry(&b, &mut codes), "1.000 B hi");
+        assert_eq!(format_compact_entry(&a, &mut codes), "1:23.644 P hi");
+        assert_eq!(format_compact_entry(&b, &mut codes), "1.000 C hi");
         // Same source seen again later keeps its already-assigned code.
-        assert_eq!(format_compact_entry(&a, &mut codes), "1:23.644 A hi");
+        assert_eq!(format_compact_entry(&a, &mut codes), "1:23.644 P hi");
+    }
+
+    #[test]
+    fn shortcode_table_collision_falls_back_to_longer_prefix() {
+        let mut codes = ShortcodeTable::default();
+        // Both reduce to "C" as bare initials — second one must not overwrite the first.
+        assert_eq!(codes.code_for("CONTROLLER"), "C");
+        assert_eq!(codes.code_for("CLIENT"), "CL");
+        // Repeat calls are stable.
+        assert_eq!(codes.code_for("CONTROLLER"), "C");
+        assert_eq!(codes.code_for("CLIENT"), "CL");
+    }
+
+    #[test]
+    fn shortcode_table_uses_meaningful_initials() {
+        let mut codes = ShortcodeTable::default();
+        assert_eq!(codes.code_for("CONTROLLER"), "C");
+        assert_eq!(codes.code_for("READER"), "R");
+        assert_eq!(codes.code_for("MCU_LINK"), "ML");
+        assert_eq!(codes.code_for("MCU_LINK_RX"), "MLR");
+        assert_eq!(codes.code_for("MCU_LINK_TX"), "MLT");
+        assert_eq!(codes.code_for("NODE-RED"), "NR");
+        assert_eq!(codes.code_for("NODE-RED-COAP"), "NRC");
     }
 
     #[test]

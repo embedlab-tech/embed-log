@@ -80,18 +80,20 @@ embed-log doctor
 ```
 
 `--format` (on `search`/`combined`/`events`): `jsonl` (default, full record, byte-exact) |
-`compact` (`1:23.644 A#1234 message`, best for reading — ~81% smaller than jsonl) | `mini-jsonl`
+`compact` (`1:23.644 C#1234 message`, best for reading — ~81% smaller than jsonl) | `mini-jsonl`
 (short-keyed JSON, best for further programmatic filtering — ~77% smaller). `compact`/`mini-jsonl`
 are, by default: **denoised** (ANSI escape codes, a message's duplicate leading timestamp, padded
 log-level brackets, and redundant device uptime counters are stripped) and **compacted**
 (timestamp shown is elapsed time since session start, not wall-clock — `sessions summary <id>`
-has the absolute anchor; source names are single/double-letter shortcodes). The first use of each
-timestamp convention/shortcode in a command's output gets a one-line explanation on **stderr**
-(never stdout — safe to parse output without filtering anything out), e.g.
-`sessions: source code A = PYTEST`. `jsonl` is the untouched escape hatch if you need exact bytes,
-original timestamps, or full source names. If a search spans multiple sessions, scope it with
-`--session <id>` for unambiguous elapsed times (otherwise each entry's elapsed time is relative to
-its own session, which can span different absolute times).
+has the absolute anchor; source names are shortcoded — initials of `_`/`-`-separated words, e.g.
+`CONTROLLER`→`C`, `MCU_LINK_RX`→`MLR`, falling back to a longer prefix on a rare collision, so
+they're mnemonic rather than arbitrary). The first use of each timestamp convention/shortcode in a
+command's output gets a one-line explanation on **stderr** (never stdout — safe to parse output
+without filtering anything out), e.g. `sessions: source code C = CONTROLLER`. `jsonl` is the
+untouched escape hatch if you need exact bytes, original timestamps, or full source names. If a
+search spans multiple sessions, scope it with `--session <id>` for unambiguous elapsed times
+(otherwise each entry's elapsed time is relative to its own session, which can span different
+absolute times).
 
 `--since` takes `<N>s|m|h|d` (e.g. `10m`, `1h`, `2d`); conflicts with `--from`. `--last N`
 conflicts with `--limit` (first-N vs last-N). Context flags (`-C`/`-B`/`-A`) conflict with

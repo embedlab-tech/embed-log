@@ -4,10 +4,20 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+description = "Collects UART, UDP, file-tail, and network-capture logs and serves a live viewer"
 
 [[bin]]
 name = "embed-log"
 path = "src/main.rs"
+
+[package.metadata.deb]
+name = "embed-log"
+depends = "$auto"
+copyright = "2026, krezolekcoder"
+license-file = ["../../LICENSE", "0"]
+assets = [
+    ["target/release/embed-log", "usr/bin/", "755"],
+]
 
 [dependencies]
 embed-log-core.workspace = true

@@ -47,11 +47,19 @@ jobs:
       - name: Package CLI
         run: ./scripts/package-cli.sh x86_64-unknown-linux-gnu
 
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked
+
+      - name: Build .deb package
+        run: cargo deb --no-build -p embed-log-cli -o dist/embed-log-x86_64-unknown-linux-gnu.deb
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: cli-linux-x64
-          path: dist/embed-log-x86_64-unknown-linux-gnu.tar.gz
+          path: |
+            dist/embed-log-x86_64-unknown-linux-gnu.tar.gz
+            dist/embed-log-x86_64-unknown-linux-gnu.deb
           if-no-files-found: error
 
   build-macos:
@@ -163,6 +171,7 @@ jobs:
           cd dist
           sha256sum \
             embed-log-x86_64-unknown-linux-gnu.tar.gz \
+            embed-log-x86_64-unknown-linux-gnu.deb \
             embed-log-aarch64-apple-darwin.tar.gz \
             embed-log-x86_64-apple-darwin.tar.gz \
             embed-log-x86_64-pc-windows-msvc.zip \
@@ -177,6 +186,7 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             dist/embed-log-x86_64-unknown-linux-gnu.tar.gz
+            dist/embed-log-x86_64-unknown-linux-gnu.deb
             dist/embed-log-aarch64-apple-darwin.tar.gz
             dist/embed-log-x86_64-apple-darwin.tar.gz
             dist/embed-log-x86_64-pc-windows-msvc.zip

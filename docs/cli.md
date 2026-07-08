@@ -236,8 +236,8 @@ Formats:
 | Format | What it looks like | Size vs. `jsonl`\* |
 | --- | --- | --- |
 | `jsonl` (default) | The full JSONL record, byte-for-byte as stored. | baseline |
-| `compact` | One human-readable line: `1:23.644 A#1234 panic: watchdog reset`. | ~81% smaller |
-| `mini-jsonl` | Small JSON object with short keys: `{"t":"1:23.644","s":"A","i":1234,"m":"panic: watchdog reset"}` (adds `src`/`dst`/`len` for packet entries, `sev`/`ev` for events). | ~77% smaller |
+| `compact` | One human-readable line: `1:23.644 D#1234 panic: watchdog reset`. | ~81% smaller |
+| `mini-jsonl` | Small JSON object with short keys: `{"t":"1:23.644","s":"D","i":1234,"m":"panic: watchdog reset"}` (adds `src`/`dst`/`len` for packet entries, `sev`/`ev` for events). | ~77% smaller |
 
 \* Measured on a real 43k-line session. `compact`/`mini-jsonl` apply two layers on top of the raw
 record:
@@ -250,11 +250,14 @@ record:
   session start* (`1:23.644` = 1 minute 23.644s in), not wall-clock time — shorter for typical
   session lengths since it never encodes hour-of-day, and it directly answers "how far into the
   run is this." The absolute anchor isn't lost — `sessions summary <id>` shows it. Source names
-  are shortcoded (`A`, `B`, `C`, ...) rather than spelled out. The first time each timestamp
-  convention or source code is used in a given command's output, a one-line explanation is
-  printed to **stderr** (never stdout, so scripts/agents parsing output see only clean data) —
-  e.g. `sessions: source code A = PYTEST`. If a search spans multiple sessions, elapsed times are
-  relative to each entry's *own* session start — scope with `--session <id>` for unambiguous
+  are shortcoded rather than spelled out — derived from the source's own name (initials of its
+  `_`/`-`-separated words: `CONTROLLER` → `C`, `MCU_LINK_RX` → `MLR`, `NODE-RED-COAP` → `NRC`),
+  falling back to a longer prefix on a rare collision, so codes stay mnemonic instead of arbitrary
+  and mostly stable across runs. The first time each timestamp convention or source code is used
+  in a given command's output, a one-line explanation is printed to **stderr** (never stdout, so
+  scripts/agents parsing output see only clean data) — e.g. `sessions: source code C = CONTROLLER`.
+  If a search spans multiple sessions, elapsed times are relative to each entry's *own* session
+  start — scope with `--session <id>` for unambiguous
   elapsed times across a single run.
 
 Both layers are on by default for `compact`/`mini-jsonl` — `jsonl` remains the untouched,

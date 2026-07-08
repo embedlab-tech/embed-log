@@ -64,7 +64,7 @@ export function _selectionSetupPane(id) {
     scopeRow.appendChild(scopeSel);
 
     // Copy format toggle — "Full" (default, unchanged today's behavior) vs
-    // the CLI-mirroring "Compact"/"JSON" compaction levels (postprocess.js).
+    // the CLI-mirroring "Compact" compaction level (postprocess.js).
     const formatRow = document.createElement("div");
     formatRow.className = "format-row";
 
@@ -82,16 +82,8 @@ export function _selectionSetupPane(id) {
     formatCompact.title = "Elapsed time + source shortcode + denoised message — most token-efficient for pasting to an agent";
     formatCompact.addEventListener("click", e => { e.stopPropagation(); _setCopyFormat(id, "compact"); });
 
-    const formatJson = document.createElement("button");
-    formatJson.className = "format-btn";
-    formatJson.id = "format-json-" + id;
-    formatJson.textContent = "JSON";
-    formatJson.title = "One compact JSON object per line";
-    formatJson.addEventListener("click", e => { e.stopPropagation(); _setCopyFormat(id, "json"); });
-
     formatRow.appendChild(formatFull);
     formatRow.appendChild(formatCompact);
-    formatRow.appendChild(formatJson);
 
     // Pane selector (lazily rebuilt when scope becomes context-selected)
     const paneSelector = document.createElement("div");
@@ -212,7 +204,7 @@ function _setScope(paneId, scope) {
 function _setCopyFormat(paneId, format) {
     state.copyFormat = format;
     PANES.forEach(id => {
-        ['full', 'compact', 'json'].forEach(f => {
+        ['full', 'compact'].forEach(f => {
             const btn = document.getElementById(`format-${f}-${id}`);
             if (btn) btn.classList.toggle('active', format === f);
         });
@@ -742,19 +734,15 @@ function _clockTimeOf(line) {
     return line?.ts || "";
 }
 
-// One line in the "compact" or "json" copy format (state.copyFormat) —
-// mirrors format_compact_entry/format_mini_entry in
-// crates/embed-log-cli/src/commands/sessions.rs. `codes` is shared across an
-// entire copy/download action so the same source gets the same shortcode
-// throughout one block.
+// One line in the "compact" copy format (state.copyFormat === "compact") —
+// mirrors format_compact_entry in crates/embed-log-cli/src/commands/sessions.rs.
+// `codes` is shared across an entire copy/download action so the same source
+// gets the same shortcode throughout one block.
 function _formatCompactedLine(line, paneId, idx, rawMessage, codes) {
     const clock = _clockTimeOf(line);
     const ts = elapsedTime(line, clock);
     const code = codes.codeFor(paneId);
     const message = denoiseMessage(rawMessage, clock);
-    if (state.copyFormat === "json") {
-        return JSON.stringify({ t: ts, s: code, i: idx, m: message });
-    }
     return `${ts} ${code}#${idx} ${message}`;
 }
 

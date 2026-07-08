@@ -74,24 +74,54 @@ export function elapsedTime(line, fallbackClock) {
     return `${s}.${msStr}`;
 }
 
-// First-seen-order source-name shortcodes: A, B, C, ... (S26, S27, ... beyond
-// 26 — no real session has come close to that many distinct sources). One
+// Source-name shortcodes derived from the source's own name — initials of
+// its `_`/`-`-separated words ("CONTROLLER" -> "C", "MCU_LINK_RX" -> "MLR",
+// "NODE-RED-COAP" -> "NRC") — rather than an arbitrary scan-order letter, so
+// codes are mnemonic and mostly stable across runs (the same source tends to
+// get the same code regardless of when it's first seen). On a collision
+// between two differently-named sources whose initials coincide, falls back
+// to the shortest unique prefix of the full name — source names are already
+// guaranteed unique by config validation, so this always terminates. One
 // table per copy/download action, not persisted across actions — matches the
 // CLI's per-invocation ShortcodeTable.
 export class ShortcodeTable {
     constructor() {
         this._codes = new Map();
+        this._used = new Set();
     }
 
     codeFor(sourceId) {
         let code = this._codes.get(sourceId);
         if (code === undefined) {
-            code = this._codes.size < 26
-                ? String.fromCharCode(65 + this._codes.size)
-                : `S${this._codes.size}`;
+            code = this._assign(sourceId);
+            this._used.add(code);
             this._codes.set(sourceId, code);
         }
         return code;
+    }
+
+    _assign(sourceId) {
+        const initials = ShortcodeTable._initials(sourceId);
+        if (!this._used.has(initials)) return initials;
+        // Collision: widen to progressively longer prefixes of the full name.
+        // Code-point based (Array.from), not raw string slicing, so this
+        // can't split a surrogate pair on an exotic source name.
+        const chars = Array.from(sourceId);
+        for (let len = 2; len <= chars.length; len++) {
+            const candidate = chars.slice(0, len).join("").toUpperCase();
+            if (!this._used.has(candidate)) return candidate;
+        }
+        return sourceId.toUpperCase();
+    }
+
+    // First letter of each `_`/`-`-separated word, uppercased. A name with no
+    // separators reduces to just its own first letter.
+    static _initials(sourceId) {
+        return sourceId
+            .split(/[_-]/)
+            .filter(Boolean)
+            .map(segment => segment[0].toUpperCase())
+            .join("");
     }
 }
 
