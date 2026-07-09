@@ -879,7 +879,14 @@ fn events_file_path(session: &SessionRecord) -> PathBuf {
         .manifest
         .get("events_file")
         .and_then(|v| v.as_str())
-        .map(PathBuf::from)
+        .map(|path| {
+            let path = PathBuf::from(path);
+            if path.is_absolute() {
+                path
+            } else {
+                session.dir.join(path)
+            }
+        })
         .unwrap_or_else(|| session.dir.join("events.jsonl"))
 }
 
@@ -1633,6 +1640,21 @@ pub(crate) fn export_session_html(session: &SessionRecord, output: PathBuf) -> R
         .get("event_rules")
         .cloned()
         .unwrap_or_else(|| serde_json::json!({}));
+    let frontend_plugins = session
+        .manifest
+        .get("frontend_plugins")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let pane_plugins = session
+        .manifest
+        .get("pane_plugins")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let plugin_scripts = session
+        .manifest
+        .get("plugin_scripts")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
 
     let exporter = SessionExporter::new(
         output.clone(),
@@ -1643,6 +1665,7 @@ pub(crate) fn export_session_html(session: &SessionRecord, output: PathBuf) -> R
         timestamp_mode,
         first_log_at,
     )
+    .with_plugins(frontend_plugins, pane_plugins, plugin_scripts)
     .with_markers(markers)
     .with_events(events, event_rules);
     exporter.export()?;

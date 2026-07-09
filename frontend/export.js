@@ -210,12 +210,12 @@ export async function exportHtmlSnapshot(options = {}) {
         if (typeof window.__embedLogOnMarkers === "function") window.__embedLogOnMarkers();
     }
     var _eventRules = window.__embedLogEventRules || {};
+    var _events = window.__embedLogEvents || [];
     var _hasRules = Object.keys(_eventRules).some(function (k) { return Array.isArray(_eventRules[k]) && _eventRules[k].length > 0; });
-    if (_hasRules) {
+    if (_hasRules || _events.length) {
         state.eventRules = _eventRules;
         state.eventsEnabled = true;
         if (typeof initEventsTab === "function") initEventsTab();
-        var _events = window.__embedLogEvents || [];
         _events.forEach(function (ev) { if (typeof addEvent === "function") addEvent(ev); });
         if (typeof renderTabBar === "function") renderTabBar();
     }
