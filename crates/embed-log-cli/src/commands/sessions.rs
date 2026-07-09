@@ -1626,6 +1626,13 @@ pub(crate) fn export_session_html(session: &SessionRecord, output: PathBuf) -> R
         .and_then(|v| v.as_str())
         .map(str::to_owned);
     let frontend_dir = std::env::current_dir()?.join("frontend");
+    let markers = load_markers_file(&session.dir)?;
+    let events = load_events_file(&events_file_path(session));
+    let event_rules = session
+        .manifest
+        .get("event_rules")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
 
     let exporter = SessionExporter::new(
         output.clone(),
@@ -1635,10 +1642,24 @@ pub(crate) fn export_session_html(session: &SessionRecord, output: PathBuf) -> R
         frontend_dir,
         timestamp_mode,
         first_log_at,
-    );
+    )
+    .with_markers(markers)
+    .with_events(events, event_rules);
     exporter.export()?;
     println!("{}", output.display());
     Ok(())
+}
+
+/// Load events from a session's events.jsonl file. Missing/unreadable file -> empty.
+/// Mirrors `SessionManager::load_events` for callers that only have a `SessionRecord`.
+fn load_events_file(path: &Path) -> Vec<serde_json::Value> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(_) => return Vec::new(),
+    };
+    text.lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect()
 }
 
 pub(crate) fn export_session_raw(session: &SessionRecord, output: PathBuf) -> Result<()> {
