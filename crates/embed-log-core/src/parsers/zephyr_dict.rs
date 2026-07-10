@@ -8,9 +8,13 @@
 
 use std::collections::HashMap;
 
+use chrono::{TimeZone, Utc};
 use serde::Deserialize;
 
 use super::traits::StreamParser;
+
+/// Default earliest-valid epoch for UTC log timestamps (2000-01-01 UTC).
+const DEFAULT_EARLIEST_VALID_EPOCH: u64 = 946_684_800;
 
 const MSG_TYPE_NORMAL: u8 = 0;
 const MSG_TYPE_DROPPED: u8 = 1;
@@ -438,11 +442,9 @@ fn take_normal_message(buf: &[u8], db: &Database) -> TakeResult {
         push_display_lines(&mut output, None, &body);
     } else {
         let source_name = db.source_name(domain_id, source_id);
-        let prefix = format!(
-            "[{timestamp:>10}] <{}> {source_name}: ",
-            level_name(level)
-        );
-        push_display_lines(&mut output, Some(&prefix), &body);
+        let ts_prefix = db.format_log_timestamp(timestamp);
+        let prefix = format!("<{}> {source_name}: ", level_name(level));
+        push_display_lines(&mut output, Some(&format!("{ts_prefix}{prefix}")), &body);
     }
     if !extra_data.is_empty() {
         output.extend(hexdump_lines(extra_data));
@@ -982,6 +984,8 @@ struct Database {
     little_endian: bool,
     arch: String,
     timestamp_64bit: bool,
+    /// Epoch seconds at/above which log timestamps are shown as UTC.
+    earliest_valid_epoch: u64,
     /// source_id (as it appears in the JSON, i.e. its decimal string) -> name
     log_instances: HashMap<String, String>,
     string_mappings: HashMap<u64, String>,
@@ -1038,15 +1042,23 @@ impl Database {
             .map(|(id, inst)| (id, inst.name))
             .collect();
 
+        let earliest_valid_epoch = parse_kconfig_u64(&raw.kconfigs, "CONFIG_APP_TIMEMGR_EARLIEST_VALID_DATE")
+            .unwrap_or(DEFAULT_EARLIEST_VALID_EPOCH);
+
         Ok(Self {
             is_64bit: raw.target.bits.unwrap_or(32) == 64,
             little_endian: raw.target.little_endianness.unwrap_or(true),
             arch: raw.arch,
             timestamp_64bit: raw.kconfigs.contains_key("CONFIG_LOG_TIMESTAMP_64BIT"),
+            earliest_valid_epoch,
             log_instances,
             string_mappings,
             sections,
         })
+    }
+
+    fn format_log_timestamp(&self, timestamp: u64) -> String {
+        format_log_timestamp(timestamp, self.timestamp_64bit, self.earliest_valid_epoch)
     }
 
     fn find_string(&self, ptr: u64) -> Option<String> {
@@ -1085,6 +1097,35 @@ impl Database {
             .get(&source_id.to_string())
             .cloned()
             .unwrap_or_else(|| format!("unknown<{domain_id}:{source_id}>"))
+    }
+}
+
+fn parse_kconfig_u64(kconfigs: &HashMap<String, serde_json::Value>, key: &str) -> Option<u64> {
+    let value = kconfigs.get(key)?;
+    if let Some(n) = value.as_u64() {
+        return Some(n);
+    }
+    if let Some(n) = value.as_i64() {
+        return u64::try_from(n).ok();
+    }
+    value.as_str()?.parse().ok()
+}
+
+/// Format a Zephyr dictionary log timestamp for human-readable decode output.
+fn format_log_timestamp(timestamp: u64, timestamp_64bit: bool, earliest_valid_epoch: u64) -> String {
+    if timestamp < earliest_valid_epoch {
+        if timestamp_64bit {
+            return format!("[{timestamp:016}] ");
+        }
+        return format!("[{timestamp:08}] ");
+    }
+
+    let Ok(secs) = i64::try_from(timestamp) else {
+        return format!("[{timestamp}] ");
+    };
+    match Utc.timestamp_opt(secs, 0).single() {
+        Some(dt) => format!("[{}]: ", dt.format("%Y-%m-%dT%H:%M:%SZ")),
+        None => format!("[{timestamp}] "),
     }
 }
 
@@ -1446,6 +1487,96 @@ mod tests {
         );
         assert!(
             !lines.iter().any(|l| l.starts_with(&hex[..8])),
+            "raw hex leaked: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn format_log_timestamp_uptime_and_epoch() {
+        assert_eq!(
+            format_log_timestamp(12, false, DEFAULT_EARLIEST_VALID_EPOCH),
+            "[00000012] "
+        );
+        assert_eq!(
+            format_log_timestamp(1_704_067_200, false, DEFAULT_EARLIEST_VALID_EPOCH),
+            "[2024-01-01T00:00:00Z]: "
+        );
+    }
+
+    #[test]
+    fn dict_log_epoch_timestamp_iso_format() {
+        let dir = temp_dir("epoch-ts");
+        let db_path = write_test_db(&dir, &[(0x1000, "time set\n")]);
+        let mut parser = ZephyrDictParser::new(&db_path);
+
+        let msg = encode_normal_message(3, 1, 1_704_067_200, 0x1000, &[], &[]);
+        let hex: String = msg.iter().map(|b| format!("{b:02x}")).collect();
+        let lines = parser.feed(hex.as_bytes());
+
+        assert!(
+            lines.iter().any(|l| l.contains("[2024-01-01T00:00:00Z]: <inf> app: time set")),
+            "{lines:?}"
+        );
+    }
+
+    #[test]
+    fn dict_log_parity_roundtrip_matches_plain_text() {
+        let dir = temp_dir("parity-rt");
+        let db_path = write_test_db(
+            &dir,
+            &[
+                (0x1000, "boot ok\n"),
+                (0x2000, "count=%d\n"),
+            ],
+        );
+        let mut parser = ZephyrDictParser::new(&db_path);
+
+        let msg_a = encode_normal_message(3, 1, 10, 0x1000, &[], &[]);
+        let msg_b = encode_normal_message(3, 1, 11, 0x2000, &[42, 0, 0, 0], &[]);
+        let mut wire = Vec::new();
+        wire.extend_from_slice(&msg_a);
+        wire.extend_from_slice(&msg_b);
+        let hex: String = wire.iter().map(|b| format!("{b:02x}")).collect();
+        let lines = parser.feed(hex.as_bytes());
+
+        assert!(lines.iter().any(|l| l.contains("<inf> app: boot ok")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("count=42")), "{lines:?}");
+        assert!(
+            !lines.iter().any(|l| l.chars().all(|c| c.is_ascii_hexdigit())),
+            "raw hex in output: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn dict_log_parity_real_reader_database_boot_prefix() {
+        let Some(db) = std::env::var("EMBED_LOG_ZEPHYR_DICT_DATABASE")
+            .ok()
+            .filter(|path| std::path::Path::new(path).exists())
+        else {
+            eprintln!(
+                "skip dict_log_parity_real_reader_database_boot_prefix: \
+                 set EMBED_LOG_ZEPHYR_DICT_DATABASE to an existing log_dictionary.json"
+            );
+            return;
+        };
+
+        let hex = include_str!("../../tests/fixtures/reader_boot_prefix.hex")
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect::<String>();
+        let mut parser = ZephyrDictParser::new(&db);
+        let lines = parser.feed(hex.as_bytes());
+
+        assert!(
+            !lines.is_empty(),
+            "expected at least one decoded line from reader boot prefix, got none"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("rv8263") || l.contains("<inf>")),
+            "unexpected decode output: {lines:?}"
+        );
+        assert!(
+            !lines.iter().any(|l| l.starts_with("003008")),
             "raw hex leaked: {lines:?}"
         );
     }
