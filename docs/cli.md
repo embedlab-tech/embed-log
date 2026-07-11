@@ -184,9 +184,11 @@ Check for updates:
 ```bash
 embed-log update --check
 embed-log update --check --json
+embed-log update --yes
+embed-log update --version v1.2.0 --yes
 ```
 
-This checks the latest stable GitHub Release and reports whether a newer version exists. Automatic binary replacement is intentionally not enabled yet; use the release installer when an update is available.
+`--check` reports the latest stable GitHub Release without changing the system. `--yes` downloads the target-matching archive, verifies it against the release `SHA256SUMS`, stages the executable beside the current binary, and replaces it with a rollback backup if replacement fails. Self-update currently supports the same release targets as the installer: Linux x86_64 and macOS Apple Silicon/Intel. Package-managed or read-only installations should use their package manager instead.
 
 Serial ports:
 

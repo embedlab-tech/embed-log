@@ -69,48 +69,184 @@ pub(crate) fn cmd_version(config_path: Option<&Path>, json: bool) -> Result<()> 
 struct GithubRelease {
     tag_name: String,
     html_url: String,
+    assets: Vec<GithubAsset>,
 }
 
-/// `embed-log update` — check the latest stable GitHub Release. Downloading
-/// and replacing the executable is intentionally a later step; this command
-/// establishes the signed-release discovery path without changing the system.
-pub(crate) async fn cmd_update(_check: bool, json: bool) -> Result<()> {
-    const REPO: &str = "krezolekcoder/embed-log";
-    let url = format!("https://api.github.com/repos/{REPO}/releases/latest");
-    let release = reqwest::Client::new()
-        .get(&url)
-        .header(reqwest::header::USER_AGENT, "embed-log-updater")
-        .send()
-        .await
-        .context("contact GitHub Releases")?
-        .error_for_status()
-        .context("read latest GitHub Release")?
-        .json::<GithubRelease>()
-        .await
-        .context("decode latest GitHub Release")?;
+#[derive(Debug, serde::Deserialize)]
+struct GithubAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+const UPDATE_REPO: &str = "krezolekcoder/embed-log";
+
+/// `embed-log update` checks releases by default; replacement requires --yes.
+pub(crate) async fn cmd_update(
+    check: bool,
+    requested_version: Option<&str>,
+    yes: bool,
+    json: bool,
+) -> Result<()> {
+    let release = fetch_release(requested_version).await?;
     let current = env!("CARGO_PKG_VERSION");
     let available = release_is_newer(current, &release.tag_name);
+    let asset_name = update_asset_name().ok_or_else(|| {
+        anyhow::anyhow!("self-update is not supported on this platform; use the release installer")
+    })?;
     let out = serde_json::json!({
         "current_version": current,
         "latest_version": release.tag_name,
         "update_available": available,
         "release_url": release.html_url,
-        "install_supported": false,
+        "asset": asset_name,
     });
-    if json {
-        println!("{}", serde_json::to_string_pretty(&out)?);
-    } else if available {
-        println!(
-            "update available: {current} → {}",
-            out["latest_version"].as_str().unwrap_or("unknown")
-        );
-        println!(
-            "  release: {}",
-            out["release_url"].as_str().unwrap_or("unknown")
-        );
-        println!("  automatic installation is not implemented yet; use the release installer.");
-    } else {
-        println!("embed-log {current} is up to date");
+    if check || !yes {
+        if json {
+            println!("{}", serde_json::to_string_pretty(&out)?);
+        } else if available {
+            println!(
+                "update available: {current} → {}",
+                out["latest_version"].as_str().unwrap_or("unknown")
+            );
+            println!(
+                "  release: {}",
+                out["release_url"].as_str().unwrap_or("unknown")
+            );
+            println!("  install with: embed-log update --yes");
+        } else {
+            println!("embed-log {current} is up to date");
+        }
+        return Ok(());
+    }
+    if !available && requested_version.is_none() {
+        println!("embed-log {current} is already up to date");
+        return Ok(());
+    }
+    install_release(&release, &asset_name).await?;
+    println!("updated embed-log to {}", release.tag_name);
+    Ok(())
+}
+
+async fn fetch_release(requested_version: Option<&str>) -> Result<GithubRelease> {
+    let suffix = requested_version
+        .map(|tag| format!("tags/{tag}"))
+        .unwrap_or_else(|| "latest".to_string());
+    reqwest::Client::new()
+        .get(format!(
+            "https://api.github.com/repos/{UPDATE_REPO}/releases/{suffix}"
+        ))
+        .header(reqwest::header::USER_AGENT, "embed-log-updater")
+        .send()
+        .await
+        .context("contact GitHub Releases")?
+        .error_for_status()
+        .context("read GitHub Release")?
+        .json::<GithubRelease>()
+        .await
+        .context("decode GitHub Release")
+}
+
+fn update_asset_name() -> Option<String> {
+    let target = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => "x86_64-unknown-linux-gnu",
+        ("macos", "aarch64") => "aarch64-apple-darwin",
+        ("macos", "x86_64") => "x86_64-apple-darwin",
+        _ => return None,
+    };
+    Some(format!("embed-log-{target}.tar.gz"))
+}
+
+async fn install_release(release: &GithubRelease, asset_name: &str) -> Result<()> {
+    let asset = release
+        .assets
+        .iter()
+        .find(|asset| asset.name == asset_name)
+        .ok_or_else(|| anyhow::anyhow!("release {} has no asset {asset_name}", release.tag_name))?;
+    let sums = release
+        .assets
+        .iter()
+        .find(|asset| asset.name == "SHA256SUMS")
+        .ok_or_else(|| anyhow::anyhow!("release {} has no SHA256SUMS", release.tag_name))?;
+    let client = reqwest::Client::new();
+    let archive = client
+        .get(&asset.browser_download_url)
+        .send()
+        .await?
+        .error_for_status()?
+        .bytes()
+        .await?;
+    let sums_text = client
+        .get(&sums.browser_download_url)
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?;
+    let expected = checksum_for(&sums_text, asset_name)
+        .ok_or_else(|| anyhow::anyhow!("SHA256SUMS has no checksum for {asset_name}"))?;
+    verify_sha256(&archive, &expected)?;
+
+    let exe = std::env::current_exe().context("locate running executable")?;
+    let parent = exe
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("running executable has no parent directory"))?;
+    let temp = tempfile_path(parent, ".embed-log-update");
+    extract_tar_gz(&archive, &temp)?;
+    let backup = exe.with_extension("bak");
+    if backup.exists() {
+        std::fs::remove_file(&backup).context("remove stale update backup")?;
+    }
+    std::fs::rename(&exe, &backup)
+        .context("backup running executable; package-managed installs may not be self-updatable")?;
+    if let Err(error) = std::fs::rename(&temp, &exe) {
+        let _ = std::fs::rename(&backup, &exe);
+        return Err(error).context("replace executable; restored previous binary");
+    }
+    let _ = std::fs::remove_file(backup);
+    Ok(())
+}
+
+fn tempfile_path(parent: &Path, suffix: &str) -> std::path::PathBuf {
+    parent.join(format!("embed-log{}-{}", suffix, std::process::id()))
+}
+
+fn checksum_for(sums: &str, file: &str) -> Option<String> {
+    sums.lines().find_map(|line| {
+        let (hash, name) = line.split_once("  ")?;
+        (name.trim_start_matches('*') == file).then(|| hash.to_string())
+    })
+}
+
+fn verify_sha256(bytes: &[u8], expected: &str) -> Result<()> {
+    use sha2::{Digest, Sha256};
+    let actual = format!("{:x}", Sha256::digest(bytes));
+    anyhow::ensure!(
+        actual.eq_ignore_ascii_case(expected),
+        "download checksum mismatch"
+    );
+    Ok(())
+}
+
+fn extract_tar_gz(bytes: &[u8], dest: &Path) -> Result<()> {
+    let decoder = flate2::read::GzDecoder::new(bytes);
+    let mut archive = tar::Archive::new(decoder);
+    let mut entries = archive.entries().context("read update archive")?;
+    let Some(entry) = entries.next() else {
+        anyhow::bail!("update archive is empty");
+    };
+    let mut entry = entry.context("read update archive entry")?;
+    let path = entry.path().context("read update archive path")?;
+    anyhow::ensure!(
+        path == Path::new("embed-log"),
+        "update archive has unexpected entry {:?}",
+        path
+    );
+    let mut output = std::fs::File::create(dest).context("create staged executable")?;
+    std::io::copy(&mut entry, &mut output).context("extract staged executable")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o755))?;
     }
     Ok(())
 }
@@ -976,6 +1112,19 @@ mod tests {
         let cfg = load_config(&path).unwrap();
         std::fs::remove_file(&path).ok();
         assert_eq!(count_pcap_sources(&cfg), 1);
+    }
+
+    #[test]
+    fn checksum_parser_and_verifier_accept_valid_sha256sums_entry() {
+        let bytes = b"embed-log update";
+        let expected = "f903aaecb874745ce8064823c22bf5397a016b79ef5ec696d5ca7c15a56b2fde";
+        let sums = format!("{expected}  embed-log-test.tar.gz\n");
+        assert_eq!(
+            checksum_for(&sums, "embed-log-test.tar.gz"),
+            Some(expected.into())
+        );
+        verify_sha256(bytes, expected).unwrap();
+        assert!(verify_sha256(bytes, "00").is_err());
     }
 
     #[test]

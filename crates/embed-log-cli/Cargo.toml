@@ -35,6 +35,9 @@ libloading = "0.8"
 regex = "1"
 reqwest.workspace = true
 semver.workspace = true
+flate2.workspace = true
+tar.workspace = true
+sha2.workspace = true
 
 [dependencies.embed-log-tui]
 workspace = true

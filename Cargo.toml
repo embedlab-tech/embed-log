@@ -41,6 +41,9 @@ thiserror = "2"
 slug = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 semver = "1"
+flate2 = "1"
+tar = "0.4"
+sha2 = "0.10"
 
 # Core + TUI crates (used by CLI and Tauri)
 embed-log-core = { path = "crates/embed-log-core" }

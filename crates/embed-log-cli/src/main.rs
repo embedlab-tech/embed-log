@@ -147,11 +147,17 @@ enum Command {
 
     /// Check GitHub Releases for a newer CLI version
     Update {
-        /// Only check and report; no binary replacement is performed yet.
-        #[arg(long)]
+        /// Only check and report; do not download or replace the binary.
+        #[arg(long, conflicts_with = "yes")]
         check: bool,
-        /// Machine-readable JSON output.
+        /// Install this release tag instead of the latest stable release.
+        #[arg(long, value_name = "TAG")]
+        version: Option<String>,
+        /// Confirm executable replacement without prompting.
         #[arg(long)]
+        yes: bool,
+        /// Machine-readable JSON output.
+        #[arg(long, conflicts_with = "yes")]
         json: bool,
     },
 
@@ -302,7 +308,12 @@ async fn main() -> Result<()> {
             serial,
             json,
         }) => misc::cmd_doctor(config.as_deref(), &serial, json),
-        Some(Command::Update { check, json }) => misc::cmd_update(check, json).await,
+        Some(Command::Update {
+            check,
+            version,
+            yes,
+            json,
+        }) => misc::cmd_update(check, version.as_deref(), yes, json).await,
         Some(Command::Ports { json }) => misc::cmd_ports(json),
         Some(Command::Hello) => misc::cmd_hello(),
         Some(Command::Sessions { command }) => cmd_sessions(*command),
