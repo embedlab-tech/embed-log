@@ -509,11 +509,15 @@ fn import_external_log(session: &SessionRecord, input: &Path, source: &str) -> R
         "external log contains no importable lines"
     );
     let combined = manifest_combined_file(session)?;
-    let mut entries: Vec<serde_json::Value> = std::fs::read_to_string(&combined)
-        .with_context(|| format!("read {}", combined.display()))?
+    let existing = std::fs::read_to_string(&combined)
+        .with_context(|| format!("read {}", combined.display()))?;
+    let mut entries: Vec<serde_json::Value> = existing
         .lines()
-        .filter_map(|line| serde_json::from_str(line).ok())
-        .collect();
+        .enumerate()
+        .map(|(index, line)| serde_json::from_str(line).map_err(|error| anyhow::anyhow!(
+            "{}:{} is not valid JSONL: {error}", combined.display(), index + 1
+        )))
+        .collect::<std::result::Result<_, _>>()?;
     entries.append(&mut imported);
     entries.sort_by(|a, b| {
         a["timestamp_num"]
@@ -527,13 +531,18 @@ fn import_external_log(session: &SessionRecord, input: &Path, source: &str) -> R
         .collect::<std::result::Result<Vec<_>, _>>()?
         .join("\n")
         + "\n";
-    std::fs::write(&combined, rendered).with_context(|| format!("write {}", combined.display()))?;
+    let staged_combined = combined.with_extension("jsonl.importing");
+    std::fs::write(&staged_combined, rendered)
+        .with_context(|| format!("write {}", staged_combined.display()))?;
+    std::fs::rename(&staged_combined, &combined)
+        .with_context(|| format!("replace {}", combined.display()))?;
     let imported_file = session.dir.join(format!("imported-{}.log", source));
     std::fs::write(&imported_file, &text)
         .with_context(|| format!("write {}", imported_file.display()))?;
     let manifest_path = session.dir.join("manifest.json");
     let mut manifest: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&manifest_path)?)?;
+    anyhow::ensure!(manifest["source_files"].get(source).is_none(), "source {source:?} already exists in this session");
     manifest["source_files"][source] = serde_json::json!(imported_file.display().to_string());
     manifest["pane_labels"][source] = serde_json::json!(source);
     manifest["pane_kinds"][source] = serde_json::json!("imported");
