@@ -1296,6 +1296,8 @@ mark.hl {
 .et-sev-fatal { background: var(--event-fatal); }
 .et-meta { opacity: 0.6; font-size: 10px; margin-bottom: 4px; }
 .et-msg { white-space: pre-wrap; word-break: break-word; }
+.et-deltas { margin-top: 5px; color: var(--text); opacity: 0.82; }
+.et-deltas code { font-family: var(--font-family, monospace); color: var(--accent); }
 .et-captures { margin-top: 4px; display: flex; gap: 4px; flex-wrap: wrap; }
 .et-captures code {
     font-family: var(--font-family, monospace);

@@ -340,12 +340,16 @@ function _buildSvg(events, lanes, range, width, height, innerW, laneH) {
             fill: 'transparent',
             class: 'events-dot-hit' + (selected ? ' selected' : ''),
             'data-event-idx': i,
+            'data-event-id': ev.event_id,
+            'data-source-id': ev.source_id,
         });
         const dot = _el('circle', {
             cx, cy, r: selected ? 7 : 5,
             fill: SEVERITY_COLORS[ev.severity] || SEVERITY_COLORS.info,
             class: 'events-dot' + (selected ? ' selected' : ''),
             'data-event-idx': i,
+            'data-event-id': ev.event_id,
+            'data-source-id': ev.source_id,
             'data-severity': ev.severity || 'info',
         });
         svg.appendChild(hit);
@@ -551,6 +555,11 @@ function _showTooltip(ev, x, y, { action = false } = {}) {
     const captures = Array.isArray(ev.captures) && ev.captures.length
         ? `<div class="et-captures">${ev.captures.map(c => `<code>${_esc(c)}</code>`).join(' ')}</div>`
         : '';
+    const deltas = _eventDeltas(ev);
+    const deltaDetails = [
+        deltas.previous && `<div>Δ previous event: <code>${_formatDuration(deltas.previous)}</code></div>`,
+        deltas.sameRule && `<div>Δ previous ${_esc(ev.event_id)}: <code>${_formatDuration(deltas.sameRule)}</code></div>`,
+    ].filter(Boolean).join('');
     const actions = action
         ? '<div class="et-actions"><button type="button" class="events-jump-log-btn">Jump to log</button></div>'
         : '';
@@ -558,6 +567,7 @@ function _showTooltip(ev, x, y, { action = false } = {}) {
         `<div class="et-head"><span class="et-sev et-sev-${ev.severity}">${ev.severity}</span>${_esc(ev.event_id)}</div>` +
         `<div class="et-meta">${_esc(paneLabel(ev.source_id))} · ${_esc(ev.timestamp || '')} · line ${ev.line_idx ?? '?'}</div>` +
         `<div class="et-msg">${_esc(ev.message || '')}</div>` +
+        (deltaDetails ? `<div class="et-deltas">${deltaDetails}</div>` : '') +
         captures + actions;
     _eventsTooltipEl.classList.toggle('actionable', action);
     if (action) {
@@ -747,6 +757,32 @@ function _niceTickStep(targetMs) {
 
 function _eventKey(ev) {
     return [ev.source_id, ev.line_idx ?? '', ev.event_id, ev.timestamp_num].join('|');
+}
+
+function _eventDeltas(ev) {
+    if (!Number.isFinite(ev.timestamp_num)) return {};
+    const ordered = state.events
+        .filter(candidate => Number.isFinite(candidate.timestamp_num))
+        .slice()
+        .sort((a, b) => a.timestamp_num - b.timestamp_num);
+    const index = ordered.findIndex(candidate => _eventKey(candidate) === _eventKey(ev));
+    if (index <= 0) return {};
+    const previous = ordered[index - 1];
+    const sameRule = ordered.slice(0, index).reverse().find(candidate =>
+        candidate.source_id === ev.source_id && candidate.event_id === ev.event_id
+    );
+    return {
+        previous: ev.timestamp_num - previous.timestamp_num,
+        sameRule: sameRule ? ev.timestamp_num - sameRule.timestamp_num : null,
+    };
+}
+
+function _formatDuration(ms) {
+    if (!Number.isFinite(ms) || ms < 0) return '';
+    if (ms < 1_000) return `${Math.round(ms)} ms`;
+    if (ms < 60_000) return `${(ms / 1_000).toFixed(ms < 10_000 ? 3 : 1)} s`;
+    const minutes = Math.floor(ms / 60_000);
+    return `${minutes}m ${((ms % 60_000) / 1_000).toFixed(1)}s`;
 }
 
 function _isScrolledToRight() {

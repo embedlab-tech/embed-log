@@ -183,6 +183,32 @@ test.describe('event detection', () => {
     await expect(page.locator('.events-jump-log-btn')).toBeVisible();
   });
 
+  test('selected recurring event shows elapsed time since prior events', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await page.locator('.events-tab-btn').click();
+    await expect(page.locator('.events-timeline-svg')).toBeVisible();
+
+    // Pick the second occurrence of any event rule. The regression demo emits
+    // recurring rules, so this exercises both global and same-rule deltas.
+    await expect.poll(() => page.locator('.events-dot-hit').count(), { timeout: 20_000 }).toBeGreaterThan(1);
+    const selected = await page.evaluate(() => {
+      const hits = [...document.querySelectorAll('.events-dot-hit')];
+      const repeated = hits.find((hit, index) => index > 0 &&
+        hits.slice(0, index).some(previous =>
+          previous.dataset.eventId === hit.dataset.eventId &&
+          previous.dataset.sourceId === hit.dataset.sourceId));
+      repeated?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      return repeated?.dataset.eventId || null;
+    });
+    expect(selected).not.toBeNull();
+
+    const tooltip = page.locator('#events-tooltip');
+    await expect(tooltip).toHaveClass(/visible/);
+    await expect(tooltip).toContainText('Δ previous event:');
+    await expect(tooltip).toContainText(`Δ previous ${selected}:`);
+  });
+
   test('severity filter checkbox hides matching dots', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
