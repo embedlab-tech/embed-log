@@ -18,6 +18,27 @@ Global options:
 
 ## Run server
 
+### Fast serial start (no YAML)
+
+Pass UART device paths directly to `run` for a temporary configuration:
+
+```bash
+embed-log run /dev/ttyUSB0
+embed-log run /dev/ttyUSB0 /dev/ttyUSB1 --tui
+```
+
+For mixed inputs, use repeatable explicit flags:
+
+```bash
+embed-log run -s /dev/ttyUSB0 -s /dev/ttyUSB1 -f ./device.log --baud 115200
+```
+
+`-s` / `--serial` adds a UART, `-f` / `--file` watches an appended file, and `--baud` applies to every quick-run UART (default: `115200`). The generated configuration is in memory: no YAML is read or written, and `--config` cannot be combined with quick-run sources. Use `--save-config embed-log.yml` to persist it for later customization.
+
+All normal run flags work in this mode, including `--tui`, `--no-open-browser`, `--log-dir`, `--host`, and `--ws-port`.
+
+### Config-based run
+
 Default command when no subcommand is given:
 
 ```bash

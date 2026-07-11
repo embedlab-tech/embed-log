@@ -7,8 +7,18 @@ The terminal UI is a ratatui/crossterm client for the same `embed-log-core` serv
 Start the server and TUI in one process:
 
 ```bash
+# Fast path: no YAML required
+embed-log run /dev/ttyUSB0 --tui
+
+# Saved configuration or demo
 embed-log run --config embed-log.yml --tui
 embed-log demo --tui
+```
+
+The quick form accepts multiple UARTs and watched files too:
+
+```bash
+embed-log run -s /dev/ttyUSB0 -s /dev/ttyUSB1 -f ./device.log --tui
 ```
 
 Connect the standalone TUI to an already-running server:

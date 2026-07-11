@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use embed_log_core::config::{load_config, resolve_logs_root, AppConfig};
+use embed_log_core::config::{
+    load_config, resolve_logs_root, AppConfig, PaneConfig, SourceConfig, TabConfig,
+};
 use embed_log_core::demo::{prepare_demo_file_sources, spawn_demo_traffic};
 use embed_log_core::onboarding as ob;
 use embed_log_core::runtime::LogServer;
@@ -88,6 +90,170 @@ pub(crate) async fn cmd_run(
 
 /// `embed-log demo` — write the embedded demo config if none exists, start
 /// synthetic traffic, then run the server.
+/// Start a temporary configuration assembled from explicit command-line sources.
+/// Unlike normal `run`, this never invokes onboarding or reads a default config.
+pub(crate) async fn cmd_run_quick(
+    serial_paths: Vec<PathBuf>,
+    file_paths: Vec<PathBuf>,
+    baudrate: u32,
+    save_config: Option<&Path>,
+    frontend_dir: &Path,
+    open_browser: bool,
+    tui: bool,
+    overrides: &RunOverrides,
+) -> Result<()> {
+    let mut config = quick_run_config(serial_paths, file_paths, baudrate)?;
+    apply_server_overrides(&mut config, overrides);
+
+    if let Some(path) = save_config {
+        if path.exists() {
+            anyhow::bail!(
+                "refusing to overwrite existing config {}; choose another --save-config path",
+                path.display()
+            );
+        }
+        let yaml =
+            serde_yaml::to_string(&config).context("serialize generated quick-run config")?;
+        std::fs::write(path, yaml)
+            .with_context(|| format!("write generated config {}", path.display()))?;
+        println!("  saved config: {}", path.display());
+    }
+
+    let frontend_dir = resolve_dir(frontend_dir)?;
+    let logs_root = match overrides.log_dir.as_ref() {
+        Some(dir) => resolve_dir(dir)?,
+        None => resolve_dir(Path::new(&config.logs.dir))?,
+    };
+    print_run_summary("quick run", &config, &frontend_dir, &logs_root);
+
+    if open_browser && !tui {
+        schedule_browser_open(config.server.host.clone(), config.server.ws_port);
+    }
+    let ws_port = config.server.ws_port;
+    let app_name = config.server.app_name.clone();
+    let server = LogServer::new(config, frontend_dir, logs_root);
+    if tui {
+        run_server_with_tui(server, ws_port, &app_name).await
+    } else {
+        server.run().await
+    }
+}
+
+fn quick_run_config(
+    serial_paths: Vec<PathBuf>,
+    file_paths: Vec<PathBuf>,
+    baudrate: u32,
+) -> Result<AppConfig> {
+    if serial_paths.is_empty() && file_paths.is_empty() {
+        anyhow::bail!("quick run needs at least one UART path or --file path");
+    }
+
+    let mut config = AppConfig {
+        baudrate,
+        ..AppConfig::default()
+    };
+    let mut used_names = std::collections::HashSet::new();
+    for (kind, paths) in [("UART", serial_paths), ("FILE", file_paths)] {
+        for path in paths {
+            let base = path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("source");
+            let name = unique_source_name(kind, base, &mut used_names);
+            let label = format!("{kind}: {}", path.display());
+            config.sources.push(SourceConfig {
+                name,
+                source_type: kind.to_ascii_lowercase(),
+                port: serde_yaml::Value::String(path.display().to_string()),
+                parser: Default::default(),
+                baudrate: (kind == "UART").then_some(baudrate),
+                label: Some(label),
+                interface: None,
+                bpf_filter: String::new(),
+                network_backend: None,
+                mock_interval: None,
+                udp: None,
+                snaplen: None,
+                promisc: None,
+                pcap: None,
+                payload: None,
+            });
+        }
+    }
+
+    // The UI supports at most two panes per tab. Pair generated sources so a
+    // quick run remains useful for one or many devices without hidden sources.
+    for (index, pair) in config.sources.chunks(2).enumerate() {
+        let panes = pair
+            .iter()
+            .map(|source| PaneConfig::Simple(source.name.clone()))
+            .collect();
+        let label = if pair.len() == 1 {
+            pair[0]
+                .label
+                .clone()
+                .unwrap_or_else(|| pair[0].name.clone())
+        } else {
+            format!("Sources {} + {}", index * 2 + 1, index * 2 + 2)
+        };
+        config.tabs.push(TabConfig { label, panes });
+    }
+    Ok(config)
+}
+
+fn unique_source_name(
+    kind: &str,
+    base: &str,
+    used: &mut std::collections::HashSet<String>,
+) -> String {
+    let normalized: String = base
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let stem = format!("{kind}_{}", normalized.trim_matches('_'));
+    let mut candidate = stem.clone();
+    let mut suffix = 2;
+    while !used.insert(candidate.clone()) {
+        candidate = format!("{stem}_{suffix}");
+        suffix += 1;
+    }
+    candidate
+}
+
+fn print_run_summary(mode: &str, config: &AppConfig, frontend_dir: &Path, logs_root: &Path) {
+    println!("embed-log v{} ({mode})", env!("CARGO_PKG_VERSION"));
+    println!("  frontend: {}", frontend_dir.display());
+    println!("  logs:     {}", logs_root.display());
+    println!(
+        "  sources:  {}",
+        config
+            .sources
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    println!(
+        "  tabs:     {}",
+        config
+            .tabs
+            .iter()
+            .map(|t| t.label.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    println!(
+        "  server:   http://{}:{}",
+        config.server.host, config.server.ws_port
+    );
+}
+
 pub(crate) async fn cmd_demo(
     config_path: Option<&PathBuf>,
     frontend_dir: &Path,
@@ -258,6 +424,37 @@ mod tests {
             PathBuf::from("/srv/frontend")
         };
         assert_eq!(resolve_dir(&abs).unwrap(), abs);
+    }
+
+    #[test]
+    fn quick_run_builds_uart_file_sources_and_two_pane_tabs() {
+        let config = quick_run_config(
+            vec![PathBuf::from("/dev/ttyUSB0"), PathBuf::from("/dev/ttyUSB1")],
+            vec![PathBuf::from("device.log")],
+            9_600,
+        )
+        .unwrap();
+
+        assert_eq!(config.sources.len(), 3);
+        assert_eq!(config.sources[0].source_type, "uart");
+        assert_eq!(config.sources[0].baudrate, Some(9_600));
+        assert_eq!(config.sources[2].source_type, "file");
+        assert_eq!(config.sources[2].baudrate, None);
+        assert_eq!(config.tabs.len(), 2);
+        assert_eq!(config.tabs[0].panes.len(), 2);
+        assert_eq!(config.tabs[1].panes.len(), 1);
+    }
+
+    #[test]
+    fn quick_run_source_names_are_unique() {
+        let config = quick_run_config(
+            vec![PathBuf::from("/dev/ttyUSB0"), PathBuf::from("ttyUSB0")],
+            vec![],
+            115_200,
+        )
+        .unwrap();
+        assert_eq!(config.sources[0].name, "UART_TTYUSB0");
+        assert_eq!(config.sources[1].name, "UART_TTYUSB0_2");
     }
 
     #[test]

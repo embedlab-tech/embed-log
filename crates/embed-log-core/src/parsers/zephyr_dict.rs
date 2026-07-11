@@ -1555,12 +1555,19 @@ mod tests {
         else {
             eprintln!(
                 "skip dict_log_parity_real_reader_database_boot_prefix: \
-                 set EMBED_LOG_ZEPHYR_DICT_DATABASE to an existing log_dictionary.json"
+                 set EMBED_LOG_ZEPHYR_DICT_DATABASE and EMBED_LOG_ZEPHYR_DICT_FIXTURE"
             );
             return;
         };
-
-        let hex = include_str!("../../tests/fixtures/reader_boot_prefix.hex")
+        let Some(fixture) = std::env::var("EMBED_LOG_ZEPHYR_DICT_FIXTURE")
+            .ok()
+            .filter(|path| std::path::Path::new(path).exists())
+        else {
+            eprintln!("skip dict_log_parity_real_reader_database_boot_prefix: set EMBED_LOG_ZEPHYR_DICT_FIXTURE to a captured HEX log");
+            return;
+        };
+        let hex = std::fs::read_to_string(&fixture)
+            .expect("read EMBED_LOG_ZEPHYR_DICT_FIXTURE")
             .chars()
             .filter(|c| !c.is_whitespace())
             .collect::<String>();

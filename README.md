@@ -27,6 +27,29 @@ Release binaries include embedded frontend assets, so users do **not** need Rust
 
 See [docs/releasing.md](docs/releasing.md) for release and installer details.
 
+## Fast start
+
+Connect one UART without creating YAML:
+
+```bash
+embed-log run /dev/ttyUSB0
+```
+
+Multiple UARTs, a watched file, or the terminal UI:
+
+```bash
+embed-log run -s /dev/ttyUSB0 -s /dev/ttyUSB1 -f ./device.log --baud 115200
+embed-log run /dev/ttyUSB0 --tui
+```
+
+This creates an in-memory configuration and opens the web UI (or TUI). Persist the generated configuration only when you need to customize it:
+
+```bash
+embed-log run /dev/ttyUSB0 --save-config embed-log.yml
+```
+
+Run `embed-log doctor` if a serial device cannot be opened. For multi-source layouts, parsers, events, and plugins, run `embed-log` with no config to use browser onboarding or create YAML explicitly.
+
 ## Claude Code plugin
 
 This repo bundles a [Claude Code](https://claude.com/claude-code) skill that teaches an AI
@@ -40,7 +63,7 @@ grepping raw log files. Install it once, in any Claude Code session:
 
 It's then available in every project on your machine, not just this repo. Source: `skills/embed-log/SKILL.md`, `.claude-plugin/`.
 
-## Quick start from source
+## Build from source
 
 ```bash
 just build
