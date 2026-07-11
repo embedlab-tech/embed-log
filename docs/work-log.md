@@ -272,3 +272,18 @@ Future entries must include this per-file added/removed-line summary.
 | `frontend/events.js` | 36 | 0 | Calculates and displays prior-event and prior-same-rule elapsed durations. |
 | `frontend/viewer.css` | 2 | 0 | Styles elapsed-time details in event tooltips. |
 | `tests-ui/regression-tests/events.spec.js` | 26 | 0 | Verifies recurring selected events display both delta values. |
+
+## 2026-07-11 23:38:40 UTC / 2026-07-12 01:38:40 GMT+2 (Warsaw)
+
+- **Commit:** `76e41be` — `Clarify event timeline lanes and hover behavior`
+- **Task:** Improve event tooltip dismissal and source-qualified lanes
+- **Started:** 2026-07-11 23:37:35 UTC / 2026-07-12 01:37:35 GMT+2 (Warsaw)
+- **Completed:** 2026-07-11 23:38:40 UTC / 2026-07-12 01:38:40 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`76e41be`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `frontend/events.js` | 19 | 6 | Qualifies event lanes by source/rule and shortens hover-tooltip dismissal. |
+| `tests-ui/regression-tests/events.spec.js` | 27 | 0 | Covers source-qualified lane labels and prompt hover-tooltip hiding. |
