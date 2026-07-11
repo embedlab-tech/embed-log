@@ -256,3 +256,19 @@ Future entries must include this per-file added/removed-line summary.
 | --- | ---: | ---: | --- |
 | `crates/embed-log-cli/src/commands/misc.rs` | 19 | 1 | Makes Windows update requests return actionable PowerShell/package-manager guidance. |
 | `docs/cli.md` | 1 | 1 | Documents that Windows self-replacement is intentionally deferred. |
+
+## 2026-07-11 23:32:57 UTC / 2026-07-12 01:32:57 GMT+2 (Warsaw)
+
+- **Commit:** `1a05fae` — `Show elapsed time between timeline events`
+- **Task:** Add event timeline delta-time tooltips with Playwright coverage
+- **Started:** 2026-07-11 23:30:28 UTC / 2026-07-12 01:30:28 GMT+2 (Warsaw)
+- **Completed:** 2026-07-11 23:32:57 UTC / 2026-07-12 01:32:57 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`1a05fae`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `frontend/events.js` | 36 | 0 | Calculates and displays prior-event and prior-same-rule elapsed durations. |
+| `frontend/viewer.css` | 2 | 0 | Styles elapsed-time details in event tooltips. |
+| `tests-ui/regression-tests/events.spec.js` | 26 | 0 | Verifies recurring selected events display both delta values. |
