@@ -102,3 +102,17 @@ Future entries must include this per-file added/removed-line summary.
 | `crates/embed-log-cli/src/commands/misc.rs` | 181 | 32 | Downloads release assets, verifies SHA-256, extracts, backs up, and replaces the executable. |
 | `crates/embed-log-cli/src/main.rs` | 15 | 4 | Adds version selection and explicit install confirmation flags. |
 | `docs/cli.md` | 3 | 1 | Documents check and verified-install update modes. |
+
+## 2026-07-11 11:12:40 UTC / 2026-07-11 13:12:40 GMT+2 (Warsaw)
+
+- **Commit:** `4bc69d2` — `Add isolated updater rollback tests`
+- **Task:** Add updater isolation and rollback tests
+- **Started:** 2026-07-11 11:11:52 UTC / 2026-07-11 13:11:52 GMT+2 (Warsaw)
+- **Completed:** 2026-07-11 11:12:40 UTC / 2026-07-11 13:12:40 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`4bc69d2`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-cli/src/commands/misc.rs` | 64 | 10 | Makes release URL selection and file replacement testable; covers swap and rollback behavior. |
