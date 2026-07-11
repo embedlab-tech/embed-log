@@ -178,3 +178,18 @@ Future entries must include this per-file added/removed-line summary.
 | --- | ---: | ---: | --- |
 | `crates/embed-log-cli/src/commands/sessions.rs` | 14 | 5 | Makes import rewrites atomic, rejects malformed existing JSONL, and rejects duplicate source names. |
 | `docs/non-session-roadmap.md` | 54 | 0 | Separates deferred distribution, UX, TUI, and Zephyr work from session work. |
+
+## 2026-07-11 11:31:57 UTC / 2026-07-11 13:31:57 GMT+2 (Warsaw)
+
+- **Commit:** `4389a04` — `Add session import dry-run mode`
+- **Task:** Complete remaining session import, bundle, and retention workflows
+- **Started:** 2026-07-11 11:31:22 UTC / 2026-07-11 13:31:22 GMT+2 (Warsaw)
+- **Completed:** 2026-07-11 11:31:57 UTC / 2026-07-11 13:31:57 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`4389a04`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 10 | 2 | Adds a non-mutating timestamp-validation import preview. |
+| `docs/cli.md` | 1 | 0 | Documents import dry-run usage. |
