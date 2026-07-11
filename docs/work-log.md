@@ -302,3 +302,20 @@ Future entries must include this per-file added/removed-line summary.
 | --- | ---: | ---: | --- |
 | `frontend/events.js` | 8 | 1 | Renders event tooltip timestamps in the active absolute/relative display mode. |
 | `tests-ui/regression-tests/events.spec.js` | 25 | 0 | Verifies event tooltip timestamps switch with the UI setting. |
+
+## 2026-07-11 23:43:00 UTC / 2026-07-12 01:43:00 GMT+2 (Warsaw)
+
+- **Commit:** `40fcf64` — `Order events chronologically and document agent plan`
+- **Task:** Order event timeline interactions chronologically and publish automation plan
+- **Started:** 2026-07-11 23:42:16 UTC / 2026-07-12 01:42:16 GMT+2 (Warsaw)
+- **Completed:** 2026-07-11 23:43:00 UTC / 2026-07-12 01:43:00 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`40fcf64`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `docs/automation-agent-plan.md` | 202 | 0 | Adds phased design for agent investigation, dynamic rules, and protocol discovery. |
+| `docs/index.md` | 1 | 0 | Links the automation and agent roadmap from the documentation map. |
+| `frontend/events.js` | 13 | 6 | Uses one timestamp-sorted event order for rendered interactions and comparisons. |
+| `tests-ui/regression-tests/events.spec.js` | 12 | 0 | Verifies timeline dots are emitted in chronological timestamp order. |
