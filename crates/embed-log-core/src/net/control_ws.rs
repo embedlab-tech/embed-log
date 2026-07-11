@@ -279,6 +279,9 @@ async fn handle_control_command(
         "log.inject" => Some(handle_log_inject(&cmd, state, msg_id).await),
         "tx.write" => Some(handle_tx_write(&cmd, state, msg_id).await),
         "marker.create" => Some(handle_marker_create(&cmd, state, msg_id).await),
+        "event_rule.create" => Some(handle_event_rule_create(&cmd, state, msg_id)),
+        "event_rule.list" => Some(handle_event_rule_list(state, msg_id)),
+        "event_rule.delete" => Some(handle_event_rule_delete(&cmd, state, msg_id)),
         _ => {
             let mut resp = serde_json::json!({
                 "type": "error",
@@ -603,6 +606,89 @@ async fn handle_tx_write(
     }
 }
 
+/// Handle `event_rule.create` — add a rule for the current server/session.
+fn handle_event_rule_create(
+    cmd: &serde_json::Value,
+    state: &super::ServerState,
+    msg_id: Option<&str>,
+) -> String {
+    let source_id = match cmd.get("source_id").and_then(|value| value.as_str()).filter(|value| !value.is_empty()) {
+        Some(value) if state.source_metadata.contains_key(value) => value,
+        Some(value) => return make_result_error("event_rule", msg_id, value, "unknown source"),
+        None => return make_response("event_rule.create.result", msg_id, serde_json::json!({ "ok": false, "error": "missing 'source_id'" })),
+    };
+    let name = match cmd.get("name").and_then(|value| value.as_str()).filter(|value| !value.trim().is_empty()) {
+        Some(value) => value.trim(),
+        None => return make_result_error("event_rule", msg_id, source_id, "missing 'name'"),
+    };
+    let pattern = match cmd.get("pattern").and_then(|value| value.as_str()).filter(|value| !value.is_empty()) {
+        Some(value) => value,
+        None => return make_result_error("event_rule", msg_id, source_id, "missing 'pattern'"),
+    };
+    let regex = match regex::Regex::new(pattern) {
+        Ok(regex) => regex,
+        Err(error) => return make_result_error("event_rule", msg_id, source_id, &format!("invalid regex: {error}")),
+    };
+    let severity = cmd.get("severity").and_then(|value| value.as_str()).unwrap_or("info");
+    if !matches!(severity, "info" | "warn" | "error" | "fatal") {
+        return make_result_error("event_rule", msg_id, source_id, "severity must be info, warn, error, or fatal");
+    }
+    let mut rules = match state.runtime_event_rules.write() {
+        Ok(rules) => rules,
+        Err(_) => return make_result_error("event_rule", msg_id, source_id, "runtime rule registry is unavailable"),
+    };
+    let source_rules = rules.entry(source_id.to_string()).or_default();
+    if source_rules.iter().any(|rule| rule.name == name) {
+        return make_result_error("event_rule", msg_id, source_id, "a runtime rule with this name already exists for the source");
+    }
+    source_rules.push(crate::config::EventRule {
+        name: name.to_string(),
+        pattern: pattern.to_string(),
+        severity: severity.to_string(),
+        regex,
+    });
+    make_response("event_rule.create.result", msg_id, serde_json::json!({
+        "ok": true, "source_id": source_id, "name": name, "pattern": pattern, "severity": severity,
+    }))
+}
+
+fn handle_event_rule_list(state: &super::ServerState, msg_id: Option<&str>) -> String {
+    let rules = match state.runtime_event_rules.read() {
+        Ok(rules) => rules,
+        Err(_) => return make_response("event_rule.list.result", msg_id, serde_json::json!({ "ok": false, "error": "runtime rule registry is unavailable" })),
+    };
+    let sources = rules.iter().map(|(source_id, source_rules)| serde_json::json!({
+        "source_id": source_id,
+        "rules": source_rules.iter().map(|rule| serde_json::json!({ "name": rule.name, "pattern": rule.pattern, "severity": rule.severity })).collect::<Vec<_>>(),
+    })).collect::<Vec<_>>();
+    make_response("event_rule.list.result", msg_id, serde_json::json!({ "ok": true, "sources": sources }))
+}
+
+fn handle_event_rule_delete(cmd: &serde_json::Value, state: &super::ServerState, msg_id: Option<&str>) -> String {
+    let source_id = match cmd.get("source_id").and_then(|value| value.as_str()) {
+        Some(value) => value,
+        None => return make_response("event_rule.delete.result", msg_id, serde_json::json!({ "ok": false, "error": "missing 'source_id'" })),
+    };
+    let name = match cmd.get("name").and_then(|value| value.as_str()) {
+        Some(value) => value,
+        None => return make_result_error("event_rule", msg_id, source_id, "missing 'name'"),
+    };
+    let mut rules = match state.runtime_event_rules.write() {
+        Ok(rules) => rules,
+        Err(_) => return make_result_error("event_rule", msg_id, source_id, "runtime rule registry is unavailable"),
+    };
+    let Some(source_rules) = rules.get_mut(source_id) else {
+        return make_result_error("event_rule", msg_id, source_id, "runtime rule not found");
+    };
+    let old_len = source_rules.len();
+    source_rules.retain(|rule| rule.name != name);
+    if source_rules.len() == old_len {
+        return make_result_error("event_rule", msg_id, source_id, "runtime rule not found");
+    }
+    if source_rules.is_empty() { rules.remove(source_id); }
+    make_response("event_rule.delete.result", msg_id, serde_json::json!({ "ok": true, "source_id": source_id, "name": name }))
+}
+
 /// Handle `marker.create` — create a marker on the current session.
 async fn handle_marker_create(
     cmd: &serde_json::Value,
@@ -843,8 +929,35 @@ mod tests {
             source_tx_senders: Arc::new(HashMap::new()),
             source_metadata: Arc::new(source_metadata),
             line_counters: Arc::new(HashMap::new()),
+            runtime_event_rules: Arc::new(std::sync::RwLock::new(HashMap::new())),
             control_api: true,
         }
+    }
+
+    #[tokio::test]
+    async fn runtime_event_rules_can_be_created_listed_and_deleted() {
+        let state = test_control_state();
+        let mut subscribed = ControlSubscription::new();
+        let create = handle_control_command(
+            r#"{"id":"rule-1","type":"event_rule.create","source_id":"DUT_UART","name":"watchdog","pattern":"watchdog: \\d+s","severity":"error"}"#,
+            &state,
+            &mut subscribed,
+        ).await.unwrap();
+        let create: serde_json::Value = serde_json::from_str(&create).unwrap();
+        assert_eq!(create["type"], "event_rule.create.result");
+        assert_eq!(create["ok"], true);
+
+        let list = handle_control_command(r#"{"id":"rule-2","type":"event_rule.list"}"#, &state, &mut subscribed).await.unwrap();
+        let list: serde_json::Value = serde_json::from_str(&list).unwrap();
+        assert_eq!(list["sources"][0]["rules"][0]["name"], "watchdog");
+
+        let delete = handle_control_command(
+            r#"{"id":"rule-3","type":"event_rule.delete","source_id":"DUT_UART","name":"watchdog"}"#,
+            &state,
+            &mut subscribed,
+        ).await.unwrap();
+        let delete: serde_json::Value = serde_json::from_str(&delete).unwrap();
+        assert_eq!(delete["ok"], true);
     }
 
     #[tokio::test]
@@ -1338,6 +1451,7 @@ mod tests {
             source_tx_senders: Arc::new(HashMap::new()),
             source_metadata: Arc::new(source_metadata),
             line_counters: Arc::new(line_counters),
+            runtime_event_rules: Arc::new(std::sync::RwLock::new(HashMap::new())),
             control_api: true,
         };
         (state, dir)
@@ -1592,6 +1706,7 @@ mod tests {
             source_tx_senders: Arc::new(HashMap::new()),
             source_metadata: Arc::new(source_metadata),
             line_counters: Arc::new(line_counters),
+            runtime_event_rules: Arc::new(std::sync::RwLock::new(HashMap::new())),
             control_api: true,
         };
 

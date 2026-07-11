@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket};
@@ -129,6 +129,8 @@ pub struct ServerState {
     pub source_metadata: Arc<HashMap<String, SourceInfo>>,
     /// Per-source line counters for stable `line_idx` in log entries.
     pub line_counters: Arc<HashMap<String, Arc<std::sync::atomic::AtomicU64>>>,
+    /// Event rules added for the lifetime of this server/session.
+    pub runtime_event_rules: Arc<RwLock<HashMap<String, Vec<crate::config::EventRule>>>>,
     /// Whether the /api/v1/control WebSocket endpoint is enabled.
     pub control_api: bool,
 }
@@ -926,6 +928,7 @@ mod tests {
             source_tx_senders: Arc::new(HashMap::new()),
             source_metadata: Arc::new(HashMap::new()),
             line_counters: Arc::new(HashMap::new()),
+            runtime_event_rules: Arc::new(std::sync::RwLock::new(HashMap::new())),
             control_api: true,
         };
         (state, rx)

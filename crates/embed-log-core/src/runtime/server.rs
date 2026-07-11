@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicU64, AtomicUsize},
-    Arc, Mutex,
+    Arc, Mutex, RwLock,
 };
 use std::time::Duration;
 
@@ -119,6 +119,7 @@ impl LogServer {
             .collect();
         let event_matchers =
             crate::config::load_event_matchers(self.config_path.as_deref(), &source_names);
+        let runtime_event_rules = Arc::new(RwLock::new(HashMap::new()));
 
         // Build source metadata for the control API.
         let mut source_metadata: HashMap<String, SourceInfo> = sources
@@ -274,6 +275,7 @@ impl LogServer {
                 ts_mode: self.config.server.timestamp_mode,
                 line_counter: line_counters.get(&merge.name).cloned(),
                 event_matcher: writer_event_matcher,
+                runtime_event_rules: runtime_event_rules.clone(),
                 source_meta: SourceRuntimeMeta {
                     source_id: merge.name.clone(),
                     source_label: merge_label(merge),
@@ -361,6 +363,7 @@ impl LogServer {
                 ts_mode: self.config.server.timestamp_mode,
                 line_counter: line_counters.get(&src.name).cloned(),
                 event_matcher: writer_event_matcher,
+                runtime_event_rules: runtime_event_rules.clone(),
                 source_meta: SourceRuntimeMeta {
                     source_id: src.name.clone(),
                     source_label: src.label.clone(),
@@ -471,6 +474,7 @@ impl LogServer {
             source_tx_senders: Arc::new(source_tx_senders),
             source_metadata: Arc::new(source_metadata),
             line_counters: Arc::new(line_counters),
+            runtime_event_rules,
             control_api: self.config.server.control_api,
         };
 
@@ -1168,6 +1172,7 @@ struct WriterRuntime {
     ts_mode: TimestampMode,
     line_counter: Option<Arc<AtomicU64>>,
     event_matcher: Option<crate::config::PatternMatcher>,
+    runtime_event_rules: Arc<RwLock<HashMap<String, Vec<crate::config::EventRule>>>>,
     source_meta: SourceRuntimeMeta,
 }
 
@@ -1443,8 +1448,17 @@ async fn run_writer(
 
         // ── Event detection ──
         // Check message against compiled event rules for this source.
-        if let Some(ref matcher) = runtime.event_matcher {
-            for event_match in matcher.check(&message) {
+        let mut event_matches = runtime
+            .event_matcher
+            .as_ref()
+            .map(|matcher| matcher.check(&message))
+            .unwrap_or_default();
+        if let Ok(rules) = runtime.runtime_event_rules.read() {
+            if let Some(rules) = rules.get(&source_name) {
+                event_matches.extend(crate::config::PatternMatcher::new(rules.clone()).check(&message));
+            }
+        }
+        for event_match in event_matches {
                 let event_payload = json!({
                     "type": "event",
                     "event_id": event_match.rule_name,
@@ -1491,7 +1505,6 @@ async fn run_writer(
                     &event_match.severity,
                     &message,
                 );
-            }
         }
 
         // Store in replay buffer
@@ -1706,6 +1719,7 @@ mod tests {
             ts_mode: TimestampMode::Absolute,
             line_counter: None,
             event_matcher: None,
+            runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer(
@@ -1769,6 +1783,7 @@ mod tests {
             ts_mode: TimestampMode::Absolute,
             line_counter: None,
             event_matcher: None,
+            runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
@@ -1835,6 +1850,7 @@ mod tests {
             ts_mode: TimestampMode::Absolute,
             line_counter: None,
             event_matcher: Some(matcher),
+            runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
@@ -1946,6 +1962,7 @@ mod tests {
             ts_mode: TimestampMode::Absolute,
             line_counter: None,
             event_matcher: Some(matcher),
+            runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
@@ -2023,6 +2040,7 @@ mod tests {
             ts_mode: TimestampMode::Absolute,
             line_counter: None,
             event_matcher: Some(matcher),
+            runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
@@ -2086,6 +2104,7 @@ mod tests {
             ts_mode: TimestampMode::Absolute,
             line_counter: None,
             event_matcher: None,
+            runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
