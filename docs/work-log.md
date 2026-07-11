@@ -35,3 +35,16 @@ Future entries must include this per-file added/removed-line summary.
 | `.gitignore` | 3 | 0 | Ignores local extension checkpoint state. |
 | `.pi/extensions/README.md` | 18 | 0 | Documents extension commands and lifecycle. |
 | `.pi/extensions/worklog-checkpoint.ts` | 152 | 0 | Implements start/finish checkpoints, token delta calculation, Git stats, and work-log append. |
+
+## 2026-07-11 10:54:04 UTC / 2026-07-11 12:54:04 CEST (Warsaw)
+
+- **Commit:** `1aff4c6` — `Add milestone work-log skill`
+- **Task:** Add an on-demand project skill that standardizes milestone commits, token checkpoints, validation, and work-log entries.
+- **Validation:** Reviewed Pi skill frontmatter and explicit skill-loading CLI support (`pi --help`) — passed.
+- **Model-token delta:** unavailable; no before checkpoint existed for this task.
+
+### File changes (`1aff4c6`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.agents/skills/milestone-worklog/SKILL.md` | 67 | 0 | Defines the milestone workflow, extension integration, fallback commands, and guardrails. |
