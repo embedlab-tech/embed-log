@@ -132,3 +132,19 @@ Future entries must include this per-file added/removed-line summary.
 | `crates/embed-log-cli/src/commands/misc.rs` | 74 | 14 | Rejects unexpected/duplicate archive entries and adds extraction/replacement safety tests. |
 | `crates/embed-log-cli/src/main.rs` | 5 | 1 | Adds explicit `--allow-downgrade` update override. |
 | `docs/cli.md` | 2 | 1 | Documents downgrade protection and override usage. |
+
+## 2026-07-11 11:19:31 UTC / 2026-07-11 13:19:31 GMT+2 (Warsaw)
+
+- **Commit:** `fa579ec` — `Add session report open command`
+- **Task:** Add sessions open command for exported session reports
+- **Started:** 2026-07-11 11:17:08 UTC / 2026-07-11 13:17:08 GMT+2 (Warsaw)
+- **Completed:** 2026-07-11 11:19:31 UTC / 2026-07-11 13:19:31 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`fa579ec`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 24 | 0 | Adds browser opening and on-demand HTML export for a resolved session. |
+| `crates/embed-log-cli/src/main.rs` | 1 | 0 | Covers `sessions open latest` CLI parsing. |
+| `docs/cli.md` | 6 | 0 | Documents opening an exported session report. |
