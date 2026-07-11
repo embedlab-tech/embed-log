@@ -8,12 +8,16 @@ fn main() {
     let dirty = git_output(&["status", "--porcelain"])
         .map(|s| !s.is_empty())
         .unwrap_or(false);
-    let sha = git_output(&["rev-parse", "--short", "HEAD"]).unwrap_or_else(|| "unknown".to_string());
+    let sha =
+        git_output(&["rev-parse", "--short", "HEAD"]).unwrap_or_else(|| "unknown".to_string());
     let git_sha = if dirty { format!("{sha}-dirty") } else { sha };
     println!("cargo:rustc-env=EMBED_LOG_GIT_SHA={git_sha}");
 
     let build_time = chrono::Utc::now().format("%Y-%m-%d %H:%M:%SZ");
     println!("cargo:rustc-env=EMBED_LOG_BUILD_TIME={build_time}");
+
+    let target = std::env::var("TARGET").unwrap_or_else(|_| "unknown".to_string());
+    println!("cargo:rustc-env=EMBED_LOG_TARGET={target}");
 }
 
 fn git_output(args: &[&str]) -> Option<String> {

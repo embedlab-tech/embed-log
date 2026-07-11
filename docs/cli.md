@@ -156,6 +156,8 @@ embed-log version --json
 embed-log version --config embed-log.yml
 ```
 
+Version output includes the package version, Git revision, build time, target triple, and running executable path. Use `--json` for release/support diagnostics.
+
 Doctor:
 
 ```bash

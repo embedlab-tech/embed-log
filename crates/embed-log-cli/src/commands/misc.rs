@@ -17,15 +17,8 @@ use crate::demo_config::DEMO_CONFIG;
 /// `cargo build` invocations unless the source actually changed — the
 /// quickest way to tell a stale installed binary from a freshly built one.
 pub(crate) fn cmd_version(config_path: Option<&Path>, json: bool) -> Result<()> {
-    let version = env!("CARGO_PKG_VERSION");
-    let git_sha = env!("EMBED_LOG_GIT_SHA");
-    let build_time = env!("EMBED_LOG_BUILD_TIME");
+    let mut out = version_report();
     if json {
-        let mut out = serde_json::json!({
-            "version": version,
-            "git_sha": git_sha,
-            "build_time": build_time,
-        });
         if let Some(path) = config_path {
             match load_config(path) {
                 Ok(cfg) => {
@@ -42,7 +35,20 @@ pub(crate) fn cmd_version(config_path: Option<&Path>, json: bool) -> Result<()> 
         }
         println!("{}", serde_json::to_string_pretty(&out)?);
     } else {
-        println!("embed-log {version} ({git_sha}, built {build_time})");
+        println!(
+            "embed-log {} ({}, built {})",
+            out["version"].as_str().unwrap_or("unknown"),
+            out["git_sha"].as_str().unwrap_or("unknown"),
+            out["build_time"].as_str().unwrap_or("unknown"),
+        );
+        println!(
+            "  target:   {}",
+            out["target"].as_str().unwrap_or("unknown")
+        );
+        println!(
+            "  path:     {}",
+            out["executable"].as_str().unwrap_or("unknown")
+        );
         if let Some(path) = config_path {
             match load_config(path) {
                 Ok(cfg) => {
@@ -57,6 +63,20 @@ pub(crate) fn cmd_version(config_path: Option<&Path>, json: bool) -> Result<()> 
         }
     }
     Ok(())
+}
+
+fn version_report() -> serde_json::Value {
+    let executable = std::env::current_exe()
+        .ok()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "git_sha": env!("EMBED_LOG_GIT_SHA"),
+        "build_time": env!("EMBED_LOG_BUILD_TIME"),
+        "target": env!("EMBED_LOG_TARGET"),
+        "executable": executable,
+    })
 }
 
 /// `embed-log validate` — load/validate config and print resolved summary.
@@ -896,6 +916,16 @@ mod tests {
         let cfg = load_config(&path).unwrap();
         std::fs::remove_file(&path).ok();
         assert_eq!(count_pcap_sources(&cfg), 1);
+    }
+
+    #[test]
+    fn version_report_includes_release_diagnostics() {
+        let report = version_report();
+        assert!(!report["version"].as_str().unwrap_or_default().is_empty());
+        assert!(!report["git_sha"].as_str().unwrap_or_default().is_empty());
+        assert!(!report["build_time"].as_str().unwrap_or_default().is_empty());
+        assert!(!report["target"].as_str().unwrap_or_default().is_empty());
+        assert!(!report["executable"].as_str().unwrap_or_default().is_empty());
     }
 
     #[test]
