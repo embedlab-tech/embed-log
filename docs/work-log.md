@@ -20,3 +20,18 @@ Chronological implementation notes for the MVP 1.0 work branch.
 | `docs/cli.md` | 4 | 0 | Serial-doctor usage and safety notes. |
 
 Future entries must include this per-file added/removed-line summary.
+
+## 2026-07-11 10:51:14 UTC / 2026-07-11 12:51:14 CEST (Warsaw)
+
+- **Commit:** `90436be` — `Add Pi work-log checkpoint extension`
+- **Task:** Add a project-local Pi extension that snapshots milestone usage and generates structured work-log entries.
+- **Validation:** `pi -e .pi/extensions/worklog-checkpoint.ts -p '/worklog-start extension load smoke test'` — passed; checkpoint created.
+- **Model-token delta:** unavailable; this extension was introduced after the milestone began, so no before snapshot exists.
+
+### File changes (`90436be`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.gitignore` | 3 | 0 | Ignores local extension checkpoint state. |
+| `.pi/extensions/README.md` | 18 | 0 | Documents extension commands and lifecycle. |
+| `.pi/extensions/worklog-checkpoint.ts` | 152 | 0 | Implements start/finish checkpoints, token delta calculation, Git stats, and work-log append. |
