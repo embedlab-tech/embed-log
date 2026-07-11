@@ -241,3 +241,18 @@ Future entries must include this per-file added/removed-line summary.
 | `README.md` | 1 | 0 | Links users to the comprehensive guide. |
 | `docs/getting-up-to-speed.md` | 241 | 0 | Adds end-to-end onboarding, session, automation, advanced-source, and update guidance. |
 | `docs/index.md` | 1 | 0 | Adds the guide to the documentation map. |
+
+## 2026-07-11 12:06:43 UTC / 2026-07-11 14:06:43 GMT+2 (Warsaw)
+
+- **Commit:** `bc5bdd8` — `Guide Windows users to supported update paths`
+- **Task:** Add Windows PowerShell installation support
+- **Started:** 2026-07-11 12:05:29 UTC / 2026-07-11 14:05:29 GMT+2 (Warsaw)
+- **Completed:** 2026-07-11 12:06:43 UTC / 2026-07-11 14:06:43 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`bc5bdd8`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-cli/src/commands/misc.rs` | 19 | 1 | Makes Windows update requests return actionable PowerShell/package-manager guidance. |
+| `docs/cli.md` | 1 | 1 | Documents that Windows self-replacement is intentionally deferred. |
