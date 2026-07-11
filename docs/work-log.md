@@ -148,3 +148,18 @@ Future entries must include this per-file added/removed-line summary.
 | `crates/embed-log-cli/src/commands/sessions.rs` | 24 | 0 | Adds browser opening and on-demand HTML export for a resolved session. |
 | `crates/embed-log-cli/src/main.rs` | 1 | 0 | Covers `sessions open latest` CLI parsing. |
 | `docs/cli.md` | 6 | 0 | Documents opening an exported session report. |
+
+## 2026-07-11 11:25:08 UTC / 2026-07-11 13:25:08 GMT+2 (Warsaw)
+
+- **Commit:** `9481c91` — `Import external logs into recorded sessions`
+- **Task:** Import external UTC-timestamped logs into existing sessions
+- **Started:** 2026-07-11 11:21:47 UTC / 2026-07-11 13:21:47 GMT+2 (Warsaw)
+- **Completed:** 2026-07-11 11:25:08 UTC / 2026-07-11 13:25:08 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`9481c91`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 167 | 15 | Adds RFC3339 import parsing, timestamp-sorted combined-log merge, source metadata, and parser tests. |
+| `docs/cli.md` | 8 | 0 | Documents importing external RFC3339 timestamped logs. |
