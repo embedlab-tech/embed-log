@@ -287,3 +287,18 @@ Future entries must include this per-file added/removed-line summary.
 | --- | ---: | ---: | --- |
 | `frontend/events.js` | 19 | 6 | Qualifies event lanes by source/rule and shortens hover-tooltip dismissal. |
 | `tests-ui/regression-tests/events.spec.js` | 27 | 0 | Covers source-qualified lane labels and prompt hover-tooltip hiding. |
+
+## 2026-07-11 23:41:32 UTC / 2026-07-12 01:41:32 GMT+2 (Warsaw)
+
+- **Commit:** `8bdac4d` — `Align event timestamps with display mode`
+- **Task:** Align event tooltip timestamps with display mode
+- **Started:** 2026-07-11 23:39:25 UTC / 2026-07-12 01:39:25 GMT+2 (Warsaw)
+- **Completed:** 2026-07-11 23:41:32 UTC / 2026-07-12 01:41:32 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`8bdac4d`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `frontend/events.js` | 8 | 1 | Renders event tooltip timestamps in the active absolute/relative display mode. |
+| `tests-ui/regression-tests/events.spec.js` | 25 | 0 | Verifies event tooltip timestamps switch with the UI setting. |
