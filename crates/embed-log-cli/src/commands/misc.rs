@@ -128,13 +128,11 @@ pub(crate) async fn cmd_update(
 }
 
 async fn fetch_release(requested_version: Option<&str>) -> Result<GithubRelease> {
-    let suffix = requested_version
-        .map(|tag| format!("tags/{tag}"))
-        .unwrap_or_else(|| "latest".to_string());
+    let api_base = std::env::var("EMBED_LOG_UPDATE_API_BASE")
+        .unwrap_or_else(|_| "https://api.github.com".to_string());
+    let url = release_api_url(&api_base, requested_version);
     reqwest::Client::new()
-        .get(format!(
-            "https://api.github.com/repos/{UPDATE_REPO}/releases/{suffix}"
-        ))
+        .get(url)
         .header(reqwest::header::USER_AGENT, "embed-log-updater")
         .send()
         .await
@@ -144,6 +142,16 @@ async fn fetch_release(requested_version: Option<&str>) -> Result<GithubRelease>
         .json::<GithubRelease>()
         .await
         .context("decode GitHub Release")
+}
+
+fn release_api_url(api_base: &str, requested_version: Option<&str>) -> String {
+    let suffix = requested_version
+        .map(|tag| format!("tags/{tag}"))
+        .unwrap_or_else(|| "latest".to_string());
+    format!(
+        "{}/repos/{UPDATE_REPO}/releases/{suffix}",
+        api_base.trim_end_matches('/')
+    )
 }
 
 fn update_asset_name() -> Option<String> {
@@ -192,14 +200,20 @@ async fn install_release(release: &GithubRelease, asset_name: &str) -> Result<()
         .ok_or_else(|| anyhow::anyhow!("running executable has no parent directory"))?;
     let temp = tempfile_path(parent, ".embed-log-update");
     extract_tar_gz(&archive, &temp)?;
-    let backup = exe.with_extension("bak");
+    replace_executable(&temp, &exe)
+}
+
+/// Replace an executable via a same-directory backup so rename is atomic on
+/// supported filesystems. Kept separate from downloading for safe tests.
+fn replace_executable(staged: &Path, executable: &Path) -> Result<()> {
+    let backup = executable.with_extension("bak");
     if backup.exists() {
         std::fs::remove_file(&backup).context("remove stale update backup")?;
     }
-    std::fs::rename(&exe, &backup)
+    std::fs::rename(executable, &backup)
         .context("backup running executable; package-managed installs may not be self-updatable")?;
-    if let Err(error) = std::fs::rename(&temp, &exe) {
-        let _ = std::fs::rename(&backup, &exe);
+    if let Err(error) = std::fs::rename(staged, executable) {
+        let _ = std::fs::rename(&backup, executable);
         return Err(error).context("replace executable; restored previous binary");
     }
     let _ = std::fs::remove_file(backup);
@@ -1112,6 +1126,46 @@ mod tests {
         let cfg = load_config(&path).unwrap();
         std::fs::remove_file(&path).ok();
         assert_eq!(count_pcap_sources(&cfg), 1);
+    }
+
+    #[test]
+    fn release_api_url_supports_default_and_explicit_tags() {
+        assert_eq!(
+            release_api_url("http://127.0.0.1:9999/", None),
+            "http://127.0.0.1:9999/repos/krezolekcoder/embed-log/releases/latest"
+        );
+        assert_eq!(
+            release_api_url("https://api.github.com", Some("v1.2.3")),
+            "https://api.github.com/repos/krezolekcoder/embed-log/releases/tags/v1.2.3"
+        );
+    }
+
+    #[test]
+    fn replace_executable_swaps_staged_file_and_removes_backup() {
+        let dir =
+            std::env::temp_dir().join(format!("embed-log-update-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let executable = dir.join("embed-log");
+        let staged = dir.join("staged");
+        std::fs::write(&executable, b"old").unwrap();
+        std::fs::write(&staged, b"new").unwrap();
+        replace_executable(&staged, &executable).unwrap();
+        assert_eq!(std::fs::read(&executable).unwrap(), b"new");
+        assert!(!executable.with_extension("bak").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn replace_executable_restores_backup_when_staged_file_is_missing() {
+        let dir =
+            std::env::temp_dir().join(format!("embed-log-update-rollback-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let executable = dir.join("embed-log");
+        std::fs::write(&executable, b"old").unwrap();
+        assert!(replace_executable(&dir.join("missing"), &executable).is_err());
+        assert_eq!(std::fs::read(&executable).unwrap(), b"old");
+        assert!(!executable.with_extension("bak").exists());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
