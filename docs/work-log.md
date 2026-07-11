@@ -116,3 +116,19 @@ Future entries must include this per-file added/removed-line summary.
 | File | Added | Removed | Summary |
 | --- | ---: | ---: | --- |
 | `crates/embed-log-cli/src/commands/misc.rs` | 64 | 10 | Makes release URL selection and file replacement testable; covers swap and rollback behavior. |
+
+## 2026-07-11 11:15:31 UTC / 2026-07-11 13:15:31 GMT+2 (Warsaw)
+
+- **Commit:** `cde8194` — `Harden updater archive validation`
+- **Task:** Harden updater downgrade and archive safety
+- **Started:** 2026-07-11 11:14:15 UTC / 2026-07-11 13:14:15 GMT+2 (Warsaw)
+- **Completed:** 2026-07-11 11:15:31 UTC / 2026-07-11 13:15:31 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`cde8194`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-cli/src/commands/misc.rs` | 74 | 14 | Rejects unexpected/duplicate archive entries and adds extraction/replacement safety tests. |
+| `crates/embed-log-cli/src/main.rs` | 5 | 1 | Adds explicit `--allow-downgrade` update override. |
+| `docs/cli.md` | 2 | 1 | Documents downgrade protection and override usage. |
