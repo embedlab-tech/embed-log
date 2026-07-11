@@ -334,3 +334,18 @@ Future entries must include this per-file added/removed-line summary.
 | --- | ---: | ---: | --- |
 | `frontend/events.js` | 27 | 7 | Builds filter chips from both configured rules and currently recorded event data. |
 | `tests-ui/regression-tests/events.spec.js` | 18 | 0 | Verifies each timeline source and severity is filterable. |
+
+## 2026-07-11 23:47:11 UTC / 2026-07-12 01:47:11 GMT+2 (Warsaw)
+
+- **Commit:** `0da7204` — `Improve event timeline accessibility`
+- **Task:** Finish remaining frontend event usability improvements
+- **Started:** 2026-07-11 23:46:07 UTC / 2026-07-12 01:46:07 GMT+2 (Warsaw)
+- **Completed:** 2026-07-11 23:47:11 UTC / 2026-07-12 01:47:11 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`0da7204`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `frontend/events.js` | 20 | 2 | Activates Events from received events, suppresses duplicate deltas, and adds keyboard-accessible dots. |
+| `tests-ui/regression-tests/events.spec.js` | 15 | 1 | Covers keyboard selection and updated recurring-event tooltip behavior. |
