@@ -225,3 +225,19 @@ Future entries must include this per-file added/removed-line summary.
 | `crates/embed-log-cli/src/commands/sessions.rs` | 61 | 0 | Adds size-reporting dry-run and deletion retention logic with coverage. |
 | `crates/embed-log-cli/src/main.rs` | 1 | 0 | Covers prune command parsing. |
 | `docs/cli.md` | 7 | 0 | Documents safe session-retention commands. |
+
+## 2026-07-11 11:47:36 UTC / 2026-07-11 13:47:36 GMT+2 (Warsaw)
+
+- **Commit:** `f171b27` — `Add Embed-log get-up-to-speed guide`
+- **Task:** Add comprehensive Embed-log get-up-to-speed guide
+- **Started:** 2026-07-11 11:46:15 UTC / 2026-07-11 13:46:15 GMT+2 (Warsaw)
+- **Completed:** 2026-07-11 11:47:36 UTC / 2026-07-11 13:47:36 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`f171b27`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 1 | 0 | Links users to the comprehensive guide. |
+| `docs/getting-up-to-speed.md` | 241 | 0 | Adds end-to-end onboarding, session, automation, advanced-source, and update guidance. |
+| `docs/index.md` | 1 | 0 | Adds the guide to the documentation map. |
