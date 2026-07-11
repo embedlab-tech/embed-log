@@ -163,3 +163,18 @@ Future entries must include this per-file added/removed-line summary.
 | --- | ---: | ---: | --- |
 | `crates/embed-log-cli/src/commands/sessions.rs` | 167 | 15 | Adds RFC3339 import parsing, timestamp-sorted combined-log merge, source metadata, and parser tests. |
 | `docs/cli.md` | 8 | 0 | Documents importing external RFC3339 timestamped logs. |
+
+## 2026-07-11 11:28:39 UTC / 2026-07-11 13:28:39 GMT+2 (Warsaw)
+
+- **Commit:** `c09c5af` — `Harden session import workflow`
+- **Task:** Document non-session roadmap and finish session import reliability
+- **Started:** 2026-07-11 11:27:18 UTC / 2026-07-11 13:27:18 GMT+2 (Warsaw)
+- **Completed:** 2026-07-11 11:28:39 UTC / 2026-07-11 13:28:39 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`c09c5af`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 14 | 5 | Makes import rewrites atomic, rejects malformed existing JSONL, and rejects duplicate source names. |
+| `docs/non-session-roadmap.md` | 54 | 0 | Separates deferred distribution, UX, TUI, and Zephyr work from session work. |
