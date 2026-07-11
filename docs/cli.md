@@ -189,7 +189,7 @@ embed-log update --version v1.2.0 --yes
 embed-log update --version v0.9.0 --yes --allow-downgrade
 ```
 
-`--check` reports the latest stable GitHub Release without changing the system. `--yes` downloads the target-matching archive, verifies it against the release `SHA256SUMS`, stages the executable beside the current binary, and replaces it with a rollback backup if replacement fails. Self-update rejects same-version and downgrade installs by default; `--allow-downgrade --yes` is the explicit escape hatch. It currently supports the same release targets as the installer: Linux x86_64 and macOS Apple Silicon/Intel. Package-managed or read-only installations should use their package manager instead.
+`--check` reports the latest stable GitHub Release without changing the system. `--yes` downloads the target-matching archive, verifies it against the release `SHA256SUMS`, stages the executable beside the current binary, and replaces it with a rollback backup if replacement fails. Self-update rejects same-version and downgrade installs by default; `--allow-downgrade --yes` is the explicit escape hatch. It currently supports Linux x86_64 and macOS Apple Silicon/Intel. On Windows, use the PowerShell installer again or your package manager: replacing a running `.exe` requires a dedicated updater helper that is not shipped yet. Package-managed or read-only installations should use their package manager instead.
 
 Serial ports:
 

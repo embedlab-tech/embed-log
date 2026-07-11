@@ -88,7 +88,25 @@ pub(crate) async fn cmd_update(
     allow_downgrade: bool,
     json: bool,
 ) -> Result<()> {
-    let release = fetch_release(requested_version).await?;
+    let release = {
+        #[cfg(target_os = "windows")]
+        {
+            let _ = (check, requested_version, yes, allow_downgrade);
+            let guidance = "self-update is not supported on Windows yet; rerun the PowerShell installer or use your package manager";
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({ "self_update_supported": false, "guidance": guidance })
+                );
+                return Ok(());
+            }
+            anyhow::bail!(guidance);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            fetch_release(requested_version).await?
+        }
+    };
     let current = env!("CARGO_PKG_VERSION");
     let available = release_is_newer(current, &release.tag_name);
     let asset_name = update_asset_name().ok_or_else(|| {
