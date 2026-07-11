@@ -342,6 +342,7 @@ function _buildSvg(events, lanes, range, width, height, innerW, laneH) {
             'data-event-idx': i,
             'data-event-id': ev.event_id,
             'data-source-id': ev.source_id,
+            'data-timestamp-num': ev.timestamp_num,
         });
         const dot = _el('circle', {
             cx, cy, r: selected ? 7 : 5,
@@ -350,6 +351,7 @@ function _buildSvg(events, lanes, range, width, height, innerW, laneH) {
             'data-event-idx': i,
             'data-event-id': ev.event_id,
             'data-source-id': ev.source_id,
+            'data-timestamp-num': ev.timestamp_num,
             'data-severity': ev.severity || 'info',
         });
         svg.appendChild(hit);
@@ -625,11 +627,19 @@ window.__embedLogHideEventsTooltip = function () {
 
 // ── Filtering ─────────────────────────────────────────────────────────────
 
+function _chronologicalEvents(events) {
+    return events.slice().sort((a, b) => {
+        const timeA = Number.isFinite(a.timestamp_num) ? a.timestamp_num : Infinity;
+        const timeB = Number.isFinite(b.timestamp_num) ? b.timestamp_num : Infinity;
+        return timeA - timeB;
+    });
+}
+
 function _filteredEvents() {
-    return state.events.filter(ev =>
+    return _chronologicalEvents(state.events.filter(ev =>
         !_hiddenSources.has(ev.source_id) &&
         !_hiddenSeverities.has(ev.severity)
-    );
+    ));
 }
 
 function _renderFilters() {
@@ -774,10 +784,7 @@ function _eventKey(ev) {
 
 function _eventDeltas(ev) {
     if (!Number.isFinite(ev.timestamp_num)) return {};
-    const ordered = state.events
-        .filter(candidate => Number.isFinite(candidate.timestamp_num))
-        .slice()
-        .sort((a, b) => a.timestamp_num - b.timestamp_num);
+    const ordered = _chronologicalEvents(state.events.filter(candidate => Number.isFinite(candidate.timestamp_num)));
     const index = ordered.findIndex(candidate => _eventKey(candidate) === _eventKey(ev));
     if (index <= 0) return {};
     const previous = ordered[index - 1];

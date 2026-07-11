@@ -68,6 +68,18 @@ test.describe('event detection', () => {
     await expect(eventsContent).toBeVisible();
   });
 
+  test('event dots and navigation use chronological timestamp order', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await page.locator('.events-tab-btn').click();
+    await expect.poll(() => page.locator('.events-dot').count(), { timeout: 20_000 }).toBeGreaterThan(1);
+
+    const timestamps = await page.locator('.events-dot').evaluateAll(dots =>
+      dots.map(dot => Number(dot.dataset.timestampNum))
+    );
+    expect(timestamps).toEqual([...timestamps].sort((a, b) => a - b));
+  });
+
   test('event lanes identify both source and event rule', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
