@@ -96,6 +96,9 @@ pub(crate) enum SessionsCommand {
         /// Name assigned to the imported source.
         #[arg(long)]
         source: String,
+        /// Validate timestamps and report the planned import without modifying the session.
+        #[arg(long)]
+        dry_run: bool,
         #[command(flatten)]
         log_dir: LogDirArgs,
     },
@@ -413,11 +416,12 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             session_id,
             input,
             source,
+            dry_run,
             log_dir,
         } => {
             let dir = resolve_sessions_dir(&log_dir)?;
             let session = resolve_session(&dir, &session_id)?;
-            import_external_log(&session, &input, &source)
+            import_external_log(&session, &input, &source, dry_run)
         }
         SessionsCommand::Open {
             session_id,
@@ -478,7 +482,7 @@ fn parse_import_timestamp(line: &str) -> Option<(DateTime<FixedOffset>, &str)> {
         .map(|ts| (ts, body))
 }
 
-fn import_external_log(session: &SessionRecord, input: &Path, source: &str) -> Result<()> {
+fn import_external_log(session: &SessionRecord, input: &Path, source: &str, dry_run: bool) -> Result<()> {
     anyhow::ensure!(!source.trim().is_empty(), "--source must not be empty");
     let text = std::fs::read_to_string(input)
         .with_context(|| format!("read external log {}", input.display()))?;
@@ -508,6 +512,10 @@ fn import_external_log(session: &SessionRecord, input: &Path, source: &str) -> R
         !imported.is_empty(),
         "external log contains no importable lines"
     );
+    if dry_run {
+        println!("would import {} line(s) from {} as {source}", imported.len(), input.display());
+        return Ok(());
+    }
     let combined = manifest_combined_file(session)?;
     let existing = std::fs::read_to_string(&combined)
         .with_context(|| format!("read {}", combined.display()))?;
