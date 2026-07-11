@@ -607,7 +607,7 @@ async fn handle_tx_write(
 }
 
 /// Handle `event_rule.create` — add a rule for the current server/session.
-fn handle_event_rule_create(
+pub(crate) fn handle_event_rule_create(
     cmd: &serde_json::Value,
     state: &super::ServerState,
     msg_id: Option<&str>,
@@ -652,7 +652,7 @@ fn handle_event_rule_create(
     }))
 }
 
-fn handle_event_rule_list(state: &super::ServerState, msg_id: Option<&str>) -> String {
+pub(crate) fn handle_event_rule_list(state: &super::ServerState, msg_id: Option<&str>) -> String {
     let rules = match state.runtime_event_rules.read() {
         Ok(rules) => rules,
         Err(_) => return make_response("event_rule.list.result", msg_id, serde_json::json!({ "ok": false, "error": "runtime rule registry is unavailable" })),
@@ -664,7 +664,7 @@ fn handle_event_rule_list(state: &super::ServerState, msg_id: Option<&str>) -> S
     make_response("event_rule.list.result", msg_id, serde_json::json!({ "ok": true, "sources": sources }))
 }
 
-fn handle_event_rule_delete(cmd: &serde_json::Value, state: &super::ServerState, msg_id: Option<&str>) -> String {
+pub(crate) fn handle_event_rule_delete(cmd: &serde_json::Value, state: &super::ServerState, msg_id: Option<&str>) -> String {
     let source_id = match cmd.get("source_id").and_then(|value| value.as_str()) {
         Some(value) => value,
         None => return make_response("event_rule.delete.result", msg_id, serde_json::json!({ "ok": false, "error": "missing 'source_id'" })),

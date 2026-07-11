@@ -129,6 +129,14 @@ export function _selectionSetupPane(id) {
     rawBtn.title = "Download selected lines as raw .log file";
     rawBtn.addEventListener("click", e => { e.stopPropagation(); _downloadRaw(id); });
     moreDropdown.appendChild(rawBtn);
+
+    const eventRuleBtn = document.createElement("button");
+    eventRuleBtn.className = "copy-btn";
+    eventRuleBtn.id = "create-event-rule-" + id;
+    eventRuleBtn.textContent = "⚡ Create event rule";
+    eventRuleBtn.title = "Create a runtime event rule from one selected log line";
+    eventRuleBtn.addEventListener("click", e => { e.stopPropagation(); _createEventRule(id); });
+    moreDropdown.appendChild(eventRuleBtn);
     actionRow.appendChild(copyBtn);
     // Marker toggle (runtime only) — in the main action row
     if (can('markers')) {
@@ -898,6 +906,30 @@ function _flashButton(id, text, restoreMs = 900) {
 // ---------------------------------------------------------------------------
 // Copy — scope-aware
 // ---------------------------------------------------------------------------
+function _createEventRule(paneId) {
+    const selected = [...(state.selected[paneId] || [])];
+    if (selected.length !== 1) {
+        window.alert("Select exactly one log line to create an event rule.");
+        return;
+    }
+    const line = getLine(paneId, selected[0]);
+    const message = line?.rawText?.trim();
+    if (!message) return;
+    const name = window.prompt("Runtime event rule name:", "log-match");
+    if (!name?.trim()) return;
+    const escaped = message.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = window.prompt("Regex pattern (matches future lines):", escaped);
+    if (!pattern) return;
+    window.wsSend?.({
+        cmd: "event_rule.create",
+        source_id: paneId,
+        name: name.trim(),
+        pattern,
+        severity: "info",
+    });
+    _flashButton("create-event-rule-" + paneId, "Rule added");
+}
+
 function _copy(paneId) {
     if (state.selectionScope !== "exact") return _copyContext(paneId);
     return _copyExact(paneId);
