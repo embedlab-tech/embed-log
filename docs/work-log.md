@@ -209,3 +209,19 @@ Future entries must include this per-file added/removed-line summary.
 | `crates/embed-log-cli/src/commands/sessions.rs` | 60 | 0 | Archives full session artifacts with build diagnostics and bundle coverage. |
 | `crates/embed-log-cli/src/main.rs` | 1 | 0 | Covers `sessions bundle latest` CLI parsing. |
 | `docs/cli.md` | 7 | 0 | Documents portable support-bundle export. |
+
+## 2026-07-11 11:41:58 UTC / 2026-07-11 13:41:58 GMT+2 (Warsaw)
+
+- **Commit:** `45c48f8` — `Add session retention pruning`
+- **Task:** Add session retention pruning with dry-run
+- **Started:** 2026-07-11 11:41:04 UTC / 2026-07-11 13:41:04 GMT+2 (Warsaw)
+- **Completed:** 2026-07-11 11:41:58 UTC / 2026-07-11 13:41:58 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`45c48f8`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 61 | 0 | Adds size-reporting dry-run and deletion retention logic with coverage. |
+| `crates/embed-log-cli/src/main.rs` | 1 | 0 | Covers prune command parsing. |
+| `docs/cli.md` | 7 | 0 | Documents safe session-retention commands. |
