@@ -61,7 +61,7 @@ async function runGit(cwd: string, args: string[]) {
 function formatStats(numstat: string) {
   return numstat.split("\n").filter(Boolean).map((line) => {
     const [added = "0", removed = "0", ...name] = line.split("\t");
-    return `| \`${name.join("\t")}\` | ${added} | ${removed} | — |`;
+    return `| \`${name.join("\t")}\` | ${added} | ${removed} | Changed in implementation commit; replace with concise summary before committing. |`;
   });
 }
 
