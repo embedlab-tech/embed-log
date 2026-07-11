@@ -85,6 +85,7 @@ pub(crate) async fn cmd_update(
     check: bool,
     requested_version: Option<&str>,
     yes: bool,
+    allow_downgrade: bool,
     json: bool,
 ) -> Result<()> {
     let release = fetch_release(requested_version).await?;
@@ -118,8 +119,14 @@ pub(crate) async fn cmd_update(
         }
         return Ok(());
     }
-    if !available && requested_version.is_none() {
-        println!("embed-log {current} is already up to date");
+    if !available {
+        if release_is_older(current, &release.tag_name) && !allow_downgrade {
+            anyhow::bail!(
+                "refusing to downgrade from {current} to {}; rerun with --allow-downgrade --yes to override",
+                release.tag_name
+            );
+        }
+        println!("embed-log {current} is already at {}", release.tag_name);
         return Ok(());
     }
     install_release(&release, &asset_name).await?;
@@ -245,24 +252,40 @@ fn extract_tar_gz(bytes: &[u8], dest: &Path) -> Result<()> {
     let decoder = flate2::read::GzDecoder::new(bytes);
     let mut archive = tar::Archive::new(decoder);
     let mut entries = archive.entries().context("read update archive")?;
-    let Some(entry) = entries.next() else {
-        anyhow::bail!("update archive is empty");
-    };
-    let mut entry = entry.context("read update archive entry")?;
-    let path = entry.path().context("read update archive path")?;
-    anyhow::ensure!(
-        path == Path::new("embed-log"),
-        "update archive has unexpected entry {:?}",
-        path
-    );
-    let mut output = std::fs::File::create(dest).context("create staged executable")?;
-    std::io::copy(&mut entry, &mut output).context("extract staged executable")?;
+    let mut executable = None;
+    while let Some(entry) = entries.next() {
+        let mut entry = entry.context("read update archive entry")?;
+        let path = entry.path().context("read update archive path")?;
+        anyhow::ensure!(
+            path == Path::new("embed-log") && entry.header().entry_type().is_file(),
+            "update archive has unexpected entry {:?}",
+            path
+        );
+        anyhow::ensure!(
+            executable.is_none(),
+            "update archive contains duplicate executable entries"
+        );
+        let mut output = std::fs::File::create(dest).context("create staged executable")?;
+        std::io::copy(&mut entry, &mut output).context("extract staged executable")?;
+        executable = Some(());
+    }
+    anyhow::ensure!(executable.is_some(), "update archive is empty");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o755))?;
     }
     Ok(())
+}
+
+fn release_is_older(current: &str, tag: &str) -> bool {
+    let Ok(current) = semver::Version::parse(current.trim_start_matches('v')) else {
+        return false;
+    };
+    let Ok(release) = semver::Version::parse(tag.trim_start_matches('v')) else {
+        return false;
+    };
+    release < current
 }
 
 fn release_is_newer(current: &str, tag: &str) -> bool {
@@ -1128,6 +1151,41 @@ mod tests {
         assert_eq!(count_pcap_sources(&cfg), 1);
     }
 
+    fn test_tar(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        use std::io::Write;
+        let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        {
+            let mut archive = tar::Builder::new(&mut gzip);
+            for (name, data) in entries {
+                let mut header = tar::Header::new_gnu();
+                header.set_size(data.len() as u64);
+                header.set_mode(0o755);
+                header.set_cksum();
+                archive.append_data(&mut header, *name, *data).unwrap();
+            }
+            archive.finish().unwrap();
+        }
+        gzip.flush().unwrap();
+        gzip.finish().unwrap()
+    }
+
+    #[test]
+    fn extract_update_archive_accepts_only_expected_executable() {
+        let dir =
+            std::env::temp_dir().join(format!("embed-log-archive-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let destination = dir.join("embed-log");
+        extract_tar_gz(&test_tar(&[("embed-log", b"new binary")]), &destination).unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), b"new binary");
+        assert!(extract_tar_gz(&test_tar(&[("other", b"bad")]), &destination).is_err());
+        assert!(extract_tar_gz(
+            &test_tar(&[("embed-log", b"ok"), ("extra", b"bad")]),
+            &destination
+        )
+        .is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn release_api_url_supports_default_and_explicit_tags() {
         assert_eq!(
@@ -1186,6 +1244,8 @@ mod tests {
         assert!(release_is_newer("0.1.0", "v0.2.0"));
         assert!(!release_is_newer("0.2.0", "v0.1.0"));
         assert!(!release_is_newer("1.0.0", "v1.0.0-rc.1"));
+        assert!(release_is_older("1.0.0", "v0.9.0"));
+        assert!(!release_is_older("1.0.0", "v1.0.0"));
         assert!(!release_is_newer("invalid", "v1.0.0"));
     }
 

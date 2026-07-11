@@ -156,6 +156,9 @@ enum Command {
         /// Confirm executable replacement without prompting.
         #[arg(long)]
         yes: bool,
+        /// Permit installing an older release. Requires --yes.
+        #[arg(long, requires = "yes", conflicts_with = "check")]
+        allow_downgrade: bool,
         /// Machine-readable JSON output.
         #[arg(long, conflicts_with = "yes")]
         json: bool,
@@ -312,8 +315,9 @@ async fn main() -> Result<()> {
             check,
             version,
             yes,
+            allow_downgrade,
             json,
-        }) => misc::cmd_update(check, version.as_deref(), yes, json).await,
+        }) => misc::cmd_update(check, version.as_deref(), yes, allow_downgrade, json).await,
         Some(Command::Ports { json }) => misc::cmd_ports(json),
         Some(Command::Hello) => misc::cmd_hello(),
         Some(Command::Sessions { command }) => cmd_sessions(*command),
