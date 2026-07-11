@@ -13,6 +13,8 @@ use embed_log_core::config::{load_config, resolve_logs_root};
 use embed_log_core::postprocess::{dedupe_entry, denoise_message, elapsed_time};
 use embed_log_core::session::SessionExporter;
 
+use crate::util::open_url_in_default_browser;
+
 /// Shared `--dir`/`--config` args for resolving which logs directory a
 /// `sessions` command operates on. Flattened into every subcommand so the
 /// flags and resolution order are identical everywhere — see
@@ -85,6 +87,12 @@ pub(crate) enum SessionsCommand {
         log_dir: LogDirArgs,
         #[arg(long)]
         json: bool,
+    },
+    /// Open a session's self-contained HTML report in the default browser.
+    Open {
+        session_id: String,
+        #[command(flatten)]
+        log_dir: LogDirArgs,
     },
     /// Export a session as HTML or raw merged text.
     Export {
@@ -388,6 +396,22 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             } else {
                 search_sessions(&dir, filters, format)
             }
+        }
+        SessionsCommand::Open {
+            session_id,
+            log_dir,
+        } => {
+            let dir = resolve_sessions_dir(&log_dir)?;
+            let session = resolve_session(&dir, &session_id)?;
+            let html = session.dir.join("session.html");
+            if !html.exists() {
+                export_session_html(&session, html.clone())?;
+            }
+            let path = html.canonicalize().unwrap_or(html);
+            open_url_in_default_browser(&path.display().to_string())
+                .context("open session report in default browser")?;
+            println!("opened {}", path.display());
+            Ok(())
         }
         SessionsCommand::Export {
             session_id,

@@ -238,6 +238,12 @@ embed-log sessions info <SESSION_ID> --dir logs
 embed-log sessions info latest --dir logs --json
 ```
 
+Open a session report in the default browser. If the HTML export is missing, it is generated first:
+
+```bash
+embed-log sessions open latest --dir logs
+```
+
 Export a recorded session:
 
 ```bash
