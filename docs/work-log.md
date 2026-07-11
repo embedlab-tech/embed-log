@@ -83,3 +83,22 @@ Future entries must include this per-file added/removed-line summary.
 | `crates/embed-log-cli/src/commands/misc.rs` | 68 | 0 | Fetches the latest GitHub Release and compares semantic versions. |
 | `crates/embed-log-cli/src/main.rs` | 11 | 0 | Adds the `update --check [--json]` command surface. |
 | `docs/cli.md` | 9 | 0 | Documents update-check usage and current install limitation. |
+
+## 2026-07-11 11:08:39 UTC / 2026-07-11 13:08:39 GMT+2 (Warsaw)
+
+- **Commit:** `64f0000` — `Implement verified self-update installation`
+- **Task:** Implement verified self-update installation for release archives
+- **Started:** 2026-07-11 11:06:39 UTC / 2026-07-11 13:06:39 GMT+2 (Warsaw)
+- **Completed:** 2026-07-11 11:08:39 UTC / 2026-07-11 13:08:39 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`64f0000`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `Cargo.lock` | 24 | 0 | Locks archive extraction and SHA-256 dependencies. |
+| `Cargo.toml` | 3 | 0 | Adds shared archive and hash dependencies. |
+| `crates/embed-log-cli/Cargo.toml` | 3 | 0 | Enables updater archive and checksum dependencies. |
+| `crates/embed-log-cli/src/commands/misc.rs` | 181 | 32 | Downloads release assets, verifies SHA-256, extracts, backs up, and replaces the executable. |
+| `crates/embed-log-cli/src/main.rs` | 15 | 4 | Adds version selection and explicit install confirmation flags. |
+| `docs/cli.md` | 3 | 1 | Documents check and verified-install update modes. |
