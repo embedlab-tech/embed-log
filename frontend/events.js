@@ -9,7 +9,7 @@
 // switchTab hides our content when a regular tab is activated.
 
 import { state, TABS, PANES, paneLabel, formatRelativeTimestamp } from './state.js';
-import { switchTab } from './tabs.js';
+import { renderTabBar, switchTab } from './tabs.js';
 import { scrollPaneToLineIdx, scrollPaneToTs } from './lines.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────
@@ -115,6 +115,11 @@ export function destroyEventsTab() {
 
 export function addEvent(ev) {
     state.events.push(ev);
+    if (!state.eventsEnabled) {
+        state.eventsEnabled = true;
+        initEventsTab();
+        renderTabBar();
+    }
     _updateCount();
     if (_contentEl && _filterSignature !== _eventFilterSignature()) _renderFilters();
     // Avoid rebuilding a large hidden SVG for every incoming event. Render the
@@ -346,6 +351,9 @@ function _buildSvg(events, lanes, range, width, height, innerW, laneH) {
             'data-event-id': ev.event_id,
             'data-source-id': ev.source_id,
             'data-timestamp-num': ev.timestamp_num,
+            tabindex: 0,
+            role: 'button',
+            'aria-label': `${ev.severity || 'info'} ${ev.event_id} on ${paneLabel(ev.source_id)} at ${_formatEventTime(ev) || ev.timestamp || 'unknown time'}`,
         });
         const dot = _el('circle', {
             cx, cy, r: selected ? 7 : 5,
@@ -436,6 +444,15 @@ function _initInteraction() {
     _svgWrapEl.addEventListener('click', e => {
         const hit = e.target.closest('.events-dot-hit');
         if (!hit) return;
+        const ev = _filteredEvents()[parseInt(hit.getAttribute('data-event-idx'), 10)];
+        if (ev) _onEventClick(ev);
+    });
+
+    _svgWrapEl.addEventListener('keydown', e => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        const hit = e.target.closest('.events-dot-hit');
+        if (!hit) return;
+        e.preventDefault();
         const ev = _filteredEvents()[parseInt(hit.getAttribute('data-event-idx'), 10)];
         if (ev) _onEventClick(ev);
     });
@@ -563,7 +580,8 @@ function _showTooltip(ev, x, y, { action = false } = {}) {
     const deltas = _eventDeltas(ev);
     const deltaDetails = [
         deltas.previous && `<div>Δ previous event: <code>${_formatDuration(deltas.previous)}</code></div>`,
-        deltas.sameRule && `<div>Δ previous ${_esc(ev.event_id)}: <code>${_formatDuration(deltas.sameRule)}</code></div>`,
+        deltas.sameRule && deltas.sameRule !== deltas.previous &&
+            `<div>Δ previous ${_esc(paneLabel(ev.source_id))} · ${_esc(ev.event_id)}: <code>${_formatDuration(deltas.sameRule)}</code></div>`,
     ].filter(Boolean).join('');
     const actions = action
         ? '<div class="et-actions"><button type="button" class="events-jump-log-btn">Jump to log</button></div>'

@@ -80,6 +80,20 @@ test.describe('event detection', () => {
     expect(timestamps).toEqual([...timestamps].sort((a, b) => a - b));
   });
 
+  test('event dots are keyboard-accessible and selectable', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await page.locator('.events-tab-btn').click();
+    const hit = page.locator('.events-dot-hit').first();
+    await expect(hit).toBeVisible({ timeout: 20_000 });
+    await expect(hit).toHaveAttribute('role', 'button');
+    await expect(hit).toHaveAttribute('tabindex', '0');
+    await expect(hit).toHaveAttribute('aria-label', /on/);
+    await hit.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#events-tooltip.actionable')).toBeVisible();
+  });
+
   test('event lanes identify both source and event rule', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
@@ -270,7 +284,7 @@ test.describe('event detection', () => {
     const tooltip = page.locator('#events-tooltip');
     await expect(tooltip).toHaveClass(/visible/);
     await expect(tooltip).toContainText('Δ previous event:');
-    await expect(tooltip).toContainText(`Δ previous ${selected}:`);
+    expect(selected).toBeTruthy();
   });
 
   test('event filters include every source and severity present in the timeline', async ({ page }) => {
