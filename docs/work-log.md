@@ -64,3 +64,22 @@ Future entries must include this per-file added/removed-line summary.
 | `crates/embed-log-cli/build.rs` | 5 | 1 | Embeds the build target triple for runtime diagnostics. |
 | `crates/embed-log-cli/src/commands/misc.rs` | 39 | 9 | Adds structured version reporting with target/executable fields and test coverage. |
 | `docs/cli.md` | 2 | 0 | Documents release/support diagnostic output. |
+
+## 2026-07-11 11:01:08 UTC / 2026-07-11 13:01:08 GMT+2 (Warsaw)
+
+- **Commit:** `00e4ffb` — `Add release update availability checks`
+- **Task:** Add release update availability checks
+- **Started:** 2026-07-11 10:59:38 UTC / 2026-07-11 12:59:38 GMT+2 (Warsaw)
+- **Completed:** 2026-07-11 11:01:08 UTC / 2026-07-11 13:01:08 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`00e4ffb`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `Cargo.lock` | 275 | 3 | Locks the HTTP/TLS and semantic-version dependencies. |
+| `Cargo.toml` | 2 | 0 | Adds workspace HTTP and semantic-version dependencies. |
+| `crates/embed-log-cli/Cargo.toml` | 3 | 0 | Enables update-check dependencies for the CLI. |
+| `crates/embed-log-cli/src/commands/misc.rs` | 68 | 0 | Fetches the latest GitHub Release and compares semantic versions. |
+| `crates/embed-log-cli/src/main.rs` | 11 | 0 | Adds the `update --check [--json]` command surface. |
+| `docs/cli.md` | 9 | 0 | Documents update-check usage and current install limitation. |
