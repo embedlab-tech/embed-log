@@ -42,13 +42,13 @@ embed-log run -s /dev/ttyUSB0 -s /dev/ttyUSB1 -f ./device.log --baud 115200
 embed-log run /dev/ttyUSB0 --tui
 ```
 
-This creates an in-memory configuration and opens the web UI (or TUI). Persist the generated configuration only when you need to customize it:
+This creates an in-memory configuration, opens the web UI (or TUI), and saves a normal session under `./logs/`. Each source gets its own tab. Persist the generated configuration only when you need a custom layout or parser:
 
 ```bash
 embed-log run /dev/ttyUSB0 --save-config embed-log.yml
 ```
 
-Run `embed-log doctor` if a serial device cannot be opened. For multi-source layouts, parsers, events, and plugins, run `embed-log` with no config to use browser onboarding or create YAML explicitly.
+See the [quick-start guide](docs/quickstart.md) for all fast-run options, session locations, and when to switch to YAML. Run `embed-log doctor` if a serial device cannot be opened.
 
 ## Claude Code plugin
 
@@ -231,6 +231,7 @@ The old per-source TCP `inject_port`, `forward_port`, and `forward_ports` config
 
 ## Documentation
 
+- [Quick start](docs/quickstart.md)
 - [Architecture](docs/architecture.md)
 - [Configuration](docs/configuration.md)
 - [CLI reference](docs/cli.md)

@@ -181,22 +181,14 @@ fn quick_run_config(
         }
     }
 
-    // The UI supports at most two panes per tab. Pair generated sources so a
-    // quick run remains useful for one or many devices without hidden sources.
-    for (index, pair) in config.sources.chunks(2).enumerate() {
-        let panes = pair
-            .iter()
-            .map(|source| PaneConfig::Simple(source.name.clone()))
-            .collect();
-        let label = if pair.len() == 1 {
-            pair[0]
-                .label
-                .clone()
-                .unwrap_or_else(|| pair[0].name.clone())
-        } else {
-            format!("Sources {} + {}", index * 2 + 1, index * 2 + 2)
-        };
-        config.tabs.push(TabConfig { label, panes });
+    // Keep quick runs simple and predictable: each source gets one tab.
+    // Users can save the generated YAML and create two-pane layouts later.
+    for source in &config.sources {
+        let label = source.label.clone().unwrap_or_else(|| source.name.clone());
+        config.tabs.push(TabConfig {
+            label,
+            panes: vec![PaneConfig::Simple(source.name.clone())],
+        });
     }
     Ok(config)
 }
@@ -427,7 +419,7 @@ mod tests {
     }
 
     #[test]
-    fn quick_run_builds_uart_file_sources_and_two_pane_tabs() {
+    fn quick_run_builds_uart_file_sources_and_one_tab_per_source() {
         let config = quick_run_config(
             vec![PathBuf::from("/dev/ttyUSB0"), PathBuf::from("/dev/ttyUSB1")],
             vec![PathBuf::from("device.log")],
@@ -440,9 +432,8 @@ mod tests {
         assert_eq!(config.sources[0].baudrate, Some(9_600));
         assert_eq!(config.sources[2].source_type, "file");
         assert_eq!(config.sources[2].baudrate, None);
-        assert_eq!(config.tabs.len(), 2);
-        assert_eq!(config.tabs[0].panes.len(), 2);
-        assert_eq!(config.tabs[1].panes.len(), 1);
+        assert_eq!(config.tabs.len(), 3);
+        assert!(config.tabs.iter().all(|tab| tab.panes.len() == 1));
     }
 
     #[test]
