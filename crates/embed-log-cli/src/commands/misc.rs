@@ -65,6 +65,66 @@ pub(crate) fn cmd_version(config_path: Option<&Path>, json: bool) -> Result<()> 
     Ok(())
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct GithubRelease {
+    tag_name: String,
+    html_url: String,
+}
+
+/// `embed-log update` — check the latest stable GitHub Release. Downloading
+/// and replacing the executable is intentionally a later step; this command
+/// establishes the signed-release discovery path without changing the system.
+pub(crate) async fn cmd_update(_check: bool, json: bool) -> Result<()> {
+    const REPO: &str = "krezolekcoder/embed-log";
+    let url = format!("https://api.github.com/repos/{REPO}/releases/latest");
+    let release = reqwest::Client::new()
+        .get(&url)
+        .header(reqwest::header::USER_AGENT, "embed-log-updater")
+        .send()
+        .await
+        .context("contact GitHub Releases")?
+        .error_for_status()
+        .context("read latest GitHub Release")?
+        .json::<GithubRelease>()
+        .await
+        .context("decode latest GitHub Release")?;
+    let current = env!("CARGO_PKG_VERSION");
+    let available = release_is_newer(current, &release.tag_name);
+    let out = serde_json::json!({
+        "current_version": current,
+        "latest_version": release.tag_name,
+        "update_available": available,
+        "release_url": release.html_url,
+        "install_supported": false,
+    });
+    if json {
+        println!("{}", serde_json::to_string_pretty(&out)?);
+    } else if available {
+        println!(
+            "update available: {current} → {}",
+            out["latest_version"].as_str().unwrap_or("unknown")
+        );
+        println!(
+            "  release: {}",
+            out["release_url"].as_str().unwrap_or("unknown")
+        );
+        println!("  automatic installation is not implemented yet; use the release installer.");
+    } else {
+        println!("embed-log {current} is up to date");
+    }
+    Ok(())
+}
+
+fn release_is_newer(current: &str, tag: &str) -> bool {
+    let Ok(current) = semver::Version::parse(current.trim_start_matches('v')) else {
+        return false;
+    };
+    let Ok(latest) = semver::Version::parse(tag.trim_start_matches('v')) else {
+        return false;
+    };
+    latest > current
+}
+
 fn version_report() -> serde_json::Value {
     let executable = std::env::current_exe()
         .ok()
@@ -916,6 +976,14 @@ mod tests {
         let cfg = load_config(&path).unwrap();
         std::fs::remove_file(&path).ok();
         assert_eq!(count_pcap_sources(&cfg), 1);
+    }
+
+    #[test]
+    fn release_version_comparison_accepts_v_prefix_and_prereleases() {
+        assert!(release_is_newer("0.1.0", "v0.2.0"));
+        assert!(!release_is_newer("0.2.0", "v0.1.0"));
+        assert!(!release_is_newer("1.0.0", "v1.0.0-rc.1"));
+        assert!(!release_is_newer("invalid", "v1.0.0"));
     }
 
     #[test]

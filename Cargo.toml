@@ -39,6 +39,8 @@ clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 thiserror = "2"
 slug = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+semver = "1"
 
 # Core + TUI crates (used by CLI and Tauri)
 embed-log-core = { path = "crates/embed-log-core" }

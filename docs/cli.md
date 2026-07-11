@@ -179,6 +179,15 @@ embed-log doctor --serial /dev/ttyUSB0
 
 Serial checks only test filesystem-level readability/writability and never configure or reset an attached UART. A missing path or permission denial produces an actionable warning.
 
+Check for updates:
+
+```bash
+embed-log update --check
+embed-log update --check --json
+```
+
+This checks the latest stable GitHub Release and reports whether a newer version exists. Automatic binary replacement is intentionally not enabled yet; use the release installer when an update is available.
+
 Serial ports:
 
 ```bash

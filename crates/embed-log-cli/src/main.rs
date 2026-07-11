@@ -145,6 +145,16 @@ enum Command {
         json: bool,
     },
 
+    /// Check GitHub Releases for a newer CLI version
+    Update {
+        /// Only check and report; no binary replacement is performed yet.
+        #[arg(long)]
+        check: bool,
+        /// Machine-readable JSON output.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// List detected serial ports
     Ports {
         /// Machine-readable JSON output
@@ -292,6 +302,7 @@ async fn main() -> Result<()> {
             serial,
             json,
         }) => misc::cmd_doctor(config.as_deref(), &serial, json),
+        Some(Command::Update { check, json }) => misc::cmd_update(check, json).await,
         Some(Command::Ports { json }) => misc::cmd_ports(json),
         Some(Command::Hello) => misc::cmd_hello(),
         Some(Command::Sessions { command }) => cmd_sessions(*command),
