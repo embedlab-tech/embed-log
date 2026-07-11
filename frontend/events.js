@@ -565,7 +565,7 @@ function _showTooltip(ev, x, y, { action = false } = {}) {
         : '';
     _eventsTooltipEl.innerHTML =
         `<div class="et-head"><span class="et-sev et-sev-${ev.severity}">${ev.severity}</span>${_esc(ev.event_id)}</div>` +
-        `<div class="et-meta">${_esc(paneLabel(ev.source_id))} · ${_esc(ev.timestamp || '')} · line ${ev.line_idx ?? '?'}</div>` +
+        `<div class="et-meta">${_esc(paneLabel(ev.source_id))} · ${_esc(_formatEventTime(ev) || ev.timestamp || '')} · line ${ev.line_idx ?? '?'}</div>` +
         `<div class="et-msg">${_esc(ev.message || '')}</div>` +
         (deltaDetails ? `<div class="et-deltas">${deltaDetails}</div>` : '') +
         captures + actions;
@@ -844,6 +844,13 @@ function _ensureTimeVisibleInZoom(ms) {
     if (ms >= range.start && ms <= range.end) return;
     const span = range.end - range.start || 1000;
     _viewRange = { start: ms - span / 2, end: ms + span / 2 };
+}
+
+function _formatEventTime(ev) {
+    if (state.timestampMode === 'relative' && Number.isFinite(ev.rel_num)) {
+        return formatRelativeTimestamp(ev.rel_num);
+    }
+    return _formatTime(ev.timestamp_num);
 }
 
 function _formatTime(epochMs) {

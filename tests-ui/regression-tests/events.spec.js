@@ -193,6 +193,31 @@ test.describe('event detection', () => {
     await expect(page.locator('.events-jump-log-btn')).toBeVisible();
   });
 
+  test('event tooltip timestamp follows the display mode toggle', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await page.locator('.events-tab-btn').click();
+    await expect.poll(() => page.locator('.events-dot-hit').count(), { timeout: 20_000 }).toBeGreaterThan(0);
+
+    const selectFirstEvent = () => page.evaluate(() =>
+      document.querySelector('.events-dot-hit')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    );
+    const tooltip = page.locator('#events-tooltip');
+    await page.locator('#btn-settings').click();
+    const toggle = page.locator('#btn-timestamp-mode');
+    if (await toggle.textContent() !== 'Relative') await toggle.click();
+    await page.locator('#btn-settings').click();
+    await selectFirstEvent();
+    await expect(tooltip).toContainText(/T\+\d+:\d{2}:\d{2}\.\d{3}/);
+
+    await page.locator('#btn-settings').click();
+    await page.locator('#btn-timestamp-mode').click();
+    await page.locator('#btn-settings').click();
+    await selectFirstEvent();
+    await expect(tooltip).not.toContainText('T+');
+    await expect(tooltip).toContainText(/\d{2}:\d{2}:\d{2}\.\d{3}/);
+  });
+
   test('event hover tooltip dismisses promptly after leaving the timeline', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
