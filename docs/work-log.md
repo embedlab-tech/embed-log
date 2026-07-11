@@ -365,3 +365,19 @@ Future entries must include this per-file added/removed-line summary.
 | `crates/embed-log-core/src/net/control_ws.rs` | 115 | 0 | Adds validated runtime event-rule create/list/delete commands and CRUD coverage. |
 | `crates/embed-log-core/src/net/ws_server.rs` | 4 | 1 | Stores the shared runtime event-rule registry in server state. |
 | `crates/embed-log-core/src/runtime/server.rs` | 23 | 4 | Matches runtime rules in source writers through the existing event persistence path. |
+
+## 2026-07-11 23:58:55 UTC / 2026-07-12 01:58:55 GMT+2 (Warsaw)
+
+- **Commit:** `8ffa5de` — `Create runtime event rules from selected logs`
+- **Task:** Add selection-based runtime event rule creation
+- **Started:** 2026-07-11 23:58:49 UTC / 2026-07-12 01:58:49 GMT+2 (Warsaw)
+- **Completed:** 2026-07-11 23:58:55 UTC / 2026-07-12 01:58:55 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`8ffa5de`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-core/src/net/control_ws.rs` | 3 | 3 | Exposes runtime event-rule handlers to the browser WebSocket server. |
+| `crates/embed-log-core/src/net/ws_server.rs` | 7 | 1 | Routes browser event-rule CRUD commands through the shared handlers. |
+| `frontend/selection.js` | 32 | 0 | Adds a selected-line action that prompts for and submits a runtime event rule. |
