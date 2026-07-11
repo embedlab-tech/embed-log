@@ -349,3 +349,19 @@ Future entries must include this per-file added/removed-line summary.
 | --- | ---: | ---: | --- |
 | `frontend/events.js` | 20 | 2 | Activates Events from received events, suppresses duplicate deltas, and adds keyboard-accessible dots. |
 | `tests-ui/regression-tests/events.spec.js` | 15 | 1 | Covers keyboard selection and updated recurring-event tooltip behavior. |
+
+## 2026-07-11 23:54:24 UTC / 2026-07-12 01:54:24 GMT+2 (Warsaw)
+
+- **Commit:** `2dae0a3` — `Add runtime event rule control API`
+- **Task:** Add runtime event-rule matching and control API
+- **Started:** 2026-07-11 23:50:21 UTC / 2026-07-12 01:50:21 GMT+2 (Warsaw)
+- **Completed:** 2026-07-11 23:54:24 UTC / 2026-07-12 01:54:24 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`2dae0a3`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-core/src/net/control_ws.rs` | 115 | 0 | Adds validated runtime event-rule create/list/delete commands and CRUD coverage. |
+| `crates/embed-log-core/src/net/ws_server.rs` | 4 | 1 | Stores the shared runtime event-rule registry in server state. |
+| `crates/embed-log-core/src/runtime/server.rs` | 23 | 4 | Matches runtime rules in source writers through the existing event persistence path. |
