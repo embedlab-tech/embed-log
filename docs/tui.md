@@ -38,9 +38,11 @@ The standalone `embed-log-tui` binary is a client only. It does not load YAML co
 - pane focus and synchronized timestamp navigation
 - absolute/relative timestamp toggle
 - selection and clipboard copy
+- per-pane regex filtering (`/`)
 - user/event markers and marker navigation
 - events timeline tab when event rules are configured
 - clear active pane
+- export the current session as self-contained HTML (`x`)
 - UART TX input for writable UART sources
 - reconnect after server restart/disconnect
 
@@ -48,7 +50,7 @@ The standalone `embed-log-tui` binary is a client only. It does not load YAML co
 
 - The TUI does not run browser JavaScript plugins. Plugin configuration is visible as metadata, but plugin-rendered browser UI is not reproduced.
 - The TUI does not provide onboarding. Create a config with `embed-log onboard`, `embed-log init`, or by editing YAML first.
-- Static HTML export/session browsing is still better handled by the browser UI or the `embed-log sessions` CLI commands.
+- The TUI can request an HTML export, but opening and browsing the exported HTML remains a browser workflow.
 
 ## Keybindings
 
@@ -68,11 +70,13 @@ Press `?` inside the TUI to show the built-in help overlay.
 | `Esc` | Clear selection, or close help |
 | `c` | Toggle exact/context selection scope |
 | `y` | Copy selected lines to clipboard |
+| `/` | Filter active pane with a regex; empty filter clears |
 | `m` | Toggle marker on current line |
 | `[`, `]` | Previous/next marker |
 | `M` | Include/exclude event markers in marker navigation |
 | `t` | Toggle absolute/relative timestamps |
 | `u` | Toggle unwrap mode |
+| `x` | Export the current session as self-contained HTML |
 | `C` | Clear active pane in the UI |
 | `:`, `i` | Open TX input for writable UART panes |
 | `e` | Open Events tab when event rules are configured |

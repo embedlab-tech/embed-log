@@ -37,6 +37,10 @@ pub fn handle_key(
         handle_tx_key(state, client, key);
         return KeyAction::Continue;
     }
+    if state.filter_mode {
+        handle_filter_key(state, key);
+        return KeyAction::Continue;
+    }
     if key.is_quit() {
         return KeyAction::Quit;
     }
@@ -59,6 +63,10 @@ pub fn handle_key(
     match key.code {
         // ── Help / TX open ──
         KeyCode::Char('?') => state.show_help = true,
+        KeyCode::Char('/') => {
+            state.filter_mode = true;
+            state.filter_buffer.clear();
+        }
         KeyCode::Char(':') => state.open_tx_mode(),
         KeyCode::Char('i')
             if state
@@ -250,6 +258,12 @@ pub fn handle_key(
                 TimestampMode::Relative => TimestampMode::Absolute,
             };
         }
+        // Export the current session as self-contained HTML. The server reports
+        // completion through session_html_status in the status bar.
+        KeyCode::Char('x') => {
+            let _ = client.commands.try_send(ClientCommand::ExportSessionHtml);
+            state.tx_status = Some("exporting session HTML…".to_string());
+        }
         // Clear logs (active pane).
         KeyCode::Char('C') => {
             let pane = state.active_pane_id();
@@ -260,6 +274,42 @@ pub fn handle_key(
     }
 
     KeyAction::Continue
+}
+
+fn handle_filter_key(state: &mut State, key: &InputKey) {
+    match key.code {
+        KeyCode::Esc => {
+            state.filter_mode = false;
+            state.filter_buffer.clear();
+        }
+        KeyCode::Enter => {
+            let pattern = state.filter_buffer.trim();
+            match regex::Regex::new(pattern) {
+                Ok(regex) => {
+                    if let Some(pane) = state.active_pane_id() {
+                        state
+                            .filters
+                            .insert(pane, (!pattern.is_empty()).then_some(regex));
+                    }
+                    state.tx_status = Some(if pattern.is_empty() {
+                        "filter cleared".to_string()
+                    } else {
+                        format!("filter: {pattern}")
+                    });
+                    state.filter_mode = false;
+                    state.filter_buffer.clear();
+                }
+                Err(error) => state.tx_status = Some(format!("invalid filter: {error}")),
+            }
+        }
+        KeyCode::Backspace => {
+            state.filter_buffer.pop();
+        }
+        KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            state.filter_buffer.push(c);
+        }
+        _ => {}
+    }
 }
 
 fn handle_tx_key(state: &mut State, client: &mut ClientHandle, key: &InputKey) {

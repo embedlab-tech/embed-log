@@ -53,6 +53,8 @@ fn draw_help_overlay(f: &mut Frame, area: Rect) {
         Line::from("c / y            toggle exact/context, copy selection"),
         Line::from("m, [, ], M       marker toggle/nav/event-marker toggle"),
         Line::from("t / u / C        timestamp mode, unwrap, clear active pane"),
+        Line::from("/                filter active pane (empty input clears)"),
+        Line::from("x                export current session as HTML"),
         Line::from(": or i           TX mode for writable UART panes"),
         Line::from("e                events tab when event rules are configured"),
         Line::from("? / Esc          close this help"),
@@ -417,6 +419,19 @@ fn draw_status_bar(f: &mut Frame, state: &State, area: Rect) {
         .as_ref()
         .map(|s| format!(" │ tx:{s}"))
         .unwrap_or_default();
+
+    if state.filter_mode {
+        let line = Line::from(vec![
+            Span::styled("filter /", Style::default().fg(Color::Yellow)),
+            Span::raw(&state.filter_buffer),
+            Span::raw("  Enter=apply Esc=cancel"),
+        ]);
+        f.render_widget(
+            Paragraph::new(line).style(Style::default().bg(Color::Black)),
+            area,
+        );
+        return;
+    }
 
     let line = Line::from(vec![
         conn_span,

@@ -182,6 +182,10 @@ pub struct State {
     pub splitter: f32,
     /// Jump-to-bottom toggle per pane (true = follow new lines).
     pub at_bottom: HashMap<String, bool>,
+    /// Regex filter input mode for the active pane.
+    pub filter_mode: bool,
+    /// Pending regex entered while `filter_mode` is active.
+    pub filter_buffer: String,
     /// TX input mode active (bottom input row shown for the active UART pane).
     pub tx_mode: bool,
     /// Current TX input buffer.
