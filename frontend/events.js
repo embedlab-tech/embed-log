@@ -297,7 +297,7 @@ function _buildSvg(events, lanes, range, width, height, innerW, laneH) {
             x: LEFT_MARGIN - 8, y: y + laneH / 2 + 4,
             'text-anchor': 'end', class: 'events-lane-label',
         });
-        label.textContent = eventId;
+        label.textContent = _eventLaneLabel(eventId);
         svg.appendChild(label);
     });
 
@@ -322,7 +322,7 @@ function _buildSvg(events, lanes, range, width, height, innerW, laneH) {
 
     // Event dots
     events.forEach((ev, i) => {
-        const laneIdx = lanes.get(ev.event_id);
+        const laneIdx = lanes.get(_eventLaneKey(ev));
         if (laneIdx === undefined) return;
         const cx = xScale(ev.timestamp_num);
         const cy = TOP_MARGIN + laneIdx * laneH + laneH / 2;
@@ -586,7 +586,7 @@ function _showTooltip(ev, x, y, { action = false } = {}) {
 function _showTooltipForEvent(ev, options = {}) {
     if (!_svgWrapEl || !_eventsTooltipEl) return;
     const x = _timeToRenderedX(ev.timestamp_num);
-    const laneIdx = _computeLanes().get(ev.event_id);
+    const laneIdx = _computeLanes().get(_eventLaneKey(ev));
     if (x === null || laneIdx === undefined) return;
 
     const rect = _svgWrapEl.getBoundingClientRect();
@@ -603,7 +603,7 @@ function _cancelTooltipHide() {
     }
 }
 
-function _scheduleTooltipHide(delay = 450) {
+function _scheduleTooltipHide(delay = 125) {
     if (_tooltipPinned) return;
     _cancelTooltipHide();
     _tooltipHideTimer = setTimeout(() => {
@@ -681,11 +681,23 @@ function _el(tag, attrs = {}) {
     return e;
 }
 
+const LANE_SEPARATOR = '\u001f';
+
+function _eventLaneKey(ev) {
+    return `${ev.source_id}${LANE_SEPARATOR}${ev.event_id}`;
+}
+
+function _eventLaneLabel(key) {
+    const [sourceId, eventId] = key.split(LANE_SEPARATOR);
+    return `${paneLabel(sourceId)} · ${eventId}`;
+}
+
 function _computeLanes() {
     const lanes = new Map();
     state.events.forEach(ev => {
         if (!_hiddenSources.has(ev.source_id) && !_hiddenSeverities.has(ev.severity)) {
-            if (!lanes.has(ev.event_id)) lanes.set(ev.event_id, lanes.size);
+            const key = _eventLaneKey(ev);
+            if (!lanes.has(key)) lanes.set(key, lanes.size);
         }
     });
     // Before the first live event arrives, still render an SVG with lanes from
@@ -696,7 +708,8 @@ function _computeLanes() {
             if (_hiddenSources.has(src) || !Array.isArray(rules)) return;
             rules.forEach(rule => {
                 if (_hiddenSeverities.has(rule.severity)) return;
-                if (rule?.name && !lanes.has(rule.name)) lanes.set(rule.name, lanes.size);
+                const key = _eventLaneKey({ source_id: src, event_id: rule?.name });
+                if (rule?.name && !lanes.has(key)) lanes.set(key, lanes.size);
             });
         });
     }

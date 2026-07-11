@@ -68,6 +68,16 @@ test.describe('event detection', () => {
     await expect(eventsContent).toBeVisible();
   });
 
+  test('event lanes identify both source and event rule', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await page.locator('.events-tab-btn').click();
+    await expect.poll(() => page.locator('.events-lane-label').count(), { timeout: 20_000 }).toBeGreaterThan(0);
+
+    const labels = await page.locator('.events-lane-label').allTextContents();
+    expect(labels.every(label => label.includes(' · '))).toBeTruthy();
+  });
+
   test('event marker rendering on log lines uses severity colors', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
@@ -181,6 +191,23 @@ test.describe('event detection', () => {
     await expect(tooltip).toHaveClass(/visible/);
     await expect(page.locator('.events-dot.selected')).toBeVisible();
     await expect(page.locator('.events-jump-log-btn')).toBeVisible();
+  });
+
+  test('event hover tooltip dismisses promptly after leaving the timeline', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await page.locator('.events-tab-btn').click();
+    await expect.poll(() => page.locator('.events-dot-hit').count(), { timeout: 20_000 }).toBeGreaterThan(0);
+
+    await page.evaluate(() => {
+      const hit = document.querySelector('.events-dot-hit');
+      const rect = hit?.getBoundingClientRect();
+      hit?.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: rect?.left, clientY: rect?.top }));
+      document.querySelector('.events-svg-wrap')?.dispatchEvent(new PointerEvent('pointerleave', { bubbles: true }));
+    });
+    const tooltip = page.locator('#events-tooltip');
+    await expect(tooltip).toHaveClass(/visible/);
+    await expect(tooltip).toBeHidden({ timeout: 500 });
   });
 
   test('selected recurring event shows elapsed time since prior events', async ({ page }) => {
