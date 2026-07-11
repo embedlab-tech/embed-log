@@ -460,6 +460,7 @@ mod tests {
             ["embed-log", "sessions", "list"].as_slice(),
             ["embed-log", "sessions", "info", "abc"].as_slice(),
             ["embed-log", "sessions", "open", "latest"].as_slice(),
+            ["embed-log", "sessions", "bundle", "latest"].as_slice(),
             ["embed-log", "sessions", "export", "abc", "--format", "raw"].as_slice(),
             ["embed-log", "sessions", "combined", "abc", "--lines", "10"].as_slice(),
             [

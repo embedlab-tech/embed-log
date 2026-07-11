@@ -247,6 +247,13 @@ embed-log sessions import latest ./pytest.log --source PYTEST --dry-run
 # [2026-07-11T11:21:48+00:00] assertion passed
 ```
 
+Create a portable support bundle. It includes all session artifacts plus `embed-log-version.json` build diagnostics:
+
+```bash
+embed-log sessions bundle latest --dir logs
+embed-log sessions bundle latest --output ./support.tar.gz
+```
+
 Open a session report in the default browser. If the HTML export is missing, it is generated first:
 
 ```bash

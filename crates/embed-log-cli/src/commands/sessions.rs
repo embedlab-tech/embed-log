@@ -102,6 +102,14 @@ pub(crate) enum SessionsCommand {
         #[command(flatten)]
         log_dir: LogDirArgs,
     },
+    /// Create a portable .tar.gz support bundle for a session.
+    Bundle {
+        session_id: String,
+        #[command(flatten)]
+        log_dir: LogDirArgs,
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
     /// Open a session's self-contained HTML report in the default browser.
     Open {
         session_id: String,
@@ -423,6 +431,16 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             let session = resolve_session(&dir, &session_id)?;
             import_external_log(&session, &input, &source, dry_run)
         }
+        SessionsCommand::Bundle {
+            session_id,
+            log_dir,
+            output,
+        } => {
+            let dir = resolve_sessions_dir(&log_dir)?;
+            let session = resolve_session(&dir, &session_id)?;
+            let output = output.unwrap_or_else(|| session.dir.join("support-bundle.tar.gz"));
+            export_session_bundle(&session, &output)
+        }
         SessionsCommand::Open {
             session_id,
             log_dir,
@@ -464,6 +482,33 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn export_session_bundle(session: &SessionRecord, output: &Path) -> Result<()> {
+    use std::io::Write;
+    let file = std::fs::File::create(output)
+        .with_context(|| format!("create {}", output.display()))?;
+    let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+    let mut archive = tar::Builder::new(encoder);
+    archive.append_dir_all(&session.id, &session.dir)
+        .with_context(|| format!("archive session {}", session.dir.display()))?;
+    let diagnostics = serde_json::json!({
+        "embed_log_version": env!("CARGO_PKG_VERSION"),
+        "git_sha": env!("EMBED_LOG_GIT_SHA"),
+        "build_time": env!("EMBED_LOG_BUILD_TIME"),
+        "target": env!("EMBED_LOG_TARGET"),
+        "session_id": session.id,
+    });
+    let bytes = serde_json::to_vec_pretty(&diagnostics)?;
+    let mut header = tar::Header::new_gnu();
+    header.set_size(bytes.len() as u64);
+    header.set_mode(0o644);
+    header.set_cksum();
+    archive.append_data(&mut header, format!("{}/embed-log-version.json", session.id), bytes.as_slice())?;
+    let encoder = archive.into_inner()?;
+    encoder.finish()?.flush()?;
+    println!("{}", output.display());
+    Ok(())
 }
 
 /// Parse an external RFC3339 timestamp at the beginning of a line. Keep this
@@ -2718,6 +2763,21 @@ mod tests {
         assert_eq!(codes.code_for("MCU_LINK_TX"), "MLT");
         assert_eq!(codes.code_for("NODE-RED"), "NR");
         assert_eq!(codes.code_for("NODE-RED-COAP"), "NRC");
+    }
+
+    #[test]
+    fn support_bundle_contains_session_and_version_diagnostics() {
+        let root = temp_log_dir();
+        write_test_session(&root, "bundle-session");
+        let session = resolve_session(&root, "bundle-session").unwrap();
+        let output = root.join("bundle.tar.gz");
+        export_session_bundle(&session, &output).unwrap();
+        let decoder = flate2::read::GzDecoder::new(std::fs::File::open(output).unwrap());
+        let mut archive = tar::Archive::new(decoder);
+        let names = archive.entries().unwrap().map(|entry| entry.unwrap().path().unwrap().display().to_string()).collect::<Vec<_>>();
+        assert!(names.iter().any(|name| name.ends_with("manifest.json")));
+        assert!(names.iter().any(|name| name.ends_with("embed-log-version.json")));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
