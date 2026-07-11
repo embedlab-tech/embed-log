@@ -238,6 +238,14 @@ embed-log sessions info <SESSION_ID> --dir logs
 embed-log sessions info latest --dir logs --json
 ```
 
+Import an external text log into an existing session. Lines must start with RFC3339 timestamps in UTC or another explicit offset; imported records are merged into `combined.jsonl` in timestamp order:
+
+```bash
+embed-log sessions import latest ./pytest.log --source PYTEST
+# 2026-07-11T11:21:47.123Z test started
+# [2026-07-11T11:21:48+00:00] assertion passed
+```
+
 Open a session report in the default browser. If the HTML export is missing, it is generated first:
 
 ```bash
