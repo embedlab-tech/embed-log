@@ -193,3 +193,19 @@ Future entries must include this per-file added/removed-line summary.
 | --- | ---: | ---: | --- |
 | `crates/embed-log-cli/src/commands/sessions.rs` | 10 | 2 | Adds a non-mutating timestamp-validation import preview. |
 | `docs/cli.md` | 1 | 0 | Documents import dry-run usage. |
+
+## 2026-07-11 11:38:17 UTC / 2026-07-11 13:38:17 GMT+2 (Warsaw)
+
+- **Commit:** `5171174` — `Add session support bundle export`
+- **Task:** Add portable session support-bundle export
+- **Started:** 2026-07-11 11:37:17 UTC / 2026-07-11 13:37:17 GMT+2 (Warsaw)
+- **Completed:** 2026-07-11 11:38:17 UTC / 2026-07-11 13:38:17 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`5171174`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 60 | 0 | Archives full session artifacts with build diagnostics and bundle coverage. |
+| `crates/embed-log-cli/src/main.rs` | 1 | 0 | Covers `sessions bundle latest` CLI parsing. |
+| `docs/cli.md` | 7 | 0 | Documents portable support-bundle export. |
