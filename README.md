@@ -231,6 +231,7 @@ The old per-source TCP `inject_port`, `forward_port`, and `forward_ports` config
 
 ## Documentation
 
+- [Getting up to speed](docs/getting-up-to-speed.md)
 - [Quick start](docs/quickstart.md)
 - [Architecture](docs/architecture.md)
 - [Configuration](docs/configuration.md)
