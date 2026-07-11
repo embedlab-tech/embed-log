@@ -319,3 +319,18 @@ Future entries must include this per-file added/removed-line summary.
 | `docs/index.md` | 1 | 0 | Links the automation and agent roadmap from the documentation map. |
 | `frontend/events.js` | 13 | 6 | Uses one timestamp-sorted event order for rendered interactions and comparisons. |
 | `tests-ui/regression-tests/events.spec.js` | 12 | 0 | Verifies timeline dots are emitted in chronological timestamp order. |
+
+## 2026-07-11 23:45:05 UTC / 2026-07-12 01:45:05 GMT+2 (Warsaw)
+
+- **Commit:** `45d214a` — `Keep event filters aligned with timeline data`
+- **Task:** Derive event filters from recorded events and rules
+- **Started:** 2026-07-11 23:44:11 UTC / 2026-07-12 01:44:11 GMT+2 (Warsaw)
+- **Completed:** 2026-07-11 23:45:05 UTC / 2026-07-12 01:45:05 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`45d214a`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `frontend/events.js` | 27 | 7 | Builds filter chips from both configured rules and currently recorded event data. |
+| `tests-ui/regression-tests/events.spec.js` | 18 | 0 | Verifies each timeline source and severity is filterable. |
