@@ -63,6 +63,7 @@ let _renderedLaneH = SCROLL_LANE_HEIGHT;
 
 let _hiddenSources    = new Set();
 let _hiddenSeverities = new Set();
+let _filterSignature = '';
 
 // ── Public API ────────────────────────────────────────────────────────────
 
@@ -108,12 +109,14 @@ export function destroyEventsTab() {
     _hasRenderedEventSnapshot = false;
     _hiddenSources.clear();
     _hiddenSeverities.clear();
+    _filterSignature = '';
     state.eventsTabActive = false;
 }
 
 export function addEvent(ev) {
     state.events.push(ev);
     _updateCount();
+    if (_contentEl && _filterSignature !== _eventFilterSignature()) _renderFilters();
     // Avoid rebuilding a large hidden SVG for every incoming event. Render the
     // first event so tests/DOM consumers can observe dots, then keep the hidden
     // tab cheap until the user opens it.
@@ -642,15 +645,32 @@ function _filteredEvents() {
     ));
 }
 
+function _eventFilterOptions() {
+    const sources = new Set(Object.keys(state.eventRules || {}));
+    const severities = new Set();
+    Object.values(state.eventRules || {}).forEach(rules => {
+        if (Array.isArray(rules)) rules.forEach(rule => severities.add(rule.severity));
+    });
+    state.events.forEach(event => {
+        if (event.source_id) sources.add(event.source_id);
+        if (event.severity) severities.add(event.severity);
+    });
+    return {
+        sources: [...sources].sort(),
+        severities: [...severities],
+    };
+}
+
+function _eventFilterSignature() {
+    const { sources, severities } = _eventFilterOptions();
+    return JSON.stringify([sources, severities.sort()]);
+}
+
 function _renderFilters() {
     if (!_filterEl) return;
-    const sources = Object.keys(state.eventRules);
+    const { sources, severities } = _eventFilterOptions();
+    _filterSignature = _eventFilterSignature();
     if (sources.length === 0) { _filterEl.innerHTML = ''; return; }
-
-    const usedSeverities = new Set();
-    Object.values(state.eventRules).forEach(rules =>
-        rules.forEach(r => usedSeverities.add(r.severity))
-    );
 
     let html = '<div class="events-filter-group"><span class="events-filter-label">Source</span>';
     sources.forEach(src => {
@@ -661,7 +681,7 @@ function _renderFilters() {
 
     html += '<div class="events-filter-group"><span class="events-filter-label">Severity</span>';
     SEVERITY_ORDER.forEach(sev => {
-        if (!usedSeverities.has(sev)) return;
+        if (!severities.includes(sev)) return;
         const checked = !_hiddenSeverities.has(sev) ? 'checked' : '';
         html += `<label class="events-chip"><input type="checkbox" data-fsev="${sev}" ${checked}><span class="events-sev-dot" style="background:${SEVERITY_COLORS[sev]}"></span>${sev}</label>`;
     });

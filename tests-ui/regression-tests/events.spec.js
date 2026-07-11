@@ -273,6 +273,24 @@ test.describe('event detection', () => {
     await expect(tooltip).toContainText(`Δ previous ${selected}:`);
   });
 
+  test('event filters include every source and severity present in the timeline', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await page.locator('.events-tab-btn').click();
+    await expect.poll(() => page.locator('.events-dot').count(), { timeout: 20_000 }).toBeGreaterThan(0);
+
+    const present = await page.locator('.events-dot').evaluateAll(dots => ({
+      sources: [...new Set(dots.map(dot => dot.dataset.sourceId))],
+      severities: [...new Set(dots.map(dot => dot.dataset.severity))],
+    }));
+    for (const source of present.sources) {
+      await expect(page.locator(`[data-fsrc="${source}"]`)).toBeVisible();
+    }
+    for (const severity of present.severities) {
+      await expect(page.locator(`[data-fsev="${severity}"]`)).toBeVisible();
+    }
+  });
+
   test('severity filter checkbox hides matching dots', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
