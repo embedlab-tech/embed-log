@@ -162,6 +162,7 @@ Doctor:
 embed-log doctor
 embed-log doctor --json
 embed-log doctor --config embed-log.yml
+embed-log doctor --serial /dev/ttyUSB0
 ```
 
 `doctor` reports the binary version, host system info, config resolution, and packet-capture readiness:
@@ -172,6 +173,9 @@ embed-log doctor --config embed-log.yml
 - whether the binary was built with the `pcap-capture` feature
 - whether the native packet-capture library is installed (`libpcap` on Unix-like systems, `Npcap`/`WinPcap` on Windows)
 - whether the inspected config contains `network_capture` sources using `network_backend: pcap`
+- configured UART paths, plus explicitly requested repeatable `--serial <path>` checks
+
+Serial checks only test filesystem-level readability/writability and never configure or reset an attached UART. A missing path or permission denial produces an actionable warning.
 
 Serial ports:
 

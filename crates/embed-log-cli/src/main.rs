@@ -137,6 +137,9 @@ enum Command {
         /// Config file to inspect
         #[arg(short, long)]
         config: Option<PathBuf>,
+        /// Inspect a UART path directly (repeatable).
+        #[arg(short = 's', long, value_name = "PATH")]
+        serial: Vec<PathBuf>,
         /// Machine-readable JSON output
         #[arg(long)]
         json: bool,
@@ -284,7 +287,11 @@ async fn main() -> Result<()> {
             }
         }
         Some(Command::Version { config, json }) => misc::cmd_version(config.as_deref(), json),
-        Some(Command::Doctor { config, json }) => misc::cmd_doctor(config.as_deref(), json),
+        Some(Command::Doctor {
+            config,
+            serial,
+            json,
+        }) => misc::cmd_doctor(config.as_deref(), &serial, json),
         Some(Command::Ports { json }) => misc::cmd_ports(json),
         Some(Command::Hello) => misc::cmd_hello(),
         Some(Command::Sessions { command }) => cmd_sessions(*command),

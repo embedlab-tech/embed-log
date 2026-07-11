@@ -144,8 +144,12 @@ pub(crate) fn cmd_validate(config_path: &Path, json: bool) -> Result<()> {
 }
 
 /// `embed-log doctor` — environment/config/runtime diagnostics.
-pub(crate) fn cmd_doctor(config_path: Option<&Path>, json: bool) -> Result<()> {
-    let report = build_doctor_report(config_path);
+pub(crate) fn cmd_doctor(
+    config_path: Option<&Path>,
+    serial_paths: &[std::path::PathBuf],
+    json: bool,
+) -> Result<()> {
+    let report = build_doctor_report_with_serial(config_path, serial_paths);
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
         return Ok(());
@@ -198,6 +202,14 @@ pub(crate) fn cmd_doctor(config_path: Option<&Path>, json: bool) -> Result<()> {
     if let Some(error) = report.get("config_error").and_then(|v| v.as_str()) {
         println!("  config error: {error}");
     }
+    if let Some(serial) = report.get("serial").and_then(|v| v.as_array()) {
+        for port in serial {
+            let path = port["path"].as_str().unwrap_or("unknown");
+            let status = port["status"].as_str().unwrap_or("unknown");
+            let detail = port["detail"].as_str().unwrap_or("");
+            println!("  serial:   {path} — {status}{detail}");
+        }
+    }
 
     let capture = &report["packet_capture"];
     println!(
@@ -231,10 +243,19 @@ pub(crate) fn cmd_doctor(config_path: Option<&Path>, json: bool) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
 fn build_doctor_report(config_path: Option<&Path>) -> serde_json::Value {
-    build_doctor_report_with_env(
+    build_doctor_report_with_serial(config_path, &[])
+}
+
+fn build_doctor_report_with_serial(
+    config_path: Option<&Path>,
+    serial_paths: &[std::path::PathBuf],
+) -> serde_json::Value {
+    build_doctor_report_with_env_and_serial(
         config_path,
         std::env::var("EMBED_LOG_CONFIG_YML_PATH").ok(),
+        serial_paths,
     )
 }
 
@@ -242,9 +263,18 @@ fn build_doctor_report(config_path: Option<&Path>) -> serde_json::Value {
 /// value injected rather than read from the real process environment — kept
 /// separate so the env-var precedence is testable without touching global
 /// state (same split `crate::config::resolve_config_path_with_env` already uses).
+#[cfg(test)]
 fn build_doctor_report_with_env(
     config_path: Option<&Path>,
     env_value: Option<String>,
+) -> serde_json::Value {
+    build_doctor_report_with_env_and_serial(config_path, env_value, &[])
+}
+
+fn build_doctor_report_with_env_and_serial(
+    config_path: Option<&Path>,
+    env_value: Option<String>,
+    requested_serial_paths: &[std::path::PathBuf],
 ) -> serde_json::Value {
     let version = env!("CARGO_PKG_VERSION");
     let packet_capture = detect_packet_capture_support();
@@ -273,6 +303,7 @@ fn build_doctor_report_with_env(
     // going to happen. A config that simply doesn't exist yet (fresh
     // checkout, no --config given) is normal, not a warning.
     let mut config_info = None;
+    let mut serial_paths = requested_serial_paths.to_vec();
     if resolved_path.exists() {
         match load_config(&resolved_path) {
             Ok(cfg) => {
@@ -282,6 +313,13 @@ fn build_doctor_report_with_env(
                     "sources": cfg.sources.len(),
                     "tabs": cfg.tabs.len(),
                     "pcap_sources": pcap_sources,
+                }));
+                serial_paths.extend(cfg.sources.iter().filter_map(|source| {
+                    source
+                        .source_type
+                        .eq_ignore_ascii_case("uart")
+                        .then(|| source.port.as_str().map(std::path::PathBuf::from))
+                        .flatten()
                 }));
                 if pcap_sources > 0 {
                     apply_packet_capture_warnings(&mut out, pcap_sources);
@@ -297,7 +335,49 @@ fn build_doctor_report_with_env(
     if let Some(config) = config_info {
         out["config"] = config;
     }
+    serial_paths.sort();
+    serial_paths.dedup();
+    let serial = serial_paths
+        .iter()
+        .map(|path| inspect_serial_path(path))
+        .collect::<Vec<_>>();
+    if serial.iter().any(|port| port["status"] != "ok") {
+        out["status"] = serde_json::json!("warn");
+    }
+    out["serial"] = serde_json::Value::Array(serial);
     out
+}
+
+/// Check filesystem-level serial access without opening/configuring the port;
+/// opening a TTY through the serial library can reset attached hardware.
+fn inspect_serial_path(path: &Path) -> serde_json::Value {
+    let display = path.display().to_string();
+    match std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+    {
+        Ok(_) => serde_json::json!({
+            "path": display,
+            "status": "ok",
+            "detail": " readable and writable",
+        }),
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => serde_json::json!({
+            "path": display,
+            "status": "permission_denied",
+            "detail": " — permission denied; on Linux add your user to the device group (commonly dialout or uucp), then sign in again",
+        }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => serde_json::json!({
+            "path": display,
+            "status": "missing",
+            "detail": " — device path does not exist; reconnect the device or run `embed-log ports`",
+        }),
+        Err(error) => serde_json::json!({
+            "path": display,
+            "status": "unavailable",
+            "detail": format!(" — {error}"),
+        }),
+    }
 }
 
 fn apply_packet_capture_warnings(out: &mut serde_json::Value, pcap_sources: usize) {
@@ -819,6 +899,16 @@ mod tests {
     }
 
     #[test]
+    fn doctor_report_marks_missing_explicit_serial_path() {
+        let path =
+            std::env::temp_dir().join(format!("embed-log-missing-serial-{}", std::process::id()));
+        std::fs::remove_file(&path).ok();
+        let report = build_doctor_report_with_env_and_serial(None, None, &[path]);
+        assert_eq!(report["status"], "warn");
+        assert_eq!(report["serial"][0]["status"], "missing");
+    }
+
+    #[test]
     fn doctor_report_includes_packet_capture_section() {
         let report = build_doctor_report(None);
         assert!(report.get("packet_capture").is_some());
@@ -845,7 +935,8 @@ mod tests {
 
     #[test]
     fn doctor_report_missing_config_is_not_a_warning() {
-        let report = build_doctor_report_with_env(None, Some("/nonexistent/embed-log.yml".to_string()));
+        let report =
+            build_doctor_report_with_env(None, Some("/nonexistent/embed-log.yml".to_string()));
         assert_eq!(report["status"], "ok");
         assert!(report.get("config").is_none());
         assert!(report.get("config_error").is_none());
