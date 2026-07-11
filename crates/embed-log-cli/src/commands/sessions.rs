@@ -80,6 +80,17 @@ pub(crate) enum SessionsCommand {
         #[arg(long = "with-markers")]
         with_markers: bool,
     },
+    /// Delete older sessions while keeping the newest N sessions.
+    Prune {
+        #[command(flatten)]
+        log_dir: LogDirArgs,
+        /// Number of newest sessions to retain.
+        #[arg(long)]
+        keep: usize,
+        /// Report files that would be deleted without modifying anything.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Show one session manifest.
     Info {
         session_id: String,
@@ -315,6 +326,14 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             list_sessions(&dir, json, limit, with_markers)
         }
         SessionsCommand::Marker { command } => cmd_session_marker(command),
+        SessionsCommand::Prune {
+            log_dir,
+            keep,
+            dry_run,
+        } => {
+            let dir = resolve_sessions_dir(&log_dir)?;
+            prune_sessions(&dir, keep, dry_run)
+        }
         SessionsCommand::Info {
             session_id,
             log_dir,
@@ -610,6 +629,33 @@ fn import_external_log(session: &SessionRecord, input: &Path, source: &str, dry_
         text.lines().filter(|line| !line.trim().is_empty()).count(),
         input.display()
     );
+    Ok(())
+}
+
+fn directory_size(path: &Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(path) else { return 0 };
+    entries.flatten().map(|entry| {
+        let path = entry.path();
+        match entry.metadata() {
+            Ok(metadata) if metadata.is_dir() => directory_size(&path),
+            Ok(metadata) => metadata.len(),
+            Err(_) => 0,
+        }
+    }).sum()
+}
+
+fn prune_sessions(dir: &Path, keep: usize, dry_run: bool) -> Result<()> {
+    let sessions = load_sessions(dir)?;
+    let removed = sessions.into_iter().skip(keep).collect::<Vec<_>>();
+    let bytes: u64 = removed.iter().map(|session| directory_size(&session.dir)).sum();
+    for session in &removed {
+        println!("{} {} {}", if dry_run { "would remove" } else { "removed" }, session.id, session.dir.display());
+        if !dry_run {
+            std::fs::remove_dir_all(&session.dir)
+                .with_context(|| format!("remove session {}", session.dir.display()))?;
+        }
+    }
+    println!("{} {} session(s), {} bytes", if dry_run { "would reclaim" } else { "reclaimed" }, removed.len(), bytes);
     Ok(())
 }
 
@@ -2763,6 +2809,21 @@ mod tests {
         assert_eq!(codes.code_for("MCU_LINK_TX"), "MLT");
         assert_eq!(codes.code_for("NODE-RED"), "NR");
         assert_eq!(codes.code_for("NODE-RED-COAP"), "NRC");
+    }
+
+    #[test]
+    fn prune_sessions_dry_run_preserves_and_real_run_removes_oldest() {
+        let root = temp_log_dir();
+        write_test_session(&root, "2026-01-01");
+        write_test_session(&root, "2026-01-02");
+        write_test_session(&root, "2026-01-03");
+        prune_sessions(&root, 1, true).unwrap();
+        assert_eq!(load_sessions(&root).unwrap().len(), 3);
+        prune_sessions(&root, 1, false).unwrap();
+        let sessions = load_sessions(&root).unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "2026-01-03");
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
