@@ -301,7 +301,11 @@ function _onEventRuleResponse(event) {
 
 function _renderRules(rules) {
     if (!_rulesPanelEl) return;
-    const rows = rules.map(rule => `<div class="event-rule-row"><code>${_esc(paneLabel(rule.source_id))} · ${_esc(rule.name)}</code><span>${_esc(rule.severity)}</span><code>${_esc(rule.pattern)}</code><span>${_esc(rule.origin)}</span>${rule.origin === 'runtime' ? `<span><button data-promote-rule="${_esc(rule.source_id)}|${_esc(rule.name)}">Save for future runs</button><button data-delete-rule="${_esc(rule.source_id)}|${_esc(rule.name)}">Stop watching</button></span>` : ''}</div>`).join('');
+    const rows = rules.map(rule => {
+        const saved = rule.origin === 'static';
+        const status = saved ? 'Saved for future runs' : 'Watching now';
+        return `<div class="event-rule-row"><code>${_esc(paneLabel(rule.source_id))} · ${_esc(rule.name)}</code><span>${_esc(rule.severity)}</span><code>${_esc(rule.pattern)}</code><span>${status}</span>${!saved ? `<span><button data-promote-rule="${_esc(rule.source_id)}|${_esc(rule.name)}">Save for future runs</button><button data-delete-rule="${_esc(rule.source_id)}|${_esc(rule.name)}">Stop watching</button></span>` : ''}</div>`;
+    }).join('');
     _rulesPanelEl.innerHTML = `<div class="event-rules-actions"><button data-export-rules>Download rules file</button><span class="event-rules-status"></span></div>${rows || '<span>No active event rules.</span>'}`;
     _rulesPanelEl.querySelector('[data-export-rules]')?.addEventListener('click', () => window.wsSend?.({ cmd: 'event_rule.export' }));
     _rulesPanelEl.querySelectorAll('[data-delete-rule]').forEach(button => button.addEventListener('click', () => {
