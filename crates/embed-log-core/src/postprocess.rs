@@ -190,10 +190,7 @@ mod tests {
     #[test]
     fn strip_duplicate_leading_timestamp_leaves_mismatched_prefix() {
         let msg = "15:41:23.644 something happened at a different logged time";
-        assert_eq!(
-            strip_duplicate_leading_timestamp(msg, "09:00:00.000"),
-            msg
-        );
+        assert_eq!(strip_duplicate_leading_timestamp(msg, "09:00:00.000"), msg);
     }
 
     #[test]
@@ -219,7 +216,8 @@ mod tests {
 
     #[test]
     fn denoise_message_applies_all_steps() {
-        let msg = "15:41:23.644 [   ERROR] \u{1b}[91mTimeout waiting for event='dcf_edhoc'\u{1b}[0m";
+        let msg =
+            "15:41:23.644 [   ERROR] \u{1b}[91mTimeout waiting for event='dcf_edhoc'\u{1b}[0m";
         assert_eq!(
             denoise_message(msg, "15:41:23.644"),
             "[ERROR] Timeout waiting for event='dcf_edhoc'"
@@ -254,7 +252,10 @@ mod tests {
 
     #[test]
     fn elapsed_time_formats_by_magnitude() {
-        assert_eq!(elapsed_time(&serde_json::json!({"relNum": 644.0}), "?"), "0.644");
+        assert_eq!(
+            elapsed_time(&serde_json::json!({"relNum": 644.0}), "?"),
+            "0.644"
+        );
         assert_eq!(
             elapsed_time(&serde_json::json!({"relNum": 83_644.0}), "?"),
             "1:23.644"

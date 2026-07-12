@@ -17,8 +17,8 @@ use tracing::{info, warn};
 
 use crate::frontend_assets::FrontendAssets;
 use crate::net::control_ws::{
-    control_ws_handler, handle_event_rule_create, handle_event_rule_delete, handle_event_rule_export, handle_event_rule_list, handle_event_rule_promote,
-    SourceInfo,
+    control_ws_handler, handle_event_rule_create, handle_event_rule_delete,
+    handle_event_rule_export, handle_event_rule_list, handle_event_rule_promote, SourceInfo,
 };
 use crate::session::SessionManager;
 use crate::sources::TxCommand;
@@ -219,7 +219,9 @@ async fn embedded_fallback(uri: axum::http::Uri) -> impl IntoResponse {
         // Binary/other assets (fonts, images, ...): guess from extension
         // rather than mislabeling them as HTML, which browsers reject for
         // e.g. @font-face loads.
-        mime_guess::from_path(path).first_or_octet_stream().to_string()
+        mime_guess::from_path(path)
+            .first_or_octet_stream()
+            .to_string()
     } else {
         "text/html; charset=utf-8".to_string()
     };
@@ -419,11 +421,29 @@ async fn handle_client_command(text: &str, state: &ServerState) -> Option<String
         "clear_logs" => Some(handle_clear_logs(&cmd, state).to_string()),
         "set_filter" => Some(handle_set_filter(&cmd).to_string()),
         "send_raw" => Some(handle_send_raw(&cmd, state).await.to_string()),
-        "event_rule.create" => Some(handle_event_rule_create(&cmd, state, cmd.get("id").and_then(|value| value.as_str()))),
-        "event_rule.list" => Some(handle_event_rule_list(state, cmd.get("id").and_then(|value| value.as_str()))),
-        "event_rule.export" => Some(handle_event_rule_export(state, cmd.get("id").and_then(|value| value.as_str()))),
-        "event_rule.promote" => Some(handle_event_rule_promote(&cmd, state, cmd.get("id").and_then(|value| value.as_str()))),
-        "event_rule.delete" => Some(handle_event_rule_delete(&cmd, state, cmd.get("id").and_then(|value| value.as_str()))),
+        "event_rule.create" => Some(handle_event_rule_create(
+            &cmd,
+            state,
+            cmd.get("id").and_then(|value| value.as_str()),
+        )),
+        "event_rule.list" => Some(handle_event_rule_list(
+            state,
+            cmd.get("id").and_then(|value| value.as_str()),
+        )),
+        "event_rule.export" => Some(handle_event_rule_export(
+            state,
+            cmd.get("id").and_then(|value| value.as_str()),
+        )),
+        "event_rule.promote" => Some(handle_event_rule_promote(
+            &cmd,
+            state,
+            cmd.get("id").and_then(|value| value.as_str()),
+        )),
+        "event_rule.delete" => Some(handle_event_rule_delete(
+            &cmd,
+            state,
+            cmd.get("id").and_then(|value| value.as_str()),
+        )),
         _ => None,
     }
 }

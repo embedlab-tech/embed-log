@@ -1,7 +1,7 @@
 {
   "$schema": null,
   "productName": "embed-log",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "identifier": "com.embed-log.app",
   "build": {
     "frontendDist": "../../frontend",

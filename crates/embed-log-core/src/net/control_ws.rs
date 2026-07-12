@@ -614,34 +614,79 @@ pub(crate) fn handle_event_rule_create(
     state: &super::ServerState,
     msg_id: Option<&str>,
 ) -> String {
-    let source_id = match cmd.get("source_id").and_then(|value| value.as_str()).filter(|value| !value.is_empty()) {
+    let source_id = match cmd
+        .get("source_id")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+    {
         Some(value) if state.source_metadata.contains_key(value) => value,
         Some(value) => return make_result_error("event_rule", msg_id, value, "unknown source"),
-        None => return make_response("event_rule.create.result", msg_id, serde_json::json!({ "ok": false, "error": "missing 'source_id'" })),
+        None => {
+            return make_response(
+                "event_rule.create.result",
+                msg_id,
+                serde_json::json!({ "ok": false, "error": "missing 'source_id'" }),
+            )
+        }
     };
-    let name = match cmd.get("name").and_then(|value| value.as_str()).filter(|value| !value.trim().is_empty()) {
+    let name = match cmd
+        .get("name")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+    {
         Some(value) => value.trim(),
         None => return make_result_error("event_rule", msg_id, source_id, "missing 'name'"),
     };
-    let pattern = match cmd.get("pattern").and_then(|value| value.as_str()).filter(|value| !value.is_empty()) {
+    let pattern = match cmd
+        .get("pattern")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+    {
         Some(value) => value,
         None => return make_result_error("event_rule", msg_id, source_id, "missing 'pattern'"),
     };
     let regex = match regex::Regex::new(pattern) {
         Ok(regex) => regex,
-        Err(error) => return make_result_error("event_rule", msg_id, source_id, &format!("invalid regex: {error}")),
+        Err(error) => {
+            return make_result_error(
+                "event_rule",
+                msg_id,
+                source_id,
+                &format!("invalid regex: {error}"),
+            )
+        }
     };
-    let severity = cmd.get("severity").and_then(|value| value.as_str()).unwrap_or("info");
+    let severity = cmd
+        .get("severity")
+        .and_then(|value| value.as_str())
+        .unwrap_or("info");
     if !matches!(severity, "info" | "warn" | "error" | "fatal") {
-        return make_result_error("event_rule", msg_id, source_id, "severity must be info, warn, error, or fatal");
+        return make_result_error(
+            "event_rule",
+            msg_id,
+            source_id,
+            "severity must be info, warn, error, or fatal",
+        );
     }
     let mut rules = match state.runtime_event_rules.write() {
         Ok(rules) => rules,
-        Err(_) => return make_result_error("event_rule", msg_id, source_id, "runtime rule registry is unavailable"),
+        Err(_) => {
+            return make_result_error(
+                "event_rule",
+                msg_id,
+                source_id,
+                "runtime rule registry is unavailable",
+            )
+        }
     };
     let source_rules = rules.entry(source_id.to_string()).or_default();
     if source_rules.iter().any(|rule| rule.name == name) {
-        return make_result_error("event_rule", msg_id, source_id, "a runtime rule with this name already exists for the source");
+        return make_result_error(
+            "event_rule",
+            msg_id,
+            source_id,
+            "a runtime rule with this name already exists for the source",
+        );
     }
     source_rules.push(crate::config::EventRule {
         name: name.to_string(),
@@ -649,15 +694,25 @@ pub(crate) fn handle_event_rule_create(
         severity: severity.to_string(),
         regex,
     });
-    make_response("event_rule.create.result", msg_id, serde_json::json!({
-        "ok": true, "source_id": source_id, "name": name, "pattern": pattern, "severity": severity,
-    }))
+    make_response(
+        "event_rule.create.result",
+        msg_id,
+        serde_json::json!({
+            "ok": true, "source_id": source_id, "name": name, "pattern": pattern, "severity": severity,
+        }),
+    )
 }
 
 pub(crate) fn handle_event_rule_list(state: &super::ServerState, msg_id: Option<&str>) -> String {
     let rules = match state.runtime_event_rules.read() {
         Ok(rules) => rules,
-        Err(_) => return make_response("event_rule.list.result", msg_id, serde_json::json!({ "ok": false, "error": "runtime rule registry is unavailable" })),
+        Err(_) => {
+            return make_response(
+                "event_rule.list.result",
+                msg_id,
+                serde_json::json!({ "ok": false, "error": "runtime rule registry is unavailable" }),
+            )
+        }
     };
     let static_rules = state.static_event_rules.iter().flat_map(|(source_id, source_rules)| {
         source_rules.iter().map(move |rule| serde_json::json!({ "source_id": source_id, "name": rule.name, "pattern": rule.pattern, "severity": rule.severity, "origin": "static" }))
@@ -666,64 +721,220 @@ pub(crate) fn handle_event_rule_list(state: &super::ServerState, msg_id: Option<
         source_rules.iter().map(move |rule| serde_json::json!({ "source_id": source_id, "name": rule.name, "pattern": rule.pattern, "severity": rule.severity, "origin": "runtime" }))
     });
     let rules = static_rules.chain(runtime_rules).collect::<Vec<_>>();
-    make_response("event_rule.list.result", msg_id, serde_json::json!({ "ok": true, "rules": rules }))
+    make_response(
+        "event_rule.list.result",
+        msg_id,
+        serde_json::json!({ "ok": true, "rules": rules }),
+    )
 }
 
 pub(crate) fn handle_event_rule_export(state: &super::ServerState, msg_id: Option<&str>) -> String {
     let runtime = match state.runtime_event_rules.read() {
         Ok(rules) => rules,
-        Err(_) => return make_response("event_rule.export.result", msg_id, serde_json::json!({ "ok": false, "error": "runtime rule registry is unavailable" })),
+        Err(_) => {
+            return make_response(
+                "event_rule.export.result",
+                msg_id,
+                serde_json::json!({ "ok": false, "error": "runtime rule registry is unavailable" }),
+            )
+        }
     };
     let mut sources: BTreeMap<String, Vec<&crate::config::EventRule>> = BTreeMap::new();
     for (source, rules) in state.static_event_rules.iter() {
-        sources.entry(source.clone()).or_default().extend(rules.iter());
+        sources
+            .entry(source.clone())
+            .or_default()
+            .extend(rules.iter());
     }
     for (source, rules) in runtime.iter() {
-        sources.entry(source.clone()).or_default().extend(rules.iter());
+        sources
+            .entry(source.clone())
+            .or_default()
+            .extend(rules.iter());
     }
     let mut root = serde_yaml::Mapping::new();
     for (source, rules) in sources {
-        let values = rules.into_iter().map(|rule| {
-            let mut rule_map = serde_yaml::Mapping::new();
-            rule_map.insert(serde_yaml::Value::String("name".into()), serde_yaml::Value::String(rule.name.clone()));
-            rule_map.insert(serde_yaml::Value::String("pattern".into()), serde_yaml::Value::String(rule.pattern.clone()));
-            rule_map.insert(serde_yaml::Value::String("severity".into()), serde_yaml::Value::String(rule.severity.clone()));
-            serde_yaml::Value::Mapping(rule_map)
-        }).collect();
-        root.insert(serde_yaml::Value::String(source), serde_yaml::Value::Sequence(values));
+        let values = rules
+            .into_iter()
+            .map(|rule| {
+                let mut rule_map = serde_yaml::Mapping::new();
+                rule_map.insert(
+                    serde_yaml::Value::String("name".into()),
+                    serde_yaml::Value::String(rule.name.clone()),
+                );
+                rule_map.insert(
+                    serde_yaml::Value::String("pattern".into()),
+                    serde_yaml::Value::String(rule.pattern.clone()),
+                );
+                rule_map.insert(
+                    serde_yaml::Value::String("severity".into()),
+                    serde_yaml::Value::String(rule.severity.clone()),
+                );
+                serde_yaml::Value::Mapping(rule_map)
+            })
+            .collect();
+        root.insert(
+            serde_yaml::Value::String(source),
+            serde_yaml::Value::Sequence(values),
+        );
     }
     match serde_yaml::to_string(&serde_yaml::Value::Mapping(root)) {
-        Ok(yaml) => make_response("event_rule.export.result", msg_id, serde_json::json!({ "ok": true, "yaml": yaml })),
-        Err(error) => make_response("event_rule.export.result", msg_id, serde_json::json!({ "ok": false, "error": error.to_string() })),
+        Ok(yaml) => make_response(
+            "event_rule.export.result",
+            msg_id,
+            serde_json::json!({ "ok": true, "yaml": yaml }),
+        ),
+        Err(error) => make_response(
+            "event_rule.export.result",
+            msg_id,
+            serde_json::json!({ "ok": false, "error": error.to_string() }),
+        ),
     }
 }
 
-pub(crate) fn handle_event_rule_promote(cmd: &serde_json::Value, state: &super::ServerState, msg_id: Option<&str>) -> String {
-    let source_id = match cmd.get("source_id").and_then(|value| value.as_str()) { Some(value) => value, None => return make_response("event_rule.promote.result", msg_id, serde_json::json!({"ok":false,"error":"missing 'source_id'"})) };
-    let name = match cmd.get("name").and_then(|value| value.as_str()) { Some(value) => value, None => return make_response("event_rule.promote.result", msg_id, serde_json::json!({"ok":false,"error":"missing 'name'"})) };
-    let runtime = match state.runtime_event_rules.read() { Ok(rules) => rules, Err(_) => return make_response("event_rule.promote.result", msg_id, serde_json::json!({"ok":false,"error":"runtime rule registry is unavailable"})) };
-    let rule = match runtime.get(source_id).and_then(|rules| rules.iter().find(|rule| rule.name == name)) { Some(rule) => rule, None => return make_response("event_rule.promote.result", msg_id, serde_json::json!({"ok":false,"error":"runtime rule not found"})) };
-    let path = &state.event_rules_path;
-    let mut root: serde_yaml::Mapping = if path.exists() { match std::fs::read_to_string(path).ok().and_then(|text| serde_yaml::from_str::<serde_yaml::Value>(&text).ok()).and_then(|value| value.as_mapping().cloned()) { Some(map) => map, None => return make_response("event_rule.promote.result", msg_id, serde_json::json!({"ok":false,"error":"existing event file is not a valid YAML mapping"})) } } else { serde_yaml::Mapping::new() };
-    let source_key = serde_yaml::Value::String(source_id.to_string());
-    let rules = root.entry(source_key).or_insert_with(|| serde_yaml::Value::Sequence(vec![])).as_sequence_mut().unwrap();
-    if rules.iter().any(|value| value.as_mapping().and_then(|map| map.get("name")).and_then(|value| value.as_str()) == Some(name)) { return make_response("event_rule.promote.result", msg_id, serde_json::json!({"ok":false,"error":"a static rule with this name already exists"})); }
-    let mut map = serde_yaml::Mapping::new();
-    map.insert(serde_yaml::Value::String("name".into()), serde_yaml::Value::String(rule.name.clone()));
-    map.insert(serde_yaml::Value::String("pattern".into()), serde_yaml::Value::String(rule.pattern.clone()));
-    map.insert(serde_yaml::Value::String("severity".into()), serde_yaml::Value::String(rule.severity.clone()));
-    rules.push(serde_yaml::Value::Mapping(map));
-    let yaml = match serde_yaml::to_string(&serde_yaml::Value::Mapping(root)) { Ok(yaml) => yaml, Err(error) => return make_response("event_rule.promote.result", msg_id, serde_json::json!({"ok":false,"error":error.to_string()})) };
-    if let Some(parent) = path.parent() { let _ = std::fs::create_dir_all(parent); }
-    let staged = path.with_extension("events.yml.tmp");
-    if let Err(error) = std::fs::write(&staged, yaml).and_then(|_| std::fs::rename(&staged, path)) { let _ = std::fs::remove_file(&staged); return make_response("event_rule.promote.result", msg_id, serde_json::json!({"ok":false,"error":error.to_string()})); }
-    make_response("event_rule.promote.result", msg_id, serde_json::json!({"ok":true,"path":path,"message":"runtime rule remains active; saved rule loads next run"}))
-}
-
-pub(crate) fn handle_event_rule_delete(cmd: &serde_json::Value, state: &super::ServerState, msg_id: Option<&str>) -> String {
+pub(crate) fn handle_event_rule_promote(
+    cmd: &serde_json::Value,
+    state: &super::ServerState,
+    msg_id: Option<&str>,
+) -> String {
     let source_id = match cmd.get("source_id").and_then(|value| value.as_str()) {
         Some(value) => value,
-        None => return make_response("event_rule.delete.result", msg_id, serde_json::json!({ "ok": false, "error": "missing 'source_id'" })),
+        None => {
+            return make_response(
+                "event_rule.promote.result",
+                msg_id,
+                serde_json::json!({"ok":false,"error":"missing 'source_id'"}),
+            )
+        }
+    };
+    let name = match cmd.get("name").and_then(|value| value.as_str()) {
+        Some(value) => value,
+        None => {
+            return make_response(
+                "event_rule.promote.result",
+                msg_id,
+                serde_json::json!({"ok":false,"error":"missing 'name'"}),
+            )
+        }
+    };
+    let runtime = match state.runtime_event_rules.read() {
+        Ok(rules) => rules,
+        Err(_) => {
+            return make_response(
+                "event_rule.promote.result",
+                msg_id,
+                serde_json::json!({"ok":false,"error":"runtime rule registry is unavailable"}),
+            )
+        }
+    };
+    let rule = match runtime
+        .get(source_id)
+        .and_then(|rules| rules.iter().find(|rule| rule.name == name))
+    {
+        Some(rule) => rule,
+        None => {
+            return make_response(
+                "event_rule.promote.result",
+                msg_id,
+                serde_json::json!({"ok":false,"error":"runtime rule not found"}),
+            )
+        }
+    };
+    let path = &state.event_rules_path;
+    let mut root: serde_yaml::Mapping = if path.exists() {
+        match std::fs::read_to_string(path)
+            .ok()
+            .and_then(|text| serde_yaml::from_str::<serde_yaml::Value>(&text).ok())
+            .and_then(|value| value.as_mapping().cloned())
+        {
+            Some(map) => map,
+            None => {
+                return make_response(
+                    "event_rule.promote.result",
+                    msg_id,
+                    serde_json::json!({"ok":false,"error":"existing event file is not a valid YAML mapping"}),
+                )
+            }
+        }
+    } else {
+        serde_yaml::Mapping::new()
+    };
+    let source_key = serde_yaml::Value::String(source_id.to_string());
+    let rules = root
+        .entry(source_key)
+        .or_insert_with(|| serde_yaml::Value::Sequence(vec![]))
+        .as_sequence_mut()
+        .unwrap();
+    if rules.iter().any(|value| {
+        value
+            .as_mapping()
+            .and_then(|map| map.get("name"))
+            .and_then(|value| value.as_str())
+            == Some(name)
+    }) {
+        return make_response(
+            "event_rule.promote.result",
+            msg_id,
+            serde_json::json!({"ok":false,"error":"a static rule with this name already exists"}),
+        );
+    }
+    let mut map = serde_yaml::Mapping::new();
+    map.insert(
+        serde_yaml::Value::String("name".into()),
+        serde_yaml::Value::String(rule.name.clone()),
+    );
+    map.insert(
+        serde_yaml::Value::String("pattern".into()),
+        serde_yaml::Value::String(rule.pattern.clone()),
+    );
+    map.insert(
+        serde_yaml::Value::String("severity".into()),
+        serde_yaml::Value::String(rule.severity.clone()),
+    );
+    rules.push(serde_yaml::Value::Mapping(map));
+    let yaml = match serde_yaml::to_string(&serde_yaml::Value::Mapping(root)) {
+        Ok(yaml) => yaml,
+        Err(error) => {
+            return make_response(
+                "event_rule.promote.result",
+                msg_id,
+                serde_json::json!({"ok":false,"error":error.to_string()}),
+            )
+        }
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let staged = path.with_extension("events.yml.tmp");
+    if let Err(error) = std::fs::write(&staged, yaml).and_then(|_| std::fs::rename(&staged, path)) {
+        let _ = std::fs::remove_file(&staged);
+        return make_response(
+            "event_rule.promote.result",
+            msg_id,
+            serde_json::json!({"ok":false,"error":error.to_string()}),
+        );
+    }
+    make_response(
+        "event_rule.promote.result",
+        msg_id,
+        serde_json::json!({"ok":true,"path":path,"message":"runtime rule remains active; saved rule loads next run"}),
+    )
+}
+
+pub(crate) fn handle_event_rule_delete(
+    cmd: &serde_json::Value,
+    state: &super::ServerState,
+    msg_id: Option<&str>,
+) -> String {
+    let source_id = match cmd.get("source_id").and_then(|value| value.as_str()) {
+        Some(value) => value,
+        None => {
+            return make_response(
+                "event_rule.delete.result",
+                msg_id,
+                serde_json::json!({ "ok": false, "error": "missing 'source_id'" }),
+            )
+        }
     };
     let name = match cmd.get("name").and_then(|value| value.as_str()) {
         Some(value) => value,
@@ -731,7 +942,14 @@ pub(crate) fn handle_event_rule_delete(cmd: &serde_json::Value, state: &super::S
     };
     let mut rules = match state.runtime_event_rules.write() {
         Ok(rules) => rules,
-        Err(_) => return make_result_error("event_rule", msg_id, source_id, "runtime rule registry is unavailable"),
+        Err(_) => {
+            return make_result_error(
+                "event_rule",
+                msg_id,
+                source_id,
+                "runtime rule registry is unavailable",
+            )
+        }
     };
     let Some(source_rules) = rules.get_mut(source_id) else {
         return make_result_error("event_rule", msg_id, source_id, "runtime rule not found");
@@ -741,8 +959,14 @@ pub(crate) fn handle_event_rule_delete(cmd: &serde_json::Value, state: &super::S
     if source_rules.len() == old_len {
         return make_result_error("event_rule", msg_id, source_id, "runtime rule not found");
     }
-    if source_rules.is_empty() { rules.remove(source_id); }
-    make_response("event_rule.delete.result", msg_id, serde_json::json!({ "ok": true, "source_id": source_id, "name": name }))
+    if source_rules.is_empty() {
+        rules.remove(source_id);
+    }
+    make_response(
+        "event_rule.delete.result",
+        msg_id,
+        serde_json::json!({ "ok": true, "source_id": source_id, "name": name }),
+    )
 }
 
 /// Handle `marker.create` — create a marker on the current session.
@@ -1005,15 +1229,30 @@ mod tests {
         assert_eq!(create["type"], "event_rule.create.result");
         assert_eq!(create["ok"], true);
 
-        let list = handle_control_command(r#"{"id":"rule-2","type":"event_rule.list"}"#, &state, &mut subscribed).await.unwrap();
+        let list = handle_control_command(
+            r#"{"id":"rule-2","type":"event_rule.list"}"#,
+            &state,
+            &mut subscribed,
+        )
+        .await
+        .unwrap();
         let list: serde_json::Value = serde_json::from_str(&list).unwrap();
         assert_eq!(list["rules"][0]["name"], "watchdog");
         assert_eq!(list["rules"][0]["origin"], "runtime");
 
-        let export = handle_control_command(r#"{"id":"rule-export","type":"event_rule.export"}"#, &state, &mut subscribed).await.unwrap();
+        let export = handle_control_command(
+            r#"{"id":"rule-export","type":"event_rule.export"}"#,
+            &state,
+            &mut subscribed,
+        )
+        .await
+        .unwrap();
         let export: serde_json::Value = serde_json::from_str(&export).unwrap();
         assert!(export["yaml"].as_str().unwrap().contains("DUT_UART:"));
-        assert!(export["yaml"].as_str().unwrap().contains("pattern: 'watchdog: \\d+s'"));
+        assert!(export["yaml"]
+            .as_str()
+            .unwrap()
+            .contains("pattern: 'watchdog: \\d+s'"));
 
         let delete = handle_control_command(
             r#"{"id":"rule-3","type":"event_rule.delete","source_id":"DUT_UART","name":"watchdog"}"#,
@@ -1031,21 +1270,33 @@ mod tests {
         state.event_rules_path = root.join("capture.events.yml");
         let mut subscribed = ControlSubscription::new();
         let create = r#"{"type":"event_rule.create","source_id":"DUT_UART","name":"watchdog","pattern":"watchdog: \\d+s","severity":"error"}"#;
-        handle_control_command(create, &state, &mut subscribed).await.unwrap();
+        handle_control_command(create, &state, &mut subscribed)
+            .await
+            .unwrap();
 
         let promote = r#"{"type":"event_rule.promote","source_id":"DUT_UART","name":"watchdog"}"#;
-        let response = handle_control_command(promote, &state, &mut subscribed).await.unwrap();
+        let response = handle_control_command(promote, &state, &mut subscribed)
+            .await
+            .unwrap();
         let response: serde_json::Value = serde_json::from_str(&response).unwrap();
         assert_eq!(response["ok"], true);
         let yaml = std::fs::read_to_string(&state.event_rules_path).unwrap();
         assert!(yaml.contains("DUT_UART:"));
         assert!(yaml.contains("name: watchdog"));
 
-        let duplicate = handle_control_command(promote, &state, &mut subscribed).await.unwrap();
+        let duplicate = handle_control_command(promote, &state, &mut subscribed)
+            .await
+            .unwrap();
         let duplicate: serde_json::Value = serde_json::from_str(&duplicate).unwrap();
         assert_eq!(duplicate["ok"], false);
-        assert!(duplicate["error"].as_str().unwrap().contains("already exists"));
-        assert!(!state.event_rules_path.with_extension("events.yml.tmp").exists());
+        assert!(duplicate["error"]
+            .as_str()
+            .unwrap()
+            .contains("already exists"));
+        assert!(!state
+            .event_rules_path
+            .with_extension("events.yml.tmp")
+            .exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 

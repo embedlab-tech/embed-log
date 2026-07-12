@@ -505,11 +505,12 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
 
 fn export_session_bundle(session: &SessionRecord, output: &Path) -> Result<()> {
     use std::io::Write;
-    let file = std::fs::File::create(output)
-        .with_context(|| format!("create {}", output.display()))?;
+    let file =
+        std::fs::File::create(output).with_context(|| format!("create {}", output.display()))?;
     let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
     let mut archive = tar::Builder::new(encoder);
-    archive.append_dir_all(&session.id, &session.dir)
+    archive
+        .append_dir_all(&session.id, &session.dir)
         .with_context(|| format!("archive session {}", session.dir.display()))?;
     let diagnostics = serde_json::json!({
         "embed_log_version": env!("CARGO_PKG_VERSION"),
@@ -523,7 +524,11 @@ fn export_session_bundle(session: &SessionRecord, output: &Path) -> Result<()> {
     header.set_size(bytes.len() as u64);
     header.set_mode(0o644);
     header.set_cksum();
-    archive.append_data(&mut header, format!("{}/embed-log-version.json", session.id), bytes.as_slice())?;
+    archive.append_data(
+        &mut header,
+        format!("{}/embed-log-version.json", session.id),
+        bytes.as_slice(),
+    )?;
     let encoder = archive.into_inner()?;
     encoder.finish()?.flush()?;
     println!("{}", output.display());
@@ -546,7 +551,12 @@ fn parse_import_timestamp(line: &str) -> Option<(DateTime<FixedOffset>, &str)> {
         .map(|ts| (ts, body))
 }
 
-fn import_external_log(session: &SessionRecord, input: &Path, source: &str, dry_run: bool) -> Result<()> {
+fn import_external_log(
+    session: &SessionRecord,
+    input: &Path,
+    source: &str,
+    dry_run: bool,
+) -> Result<()> {
     anyhow::ensure!(!source.trim().is_empty(), "--source must not be empty");
     let text = std::fs::read_to_string(input)
         .with_context(|| format!("read external log {}", input.display()))?;
@@ -577,7 +587,11 @@ fn import_external_log(session: &SessionRecord, input: &Path, source: &str, dry_
         "external log contains no importable lines"
     );
     if dry_run {
-        println!("would import {} line(s) from {} as {source}", imported.len(), input.display());
+        println!(
+            "would import {} line(s) from {} as {source}",
+            imported.len(),
+            input.display()
+        );
         return Ok(());
     }
     let combined = manifest_combined_file(session)?;
@@ -586,9 +600,15 @@ fn import_external_log(session: &SessionRecord, input: &Path, source: &str, dry_
     let mut entries: Vec<serde_json::Value> = existing
         .lines()
         .enumerate()
-        .map(|(index, line)| serde_json::from_str(line).map_err(|error| anyhow::anyhow!(
-            "{}:{} is not valid JSONL: {error}", combined.display(), index + 1
-        )))
+        .map(|(index, line)| {
+            serde_json::from_str(line).map_err(|error| {
+                anyhow::anyhow!(
+                    "{}:{} is not valid JSONL: {error}",
+                    combined.display(),
+                    index + 1
+                )
+            })
+        })
         .collect::<std::result::Result<_, _>>()?;
     entries.append(&mut imported);
     entries.sort_by(|a, b| {
@@ -614,7 +634,10 @@ fn import_external_log(session: &SessionRecord, input: &Path, source: &str, dry_
     let manifest_path = session.dir.join("manifest.json");
     let mut manifest: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&manifest_path)?)?;
-    anyhow::ensure!(manifest["source_files"].get(source).is_none(), "source {source:?} already exists in this session");
+    anyhow::ensure!(
+        manifest["source_files"].get(source).is_none(),
+        "source {source:?} already exists in this session"
+    );
     manifest["source_files"][source] = serde_json::json!(imported_file.display().to_string());
     manifest["pane_labels"][source] = serde_json::json!(source);
     manifest["pane_kinds"][source] = serde_json::json!("imported");
@@ -633,29 +656,51 @@ fn import_external_log(session: &SessionRecord, input: &Path, source: &str, dry_
 }
 
 fn directory_size(path: &Path) -> u64 {
-    let Ok(entries) = std::fs::read_dir(path) else { return 0 };
-    entries.flatten().map(|entry| {
-        let path = entry.path();
-        match entry.metadata() {
-            Ok(metadata) if metadata.is_dir() => directory_size(&path),
-            Ok(metadata) => metadata.len(),
-            Err(_) => 0,
-        }
-    }).sum()
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|entry| {
+            let path = entry.path();
+            match entry.metadata() {
+                Ok(metadata) if metadata.is_dir() => directory_size(&path),
+                Ok(metadata) => metadata.len(),
+                Err(_) => 0,
+            }
+        })
+        .sum()
 }
 
 fn prune_sessions(dir: &Path, keep: usize, dry_run: bool) -> Result<()> {
     let sessions = load_sessions(dir)?;
     let removed = sessions.into_iter().skip(keep).collect::<Vec<_>>();
-    let bytes: u64 = removed.iter().map(|session| directory_size(&session.dir)).sum();
+    let bytes: u64 = removed
+        .iter()
+        .map(|session| directory_size(&session.dir))
+        .sum();
     for session in &removed {
-        println!("{} {} {}", if dry_run { "would remove" } else { "removed" }, session.id, session.dir.display());
+        println!(
+            "{} {} {}",
+            if dry_run { "would remove" } else { "removed" },
+            session.id,
+            session.dir.display()
+        );
         if !dry_run {
             std::fs::remove_dir_all(&session.dir)
                 .with_context(|| format!("remove session {}", session.dir.display()))?;
         }
     }
-    println!("{} {} session(s), {} bytes", if dry_run { "would reclaim" } else { "reclaimed" }, removed.len(), bytes);
+    println!(
+        "{} {} session(s), {} bytes",
+        if dry_run {
+            "would reclaim"
+        } else {
+            "reclaimed"
+        },
+        removed.len(),
+        bytes
+    );
     Ok(())
 }
 
@@ -2835,9 +2880,15 @@ mod tests {
         export_session_bundle(&session, &output).unwrap();
         let decoder = flate2::read::GzDecoder::new(std::fs::File::open(output).unwrap());
         let mut archive = tar::Archive::new(decoder);
-        let names = archive.entries().unwrap().map(|entry| entry.unwrap().path().unwrap().display().to_string()).collect::<Vec<_>>();
+        let names = archive
+            .entries()
+            .unwrap()
+            .map(|entry| entry.unwrap().path().unwrap().display().to_string())
+            .collect::<Vec<_>>();
         assert!(names.iter().any(|name| name.ends_with("manifest.json")));
-        assert!(names.iter().any(|name| name.ends_with("embed-log-version.json")));
+        assert!(names
+            .iter()
+            .any(|name| name.ends_with("embed-log-version.json")));
         std::fs::remove_dir_all(root).unwrap();
     }
 

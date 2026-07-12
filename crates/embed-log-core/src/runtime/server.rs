@@ -120,12 +120,22 @@ impl LogServer {
         let event_matchers =
             crate::config::load_event_matchers(self.config_path.as_deref(), &source_names);
         let runtime_event_rules = Arc::new(RwLock::new(HashMap::new()));
-        let static_event_rules = Arc::new(event_matchers.iter().map(|(source, matcher)| {
-            (source.clone(), matcher.rules().to_vec())
-        }).collect::<HashMap<_, _>>());
-        let event_rules_path = self.config_path.as_ref().map(|path| {
-            path.parent().unwrap_or(Path::new(".")).join(format!("{}.events.yml", path.file_stem().unwrap_or_default().to_string_lossy()))
-        }).unwrap_or_else(|| PathBuf::from("embed-log.events.yml"));
+        let static_event_rules = Arc::new(
+            event_matchers
+                .iter()
+                .map(|(source, matcher)| (source.clone(), matcher.rules().to_vec()))
+                .collect::<HashMap<_, _>>(),
+        );
+        let event_rules_path = self
+            .config_path
+            .as_ref()
+            .map(|path| {
+                path.parent().unwrap_or(Path::new(".")).join(format!(
+                    "{}.events.yml",
+                    path.file_stem().unwrap_or_default().to_string_lossy()
+                ))
+            })
+            .unwrap_or_else(|| PathBuf::from("embed-log.events.yml"));
 
         // Build source metadata for the control API.
         let mut source_metadata: HashMap<String, SourceInfo> = sources
@@ -631,8 +641,13 @@ impl LogServer {
                     };
                     let baudrate = src_cfg.baudrate.unwrap_or(self.config.baudrate);
                     Box::new(
-                        UartSource::new_with_parser(&src_cfg.name, port_path, baudrate, &parser.parser_type)
-                            .with_parser(parser),
+                        UartSource::new_with_parser(
+                            &src_cfg.name,
+                            port_path,
+                            baudrate,
+                            &parser.parser_type,
+                        )
+                        .with_parser(parser),
                     )
                 }
                 "udp" => {
@@ -1463,56 +1478,57 @@ async fn run_writer(
             .unwrap_or_default();
         if let Ok(rules) = runtime.runtime_event_rules.read() {
             if let Some(rules) = rules.get(&source_name) {
-                event_matches.extend(crate::config::PatternMatcher::new(rules.clone()).check(&message));
+                event_matches
+                    .extend(crate::config::PatternMatcher::new(rules.clone()).check(&message));
             }
         }
         for event_match in event_matches {
-                let event_payload = json!({
-                    "type": "event",
-                    "event_id": event_match.rule_name,
-                    "source_id": source_name,
-                    "severity": event_match.severity,
-                    "timestamp": display_ts,
-                    "timestamp_iso": ts_iso,
-                    "timestamp_num": abs_num,
-                    "rel_num": rel_num,
-                    "line_idx": line_idx,
-                    "message": message,
-                    "origin": origin,
-                    "captures": event_match.captures,
-                });
+            let event_payload = json!({
+                "type": "event",
+                "event_id": event_match.rule_name,
+                "source_id": source_name,
+                "severity": event_match.severity,
+                "timestamp": display_ts,
+                "timestamp_iso": ts_iso,
+                "timestamp_num": abs_num,
+                "rel_num": rel_num,
+                "line_idx": line_idx,
+                "message": message,
+                "origin": origin,
+                "captures": event_match.captures,
+            });
 
-                // Broadcast the event to all WS clients.
-                let _ = runtime.broadcast_tx.send(event_payload.to_string());
+            // Broadcast the event to all WS clients.
+            let _ = runtime.broadcast_tx.send(event_payload.to_string());
 
-                // Persist event to events.jsonl.
-                if let Ok(mgr) = runtime.session_manager.lock() {
-                    if let Err(e) = mgr.append_event(&event_payload) {
-                        error!("[{source_name}] failed to append event: {e}");
-                    }
+            // Persist event to events.jsonl.
+            if let Ok(mgr) = runtime.session_manager.lock() {
+                if let Err(e) = mgr.append_event(&event_payload) {
+                    error!("[{source_name}] failed to append event: {e}");
                 }
+            }
 
-                // Push to events replay buffer.
-                {
-                    let mut buf = runtime.events_replay.lock().unwrap();
-                    if buf.len() >= REPLAY_BUFFER_SIZE {
-                        buf.pop_front();
-                    }
-                    buf.push_back(event_payload.to_string());
+            // Push to events replay buffer.
+            {
+                let mut buf = runtime.events_replay.lock().unwrap();
+                if buf.len() >= REPLAY_BUFFER_SIZE {
+                    buf.pop_front();
                 }
+                buf.push_back(event_payload.to_string());
+            }
 
-                // Create an event marker (replaces previous event markers at this line,
-                // preserves user markers).
-                save_event_marker(
-                    &runtime.session_manager,
-                    &runtime.broadcast_tx,
-                    &source_name,
-                    line_idx,
-                    abs_num,
-                    &event_match.rule_name,
-                    &event_match.severity,
-                    &message,
-                );
+            // Create an event marker (replaces previous event markers at this line,
+            // preserves user markers).
+            save_event_marker(
+                &runtime.session_manager,
+                &runtime.broadcast_tx,
+                &source_name,
+                line_idx,
+                abs_num,
+                &event_match.rule_name,
+                &event_match.severity,
+                &message,
+            );
         }
 
         // Store in replay buffer
@@ -1602,9 +1618,7 @@ mod tests {
         ));
 
         raw_tx
-            .send(
-                LogEntry::new(Local::now(), "TX::ui", "version\r\n").with_color("yellow"),
-            )
+            .send(LogEntry::new(Local::now(), "TX::ui", "version\r\n").with_color("yellow"))
             .await
             .unwrap();
         drop(raw_tx);

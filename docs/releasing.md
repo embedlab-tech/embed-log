@@ -23,13 +23,13 @@ These are GitHub's default OS/architecture labels for self-hosted runners. If yo
 2. Create and push a tag:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
 3. The `Release CLI` workflow will build each platform artifact, generate `SHA256SUMS`, attach `install.sh` / `install.ps1`, and publish a GitHub Release.
 
-You can also run the workflow manually from GitHub Actions. If running from a branch, provide the release tag input, for example `v0.1.0`.
+You can also run the workflow manually from GitHub Actions. If running from a branch, provide the release tag input, for example `v1.0.0`.
 
 ## User install commands
 
@@ -42,7 +42,7 @@ curl -fsSL https://github.com/krezolekcoder/embed-log/releases/latest/download/i
 macOS/Linux pinned release:
 
 ```bash
-curl -fsSL https://github.com/krezolekcoder/embed-log/releases/download/v0.1.0/install.sh | EMBED_LOG_VERSION=v0.1.0 sh
+curl -fsSL https://github.com/krezolekcoder/embed-log/releases/download/v1.0.0/install.sh | EMBED_LOG_VERSION=v1.0.0 sh
 ```
 
 macOS/Linux custom install directory:
@@ -66,7 +66,7 @@ irm https://github.com/krezolekcoder/embed-log/releases/latest/download/install.
 Windows pinned release:
 
 ```powershell
-$env:EMBED_LOG_VERSION = "v0.1.0"; irm https://github.com/krezolekcoder/embed-log/releases/download/v0.1.0/install.ps1 | iex
+$env:EMBED_LOG_VERSION = "v1.0.0"; irm https://github.com/krezolekcoder/embed-log/releases/download/v1.0.0/install.ps1 | iex
 ```
 
 Windows custom install directory:

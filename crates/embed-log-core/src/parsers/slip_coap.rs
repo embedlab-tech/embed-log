@@ -62,7 +62,10 @@ fn format_frame(frame: &[u8]) -> String {
     // Unlike the legacy sniffer (which silently drops short frames), surface
     // them: a dropped log line reads as a bug when watching a live viewer.
     if frame.len() < 8 {
-        return format!("[slip frame too short for UDP header: {} byte(s)]", frame.len());
+        return format!(
+            "[slip frame too short for UDP header: {} byte(s)]",
+            frame.len()
+        );
     }
     let src_port = u16::from_be_bytes([frame[0], frame[1]]);
     let dst_port = u16::from_be_bytes([frame[2], frame[3]]);
@@ -80,7 +83,10 @@ fn format_frame(frame: &[u8]) -> String {
 
     match coap::parse(payload) {
         Some(details) => format!("[{direction}]{details}"),
-        None => format!("[{direction}] [COAP_DECODE_ERR] payload_hex:{}", hex_compact(payload)),
+        None => format!(
+            "[{direction}] [COAP_DECODE_ERR] payload_hex:{}",
+            hex_compact(payload)
+        ),
     }
 }
 
@@ -170,7 +176,13 @@ mod coap {
         } else {
             let parts: Vec<String> = options
                 .iter()
-                .map(|o| format!("{}: {}", option_name(o.number), option_value_text(o.number, &o.value)))
+                .map(|o| {
+                    format!(
+                        "{}: {}",
+                        option_name(o.number),
+                        option_value_text(o.number, &o.value)
+                    )
+                })
                 .collect();
             format!("[{}]", parts.join(", "))
         };
@@ -326,7 +338,10 @@ mod tests {
         // decoded to [0xAA, 0xC0, 0xBB], i.e. escaping worked.
         let mut parser2 = SlipCoapParser::new();
         let lines = parser2.feed(&framed);
-        assert_eq!(lines, vec!["[slip frame too short for UDP header: 3 byte(s)]"]);
+        assert_eq!(
+            lines,
+            vec!["[slip frame too short for UDP header: 3 byte(s)]"]
+        );
     }
 
     #[test]
@@ -334,7 +349,10 @@ mod tests {
         let mut parser = SlipCoapParser::new();
         let framed = [SLIP_END, 1, 2, 3, SLIP_END];
         let lines = parser.feed(&framed);
-        assert_eq!(lines, vec!["[slip frame too short for UDP header: 3 byte(s)]"]);
+        assert_eq!(
+            lines,
+            vec!["[slip frame too short for UDP header: 3 byte(s)]"]
+        );
     }
 
     #[test]
