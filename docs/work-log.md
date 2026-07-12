@@ -474,3 +474,17 @@ Future entries must include this per-file added/removed-line summary.
 | File | Added | Removed | Summary |
 | --- | ---: | ---: | --- |
 | `frontend/events.js` | 11 | 2 | Adds natural promotion and stop-watching actions with user-facing save feedback. |
+
+## 2026-07-12 09:32:55 UTC / 2026-07-12 11:32:55 GMT+2 (Warsaw)
+
+- **Commit:** `9c1353d` — `Use natural language in event rules panel`
+- **Task:** Use natural language in event rules panel
+- **Started:** 2026-07-12 09:32:07 UTC / 2026-07-12 11:32:07 GMT+2 (Warsaw)
+- **Completed:** 2026-07-12 09:32:55 UTC / 2026-07-12 11:32:55 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`9c1353d`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `frontend/events.js` | 5 | 1 | Replaces static/runtime jargon with saved/watching status labels. |
