@@ -1025,6 +1025,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn promote_runtime_rule_writes_and_rejects_duplicate_companion_rule() {
+        let mut state = test_control_state();
+        let root = temp_session_dir("promote-event-rule");
+        state.event_rules_path = root.join("capture.events.yml");
+        let mut subscribed = ControlSubscription::new();
+        let create = r#"{"type":"event_rule.create","source_id":"DUT_UART","name":"watchdog","pattern":"watchdog: \\d+s","severity":"error"}"#;
+        handle_control_command(create, &state, &mut subscribed).await.unwrap();
+
+        let promote = r#"{"type":"event_rule.promote","source_id":"DUT_UART","name":"watchdog"}"#;
+        let response = handle_control_command(promote, &state, &mut subscribed).await.unwrap();
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["ok"], true);
+        let yaml = std::fs::read_to_string(&state.event_rules_path).unwrap();
+        assert!(yaml.contains("DUT_UART:"));
+        assert!(yaml.contains("name: watchdog"));
+
+        let duplicate = handle_control_command(promote, &state, &mut subscribed).await.unwrap();
+        let duplicate: serde_json::Value = serde_json::from_str(&duplicate).unwrap();
+        assert_eq!(duplicate["ok"], false);
+        assert!(duplicate["error"].as_str().unwrap().contains("already exists"));
+        assert!(!state.event_rules_path.with_extension("events.yml.tmp").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
     async fn hello_returns_sources_and_session() {
         let state = test_control_state();
         let mut sub = ControlSubscription::new();
