@@ -397,3 +397,34 @@ Future entries must include this per-file added/removed-line summary.
 | `crates/embed-log-core/src/net/control_ws.rs` | 13 | 6 | Returns unified full-detail static and runtime rule records. |
 | `crates/embed-log-core/src/net/ws_server.rs` | 3 | 0 | Stores static event rules in shared server state. |
 | `crates/embed-log-core/src/runtime/server.rs` | 4 | 0 | Preserves loaded static rules for runtime API discovery. |
+
+## 2026-07-12 08:09:54 UTC / 2026-07-12 10:09:54 GMT+2 (Warsaw)
+
+- **Commit:** `54152ea` — `Export active event rules as YAML`
+- **Task:** Export active event rules as companion YAML
+- **Started:** 2026-07-12 08:08:19 UTC / 2026-07-12 10:08:19 GMT+2 (Warsaw)
+- **Completed:** 2026-07-12 08:09:54 UTC / 2026-07-12 10:09:54 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`54152ea`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-core/src/net/control_ws.rs` | 36 | 1 | Serializes unified active rules into companion YAML for export. |
+| `crates/embed-log-core/src/net/ws_server.rs` | 2 | 1 | Routes YAML export requests through the browser WebSocket. |
+
+## 2026-07-12 08:42:43 UTC / 2026-07-12 10:42:43 GMT+2 (Warsaw)
+
+- **Commit:** `0690b59` — `Add event rules manager panel`
+- **Task:** Add event rules manager panel
+- **Started:** 2026-07-12 08:42:43 UTC / 2026-07-12 10:42:43 GMT+2 (Warsaw)
+- **Completed:** 2026-07-12 08:42:43 UTC / 2026-07-12 10:42:43 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`0690b59`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `frontend/events.js` | 45 | 1 | Adds active-rules panel, runtime deletion, and YAML download actions. |
+| `frontend/viewer.css` | 6 | 0 | Styles rule-manager rows and actions. |
+| `frontend/ws.js` | 5 | 0 | Forwards event-rule protocol responses to the UI. |
