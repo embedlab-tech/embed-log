@@ -1020,7 +1020,7 @@ checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 
 [[package]]
 name = "embed-log-cli"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1045,7 +1045,7 @@ dependencies = [
 
 [[package]]
 name = "embed-log-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1074,7 +1074,7 @@ dependencies = [
 
 [[package]]
 name = "embed-log-tauri"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "embed-log-core",
@@ -1092,7 +1092,7 @@ dependencies = [
 
 [[package]]
 name = "embed-log-tui"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "arboard",

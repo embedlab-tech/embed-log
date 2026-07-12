@@ -17,7 +17,7 @@ use tracing::{info, warn};
 
 use crate::frontend_assets::FrontendAssets;
 use crate::net::control_ws::{
-    control_ws_handler, handle_event_rule_create, handle_event_rule_delete, handle_event_rule_export, handle_event_rule_list,
+    control_ws_handler, handle_event_rule_create, handle_event_rule_delete, handle_event_rule_export, handle_event_rule_list, handle_event_rule_promote,
     SourceInfo,
 };
 use crate::session::SessionManager;
@@ -134,6 +134,8 @@ pub struct ServerState {
     pub line_counters: Arc<HashMap<String, Arc<std::sync::atomic::AtomicU64>>>,
     /// Rules loaded from the companion event YAML file at server startup.
     pub static_event_rules: Arc<HashMap<String, Vec<crate::config::EventRule>>>,
+    /// Preferred companion YAML path for persisting promoted runtime rules.
+    pub event_rules_path: PathBuf,
     /// Event rules added for the lifetime of this server/session.
     pub runtime_event_rules: Arc<RwLock<HashMap<String, Vec<crate::config::EventRule>>>>,
     /// Whether the /api/v1/control WebSocket endpoint is enabled.
@@ -420,6 +422,7 @@ async fn handle_client_command(text: &str, state: &ServerState) -> Option<String
         "event_rule.create" => Some(handle_event_rule_create(&cmd, state, cmd.get("id").and_then(|value| value.as_str()))),
         "event_rule.list" => Some(handle_event_rule_list(state, cmd.get("id").and_then(|value| value.as_str()))),
         "event_rule.export" => Some(handle_event_rule_export(state, cmd.get("id").and_then(|value| value.as_str()))),
+        "event_rule.promote" => Some(handle_event_rule_promote(&cmd, state, cmd.get("id").and_then(|value| value.as_str()))),
         "event_rule.delete" => Some(handle_event_rule_delete(&cmd, state, cmd.get("id").and_then(|value| value.as_str()))),
         _ => None,
     }
@@ -938,6 +941,7 @@ mod tests {
             source_metadata: Arc::new(HashMap::new()),
             line_counters: Arc::new(HashMap::new()),
             static_event_rules: Arc::new(HashMap::new()),
+            event_rules_path: std::env::temp_dir().join("embed-log.events.yml"),
             runtime_event_rules: Arc::new(std::sync::RwLock::new(HashMap::new())),
             control_api: true,
         };

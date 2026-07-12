@@ -123,6 +123,9 @@ impl LogServer {
         let static_event_rules = Arc::new(event_matchers.iter().map(|(source, matcher)| {
             (source.clone(), matcher.rules().to_vec())
         }).collect::<HashMap<_, _>>());
+        let event_rules_path = self.config_path.as_ref().map(|path| {
+            path.parent().unwrap_or(Path::new(".")).join(format!("{}.events.yml", path.file_stem().unwrap_or_default().to_string_lossy()))
+        }).unwrap_or_else(|| PathBuf::from("embed-log.events.yml"));
 
         // Build source metadata for the control API.
         let mut source_metadata: HashMap<String, SourceInfo> = sources
@@ -478,6 +481,7 @@ impl LogServer {
             source_metadata: Arc::new(source_metadata),
             line_counters: Arc::new(line_counters),
             static_event_rules,
+            event_rules_path,
             runtime_event_rules,
             control_api: self.config.server.control_api,
         };
