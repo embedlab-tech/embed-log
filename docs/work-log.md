@@ -428,3 +428,21 @@ Future entries must include this per-file added/removed-line summary.
 | `frontend/events.js` | 45 | 1 | Adds active-rules panel, runtime deletion, and YAML download actions. |
 | `frontend/viewer.css` | 6 | 0 | Styles rule-manager rows and actions. |
 | `frontend/ws.js` | 5 | 0 | Forwards event-rule protocol responses to the UI. |
+
+## 2026-07-12 08:51:59 UTC / 2026-07-12 10:51:59 GMT+2 (Warsaw)
+
+- **Commit:** `ca89763` — `Promote event rules and prepare 1.0 release`
+- **Task:** Promote runtime event rules into companion YAML
+- **Started:** 2026-07-12 08:44:31 UTC / 2026-07-12 10:44:31 GMT+2 (Warsaw)
+- **Completed:** 2026-07-12 08:51:59 UTC / 2026-07-12 10:51:59 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`ca89763`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `Cargo.lock` | 4 | 4 | Updates workspace package metadata for version 1.0.0. |
+| `Cargo.toml` | 1 | 1 | Bumps the workspace release version to 1.0.0. |
+| `crates/embed-log-core/src/net/control_ws.rs` | 26 | 0 | Adds duplicate-safe atomic promotion of runtime rules into companion YAML. |
+| `crates/embed-log-core/src/net/ws_server.rs` | 5 | 1 | Routes promotion requests from the browser WebSocket. |
+| `crates/embed-log-core/src/runtime/server.rs` | 4 | 0 | Supplies the preferred companion event-rule path to server state. |
