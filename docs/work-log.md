@@ -558,3 +558,18 @@ Future entries must include this per-file added/removed-line summary.
 | `crates/embed-log-core/src/net/ws_server.rs` | 35 | 0 | Adds REST readiness, version, session, source-capability, and stats discovery. |
 | `docs/api-status.md` | 59 | 0 | Documents the status endpoint schema and orchestration usage. |
 | `docs/index.md` | 1 | 0 | Links the new status API reference. |
+
+## 2026-07-12 14:32:09 UTC / 2026-07-12 16:32:09 GMT+2 (Warsaw)
+
+- **Commit:** `d2cf55c` — `Document ready agent capabilities`
+- **Task:** Document ready-to-use agent capabilities
+- **Started:** 2026-07-12 14:31:20 UTC / 2026-07-12 16:31:20 GMT+2 (Warsaw)
+- **Completed:** 2026-07-12 14:32:09 UTC / 2026-07-12 16:32:09 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`d2cf55c`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `docs/agent-capabilities.md` | 135 | 0 | Documents available session, status, live-event, and event-rule agent workflows. |
+| `docs/index.md` | 1 | 0 | Links the ready-to-use agent reference. |
