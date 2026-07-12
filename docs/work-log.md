@@ -488,3 +488,17 @@ Future entries must include this per-file added/removed-line summary.
 | File | Added | Removed | Summary |
 | --- | ---: | ---: | --- |
 | `frontend/events.js` | 5 | 1 | Replaces static/runtime jargon with saved/watching status labels. |
+
+## 2026-07-12 09:35:28 UTC / 2026-07-12 11:35:28 GMT+2 (Warsaw)
+
+- **Commit:** `b4cc1f1` — `Test runtime event rule promotion persistence`
+- **Task:** Test runtime event rule promotion persistence
+- **Started:** 2026-07-12 09:33:56 UTC / 2026-07-12 11:33:56 GMT+2 (Warsaw)
+- **Completed:** 2026-07-12 09:35:28 UTC / 2026-07-12 11:35:28 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`b4cc1f1`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-core/src/net/control_ws.rs` | 25 | 0 | Covers companion YAML creation, duplicate rejection, and staged-file cleanup. |
