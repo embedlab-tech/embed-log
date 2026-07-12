@@ -104,6 +104,21 @@ test.describe('event detection', () => {
     expect(labels.every(label => label.includes(' · '))).toBeTruthy();
   });
 
+  test('rules panel shows saved rules and downloads a rules file', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await page.locator('.events-tab-btn').click();
+    await page.locator('#events-rules-btn').click();
+    const panel = page.locator('.events-rules-panel');
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText('Saved for future runs');
+
+    const download = page.waitForEvent('download');
+    await panel.locator('[data-export-rules]').click();
+    const file = await download;
+    expect(file.suggestedFilename()).toBe('embed-log.events.yml');
+  });
+
   test('event marker rendering on log lines uses severity colors', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
