@@ -291,17 +291,26 @@ function _onEventRuleResponse(event) {
         window.wsSend?.({ cmd: 'event_rule.list' });
     } else if (response.type === 'event_rule.export.result' && response.ok) {
         _downloadRulesYaml(response.yaml || '');
+    } else if (response.type === 'event_rule.promote.result') {
+        const status = _rulesPanelEl?.querySelector('.event-rules-status');
+        if (status) status.textContent = response.ok
+            ? 'Saved for future runs. Still watching now.'
+            : `Could not save: ${response.error || 'unknown error'}`;
     }
 }
 
 function _renderRules(rules) {
     if (!_rulesPanelEl) return;
-    const rows = rules.map(rule => `<div class="event-rule-row"><code>${_esc(paneLabel(rule.source_id))} · ${_esc(rule.name)}</code><span>${_esc(rule.severity)}</span><code>${_esc(rule.pattern)}</code><span>${_esc(rule.origin)}</span>${rule.origin === 'runtime' ? `<button data-delete-rule="${_esc(rule.source_id)}|${_esc(rule.name)}">Delete</button>` : ''}</div>`).join('');
-    _rulesPanelEl.innerHTML = `<div class="event-rules-actions"><button data-export-rules>Download YAML</button></div>${rows || '<span>No active event rules.</span>'}`;
+    const rows = rules.map(rule => `<div class="event-rule-row"><code>${_esc(paneLabel(rule.source_id))} · ${_esc(rule.name)}</code><span>${_esc(rule.severity)}</span><code>${_esc(rule.pattern)}</code><span>${_esc(rule.origin)}</span>${rule.origin === 'runtime' ? `<span><button data-promote-rule="${_esc(rule.source_id)}|${_esc(rule.name)}">Save for future runs</button><button data-delete-rule="${_esc(rule.source_id)}|${_esc(rule.name)}">Stop watching</button></span>` : ''}</div>`).join('');
+    _rulesPanelEl.innerHTML = `<div class="event-rules-actions"><button data-export-rules>Download rules file</button><span class="event-rules-status"></span></div>${rows || '<span>No active event rules.</span>'}`;
     _rulesPanelEl.querySelector('[data-export-rules]')?.addEventListener('click', () => window.wsSend?.({ cmd: 'event_rule.export' }));
     _rulesPanelEl.querySelectorAll('[data-delete-rule]').forEach(button => button.addEventListener('click', () => {
         const [source_id, name] = button.dataset.deleteRule.split('|');
         window.wsSend?.({ cmd: 'event_rule.delete', source_id, name });
+    }));
+    _rulesPanelEl.querySelectorAll('[data-promote-rule]').forEach(button => button.addEventListener('click', () => {
+        const [source_id, name] = button.dataset.promoteRule.split('|');
+        window.wsSend?.({ cmd: 'event_rule.promote', source_id, name });
     }));
 }
 
