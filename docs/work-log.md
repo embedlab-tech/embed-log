@@ -460,3 +460,17 @@ Future entries must include this per-file added/removed-line summary.
 | File | Added | Removed | Summary |
 | --- | ---: | ---: | --- |
 | `frontend/selection.js` | 10 | 9 | Replaces technical prompts with one-click natural-language pattern watching. |
+
+## 2026-07-12 09:29:05 UTC / 2026-07-12 11:29:05 GMT+2 (Warsaw)
+
+- **Commit:** `dd84644` — `Add save-for-future-runs event action`
+- **Task:** Add save-for-future-runs event rule action
+- **Started:** 2026-07-12 09:28:10 UTC / 2026-07-12 11:28:10 GMT+2 (Warsaw)
+- **Completed:** 2026-07-12 09:29:05 UTC / 2026-07-12 11:29:05 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`dd84644`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `frontend/events.js` | 11 | 2 | Adds natural promotion and stop-watching actions with user-facing save feedback. |
