@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
@@ -281,6 +281,7 @@ async fn handle_control_command(
         "marker.create" => Some(handle_marker_create(&cmd, state, msg_id).await),
         "event_rule.create" => Some(handle_event_rule_create(&cmd, state, msg_id)),
         "event_rule.list" => Some(handle_event_rule_list(state, msg_id)),
+        "event_rule.export" => Some(handle_event_rule_export(state, msg_id)),
         "event_rule.delete" => Some(handle_event_rule_delete(&cmd, state, msg_id)),
         _ => {
             let mut resp = serde_json::json!({
@@ -667,6 +668,35 @@ pub(crate) fn handle_event_rule_list(state: &super::ServerState, msg_id: Option<
     make_response("event_rule.list.result", msg_id, serde_json::json!({ "ok": true, "rules": rules }))
 }
 
+pub(crate) fn handle_event_rule_export(state: &super::ServerState, msg_id: Option<&str>) -> String {
+    let runtime = match state.runtime_event_rules.read() {
+        Ok(rules) => rules,
+        Err(_) => return make_response("event_rule.export.result", msg_id, serde_json::json!({ "ok": false, "error": "runtime rule registry is unavailable" })),
+    };
+    let mut sources: BTreeMap<String, Vec<&crate::config::EventRule>> = BTreeMap::new();
+    for (source, rules) in state.static_event_rules.iter() {
+        sources.entry(source.clone()).or_default().extend(rules.iter());
+    }
+    for (source, rules) in runtime.iter() {
+        sources.entry(source.clone()).or_default().extend(rules.iter());
+    }
+    let mut root = serde_yaml::Mapping::new();
+    for (source, rules) in sources {
+        let values = rules.into_iter().map(|rule| {
+            let mut rule_map = serde_yaml::Mapping::new();
+            rule_map.insert(serde_yaml::Value::String("name".into()), serde_yaml::Value::String(rule.name.clone()));
+            rule_map.insert(serde_yaml::Value::String("pattern".into()), serde_yaml::Value::String(rule.pattern.clone()));
+            rule_map.insert(serde_yaml::Value::String("severity".into()), serde_yaml::Value::String(rule.severity.clone()));
+            serde_yaml::Value::Mapping(rule_map)
+        }).collect();
+        root.insert(serde_yaml::Value::String(source), serde_yaml::Value::Sequence(values));
+    }
+    match serde_yaml::to_string(&serde_yaml::Value::Mapping(root)) {
+        Ok(yaml) => make_response("event_rule.export.result", msg_id, serde_json::json!({ "ok": true, "yaml": yaml })),
+        Err(error) => make_response("event_rule.export.result", msg_id, serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
 pub(crate) fn handle_event_rule_delete(cmd: &serde_json::Value, state: &super::ServerState, msg_id: Option<&str>) -> String {
     let source_id = match cmd.get("source_id").and_then(|value| value.as_str()) {
         Some(value) => value,
@@ -955,6 +985,11 @@ mod tests {
         let list: serde_json::Value = serde_json::from_str(&list).unwrap();
         assert_eq!(list["rules"][0]["name"], "watchdog");
         assert_eq!(list["rules"][0]["origin"], "runtime");
+
+        let export = handle_control_command(r#"{"id":"rule-export","type":"event_rule.export"}"#, &state, &mut subscribed).await.unwrap();
+        let export: serde_json::Value = serde_json::from_str(&export).unwrap();
+        assert!(export["yaml"].as_str().unwrap().contains("DUT_UART:"));
+        assert!(export["yaml"].as_str().unwrap().contains("pattern: 'watchdog: \\d+s'"));
 
         let delete = handle_control_command(
             r#"{"id":"rule-3","type":"event_rule.delete","source_id":"DUT_UART","name":"watchdog"}"#,
