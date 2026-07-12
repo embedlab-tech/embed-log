@@ -381,3 +381,19 @@ Future entries must include this per-file added/removed-line summary.
 | `crates/embed-log-core/src/net/control_ws.rs` | 3 | 3 | Exposes runtime event-rule handlers to the browser WebSocket server. |
 | `crates/embed-log-core/src/net/ws_server.rs` | 7 | 1 | Routes browser event-rule CRUD commands through the shared handlers. |
 | `frontend/selection.js` | 32 | 0 | Adds a selected-line action that prompts for and submits a runtime event rule. |
+
+## 2026-07-12 08:06:42 UTC / 2026-07-12 10:06:42 GMT+2 (Warsaw)
+
+- **Commit:** `b6d9628` — `Expose static and runtime event rules together`
+- **Task:** Add event rules manager preview export and promotion
+- **Started:** 2026-07-12 00:02:29 UTC / 2026-07-12 02:02:29 GMT+2 (Warsaw)
+- **Completed:** 2026-07-12 08:06:42 UTC / 2026-07-12 10:06:42 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`b6d9628`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-core/src/net/control_ws.rs` | 13 | 6 | Returns unified full-detail static and runtime rule records. |
+| `crates/embed-log-core/src/net/ws_server.rs` | 3 | 0 | Stores static event rules in shared server state. |
+| `crates/embed-log-core/src/runtime/server.rs` | 4 | 0 | Preserves loaded static rules for runtime API discovery. |
