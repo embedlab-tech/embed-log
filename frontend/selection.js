@@ -133,8 +133,8 @@ export function _selectionSetupPane(id) {
     const eventRuleBtn = document.createElement("button");
     eventRuleBtn.className = "copy-btn";
     eventRuleBtn.id = "create-event-rule-" + id;
-    eventRuleBtn.textContent = "⚡ Create event rule";
-    eventRuleBtn.title = "Create a runtime event rule from one selected log line";
+    eventRuleBtn.textContent = "✨ Remember this pattern";
+    eventRuleBtn.title = "Watch for similar messages and add future occurrences to Events";
     eventRuleBtn.addEventListener("click", e => { e.stopPropagation(); _createEventRule(id); });
     moreDropdown.appendChild(eventRuleBtn);
     actionRow.appendChild(copyBtn);
@@ -915,19 +915,20 @@ function _createEventRule(paneId) {
     const line = getLine(paneId, selected[0]);
     const message = line?.rawText?.trim();
     if (!message) return;
-    const name = window.prompt("Runtime event rule name:", "log-match");
-    if (!name?.trim()) return;
-    const escaped = message.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const pattern = window.prompt("Regex pattern (matches future lines):", escaped);
-    if (!pattern) return;
+    // Generalize changing numbers so a line such as "reset after 5s" also
+    // catches future "reset after 10s" messages. Advanced regex editing stays
+    // in the Rules panel rather than interrupting this common workflow.
+    const placeholder = "__EMBED_LOG_NUMBER__";
+    const escaped = message.replace(/\d+/g, placeholder).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = escaped.replace(placeholder, "\\d+");
     window.wsSend?.({
         cmd: "event_rule.create",
         source_id: paneId,
-        name: name.trim(),
+        name: `remembered-${Date.now()}`,
         pattern,
         severity: "info",
     });
-    _flashButton("create-event-rule-" + paneId, "Rule added");
+    _flashButton("create-event-rule-" + paneId, "Watching");
 }
 
 function _copy(paneId) {
