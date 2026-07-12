@@ -542,3 +542,19 @@ Future entries must include this per-file added/removed-line summary.
 | `crates/embed-log-core/src/runtime/server.rs` | 66 | 52 | Rustfmt/release-preparation change; see implementation commit. |
 | `crates/embed-log-tauri/tauri.conf.json` | 1 | 1 | Rustfmt/release-preparation change; see implementation commit. |
 | `docs/releasing.md` | 5 | 5 | Rustfmt/release-preparation change; see implementation commit. |
+
+## 2026-07-12 14:08:14 UTC / 2026-07-12 16:08:14 GMT+2 (Warsaw)
+
+- **Commit:** `89964a8` — `Add REST status capabilities endpoint`
+- **Task:** Add REST status capabilities endpoint
+- **Started:** 2026-07-12 14:05:16 UTC / 2026-07-12 16:05:16 GMT+2 (Warsaw)
+- **Completed:** 2026-07-12 14:08:14 UTC / 2026-07-12 16:08:14 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`89964a8`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-core/src/net/ws_server.rs` | 35 | 0 | Adds REST readiness, version, session, source-capability, and stats discovery. |
+| `docs/api-status.md` | 59 | 0 | Documents the status endpoint schema and orchestration usage. |
+| `docs/index.md` | 1 | 0 | Links the new status API reference. |
