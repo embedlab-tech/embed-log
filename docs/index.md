@@ -2,6 +2,7 @@
 
 - [Getting up to speed](getting-up-to-speed.md) — end-to-end guide from first capture through sessions, automation, and advanced workflows.
 - [Automation and agent plan](automation-agent-plan.md) — roadmap for token-efficient agent workflows, dynamic event rules, and API discovery.
+- [Agent capabilities reference](agent-capabilities.md) — commands and control-WebSocket operations agents can use now.
 - [Quick start](quickstart.md) — run UART/file sources without YAML and find sessions.
 - [Architecture](architecture.md) — runtime diagrams, crate/module map, frontend/Tauri/session flow.
 - [Configuration](configuration.md) — YAML schema, source types, tabs, plugins, examples.
