@@ -1223,6 +1223,12 @@ mark.hl {
     font-size: 13px;
 }
 
+/* ── Event rules panel ── */
+.events-rules-panel { padding: 8px; border-bottom: 1px solid var(--border); font-size: 11px; }
+.event-rule-row { display: grid; grid-template-columns: 180px 60px 1fr 60px auto; gap: 8px; align-items: center; padding: 3px 0; }
+.event-rule-row code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.event-rules-actions { margin-bottom: 6px; }
+
 /* ── Events filter bar ── */
 .events-filter-bar {
     display: flex;

@@ -45,6 +45,7 @@ let _svgWrapEl  = null;   // div wrapping the <svg>
 let _filterEl   = null;   // source/severity filter bar
 let _eventsTooltipEl  = null;   // hover tooltip
 let _eventsBtn  = null;   // tab-bar button
+let _rulesPanelEl = null;
 
 let _timelineMode = 'scroll'; // 'scroll' = zoomable horizontal scroll, 'zoom' = fit range to viewport
 let _scrollPxPerMs = SCROLL_DEFAULT_PX_PER_MS;
@@ -209,6 +210,7 @@ function _buildDom() {
         '<span class="events-title">⚡ Event Timeline</span>' +
         '<span class="events-count"></span>' +
         '<button class="events-nav-toggle" id="events-nav-toggle" title="Include event markers in marker navigation">⚡ in nav</button>' +
+        '<button class="events-btn" id="events-rules-btn">⚙ Rules</button>' +
         '<div class="events-step-controls" title="Select and center events without leaving the timeline">' +
             '<button class="events-btn" data-event-nav="-1" title="Previous event">◀ event</button>' +
             '<button class="events-btn" data-event-nav="1" title="Next event">event ▶</button>' +
@@ -227,8 +229,11 @@ function _buildDom() {
 
     _filterEl = document.createElement('div');
     _filterEl.className = 'events-filter-bar';
+    _rulesPanelEl = document.createElement('div');
+    _rulesPanelEl.className = 'events-rules-panel';
+    _rulesPanelEl.hidden = true;
 
-    _contentEl.append(header, _svgWrapEl, _filterEl);
+    _contentEl.append(header, _rulesPanelEl, _svgWrapEl, _filterEl);
     document.getElementById('container').appendChild(_contentEl);
 
     // Mode + zoom controls.
@@ -247,6 +252,8 @@ function _buildDom() {
         btn.addEventListener('click', () => _navigateEvent(btn.dataset.eventNav));
     });
     _syncModeUi();
+    header.querySelector('#events-rules-btn')?.addEventListener('click', _toggleRulesPanel);
+    window.addEventListener('embed-log-event-rule', _onEventRuleResponse);
 
     // Toggle event markers in main marker navigation
     const navToggle = document.getElementById('events-nav-toggle');
@@ -268,6 +275,43 @@ function _buildDom() {
     _eventsBtn.className = 'tab-btn events-tab-btn';
     _eventsBtn.textContent = '⚡ Events';
     _eventsBtn.addEventListener('click', _activateEventsTab);
+}
+
+function _toggleRulesPanel() {
+    if (!_rulesPanelEl) return;
+    _rulesPanelEl.hidden = !_rulesPanelEl.hidden;
+    if (!_rulesPanelEl.hidden) window.wsSend?.({ cmd: 'event_rule.list' });
+}
+
+function _onEventRuleResponse(event) {
+    const response = event.detail || {};
+    if (response.type === 'event_rule.list.result' && response.ok) {
+        _renderRules(response.rules || []);
+    } else if (response.type === 'event_rule.delete.result' && response.ok) {
+        window.wsSend?.({ cmd: 'event_rule.list' });
+    } else if (response.type === 'event_rule.export.result' && response.ok) {
+        _downloadRulesYaml(response.yaml || '');
+    }
+}
+
+function _renderRules(rules) {
+    if (!_rulesPanelEl) return;
+    const rows = rules.map(rule => `<div class="event-rule-row"><code>${_esc(paneLabel(rule.source_id))} · ${_esc(rule.name)}</code><span>${_esc(rule.severity)}</span><code>${_esc(rule.pattern)}</code><span>${_esc(rule.origin)}</span>${rule.origin === 'runtime' ? `<button data-delete-rule="${_esc(rule.source_id)}|${_esc(rule.name)}">Delete</button>` : ''}</div>`).join('');
+    _rulesPanelEl.innerHTML = `<div class="event-rules-actions"><button data-export-rules>Download YAML</button></div>${rows || '<span>No active event rules.</span>'}`;
+    _rulesPanelEl.querySelector('[data-export-rules]')?.addEventListener('click', () => window.wsSend?.({ cmd: 'event_rule.export' }));
+    _rulesPanelEl.querySelectorAll('[data-delete-rule]').forEach(button => button.addEventListener('click', () => {
+        const [source_id, name] = button.dataset.deleteRule.split('|');
+        window.wsSend?.({ cmd: 'event_rule.delete', source_id, name });
+    }));
+}
+
+function _downloadRulesYaml(yaml) {
+    const blob = new Blob([yaml], { type: 'application/x-yaml' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'embed-log.events.yml';
+    link.click();
+    URL.revokeObjectURL(link.href);
 }
 
 function _buildTooltip() {
