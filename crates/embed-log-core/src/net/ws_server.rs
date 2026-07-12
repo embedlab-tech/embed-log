@@ -171,6 +171,7 @@ pub async fn start_server(
 
     api = api
         .route("/api/health", axum::routing::get(api_health_handler))
+        .route("/api/v1/status", axum::routing::get(api_status_handler))
         .route(
             "/api/session/current",
             axum::routing::get(api_current_session_handler),
@@ -643,6 +644,40 @@ fn current_session_value(state: &ServerState) -> serde_json::Value {
 
 async fn api_health_handler() -> impl IntoResponse {
     axum::Json(serde_json::json!({ "status": "ok" }))
+}
+
+/// GET /api/v1/status — lightweight readiness and source-capability discovery.
+async fn api_status_handler(State(state): State<ServerState>) -> impl IntoResponse {
+    let sources = state
+        .source_metadata
+        .iter()
+        .map(|(name, source)| {
+            let stats = state
+                .stats
+                .source(name)
+                .map(|stats| stats.snapshot(state.stats.queue_size))
+                .unwrap_or(serde_json::Value::Null);
+            (
+                name.clone(),
+                serde_json::json!({
+                    "type": source.source_type,
+                    "label": source.label,
+                    "writable": source.writable,
+                    "available": true,
+                    "stats": stats,
+                }),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>();
+    let session = current_session_value(&state);
+    axum::Json(serde_json::json!({
+        "ok": true,
+        "api_version": "v1",
+        "version": env!("CARGO_PKG_VERSION"),
+        "session_id": session.get("id").cloned().unwrap_or(serde_json::Value::Null),
+        "control_api": state.control_api,
+        "sources": sources,
+    }))
 }
 
 async fn api_current_session_handler(State(state): State<ServerState>) -> impl IntoResponse {

@@ -6,6 +6,7 @@
 - [Architecture](architecture.md) — runtime diagrams, crate/module map, frontend/Tauri/session flow.
 - [Configuration](configuration.md) — YAML schema, source types, tabs, plugins, examples.
 - [CLI reference](cli.md) — commands, options, environment variables.
+- [Status and capabilities API](api-status.md) — REST readiness and source discovery for harnesses.
 - [Development](development.md) — local workflow, `just` recipes, extension points.
 - [Terminal UI](tui.md) — launch modes, supported features, limitations, and keybindings.
 - [Tauri desktop app](tauri.md) — config path resolution, onboarding, default session log locations.
