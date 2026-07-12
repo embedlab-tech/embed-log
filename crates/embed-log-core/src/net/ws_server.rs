@@ -132,6 +132,8 @@ pub struct ServerState {
     pub source_metadata: Arc<HashMap<String, SourceInfo>>,
     /// Per-source line counters for stable `line_idx` in log entries.
     pub line_counters: Arc<HashMap<String, Arc<std::sync::atomic::AtomicU64>>>,
+    /// Rules loaded from the companion event YAML file at server startup.
+    pub static_event_rules: Arc<HashMap<String, Vec<crate::config::EventRule>>>,
     /// Event rules added for the lifetime of this server/session.
     pub runtime_event_rules: Arc<RwLock<HashMap<String, Vec<crate::config::EventRule>>>>,
     /// Whether the /api/v1/control WebSocket endpoint is enabled.
@@ -934,6 +936,7 @@ mod tests {
             source_tx_senders: Arc::new(HashMap::new()),
             source_metadata: Arc::new(HashMap::new()),
             line_counters: Arc::new(HashMap::new()),
+            static_event_rules: Arc::new(HashMap::new()),
             runtime_event_rules: Arc::new(std::sync::RwLock::new(HashMap::new())),
             control_api: true,
         };

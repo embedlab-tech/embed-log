@@ -657,11 +657,14 @@ pub(crate) fn handle_event_rule_list(state: &super::ServerState, msg_id: Option<
         Ok(rules) => rules,
         Err(_) => return make_response("event_rule.list.result", msg_id, serde_json::json!({ "ok": false, "error": "runtime rule registry is unavailable" })),
     };
-    let sources = rules.iter().map(|(source_id, source_rules)| serde_json::json!({
-        "source_id": source_id,
-        "rules": source_rules.iter().map(|rule| serde_json::json!({ "name": rule.name, "pattern": rule.pattern, "severity": rule.severity })).collect::<Vec<_>>(),
-    })).collect::<Vec<_>>();
-    make_response("event_rule.list.result", msg_id, serde_json::json!({ "ok": true, "sources": sources }))
+    let static_rules = state.static_event_rules.iter().flat_map(|(source_id, source_rules)| {
+        source_rules.iter().map(move |rule| serde_json::json!({ "source_id": source_id, "name": rule.name, "pattern": rule.pattern, "severity": rule.severity, "origin": "static" }))
+    });
+    let runtime_rules = rules.iter().flat_map(|(source_id, source_rules)| {
+        source_rules.iter().map(move |rule| serde_json::json!({ "source_id": source_id, "name": rule.name, "pattern": rule.pattern, "severity": rule.severity, "origin": "runtime" }))
+    });
+    let rules = static_rules.chain(runtime_rules).collect::<Vec<_>>();
+    make_response("event_rule.list.result", msg_id, serde_json::json!({ "ok": true, "rules": rules }))
 }
 
 pub(crate) fn handle_event_rule_delete(cmd: &serde_json::Value, state: &super::ServerState, msg_id: Option<&str>) -> String {
@@ -929,6 +932,7 @@ mod tests {
             source_tx_senders: Arc::new(HashMap::new()),
             source_metadata: Arc::new(source_metadata),
             line_counters: Arc::new(HashMap::new()),
+            static_event_rules: Arc::new(HashMap::new()),
             runtime_event_rules: Arc::new(std::sync::RwLock::new(HashMap::new())),
             control_api: true,
         }
@@ -949,7 +953,8 @@ mod tests {
 
         let list = handle_control_command(r#"{"id":"rule-2","type":"event_rule.list"}"#, &state, &mut subscribed).await.unwrap();
         let list: serde_json::Value = serde_json::from_str(&list).unwrap();
-        assert_eq!(list["sources"][0]["rules"][0]["name"], "watchdog");
+        assert_eq!(list["rules"][0]["name"], "watchdog");
+        assert_eq!(list["rules"][0]["origin"], "runtime");
 
         let delete = handle_control_command(
             r#"{"id":"rule-3","type":"event_rule.delete","source_id":"DUT_UART","name":"watchdog"}"#,
@@ -1451,6 +1456,7 @@ mod tests {
             source_tx_senders: Arc::new(HashMap::new()),
             source_metadata: Arc::new(source_metadata),
             line_counters: Arc::new(line_counters),
+            static_event_rules: Arc::new(HashMap::new()),
             runtime_event_rules: Arc::new(std::sync::RwLock::new(HashMap::new())),
             control_api: true,
         };
@@ -1706,6 +1712,7 @@ mod tests {
             source_tx_senders: Arc::new(HashMap::new()),
             source_metadata: Arc::new(source_metadata),
             line_counters: Arc::new(line_counters),
+            static_event_rules: Arc::new(HashMap::new()),
             runtime_event_rules: Arc::new(std::sync::RwLock::new(HashMap::new())),
             control_api: true,
         };

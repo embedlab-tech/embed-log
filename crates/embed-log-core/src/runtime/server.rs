@@ -120,6 +120,9 @@ impl LogServer {
         let event_matchers =
             crate::config::load_event_matchers(self.config_path.as_deref(), &source_names);
         let runtime_event_rules = Arc::new(RwLock::new(HashMap::new()));
+        let static_event_rules = Arc::new(event_matchers.iter().map(|(source, matcher)| {
+            (source.clone(), matcher.rules().to_vec())
+        }).collect::<HashMap<_, _>>());
 
         // Build source metadata for the control API.
         let mut source_metadata: HashMap<String, SourceInfo> = sources
@@ -474,6 +477,7 @@ impl LogServer {
             source_tx_senders: Arc::new(source_tx_senders),
             source_metadata: Arc::new(source_metadata),
             line_counters: Arc::new(line_counters),
+            static_event_rules,
             runtime_event_rules,
             control_api: self.config.server.control_api,
         };
