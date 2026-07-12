@@ -446,3 +446,17 @@ Future entries must include this per-file added/removed-line summary.
 | `crates/embed-log-core/src/net/control_ws.rs` | 26 | 0 | Adds duplicate-safe atomic promotion of runtime rules into companion YAML. |
 | `crates/embed-log-core/src/net/ws_server.rs` | 5 | 1 | Routes promotion requests from the browser WebSocket. |
 | `crates/embed-log-core/src/runtime/server.rs` | 4 | 0 | Supplies the preferred companion event-rule path to server state. |
+
+## 2026-07-12 09:23:46 UTC / 2026-07-12 11:23:46 GMT+2 (Warsaw)
+
+- **Commit:** `a84b302` — `Simplify event rule creation workflow`
+- **Task:** Simplify event rule creation UX
+- **Started:** 2026-07-12 09:22:47 UTC / 2026-07-12 11:22:47 GMT+2 (Warsaw)
+- **Completed:** 2026-07-12 09:23:46 UTC / 2026-07-12 11:23:46 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`a84b302`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `frontend/selection.js` | 10 | 9 | Replaces technical prompts with one-click natural-language pattern watching. |
