@@ -502,3 +502,17 @@ Future entries must include this per-file added/removed-line summary.
 | File | Added | Removed | Summary |
 | --- | ---: | ---: | --- |
 | `crates/embed-log-core/src/net/control_ws.rs` | 25 | 0 | Covers companion YAML creation, duplicate rejection, and staged-file cleanup. |
+
+## 2026-07-12 09:37:27 UTC / 2026-07-12 11:37:27 GMT+2 (Warsaw)
+
+- **Commit:** `504bf95` — `Test event rules panel export workflow`
+- **Task:** Add Playwright coverage for event rules panel
+- **Started:** 2026-07-12 09:36:47 UTC / 2026-07-12 11:36:47 GMT+2 (Warsaw)
+- **Completed:** 2026-07-12 09:37:27 UTC / 2026-07-12 11:37:27 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`504bf95`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `tests-ui/regression-tests/events.spec.js` | 15 | 0 | Covers rules-panel loading, saved-rule wording, and companion-file download. |
