@@ -516,3 +516,29 @@ Future entries must include this per-file added/removed-line summary.
 | File | Added | Removed | Summary |
 | --- | ---: | ---: | --- |
 | `tests-ui/regression-tests/events.spec.js` | 15 | 0 | Covers rules-panel loading, saved-rule wording, and companion-file download. |
+
+## 2026-07-12 09:41:25 UTC / 2026-07-12 11:41:25 GMT+2 (Warsaw)
+
+- **Commit:** `88927ae` — `Prepare 1.0.0 release candidate`
+- **Task:** Format and install local 1.0.0 release candidate
+- **Started:** 2026-07-12 09:40:26 UTC / 2026-07-12 11:40:26 GMT+2 (Warsaw)
+- **Completed:** 2026-07-12 09:41:25 UTC / 2026-07-12 11:41:25 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`88927ae`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/release-cli.yml` | 1 | 1 | Rustfmt/release-preparation change; see implementation commit. |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 75 | 24 | Rustfmt/release-preparation change; see implementation commit. |
+| `crates/embed-log-cli/src/main.rs` | 9 | 1 | Rustfmt/release-preparation change; see implementation commit. |
+| `crates/embed-log-core/src/config/loader.rs` | 4 | 1 | Rustfmt/release-preparation change; see implementation commit. |
+| `crates/embed-log-core/src/config/paths.rs` | 1 | 4 | Rustfmt/release-preparation change; see implementation commit. |
+| `crates/embed-log-core/src/net/control_ws.rs` | 306 | 55 | Rustfmt/release-preparation change; see implementation commit. |
+| `crates/embed-log-core/src/net/ws_server.rs` | 28 | 8 | Rustfmt/release-preparation change; see implementation commit. |
+| `crates/embed-log-core/src/parsers/slip_coap.rs` | 23 | 5 | Rustfmt/release-preparation change; see implementation commit. |
+| `crates/embed-log-core/src/parsers/zephyr_dict.rs` | 93 | 35 | Rustfmt/release-preparation change; see implementation commit. |
+| `crates/embed-log-core/src/postprocess.rs` | 7 | 6 | Rustfmt/release-preparation change; see implementation commit. |
+| `crates/embed-log-core/src/runtime/server.rs` | 66 | 52 | Rustfmt/release-preparation change; see implementation commit. |
+| `crates/embed-log-tauri/tauri.conf.json` | 1 | 1 | Rustfmt/release-preparation change; see implementation commit. |
+| `docs/releasing.md` | 5 | 5 | Rustfmt/release-preparation change; see implementation commit. |
