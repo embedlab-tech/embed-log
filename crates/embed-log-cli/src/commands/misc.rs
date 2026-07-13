@@ -78,7 +78,7 @@ struct GithubAsset {
     browser_download_url: String,
 }
 
-const UPDATE_REPO: &str = "krezolekcoder/embed-log";
+const UPDATE_REPO: &str = "embedlab-tech/embed-log";
 
 /// `embed-log update` checks releases by default; replacement requires --yes.
 pub(crate) async fn cmd_update(
