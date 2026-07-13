@@ -287,7 +287,7 @@ fn unhexify_chunk(hexstr: &str, min_hex_len: usize) -> Option<Vec<u8>> {
     while end > 0 {
         let mut out = Vec::with_capacity(end / 2);
         let mut failed = false;
-        for pair in hexstr[..end].as_bytes().chunks(2) {
+        for pair in hexstr.as_bytes()[..end].chunks(2) {
             if pair.len() != 2 {
                 failed = true;
                 break;
@@ -709,13 +709,8 @@ fn stack_min_align(arch: &str, is64: bool) -> (usize, bool) {
 fn data_type_align_override(t: ArgType, is64: bool) -> usize {
     match t {
         ArgType::LongLong | ArgType::ULongLong => 8,
-        ArgType::Long | ArgType::ULong => {
-            if is64 {
-                8
-            } else {
-                4
-            }
-        }
+        ArgType::Long | ArgType::ULong if is64 => 8,
+        ArgType::Long | ArgType::ULong => 4,
         _ => 4,
     }
 }
@@ -1226,11 +1221,12 @@ mod tests {
         assert_eq!(end_of_args_abs % 4, 0, "test arg list must be int-aligned");
         let end_of_args_units = (end_of_args_abs / 4) as u8;
 
-        let mut package = Vec::new();
-        package.push(end_of_args_units);
-        package.push(0); // num_packed_strings
-        package.push(0); // num_ro_str_indexes
-        package.push(0); // num_rw_str_indexes
+        let mut package = vec![
+            end_of_args_units,
+            0, // num_packed_strings
+            0, // num_ro_str_indexes
+            0, // num_rw_str_indexes
+        ];
         package.extend_from_slice(&fmt_str_ptr.to_le_bytes());
         package.extend_from_slice(arg_bytes);
         // no inline string table needed since strings are statically resolved

@@ -48,6 +48,9 @@ struct ParsedUdpPacket<'a> {
 }
 
 impl NetworkCaptureSource {
+    // Mirrors the complete network-capture configuration; callers receive
+    // individual optional YAML fields rather than an intermediate builder.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: impl Into<String>,
         interface: impl Into<String>,

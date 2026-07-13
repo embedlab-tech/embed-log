@@ -269,9 +269,9 @@ fn verify_sha256(bytes: &[u8], expected: &str) -> Result<()> {
 fn extract_tar_gz(bytes: &[u8], dest: &Path) -> Result<()> {
     let decoder = flate2::read::GzDecoder::new(bytes);
     let mut archive = tar::Archive::new(decoder);
-    let mut entries = archive.entries().context("read update archive")?;
+    let entries = archive.entries().context("read update archive")?;
     let mut executable = None;
-    while let Some(entry) = entries.next() {
+    for entry in entries {
         let mut entry = entry.context("read update archive entry")?;
         let path = entry.path().context("read update archive path")?;
         anyhow::ensure!(

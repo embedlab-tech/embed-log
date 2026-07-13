@@ -37,8 +37,8 @@ pub fn draw(f: &mut Frame, state: &State) {
 }
 
 fn draw_help_overlay(f: &mut Frame, area: Rect) {
-    let width = area.width.saturating_sub(8).min(88).max(40);
-    let height = area.height.saturating_sub(4).min(22).max(10);
+    let width = area.width.saturating_sub(8).clamp(40, 88);
+    let height = area.height.saturating_sub(4).clamp(10, 22);
     let x = area.x + area.width.saturating_sub(width) / 2;
     let y = area.y + area.height.saturating_sub(height) / 2;
     let popup = Rect::new(x, y, width, height);

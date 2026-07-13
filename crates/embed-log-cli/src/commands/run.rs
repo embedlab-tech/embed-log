@@ -92,6 +92,9 @@ pub(crate) async fn cmd_run(
 /// synthetic traffic, then run the server.
 /// Start a temporary configuration assembled from explicit command-line sources.
 /// Unlike normal `run`, this never invokes onboarding or reads a default config.
+///
+/// The arguments mirror the independent quick-run CLI flags.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn cmd_run_quick(
     serial_paths: Vec<PathBuf>,
     file_paths: Vec<PathBuf>,

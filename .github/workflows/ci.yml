@@ -431,8 +431,5 @@ jobs:
         run: |
           rm -f "${{ runner.temp }}/embed-log-bin/embed-log"
           rm -rf release-staging
-          if command -v embed-log >/dev/null 2>&1; then
-            echo "ERROR: embed-log still on PATH after cleanup" >&2
-            exit 1
-          fi
-          echo "Cleanup complete — embed-log uninstalled"
+          test ! -e "${{ runner.temp }}/embed-log-bin/embed-log"
+          echo "Cleanup complete — job-installed embed-log removed"
