@@ -1208,11 +1208,11 @@ mod tests {
     fn release_api_url_supports_default_and_explicit_tags() {
         assert_eq!(
             release_api_url("http://127.0.0.1:9999/", None),
-            "http://127.0.0.1:9999/repos/krezolekcoder/embed-log/releases/latest"
+            "http://127.0.0.1:9999/repos/embedlab-tech/embed-log/releases/latest"
         );
         assert_eq!(
             release_api_url("https://api.github.com", Some("v1.2.3")),
-            "https://api.github.com/repos/krezolekcoder/embed-log/releases/tags/v1.2.3"
+            "https://api.github.com/repos/embedlab-tech/embed-log/releases/tags/v1.2.3"
         );
     }
 

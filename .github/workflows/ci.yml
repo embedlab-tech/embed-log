@@ -250,8 +250,10 @@ jobs:
             tests-ui/test-results/
           if-no-files-found: ignore
 
+  # Disabled until the runner has the complete WebKitGTK/Tauri dependency set.
   tauri-linux:
-    name: Tauri Linux build
+    name: Tauri Linux build (disabled)
+    if: ${{ false }}
     runs-on: [self-hosted, Linux]
     needs: build-cli
     timeout-minutes: 60
