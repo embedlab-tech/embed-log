@@ -638,3 +638,19 @@ Future entries must include this per-file added/removed-line summary.
 | --- | ---: | ---: | --- |
 | `docs/hardware-ci.md` | 1 | 1 | Documents the mixed-baud profile and minimum 500-record capture. |
 | `sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py` | 32 | 16 | Configures per-source baud profiles, increases traffic, and restores 115200 teardown state. |
+
+## 2026-07-13 18:00:55 UTC / 2026-07-13 20:00:55 CEST (Warsaw)
+
+- **Commit:** `4e29f40` — `Run hardware CI against pre-flashed STM32G0 rig`
+- **Task:** Make hardware CI run the mixed-baud test against a connected, pre-flashed STM32G0 rig without sandbox firmware setup.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 18:00:55 UTC / 2026-07-13 20:00:55 CEST (+0200) (Warsaw)
+- **Validation:** `PATH=/tmp/embed-log-hw-package/bin:$PATH EMBED_LOG_STM32G0_HARDWARE=1 EMBED_LOG_STM32G0_ARTIFACT_DIR=/tmp/embed-log-stm32g0-ci-artifacts /tmp/embed-log-hw-venv/bin/python -m pytest sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py -q` — passed (1 passed); workflow YAML parsed with the pre-flashed-rig job shape.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`4e29f40`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/hardware-integration.yml` | 8 | 25 | Uses verified by-id defaults and removes firmware flashing/preflight. |
+| `docs/hardware-ci.md` | 4 | 6 | Documents the connected pre-flashed rig workflow and optional overrides. |
