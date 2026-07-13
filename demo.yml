@@ -4,7 +4,6 @@ server:
   host: 127.0.0.1
   ws_port: 8080
   app_name: embed-log demo
-  open_browser: false
   timestamp_mode: absolute
 
 logs:
@@ -23,7 +22,7 @@ sources:
     port: 6000
 
   - name: HOST
-    label: Host Controller
+    label: Host Debug
     type: udp
     port: 6001
 

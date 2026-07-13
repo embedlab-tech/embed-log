@@ -669,7 +669,7 @@ function sendSerial(paneId) {
     const text  = input.value.trim();
     if (!text) return;
     input.value = "";
-    window.wsSend?.({ cmd: "send_raw", id: paneId, data: text + "\n" });
+    window.wsSend?.({ cmd: "send_raw", id: paneId, data: text + "\r" });
 }
 
 export function _uiSetupTxPane(id) {
@@ -804,7 +804,7 @@ export function _uiSetupTxPane(id) {
         }
         window.__embedLogTxHistory[histKey] = history;
 
-        window.wsSend?.({ cmd: "send_raw", id, data: text + "\n" });
+        window.wsSend?.({ cmd: "send_raw", id, data: text + "\r" });
     }
 
     // Enter → send

@@ -879,7 +879,14 @@ fn events_file_path(session: &SessionRecord) -> PathBuf {
         .manifest
         .get("events_file")
         .and_then(|v| v.as_str())
-        .map(PathBuf::from)
+        .map(|path| {
+            let path = PathBuf::from(path);
+            if path.is_absolute() {
+                path
+            } else {
+                session.dir.join(path)
+            }
+        })
         .unwrap_or_else(|| session.dir.join("events.jsonl"))
 }
 
@@ -900,7 +907,7 @@ fn clock_time(entry: &serde_json::Value) -> String {
 
 /// [`CompactionLevel::Ultra`] source-name shortcodes for `--format
 /// compact`/`mini-jsonl`: derived from the source's own name — initials of
-/// its `_`/`-`-separated words (`CONTROLLER` -> `C`, `MCU_LINK_RX` -> `MLR`,
+/// its `_`/`-`-separated words (`COUNTER` -> `C`, `MCU_LINK_RX` -> `MLR`,
 /// `NODE-RED-COAP` -> `NRC`) — rather than an arbitrary scan-order letter, so
 /// codes are mnemonic and mostly stable across runs (the same source tends
 /// to get the same code regardless of when it's first seen). On a collision
@@ -1626,6 +1633,28 @@ pub(crate) fn export_session_html(session: &SessionRecord, output: PathBuf) -> R
         .and_then(|v| v.as_str())
         .map(str::to_owned);
     let frontend_dir = std::env::current_dir()?.join("frontend");
+    let markers = load_markers_file(&session.dir)?;
+    let events = load_events_file(&events_file_path(session));
+    let event_rules = session
+        .manifest
+        .get("event_rules")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let frontend_plugins = session
+        .manifest
+        .get("frontend_plugins")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let pane_plugins = session
+        .manifest
+        .get("pane_plugins")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let plugin_scripts = session
+        .manifest
+        .get("plugin_scripts")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
 
     let exporter = SessionExporter::new(
         output.clone(),
@@ -1635,10 +1664,25 @@ pub(crate) fn export_session_html(session: &SessionRecord, output: PathBuf) -> R
         frontend_dir,
         timestamp_mode,
         first_log_at,
-    );
+    )
+    .with_plugins(frontend_plugins, pane_plugins, plugin_scripts)
+    .with_markers(markers)
+    .with_events(events, event_rules);
     exporter.export()?;
     println!("{}", output.display());
     Ok(())
+}
+
+/// Load events from a session's events.jsonl file. Missing/unreadable file -> empty.
+/// Mirrors `SessionManager::load_events` for callers that only have a `SessionRecord`.
+fn load_events_file(path: &Path) -> Vec<serde_json::Value> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(_) => return Vec::new(),
+    };
+    text.lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect()
 }
 
 pub(crate) fn export_session_raw(session: &SessionRecord, output: PathBuf) -> Result<()> {
@@ -2438,14 +2482,14 @@ mod tests {
     #[test]
     fn format_mini_entry_denoises_message() {
         let entry = serde_json::json!({
-            "source_id": "READER",
-            "message": "gwl outside> \u{1b}[13D\u{1b}[J[00000000] <inf> rv8263: interrupt configured",
+            "source_id": "RELAY",
+            "message": "node outside> \u{1b}[13D\u{1b}[J[00000000] <inf> rv8263: interrupt configured",
             "timestamp_iso": "2026-07-06T14:31:31.877+02:00",
         });
         let mut codes = ShortcodeTable::default();
         assert_eq!(
             format_mini_entry(&entry, &mut codes)["m"],
-            "gwl outside> [00000000] <inf> rv8263: interrupt configured"
+            "node outside> [00000000] <inf> rv8263: interrupt configured"
         );
     }
 
@@ -2459,7 +2503,7 @@ mod tests {
             "relNum": 83_644.0,
         });
         let b = serde_json::json!({
-            "source_id": "CONTROLLER",
+            "source_id": "COUNTER",
             "message": "hi",
             "timestamp_iso": "2026-07-06T14:31:31.877+02:00",
             "relNum": 1_000.0,
@@ -2474,18 +2518,18 @@ mod tests {
     fn shortcode_table_collision_falls_back_to_longer_prefix() {
         let mut codes = ShortcodeTable::default();
         // Both reduce to "C" as bare initials — second one must not overwrite the first.
-        assert_eq!(codes.code_for("CONTROLLER"), "C");
+        assert_eq!(codes.code_for("COUNTER"), "C");
         assert_eq!(codes.code_for("CLIENT"), "CL");
         // Repeat calls are stable.
-        assert_eq!(codes.code_for("CONTROLLER"), "C");
+        assert_eq!(codes.code_for("COUNTER"), "C");
         assert_eq!(codes.code_for("CLIENT"), "CL");
     }
 
     #[test]
     fn shortcode_table_uses_meaningful_initials() {
         let mut codes = ShortcodeTable::default();
-        assert_eq!(codes.code_for("CONTROLLER"), "C");
-        assert_eq!(codes.code_for("READER"), "R");
+        assert_eq!(codes.code_for("COUNTER"), "C");
+        assert_eq!(codes.code_for("RELAY"), "R");
         assert_eq!(codes.code_for("MCU_LINK"), "ML");
         assert_eq!(codes.code_for("MCU_LINK_RX"), "MLR");
         assert_eq!(codes.code_for("MCU_LINK_TX"), "MLT");
@@ -2540,7 +2584,7 @@ mod tests {
         std::fs::write(
             dir.join("combined.jsonl"),
             concat!(
-                "{\"source_id\":\"CONTROLLER\",\"message\":\"boot\",\"timestamp_iso\":\"2026-07-06T14:31:18+02:00\"}\n",
+                "{\"source_id\":\"COUNTER\",\"message\":\"boot\",\"timestamp_iso\":\"2026-07-06T14:31:18+02:00\"}\n",
                 "{\"source_id\":\"PYTEST\",\"message\":\"Timeout waiting for event='dcf_edhoc'\",\"timestamp_iso\":\"2026-07-06T14:41:23+02:00\"}\n",
             ),
         )

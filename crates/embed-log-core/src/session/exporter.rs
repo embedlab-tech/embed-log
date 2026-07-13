@@ -139,21 +139,6 @@ impl SessionExporter {
             }
         }
 
-        // Compute pane stats.
-        let mut total_lines = 0usize;
-        let mut total_bytes = 0usize;
-        let mut pane_stats: HashMap<String, (usize, usize)> = HashMap::new();
-        for pane_id in &all_pane_ids {
-            let entries = log_data.get(pane_id);
-            let count = entries.map(|e| e.len()).unwrap_or(0);
-            let bytes = entries
-                .map(|e| e.iter().map(|entry| entry.text.len()).sum::<usize>())
-                .unwrap_or(0);
-            pane_stats.insert(pane_id.clone(), (count, bytes));
-            total_lines += count;
-            total_bytes += bytes;
-        }
-
         // Build JSON serializations.
         let tabs_json = serde_json::to_string(&self.tabs)?;
         let panes_json = serde_json::to_string(&all_pane_ids)?;
@@ -182,6 +167,7 @@ impl SessionExporter {
                 "unwrap": true,
                 "wsStatus": false,
                 "dynamicTabs": false,
+                "markers": false,
             },
         });
         let profile_json = serde_json::to_string(&static_profile)?;
@@ -196,6 +182,7 @@ impl SessionExporter {
              window.__embedLogPanePlugins = {pane_plugins_json};\n\
              window.__embedLogPluginScripts = {plugin_scripts_json};\n\
              window.__embedLogInitialPanePluginUiState = {{}};\n\
+             window.__embedLogInitialThemeState = {{\"mode\":\"light\",\"lightKey\":\"whitesand\",\"darkKey\":\"one-dark\"}};\n\
              window.__embedLogInitialTimestampMode = {tm};\n\
              window.__embedLogFirstLogAt = {fla};\n\
              window.__embedLogInitialFontSize = 14;\n\
@@ -267,12 +254,12 @@ impl SessionExporter {
                  if (typeof window.__embedLogOnMarkers === \"function\") window.__embedLogOnMarkers();\n\
              }}\n\
              var _eventRules = window.__embedLogEventRules || {{}};\n\
+             var _events = window.__embedLogEvents || [];\n\
              var _hasRules = Object.values(_eventRules).some(function (r) {{ return Array.isArray(r) && r.length > 0; }});\n\
-             if (_hasRules) {{\n\
+             if (_hasRules || _events.length) {{\n\
                  state.eventRules = _eventRules;\n\
                  state.eventsEnabled = true;\n\
                  if (typeof initEventsTab === \"function\") initEventsTab();\n\
-                 var _events = window.__embedLogEvents || [];\n\
                  _events.forEach(function (ev) {{ if (typeof addEvent === \"function\") addEvent(ev); }});\n\
                  if (typeof renderTabBar === \"function\") renderTabBar();\n\
              }}\n\
@@ -303,26 +290,15 @@ impl SessionExporter {
         ];
         let mut js_blocks = String::new();
         for &filename in &js_files {
+            if filename == "state.js" {
+                js_blocks.push_str(&plugin_script_tags(&self.plugin_scripts));
+            }
             if let Some(src) = self.read_frontend_asset(filename) {
                 let stripped = strip_module_syntax(&src);
                 let escaped = esc_script_text(&stripped);
                 js_blocks.push_str("<script>");
                 js_blocks.push_str(&escaped);
                 js_blocks.push_str("</script>\n");
-            }
-        }
-
-        // Add plugin script tags.
-        let mut plugin_script_tags = String::new();
-        if let Some(scripts) = self.plugin_scripts.as_object() {
-            for (name, script) in scripts {
-                if let Some(script_str) = script.as_str() {
-                    let escaped = esc_script_text(script_str);
-                    plugin_script_tags.push_str("<script>");
-                    plugin_script_tags.push_str(&escaped);
-                    plugin_script_tags.push_str("</script>\n");
-                    let _ = name; // plugin name not needed in tag
-                }
             }
         }
 
@@ -343,9 +319,7 @@ impl SessionExporter {
                             .get(pane_id)
                             .map(|s| s.as_str())
                             .unwrap_or(pane_id);
-                        let stats = pane_stats.get(pane_id).copied().unwrap_or((0, 0));
-                        let stats_text = stats_text(stats.0, stats.1);
-                        tab_contents.push_str(&pane_html(pane_id, label, &stats_text));
+                        tab_contents.push_str(&pane_html(pane_id, label));
                         tab_contents.push('\n');
                     }
                 }
@@ -353,13 +327,13 @@ impl SessionExporter {
             tab_contents.push_str("    </div>\n");
         }
 
-        let total_stats = stats_text(total_lines, total_bytes);
         let title = self
             .tabs
             .iter()
             .filter_map(|t| t.get("label").and_then(|l| l.as_str()))
             .collect::<Vec<_>>()
             .join(" + ");
+        let safe_title = html_escape(&title);
 
         // Assemble HTML.
         let mut html = String::with_capacity(
@@ -369,14 +343,14 @@ impl SessionExporter {
         html.push_str("<html lang=\"en\" data-theme=\"whitesand\">\n");
         html.push_str("<head>\n");
         html.push_str("<meta charset=\"UTF-8\">\n");
-        html.push_str(&format!("<title>embed-log — {title}</title>\n"));
+        html.push_str(&format!("<title>embed-log — {safe_title}</title>\n"));
         html.push_str("<style>");
         html.push_str(&css);
         html.push_str("</style>\n");
         html.push_str("</head>\n");
         html.push_str("<body>\n\n");
 
-        html.push_str(&render_toolbar(&total_stats));
+        html.push_str(&render_toolbar());
         html.push_str("\n\n");
 
         html.push_str("<div id=\"download-raw-menu\">\n");
@@ -397,7 +371,6 @@ impl SessionExporter {
         html.push_str("</script>\n");
         html.push_str(&pane_data_tags);
         html.push_str(&js_blocks);
-        html.push_str(&plugin_script_tags);
         html.push_str("<script>");
         html.push_str(&bootstrap_js);
         html.push_str("</script>\n");
@@ -505,56 +478,29 @@ fn esc_script_text(src: &str) -> String {
     script_close_re().replace_all(src, "<\\/script").to_string()
 }
 
-fn stats_text(line_count: usize, byte_count: usize) -> String {
-    if line_count == 0 {
-        return String::new();
-    }
-    format!("{} lines · {}", fmt_int(line_count), fmt_bytes(byte_count))
-}
-
-fn fmt_int(n: usize) -> String {
-    let s = n.to_string();
-    let bytes = s.as_bytes();
-    let mut result = String::with_capacity(bytes.len() + bytes.len() / 3);
-    for (i, &b) in bytes.iter().enumerate() {
-        if i > 0 && (bytes.len() - i) % 3 == 0 {
-            result.push(',');
+fn plugin_script_tags(plugin_scripts: &serde_json::Value) -> String {
+    let mut tags = String::new();
+    if let Some(scripts) = plugin_scripts.as_object() {
+        for script in scripts.values() {
+            if let Some(script_str) = script.as_str() {
+                tags.push_str("<script>");
+                tags.push_str(&esc_script_text(script_str));
+                tags.push_str("</script>\n");
+            }
         }
-        result.push(b as char);
     }
-    result
+    tags
 }
 
-fn fmt_bytes(n: usize) -> String {
-    if n < 1024 {
-        format!("{n} B")
-    } else if n < 1024 * 1024 {
-        if n < 10 * 1024 {
-            format!("{:.1} kB", n as f64 / 1024.0)
-        } else {
-            format!("{:.0} kB", n as f64 / 1024.0)
-        }
-    } else {
-        format!("{:.1} MB", n as f64 / (1024.0 * 1024.0))
-    }
-}
-
-fn pane_html(pane_id: &str, label: &str, stats_text: &str) -> String {
+fn pane_html(pane_id: &str, label: &str) -> String {
     let safe_label = html_escape(label);
-    let stats_span = if stats_text.is_empty() {
-        format!("<span class=\"pane-stats\" data-pane-stats=\"{pane_id}\"></span>")
-    } else {
-        format!(
-            "<span class=\"pane-stats\" data-pane-stats=\"{pane_id}\">{}</span>",
-            html_escape(stats_text)
-        )
-    };
     format!(
         "        <div class=\"pane\" id=\"pane-{pane_id}\">\n\
          \x20           <div class=\"pane-header\">\n\
          \x20               <span class=\"pane-name\">{safe_label}</span>\n\
-         \x20               {stats_span}\n\n\
-         \x20               <button class=\"pane-wrap-btn\" title=\"Toggle word wrap in this pane\">Wrap</button>\n\n\
+         \x20               <span class=\"pane-stats\" data-pane-stats=\"{pane_id}\"></span>\n\n\
+         \x20               <button class=\"pane-wrap-btn\" title=\"Toggle word wrap in this pane\">Wrap</button>\n\
+         \x20               <button class=\"pane-download-btn\" title=\"Download raw .log for this pane\">Download</button>\n\
          \x20           </div>\n\
          \x20           <div class=\"filter-bar\">\n\
          \x20               <input class=\"filter-input\" data-pane=\"{pane_id}\" placeholder=\"Filter (regex)…\">\n\
@@ -571,30 +517,28 @@ fn pane_html(pane_id: &str, label: &str, stats_text: &str) -> String {
     )
 }
 
-fn render_toolbar(total_stats: &str) -> String {
-    let safe_total = html_escape(total_stats);
-    let stats_div = if safe_total.is_empty() {
-        "<div id=\"toolbar-stats\" class=\"toolbar-stats\"></div>".to_string()
-    } else {
-        format!("<div id=\"toolbar-stats\" class=\"toolbar-stats\">· {safe_total}</div>")
-    };
-    format!(
-        "<div id=\"toolbar\">\n\
-         \x20   <span class=\"app-name\">embed-log</span>\n\
-         \x20   <div class=\"sep\"></div>\n\
-         \x20   <button id=\"btn-download-raw\" title=\"Download all logs as merged raw text file\">Download raw</button>\n\
-         \x20   <button id=\"btn-unwrap\" title=\"Unwrap multi-pane tabs into single-pane tabs\">Unwrap</button>\n\
-         \x20   <button id=\"btn-timestamp-mode\" title=\"Switch timestamps\">Absolute</button>\n\
-         \x20   <div class=\"sep\"></div>\n\
-         \x20   <button id=\"btn-theme\" title=\"Toggle light / dark theme\">&#x1F319;</button>\n\
-         \x20   {stats_div}\n\
-         \x20   <div id=\"marker-nav\" class=\"marker-nav\" style=\"display:none\">\n\
-         \x20       <button id=\"marker-nav-prev\" title=\"Previous marker\">&#x25C0;</button>\n\
-         \x20       <span id=\"marker-nav-idx\">1</span>/<span id=\"marker-nav-total\">0</span>\n\
-         \x20       <button id=\"marker-nav-next\" title=\"Next marker\">&#x25B6;</button>\n\
-         \x20   </div>\n\
-         </div>"
-    )
+fn render_toolbar() -> String {
+    [
+        "<div id=\"toolbar\">",
+        "    <div class=\"toolbar-group toolbar-left\">",
+        "        <span class=\"app-name\">embed-log</span>",
+        "        <button id=\"btn-unwrap\" title=\"Unwrap multi-pane tabs into single-pane tabs\">Unwrap</button>",
+        "        <button id=\"btn-timestamp-mode\" title=\"Switch timestamps\">Absolute</button>",
+        "        <div class=\"sep\"></div>",
+        "        <button id=\"btn-theme\" title=\"Toggle light / dark theme\">&#x1F319;</button>",
+        "    </div>",
+        "    <button id=\"btn-jump-all\" class=\"btn-live\" title=\"Jump every pane to its latest line and keep tab switches live (Shift+L)\">Live</button>",
+        "    <div class=\"toolbar-group toolbar-right\">",
+        "        <div id=\"toolbar-stats\" class=\"toolbar-stats\"></div>",
+        "        <div id=\"marker-nav\" class=\"marker-nav\" style=\"display:none\">",
+        "            <button id=\"marker-nav-prev\" title=\"Previous marker\">&#x25C0;</button>",
+        "            <span id=\"marker-nav-idx\">1</span>/<span id=\"marker-nav-total\">0</span>",
+        "            <button id=\"marker-nav-next\" title=\"Next marker\">&#x25B6;</button>",
+        "        </div>",
+        "    </div>",
+        "</div>",
+    ]
+    .join("\n")
 }
 
 fn html_escape(s: &str) -> String {
@@ -623,23 +567,6 @@ mod tests {
         let escaped = esc_script_text(src);
         assert!(escaped.contains("<\\/script"));
         assert!(!escaped.contains("</script>"));
-    }
-
-    #[test]
-    fn fmt_int_with_commas() {
-        assert_eq!(fmt_int(0), "0");
-        assert_eq!(fmt_int(999), "999");
-        assert_eq!(fmt_int(1000), "1,000");
-        assert_eq!(fmt_int(1234567), "1,234,567");
-    }
-
-    #[test]
-    fn fmt_bytes_thresholds() {
-        assert_eq!(fmt_bytes(512), "512 B");
-        assert_eq!(fmt_bytes(1024), "1.0 kB");
-        assert_eq!(fmt_bytes(5120), "5.0 kB");
-        assert_eq!(fmt_bytes(10240), "10 kB");
-        assert_eq!(fmt_bytes(1048576), "1.0 MB");
     }
 
     #[test]

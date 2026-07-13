@@ -68,11 +68,11 @@ fn reject_removed_fields(raw: &serde_yaml::Value) -> Result<(), ConfigError> {
 }
 
 /// Validate the parsed config, applying defaults and checking constraints.
-fn validate_config(config: &mut AppConfig, _config_path: &Path) -> Result<(), ConfigError> {
+fn validate_config(config: &mut AppConfig, config_path: &Path) -> Result<(), ConfigError> {
     let mut source_names = HashSet::new();
 
     // ── Validate sources ──
-    for (i, src) in config.sources.iter().enumerate() {
+    for (i, src) in config.sources.iter_mut().enumerate() {
         let ctx = || format!("sources[{i}]");
 
         if src.name.is_empty() {
@@ -230,10 +230,12 @@ fn validate_config(config: &mut AppConfig, _config_path: &Path) -> Result<(), Co
             let db = src.parser.database.as_deref().unwrap_or("");
             if db.trim().is_empty() {
                 return Err(ConfigError::validation(format!(
-                    "{}.parser.database is required for parser.type 'zephyr-dict'",
+                    "{}.parser.database is required for parser.type '{parser_type}'",
                     ctx()
                 )));
             }
+            let resolved = super::paths::resolve_relative_to_config(config_path, db);
+            src.parser.database = Some(resolved.display().to_string());
         }
     }
 

@@ -449,6 +449,7 @@ button.active { background: var(--selection); border-color: var(--accent); color
     overflow: hidden;
     background: var(--border);
     gap: 1px;
+    min-height: 0;
 }
 
 .pane {
@@ -456,6 +457,7 @@ button.active { background: var(--selection); border-color: var(--accent); color
     flex-direction: column;
     flex: 1;
     min-width: 0;
+    min-height: 0;
     background: var(--bg);
 }
 
@@ -614,6 +616,8 @@ button.active { background: var(--selection); border-color: var(--accent); color
     padding: 0 8px;
     gap: 6px;
     flex-shrink: 0;
+    position: relative;
+    z-index: 2;
 }
 .filter-input {
     flex: 1;
@@ -635,11 +639,13 @@ button.active { background: var(--selection); border-color: var(--accent); color
     display: flex;
     flex-direction: column;
     flex: 1;
+    min-height: 0;
     overflow: hidden;
 }
 
 .log-area {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
     padding: 4px 0;
@@ -894,6 +900,7 @@ mark.hl {
     border-top: 1px solid var(--border);
     flex-shrink: 0;
     position: relative;
+    z-index: 2;
 }
 .serial-input {
     flex: 1;

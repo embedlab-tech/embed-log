@@ -14,7 +14,7 @@ function generateMergedHtml(htmlPath, logPath) {
   execFileSync('cargo', [
     'run', '--quiet', '--package', 'embed-log-cli', '--bin', 'embed-log', '--',
     'merge',
-    '--tab', 'Large', 'A=READER', logPath,
+    '--tab', 'Large', 'A=SENSOR', logPath,
     '--output', htmlPath,
   ], { cwd: repoRoot });
 }

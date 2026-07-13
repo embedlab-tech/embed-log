@@ -47,7 +47,7 @@ test.describe('Rust backend browser e2e', () => {
     await waitForWs(page);
 
     await expect(page.locator('#pane-DUT .pane-name')).toHaveText('DUT UART');
-    await expect(page.locator('#pane-HOST .pane-name')).toHaveText('Host Controller');
+    await expect(page.locator('#pane-HOST .pane-name')).toHaveText('Host Debug');
 
     await sendUdp(6000, 'E2E DUT boot\n');
     await sendUdp(6001, 'E2E HOST ready\n');

@@ -8,6 +8,17 @@ use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 use super::traits::{LogSource, TxCommand};
+
+/// Normalize UART TX for a Zephyr shell: CR-terminated lines (`\r`).
+fn normalize_uart_shell_tx(data: &[u8]) -> Vec<u8> {
+    let mut v = data.to_vec();
+    while matches!(v.last(), Some(b'\n' | b'\r')) {
+        v.pop();
+    }
+    v.push(b'\r');
+    v
+}
+use crate::config::models::ParserConfig;
 use crate::models::LogEntry;
 use crate::parsers::create_parser;
 
@@ -29,8 +40,7 @@ enum PortSource {
 /// `TX::<origin>` log entry is recorded after successful write.
 pub struct UartSource {
     name: String,
-    parser_type: String,
-    parser_database: Option<String>,
+    parser: ParserConfig,
     port_source: PortSource,
     tx_rx: Option<mpsc::Receiver<TxCommand>>,
 }
@@ -48,8 +58,10 @@ impl UartSource {
     ) -> Self {
         Self {
             name: name.into(),
-            parser_type: parser_type.into(),
-            parser_database: None,
+            parser: ParserConfig {
+                parser_type: parser_type.into(),
+                ..ParserConfig::default()
+            },
             port_source: PortSource::Path {
                 port_path: port_path.into(),
                 baudrate,
@@ -69,8 +81,10 @@ impl UartSource {
     ) -> Self {
         Self {
             name: name.into(),
-            parser_type: parser_type.into(),
-            parser_database: None,
+            parser: ParserConfig {
+                parser_type: parser_type.into(),
+                ..ParserConfig::default()
+            },
             port_source: PortSource::PreOpened {
                 port: Arc::new(tokio::sync::Mutex::new(Some(port))),
             },
@@ -84,9 +98,14 @@ impl UartSource {
         self
     }
 
+    pub fn with_parser(mut self, parser: ParserConfig) -> Self {
+        self.parser = parser;
+        self
+    }
+
     /// Attach the `parser.database` path (used by e.g. `zephyr-dict`).
     pub fn with_parser_database(mut self, database: Option<String>) -> Self {
-        self.parser_database = database;
+        self.parser.database = database;
         self
     }
 
@@ -168,8 +187,7 @@ impl LogSource for UartSource {
     async fn run(self: Box<Self>, tx: mpsc::Sender<LogEntry>) -> Result<()> {
         let mut this = self;
         let name = this.name.clone();
-        let parser_type = this.parser_type.clone();
-        let parser_database = this.parser_database.clone();
+        let parser_cfg = this.parser.clone();
 
         // Obtain the serial port (open by path or use pre-opened).
         let port = this.get_port().await?;
@@ -183,8 +201,8 @@ impl LogSource for UartSource {
             let tx_port = port.clone();
             tokio::spawn(async move {
                 while let Some(cmd) = cmd_rx.recv().await {
-                    let data = cmd.data;
                     let origin = cmd.origin;
+                    let data = normalize_uart_shell_tx(&cmd.data);
                     let data_len = data.len();
                     let data_for_write = data.clone();
 
@@ -248,7 +266,7 @@ impl LogSource for UartSource {
             });
         }
 
-        let mut parser = create_parser(&parser_type, parser_database.as_deref());
+        let mut parser = create_parser(&parser_cfg);
 
         loop {
             // Clone the port under the lock, then release before the blocking read.
@@ -275,7 +293,7 @@ impl LogSource for UartSource {
                 Err(e) => {
                     this.reconnect_port(&port, &format!("clone error: {e}"))
                         .await?;
-                    parser = create_parser(&parser_type, parser_database.as_deref());
+                    parser = create_parser(&parser_cfg);
                     continue;
                 }
             };
@@ -291,7 +309,7 @@ impl LogSource for UartSource {
                 Err(e) => {
                     this.reconnect_port(&port, &format!("read error: {e}"))
                         .await?;
-                    parser = create_parser(&parser_type, parser_database.as_deref());
+                    parser = create_parser(&parser_cfg);
                     continue;
                 }
             };
@@ -436,6 +454,14 @@ mod tests {
 
     #[tokio::test]
     #[cfg(unix)]
+    async fn uart_tx_normalizes_lf_to_cr() {
+        assert_eq!(super::normalize_uart_shell_tx(b"help\n"), b"help\r");
+        assert_eq!(super::normalize_uart_shell_tx(b"version\r\n"), b"version\r");
+        assert_eq!(super::normalize_uart_shell_tx(b"cmd"), b"cmd\r");
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
     async fn uart_tx_writes_exact_bytes_to_pty_and_emits_yellow_tx_entry() {
         let (mut master, slave) = create_pty_pair();
 
@@ -475,7 +501,7 @@ mod tests {
         .unwrap();
         let (master_buf, read_result) = result;
         let n = read_result.unwrap_or(0);
-        assert_eq!(&master_buf[..n], b"version\r\n");
+        assert_eq!(&master_buf[..n], b"version\r");
 
         // Verify a yellow TX::ui LogEntry was emitted.
         let entry = timeout(Duration::from_secs(2), entry_rx.recv())
@@ -483,7 +509,7 @@ mod tests {
             .expect("timeout waiting for TX log entry")
             .expect("channel closed before TX entry");
         assert_eq!(entry.source, "TX::ui");
-        assert_eq!(entry.message, "version\r\n");
+        assert_eq!(entry.message, "version\r");
         assert_eq!(entry.color.as_deref(), Some("yellow"));
 
         handle.abort();
@@ -565,7 +591,7 @@ mod tests {
         .unwrap();
         let (master_buf, read_result) = result;
         let n = read_result.unwrap_or(0);
-        assert_eq!(&master_buf[..n], b"status\n");
+        assert_eq!(&master_buf[..n], b"status\r");
 
         // Verify TX::pytest log entry
         let entry = timeout(Duration::from_secs(2), entry_rx.recv())
@@ -573,7 +599,7 @@ mod tests {
             .expect("timeout")
             .expect("channel closed");
         assert_eq!(entry.source, "TX::pytest");
-        assert_eq!(entry.message, "status\n");
+        assert_eq!(entry.message, "status\r");
         assert_eq!(entry.color.as_deref(), Some("yellow"));
 
         handle.abort();
