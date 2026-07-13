@@ -842,3 +842,27 @@ Future entries must include this per-file added/removed-line summary.
 | File | Added | Removed | Summary |
 | --- | ---: | ---: | --- |
 | `scripts/test_tui_integration.py` | 7 | 4 | Retries PTY source writes and selects exact per-source session filenames. |
+
+## 2026-07-13 22:39:24 UTC / 2026-07-14 00:39:24 CEST (Warsaw)
+
+- **Commit:** `cb7353f` — `Build and test release artifacts on hosted runners`
+- **Task:** Replace the self-hosted release path with a single native hosted-runner build/test/package/publish workflow and align installer documentation with the repository origin.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 22:39:24 UTC / 2026-07-14 00:39:24 CEST (+0200) (Warsaw)
+- **Validation:** release workflow matrix/YAML ordering assertion — passed; `cargo test --locked --package embed-log-core --package embed-log-cli --package embed-log-tui` — passed (389 tests); Linux package extraction and `embed-log version --json` smoke test — passed; `sh -n install.sh` — passed.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`cb7353f`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/release-cli.yml` | 85 | 98 | Adds hosted native Linux/macOS/Windows test/package matrix and gated release publishing. |
+| `Cargo.toml` | 1 | 1 | Corrects workspace repository metadata. |
+| `README.md` | 3 | 3 | Points install and plugin commands at the repository origin. |
+| `RELEASE_AND_UPDATE.md` | 4 | 4 | Corrects release installer URLs. |
+| `docs/getting-up-to-speed.md` | 1 | 1 | Corrects the installer URL. |
+| `docs/releasing.md` | 18 | 18 | Documents the hosted matrix and tested release flow. |
+| `install.ps1` | 1 | 1 | Uses the repository origin by default. |
+| `install.sh` | 1 | 1 | Uses the repository origin by default. |
+| `sdk/python/README.md` | 1 | 1 | Corrects the SDK repository link. |
+| `sdk/python/pyproject.toml` | 1 | 1 | Corrects package repository metadata. |
