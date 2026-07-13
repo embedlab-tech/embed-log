@@ -40,7 +40,7 @@ The job runs:
 python -m pytest sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py -q
 ```
 
-The test configures `CONTROL` and `USART1` at 115200, `USART3` at 460800, and `USART4` at 1000000. It captures at least 500 deterministic records per generator, forwards records through a loopback UDP source, then stops generators and restores data UARTs to 115200. Because CI enables `EMBED_LOG_STM32G0_HARDWARE=1`, a missing configured UART path fails the job instead of being reported as a passing skip.
+The test configures `CONTROL` and `USART1` at 115200, `USART3` at 460800, and `USART4` at 1000000. It captures at least 550 deterministic records per generator, requiring at least 500 ordered, unique loopback-UDP deliveries to allow for UDP datagram loss, then stops generators and restores data UARTs to 115200. Because CI enables `EMBED_LOG_STM32G0_HARDWARE=1`, a missing configured UART path fails the job instead of being reported as a passing skip.
 
 ## Security
 

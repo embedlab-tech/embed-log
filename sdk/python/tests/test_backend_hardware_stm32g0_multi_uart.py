@@ -49,6 +49,8 @@ COUNTER_RE = {
 }
 FORWARDED_RE = re.compile(r"^FORWARDED (USART[134]): \[(USART[134])\] INFO Counter=(\d+)$")
 SAMPLE_COUNT = 500
+# Leave UDP delivery headroom: datagrams can be dropped even on loopback.
+CAPTURE_SAMPLE_COUNT = SAMPLE_COUNT + 50
 CAPTURE_TIMEOUT_SECONDS = 75
 
 
@@ -202,7 +204,7 @@ def stm32g0_ports() -> dict[str, str]:
 @pytest.fixture
 def artifact_dir(tmp_path: Path) -> Path:
     configured = os.environ.get(ARTIFACT_DIR_ENV)
-    path = Path(configured) if configured else tmp_path / "stm32g0-artifacts"
+    path = Path(configured).resolve() if configured else tmp_path / "stm32g0-artifacts"
     if configured:
         shutil.rmtree(path, ignore_errors=True)
     path.mkdir(parents=True, exist_ok=True)
@@ -272,7 +274,7 @@ def test_stm32g0_four_uart_sources_and_udp_forwarding(
                     shell_write(client, f"gen {profile['peripheral']} start")
 
                 deadline = time.monotonic() + CAPTURE_TIMEOUT_SECONDS
-                while time.monotonic() < deadline and any(len(values) < SAMPLE_COUNT for values in observed.values()):
+                while time.monotonic() < deadline and any(len(values) < CAPTURE_SAMPLE_COUNT for values in observed.values()):
                     for entry in client.entries(timeout=0.5):
                         pattern = COUNTER_RE.get(entry.source_id)
                         match = pattern.fullmatch(entry.message) if pattern else None
@@ -283,7 +285,7 @@ def test_stm32g0_four_uart_sources_and_udp_forwarding(
                             f"FORWARDED {entry.source_id}: {entry.message}".encode(),
                             ("127.0.0.1", udp_port),
                         )
-                        if all(len(values) >= SAMPLE_COUNT for values in observed.values()):
+                        if all(len(values) >= CAPTURE_SAMPLE_COUNT for values in observed.values()):
                             break
 
                 for source, counters in observed.items():
