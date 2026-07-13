@@ -669,3 +669,22 @@ Future entries must include this per-file added/removed-line summary.
 | File | Added | Removed | Summary |
 | --- | ---: | ---: | --- |
 | `sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py` | 9 | 1 | Requires minimum, ordered, unique UDP deliveries while retaining contiguous UART checks. |
+
+## 2026-07-13 18:12:08 UTC / 2026-07-13 20:12:08 CEST (Warsaw)
+
+- **Commit:** `8f05923` — `Run full validation locally on STM lab runner`
+- **Task:** Run build, unit, Python integration, Playwright, and STM hardware validation locally on the trusted lab runner; omit Tauri Linux temporarily.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 18:12:08 UTC / 2026-07-13 20:12:08 CEST (+0200) (Warsaw)
+- **Validation:** `cargo test --locked --package embed-log-core --package embed-log-cli` — passed (315 tests); `python -m pytest sdk/python/tests -q --ignore=sdk/python/tests/test_backend_hardware_uart.py --ignore=sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py` — passed (53 tests); `npm --prefix tests-ui run test:e2e` — passed (4 tests); `npm --prefix tests-ui run test:regression` — passed (80 tests, 4 skipped).
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`8f05923`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 3 | 1 | Disables the Tauri Linux job pending runner dependencies. |
+| `.github/workflows/hardware-integration.yml` | 59 | 45 | Replaces hosted packaging with one local STM-lab build, unit, integration, Playwright, and hardware flow. |
+| `crates/embed-log-cli/src/commands/misc.rs` | 2 | 2 | Aligns release URL test expectations with the configured repository. |
+| `docs/hardware-ci.md` | 9 | 8 | Documents local runner validation order and branch trigger. |
+| `sdk/python/tests/test_e2e.py` | 2 | 2 | Aligns PTY expectation with Zephyr-shell CR TX normalization. |
