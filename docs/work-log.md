@@ -866,3 +866,19 @@ Future entries must include this per-file added/removed-line summary.
 | `install.sh` | 1 | 1 | Uses the repository origin by default. |
 | `sdk/python/README.md` | 1 | 1 | Corrects the SDK repository link. |
 | `sdk/python/pyproject.toml` | 1 | 1 | Corrects package repository metadata. |
+
+## 2026-07-13 22:43:08 UTC / 2026-07-14 00:43:08 CEST (Warsaw)
+
+- **Commit:** `f54b88f` — `Add release matrix dry-run mode`
+- **Task:** Make the hosted release build/test matrix manually runnable without publishing a GitHub Release.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 22:43:08 UTC / 2026-07-14 00:43:08 CEST (+0200) (Warsaw)
+- **Validation:** release workflow YAML assertion confirmed the manual publish flag defaults false, checkout uses the selected branch, and publishing is gated to tags or an explicit flag.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`f54b88f`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/release-cli.yml` | 12 | 4 | Adds publish opt-in and correct branch checkout for manual matrix dry runs. |
+| `docs/releasing.md` | 1 | 1 | Documents the non-publishing hosted release test dispatch. |
