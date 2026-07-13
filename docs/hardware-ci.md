@@ -1,19 +1,20 @@
 # STM32G0 hardware integration CI
 
-`.github/workflows/hardware-integration.yml` runs the complete local validation flow on the dedicated NUCLEO-G070RB/FT4232H runner. It never publishes a GitHub Release or uses a GitHub-hosted build job.
+The regular [CI workflow](../.github/workflows/ci.yml) includes the STM32G0 hardware integration job. There is no separate hardware workflow.
 
 ## Flow
 
-1. The `stm-lab` self-hosted runner checks out the revision and builds the release CLI locally.
-2. It runs Rust CLI/core unit tests and the Python SDK/backend integration suite against that local build.
-3. It installs the locked `tests-ui` dependencies and Playwright Chromium before running Node UI unit, Playwright end-to-end, and Playwright regression tests.
-4. It verifies all four stable UART paths on the pre-flashed, connected rig.
-5. The STM32G0 pytest starts embed-log with four UART sources (`CONTROL` at 115200, `USART1` at 115200, `USART3` at 460800, and `USART4` at 1000000) and a loopback UDP source. Python automation applies the matching Zephyr-shell baud profiles through `CONTROL`, captures at least 500 deterministic records per data UART, forwards subscribed generator messages over UDP, and verifies source isolation and persisted session files.
-6. Captured configuration, server output, logs, session reports, and Playwright reports are uploaded even when a test fails.
+1. CI runs its normal format, CLI build, Rust/unit, package, and UI test jobs on self-hosted runners.
+2. `package-cli-linux` builds and uploads the release CLI tarball.
+3. `backend-hardware-tests` (shown as **STM32G0 hardware integration**) runs on the exclusive `stm-lab` runner, downloads that exact tarball, and installs it only in `.tooling/bin` for the job.
+4. It checks all four stable UART paths and runs the mixed-baud pytest against the connected, pre-flashed rig.
+5. Captured configuration, server output, logs, and session reports under `captures/stm32g0/` are uploaded even if the test fails.
+
+The hardware job has a global `stm-lab-hardware` concurrency group so physical-rig runs from different branches cannot overlap.
 
 ## Runner setup
 
-Give the exclusive physical-lab runner these labels:
+Give the physical-lab runner these labels:
 
 ```text
 self-hosted
@@ -21,7 +22,7 @@ Linux
 stm-lab
 ```
 
-The workflow defaults to the verified paths on this runner. Set these optional repository variables only if the lab rig uses different stable `/dev/serial/by-id/...` paths; never use `ttyACM*` or `ttyUSB*` names.
+The job defaults to the verified paths on this runner. Set these optional repository variables only when the rig uses different stable `/dev/serial/by-id/...` paths; never use `ttyACM*` or `ttyUSB*` names.
 
 ```text
 EMBED_LOG_STM32G0_CONTROL_PORT=/dev/serial/by-id/usb-STMicroelectronics_STM32_STLink_0669FF485552787187184556-if02
@@ -30,20 +31,18 @@ EMBED_LOG_STM32G0_USART3_PORT=/dev/serial/by-id/usb-FTDI_Quad_RS232-HS-if02-port
 EMBED_LOG_STM32G0_USART4_PORT=/dev/serial/by-id/usb-FTDI_Quad_RS232-HS-if00-port0
 ```
 
-The runner user needs access to the ST-LINK and serial devices; see the sandbox handoff for its udev rule. No firmware checkout, Zephyr toolchain, OpenOCD, or `just` installation is needed by this workflow: it assumes the board is already flashed and running.
+The runner user needs access to the ST-LINK and serial devices. The board must already be flashed and running; this job needs no firmware checkout, Zephyr toolchain, OpenOCD, or `just` installation.
 
-## Run it
+## Test behavior
 
-Use **Actions → STM lab validation → Run workflow**. The complete local flow runs before the hardware command. The default command is:
+The job runs:
 
 ```bash
 python -m pytest sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py -q
 ```
 
-The test is guarded by `EMBED_LOG_STM32G0_HARDWARE=1`, which the workflow sets. It stops the generators and restores the USART3/USART4 firmware baud rates to 115200 during teardown.
-
-The workflow runs on pushes to the trusted `release-mvp` branch, manual dispatch, and nightly at 02:00 UTC. Its `stm-lab-hardware` concurrency group serializes all runs that use the physical rig.
+The test configures `CONTROL` and `USART1` at 115200, `USART3` at 460800, and `USART4` at 1000000. It captures at least 500 deterministic records per generator, forwards records through a loopback UDP source, then stops generators and restores data UARTs to 115200. Because CI enables `EMBED_LOG_STM32G0_HARDWARE=1`, a missing configured UART path fails the job instead of being reported as a passing skip.
 
 ## Security
 
-Do not add pull-request triggers for untrusted forks. A hardware runner executes code against physical devices. Keep it restricted to manual dispatch, scheduled runs, or trusted branch pushes.
+The CI workflow runs code on self-hosted runners. Do not add pull-request triggers for untrusted forks to the hardware job.

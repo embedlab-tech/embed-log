@@ -187,7 +187,7 @@ def stm32g0_ports() -> dict[str, str]:
         ports[source] = os.environ.get(f"EMBED_LOG_STM32G0_{source}_PORT", ports[source])
     missing = [f"{source}={path}" for source, path in ports.items() if not Path(path).exists()]
     if missing:
-        pytest.skip("STM32G0 UART paths are unavailable: " + ", ".join(missing))
+        pytest.fail("STM32G0 UART paths are unavailable: " + ", ".join(missing))
     return ports
 
 
@@ -195,6 +195,8 @@ def stm32g0_ports() -> dict[str, str]:
 def artifact_dir(tmp_path: Path) -> Path:
     configured = os.environ.get(ARTIFACT_DIR_ENV)
     path = Path(configured) if configured else tmp_path / "stm32g0-artifacts"
+    if configured:
+        shutil.rmtree(path, ignore_errors=True)
     path.mkdir(parents=True, exist_ok=True)
     return path
 
