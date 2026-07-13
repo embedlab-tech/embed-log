@@ -654,3 +654,18 @@ Future entries must include this per-file added/removed-line summary.
 | --- | ---: | ---: | --- |
 | `.github/workflows/hardware-integration.yml` | 8 | 25 | Uses verified by-id defaults and removes firmware flashing/preflight. |
 | `docs/hardware-ci.md` | 4 | 6 | Documents the connected pre-flashed rig workflow and optional overrides. |
+
+## 2026-07-13 18:04:31 UTC / 2026-07-13 20:04:31 CEST (Warsaw)
+
+- **Commit:** `91f3408` — `Allow UDP datagram loss in hardware forwarding test`
+- **Task:** Make high-rate UDP forwarding validation reflect UDP datagram delivery semantics.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 18:04:31 UTC / 2026-07-13 20:04:31 CEST (+0200) (Warsaw)
+- **Validation:** `PATH=/tmp/embed-log-ci-package/bin:$PATH EMBED_LOG_STM32G0_HARDWARE=1 EMBED_LOG_STM32G0_ARTIFACT_DIR=/tmp/embed-log-stm32g0-push-verify /tmp/embed-log-hw-venv/bin/python -m pytest sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py -q` — passed (1 passed). Artifacts contain 689 USART1, 596 USART3, 500 USART4, and 1759 forwarded UDP records.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`91f3408`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py` | 9 | 1 | Requires minimum, ordered, unique UDP deliveries while retaining contiguous UART checks. |
