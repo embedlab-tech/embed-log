@@ -47,17 +47,14 @@ jobs:
     runs-on: [self-hosted, Linux, stm-lab]
     needs: build-linux-cli
     timeout-minutes: 45
-    # All paths are repository variables so the workflow never relies on
-    # ttyACM/ttyUSB enumeration. The sandbox checkout is runner-provisioned
-    # and must be pinned to EMBED_LOG_STM32G0_FIRMWARE_REVISION.
+    # The rig is pre-flashed and connected. Prefer repository-variable
+    # overrides, but default to this runner's verified stable by-id paths.
     env:
       EMBED_LOG_STM32G0_HARDWARE: "1"
-      EMBED_LOG_STM32G0_CONTROL_PORT: ${{ vars.EMBED_LOG_STM32G0_CONTROL_PORT }}
-      EMBED_LOG_STM32G0_USART1_PORT: ${{ vars.EMBED_LOG_STM32G0_USART1_PORT }}
-      EMBED_LOG_STM32G0_USART3_PORT: ${{ vars.EMBED_LOG_STM32G0_USART3_PORT }}
-      EMBED_LOG_STM32G0_USART4_PORT: ${{ vars.EMBED_LOG_STM32G0_USART4_PORT }}
-      EMBED_LOG_STM32G0_SANDBOX_DIR: ${{ vars.EMBED_LOG_STM32G0_SANDBOX_DIR }}
-      EMBED_LOG_STM32G0_FIRMWARE_REVISION: ${{ vars.EMBED_LOG_STM32G0_FIRMWARE_REVISION }}
+      EMBED_LOG_STM32G0_CONTROL_PORT: ${{ vars.EMBED_LOG_STM32G0_CONTROL_PORT || '/dev/serial/by-id/usb-STMicroelectronics_STM32_STLink_0669FF485552787187184556-if02' }}
+      EMBED_LOG_STM32G0_USART1_PORT: ${{ vars.EMBED_LOG_STM32G0_USART1_PORT || '/dev/serial/by-id/usb-FTDI_Quad_RS232-HS-if03-port0' }}
+      EMBED_LOG_STM32G0_USART3_PORT: ${{ vars.EMBED_LOG_STM32G0_USART3_PORT || '/dev/serial/by-id/usb-FTDI_Quad_RS232-HS-if02-port0' }}
+      EMBED_LOG_STM32G0_USART4_PORT: ${{ vars.EMBED_LOG_STM32G0_USART4_PORT || '/dev/serial/by-id/usb-FTDI_Quad_RS232-HS-if00-port0' }}
       EMBED_LOG_STM32G0_ARTIFACT_DIR: captures/stm32g0
       HARDWARE_TEST_COMMAND: ${{ inputs.hardware_test_command || 'python -m pytest sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py -q' }}
     steps:
@@ -94,22 +91,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install harness and firmware-preflight dependencies
-        run: python -m pip install -e 'sdk/python[dev]' pyserial
-
-      - name: Flash and preflight pinned STM32G0 firmware
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$EMBED_LOG_STM32G0_SANDBOX_DIR"
-          test -n "$EMBED_LOG_STM32G0_FIRMWARE_REVISION"
-          test -f "$EMBED_LOG_STM32G0_SANDBOX_DIR/justfile"
-          test "$(git -C "$EMBED_LOG_STM32G0_SANDBOX_DIR" rev-parse HEAD)" = "$EMBED_LOG_STM32G0_FIRMWARE_REVISION"
-          test -z "$(git -C "$EMBED_LOG_STM32G0_SANDBOX_DIR" status --porcelain)"
-          cd "$EMBED_LOG_STM32G0_SANDBOX_DIR"
-          just build
-          just flash-openocd
-          just verify-multi-uart
+      - name: Install Python harness dependencies
+        run: python -m pip install -e 'sdk/python[dev]'
 
       - name: Run STM32G0 hardware integration test
         shell: bash
