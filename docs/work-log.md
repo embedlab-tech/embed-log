@@ -812,3 +812,18 @@ Future entries must include this per-file added/removed-line summary.
 | `.github/workflows/ci.yml` | 78 | 0 | Adds a package-pinned TUI hardware job after UART hardware validation. |
 | `docs/hardware-ci.md` | 3 | 2 | Documents the sequential TUI hardware validation and its captures. |
 | `scripts/test_tui_integration.py` | 228 | 85 | Adds PTY UART simulation and STM32G0 backends, TUI TX shell control, and post-reset counter validation. |
+
+## 2026-07-13 22:07:50 UTC / 2026-07-14 00:07:50 CEST (Warsaw)
+
+- **Commit:** `b7cac46` — `Verify CONTROL UART TX through hardware API`
+- **Task:** Explicitly validate embed-log control-API TX against the STM32G0 shell UART before driving the hardware generators.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 22:07:50 UTC / 2026-07-14 00:07:50 CEST (+0200) (Warsaw)
+- **Validation:** `EMBED_LOG_HARDWARE_BINARY=/tmp/embed-log-ci-package/bin/embed-log EMBED_LOG_STM32G0_HARDWARE=1 ... pytest sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py -q` — passed (1 passed). The CONTROL `uart list` API TX response reported USART1/3/4 enabled.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`b7cac46`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py` | 33 | 11 | Exercises CONTROL `tx_write`, verifies shell responses, and ignores pre-reset traffic blocks. |
