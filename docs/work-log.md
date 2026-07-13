@@ -688,3 +688,25 @@ Future entries must include this per-file added/removed-line summary.
 | `crates/embed-log-cli/src/commands/misc.rs` | 2 | 2 | Aligns release URL test expectations with the configured repository. |
 | `docs/hardware-ci.md` | 9 | 8 | Documents local runner validation order and branch trigger. |
 | `sdk/python/tests/test_e2e.py` | 2 | 2 | Aligns PTY expectation with Zephyr-shell CR TX normalization. |
+
+## 2026-07-13 18:18:17 UTC / 2026-07-13 20:18:17 CEST (Warsaw)
+
+- **Commit:** `5c8f46d` — `Fix CI lint and installed binary cleanup`
+- **Task:** Fix failures reported by the CI unit-test and installed-binary jobs.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 18:18:17 UTC / 2026-07-13 20:18:17 CEST (+0200) (Warsaw)
+- **Validation:** `cargo clippy --locked --package embed-log-core --package embed-log-cli --all-targets -- -D warnings` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli` — passed (315 tests); installed-binary cleanup workflow shape verified.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`5c8f46d`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 2 | 5 | Cleans up only the job-installed CLI instead of rejecting unrelated PATH entries. |
+| `crates/embed-log-cli/src/commands/misc.rs` | 2 | 2 | Uses iterator idiom in archive extraction. |
+| `crates/embed-log-cli/src/commands/run.rs` | 3 | 0 | Documents the intentional quick-run argument shape for Clippy. |
+| `crates/embed-log-core/src/config/loader.rs` | 2 | 2 | Removes needless generic-argument borrows. |
+| `crates/embed-log-core/src/parsers/zephyr_dict.rs` | 9 | 13 | Applies Clippy-safe byte slicing, matching, and vector initialization. |
+| `crates/embed-log-core/src/session/log_parse.rs` | 5 | 8 | Uses a `while let` prefix-stripping loop. |
+| `crates/embed-log-core/src/sources/network.rs` | 3 | 0 | Documents the config-shaped capture constructor and its argument allowance. |
+| `crates/embed-log-tui/src/draw.rs` | 2 | 2 | Uses explicit size clamping for the help overlay. |
