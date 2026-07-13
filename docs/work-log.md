@@ -589,3 +589,19 @@ Future entries must include this per-file added/removed-line summary.
 | `crates/embed-log-cli/src/commands/misc.rs` | 1 | 1 | Points self-update release lookup at the actual origin repository. |
 | `tests-ui/rust-demo-server.mjs` | 3 | 3 | Moves E2E UDP sources to an isolated port range. |
 | `tests-ui/tests/rust-demo.spec.js` | 6 | 6 | Sends E2E fixtures to the isolated test ports. |
+
+## 2026-07-13 17:24:51 UTC / 2026-07-13 19:24:51 GMT+2 (Warsaw)
+
+- **Commit:** `44e2aa6` — `Add STM hardware integration workflow template`
+- **Task:** Add hardware integration workflow template
+- **Started:** 2026-07-13 17:23:18 UTC / 2026-07-13 19:23:18 GMT+2 (Warsaw)
+- **Completed:** 2026-07-13 17:24:51 UTC / 2026-07-13 19:24:51 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`44e2aa6`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/hardware-integration.yml` | 102 | 0 | Adds hosted artifact build and serialized STM-lab hardware validation workflow. |
+| `docs/hardware-ci.md` | 46 | 0 | Documents runner labels, variables, operation, and hardware-runner security. |
+| `docs/index.md` | 1 | 0 | Links the hardware CI guide. |
