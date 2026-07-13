@@ -143,7 +143,7 @@ jobs:
     name: STM32G0 hardware integration
     # Never operate the rig for pull-request code, including fork PRs.
     if: github.event_name != 'pull_request'
-    runs-on: [self-hosted, Linux, stm-lab]
+    runs-on: [self-hosted, Linux]
     needs: package-cli-linux
     timeout-minutes: 60
     # The lab owns physical devices; serialize this job across all branches.

@@ -10,16 +10,15 @@ The regular [CI workflow](../.github/workflows/ci.yml) includes the STM32G0 hard
 4. It checks all four stable UART paths and runs the mixed-baud pytest against the connected, pre-flashed rig.
 5. Captured configuration, server output, logs, and session reports under `captures/stm32g0/` are uploaded even if the test fails.
 
-The hardware job has a global `stm-lab-hardware` concurrency group so physical-rig runs from different branches cannot overlap.
+The hardware job has a global `stm-lab-hardware` concurrency group so physical-rig runs from different branches cannot overlap. Although the runner does not need a custom label, it is dedicated to this repository's physical rig.
 
 ## Runner setup
 
-Give the physical-lab runner these labels:
+The dedicated `embed-log-runner` is registered with these labels:
 
 ```text
 self-hosted
 Linux
-stm-lab
 ```
 
 The job defaults to the verified paths on this runner. Set these optional repository variables only when the rig uses different stable `/dev/serial/by-id/...` paths; never use `ttyACM*` or `ttyUSB*` names.
