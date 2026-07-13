@@ -28,6 +28,7 @@ import pytest
 import yaml
 
 HARDWARE_GATE = "EMBED_LOG_STM32G0_HARDWARE"
+BINARY_ENV = "EMBED_LOG_HARDWARE_BINARY"
 ARTIFACT_DIR_ENV = "EMBED_LOG_STM32G0_ARTIFACT_DIR"
 CONTROL_PORT_ENV = "EMBED_LOG_STM32G0_CONTROL_PORT"
 
@@ -159,6 +160,13 @@ def shell_write(client: object, command: str) -> None:
 
 @pytest.fixture(scope="session")
 def embed_log_binary() -> Path:
+    configured = os.environ.get(BINARY_ENV)
+    if configured:
+        binary = Path(configured)
+        if not binary.is_file() or not os.access(binary, os.X_OK):
+            pytest.fail(f"configured {BINARY_ENV} is not an executable file: {binary}")
+        return binary
+
     installed = shutil.which("embed-log")
     if installed:
         return Path(installed)
