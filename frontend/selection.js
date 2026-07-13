@@ -129,6 +129,14 @@ export function _selectionSetupPane(id) {
     rawBtn.title = "Download selected lines as raw .log file";
     rawBtn.addEventListener("click", e => { e.stopPropagation(); _downloadRaw(id); });
     moreDropdown.appendChild(rawBtn);
+
+    const eventRuleBtn = document.createElement("button");
+    eventRuleBtn.className = "copy-btn";
+    eventRuleBtn.id = "create-event-rule-" + id;
+    eventRuleBtn.textContent = "✨ Remember this pattern";
+    eventRuleBtn.title = "Watch for similar messages and add future occurrences to Events";
+    eventRuleBtn.addEventListener("click", e => { e.stopPropagation(); _createEventRule(id); });
+    moreDropdown.appendChild(eventRuleBtn);
     actionRow.appendChild(copyBtn);
     // Marker toggle (runtime only) — in the main action row
     if (can('markers')) {
@@ -898,6 +906,31 @@ function _flashButton(id, text, restoreMs = 900) {
 // ---------------------------------------------------------------------------
 // Copy — scope-aware
 // ---------------------------------------------------------------------------
+function _createEventRule(paneId) {
+    const selected = [...(state.selected[paneId] || [])];
+    if (selected.length !== 1) {
+        window.alert("Select exactly one log line to create an event rule.");
+        return;
+    }
+    const line = getLine(paneId, selected[0]);
+    const message = line?.rawText?.trim();
+    if (!message) return;
+    // Generalize changing numbers so a line such as "reset after 5s" also
+    // catches future "reset after 10s" messages. Advanced regex editing stays
+    // in the Rules panel rather than interrupting this common workflow.
+    const placeholder = "__EMBED_LOG_NUMBER__";
+    const escaped = message.replace(/\d+/g, placeholder).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = escaped.replace(placeholder, "\\d+");
+    window.wsSend?.({
+        cmd: "event_rule.create",
+        source_id: paneId,
+        name: `remembered-${Date.now()}`,
+        pattern,
+        severity: "info",
+    });
+    _flashButton("create-event-rule-" + paneId, "Watching");
+}
+
 function _copy(paneId) {
     if (state.selectionScope !== "exact") return _copyContext(paneId);
     return _copyExact(paneId);

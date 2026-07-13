@@ -2,7 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicU64, AtomicUsize},
-    Arc, Mutex,
+    Arc, Mutex, RwLock,
 };
 use std::time::Duration;
 
@@ -119,6 +119,23 @@ impl LogServer {
             .collect();
         let event_matchers =
             crate::config::load_event_matchers(self.config_path.as_deref(), &source_names);
+        let runtime_event_rules = Arc::new(RwLock::new(HashMap::new()));
+        let static_event_rules = Arc::new(
+            event_matchers
+                .iter()
+                .map(|(source, matcher)| (source.clone(), matcher.rules().to_vec()))
+                .collect::<HashMap<_, _>>(),
+        );
+        let event_rules_path = self
+            .config_path
+            .as_ref()
+            .map(|path| {
+                path.parent().unwrap_or(Path::new(".")).join(format!(
+                    "{}.events.yml",
+                    path.file_stem().unwrap_or_default().to_string_lossy()
+                ))
+            })
+            .unwrap_or_else(|| PathBuf::from("embed-log.events.yml"));
 
         // Build source metadata for the control API.
         let mut source_metadata: HashMap<String, SourceInfo> = sources
@@ -274,6 +291,7 @@ impl LogServer {
                 ts_mode: self.config.server.timestamp_mode,
                 line_counter: line_counters.get(&merge.name).cloned(),
                 event_matcher: writer_event_matcher,
+                runtime_event_rules: runtime_event_rules.clone(),
                 source_meta: SourceRuntimeMeta {
                     source_id: merge.name.clone(),
                     source_label: merge_label(merge),
@@ -361,6 +379,7 @@ impl LogServer {
                 ts_mode: self.config.server.timestamp_mode,
                 line_counter: line_counters.get(&src.name).cloned(),
                 event_matcher: writer_event_matcher,
+                runtime_event_rules: runtime_event_rules.clone(),
                 source_meta: SourceRuntimeMeta {
                     source_id: src.name.clone(),
                     source_label: src.label.clone(),
@@ -471,6 +490,9 @@ impl LogServer {
             source_tx_senders: Arc::new(source_tx_senders),
             source_metadata: Arc::new(source_metadata),
             line_counters: Arc::new(line_counters),
+            static_event_rules,
+            event_rules_path,
+            runtime_event_rules,
             control_api: self.config.server.control_api,
         };
 
@@ -619,8 +641,13 @@ impl LogServer {
                     };
                     let baudrate = src_cfg.baudrate.unwrap_or(self.config.baudrate);
                     Box::new(
-                        UartSource::new_with_parser(&src_cfg.name, port_path, baudrate, &parser.parser_type)
-                            .with_parser(parser),
+                        UartSource::new_with_parser(
+                            &src_cfg.name,
+                            port_path,
+                            baudrate,
+                            &parser.parser_type,
+                        )
+                        .with_parser(parser),
                     )
                 }
                 "udp" => {
@@ -1168,6 +1195,7 @@ struct WriterRuntime {
     ts_mode: TimestampMode,
     line_counter: Option<Arc<AtomicU64>>,
     event_matcher: Option<crate::config::PatternMatcher>,
+    runtime_event_rules: Arc<RwLock<HashMap<String, Vec<crate::config::EventRule>>>>,
     source_meta: SourceRuntimeMeta,
 }
 
@@ -1443,55 +1471,64 @@ async fn run_writer(
 
         // ── Event detection ──
         // Check message against compiled event rules for this source.
-        if let Some(ref matcher) = runtime.event_matcher {
-            for event_match in matcher.check(&message) {
-                let event_payload = json!({
-                    "type": "event",
-                    "event_id": event_match.rule_name,
-                    "source_id": source_name,
-                    "severity": event_match.severity,
-                    "timestamp": display_ts,
-                    "timestamp_iso": ts_iso,
-                    "timestamp_num": abs_num,
-                    "rel_num": rel_num,
-                    "line_idx": line_idx,
-                    "message": message,
-                    "origin": origin,
-                    "captures": event_match.captures,
-                });
-
-                // Broadcast the event to all WS clients.
-                let _ = runtime.broadcast_tx.send(event_payload.to_string());
-
-                // Persist event to events.jsonl.
-                if let Ok(mgr) = runtime.session_manager.lock() {
-                    if let Err(e) = mgr.append_event(&event_payload) {
-                        error!("[{source_name}] failed to append event: {e}");
-                    }
-                }
-
-                // Push to events replay buffer.
-                {
-                    let mut buf = runtime.events_replay.lock().unwrap();
-                    if buf.len() >= REPLAY_BUFFER_SIZE {
-                        buf.pop_front();
-                    }
-                    buf.push_back(event_payload.to_string());
-                }
-
-                // Create an event marker (replaces previous event markers at this line,
-                // preserves user markers).
-                save_event_marker(
-                    &runtime.session_manager,
-                    &runtime.broadcast_tx,
-                    &source_name,
-                    line_idx,
-                    abs_num,
-                    &event_match.rule_name,
-                    &event_match.severity,
-                    &message,
-                );
+        let mut event_matches = runtime
+            .event_matcher
+            .as_ref()
+            .map(|matcher| matcher.check(&message))
+            .unwrap_or_default();
+        if let Ok(rules) = runtime.runtime_event_rules.read() {
+            if let Some(rules) = rules.get(&source_name) {
+                event_matches
+                    .extend(crate::config::PatternMatcher::new(rules.clone()).check(&message));
             }
+        }
+        for event_match in event_matches {
+            let event_payload = json!({
+                "type": "event",
+                "event_id": event_match.rule_name,
+                "source_id": source_name,
+                "severity": event_match.severity,
+                "timestamp": display_ts,
+                "timestamp_iso": ts_iso,
+                "timestamp_num": abs_num,
+                "rel_num": rel_num,
+                "line_idx": line_idx,
+                "message": message,
+                "origin": origin,
+                "captures": event_match.captures,
+            });
+
+            // Broadcast the event to all WS clients.
+            let _ = runtime.broadcast_tx.send(event_payload.to_string());
+
+            // Persist event to events.jsonl.
+            if let Ok(mgr) = runtime.session_manager.lock() {
+                if let Err(e) = mgr.append_event(&event_payload) {
+                    error!("[{source_name}] failed to append event: {e}");
+                }
+            }
+
+            // Push to events replay buffer.
+            {
+                let mut buf = runtime.events_replay.lock().unwrap();
+                if buf.len() >= REPLAY_BUFFER_SIZE {
+                    buf.pop_front();
+                }
+                buf.push_back(event_payload.to_string());
+            }
+
+            // Create an event marker (replaces previous event markers at this line,
+            // preserves user markers).
+            save_event_marker(
+                &runtime.session_manager,
+                &runtime.broadcast_tx,
+                &source_name,
+                line_idx,
+                abs_num,
+                &event_match.rule_name,
+                &event_match.severity,
+                &message,
+            );
         }
 
         // Store in replay buffer
@@ -1581,9 +1618,7 @@ mod tests {
         ));
 
         raw_tx
-            .send(
-                LogEntry::new(Local::now(), "TX::ui", "version\r\n").with_color("yellow"),
-            )
+            .send(LogEntry::new(Local::now(), "TX::ui", "version\r\n").with_color("yellow"))
             .await
             .unwrap();
         drop(raw_tx);
@@ -1706,6 +1741,7 @@ mod tests {
             ts_mode: TimestampMode::Absolute,
             line_counter: None,
             event_matcher: None,
+            runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer(
@@ -1769,6 +1805,7 @@ mod tests {
             ts_mode: TimestampMode::Absolute,
             line_counter: None,
             event_matcher: None,
+            runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
@@ -1835,6 +1872,7 @@ mod tests {
             ts_mode: TimestampMode::Absolute,
             line_counter: None,
             event_matcher: Some(matcher),
+            runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
@@ -1946,6 +1984,7 @@ mod tests {
             ts_mode: TimestampMode::Absolute,
             line_counter: None,
             event_matcher: Some(matcher),
+            runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
@@ -2023,6 +2062,7 @@ mod tests {
             ts_mode: TimestampMode::Absolute,
             line_counter: None,
             event_matcher: Some(matcher),
+            runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
@@ -2086,6 +2126,7 @@ mod tests {
             ts_mode: TimestampMode::Absolute,
             line_counter: None,
             event_matcher: None,
+            runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));

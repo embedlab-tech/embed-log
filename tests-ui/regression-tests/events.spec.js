@@ -68,6 +68,57 @@ test.describe('event detection', () => {
     await expect(eventsContent).toBeVisible();
   });
 
+  test('event dots and navigation use chronological timestamp order', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await page.locator('.events-tab-btn').click();
+    await expect.poll(() => page.locator('.events-dot').count(), { timeout: 20_000 }).toBeGreaterThan(1);
+
+    const timestamps = await page.locator('.events-dot').evaluateAll(dots =>
+      dots.map(dot => Number(dot.dataset.timestampNum))
+    );
+    expect(timestamps).toEqual([...timestamps].sort((a, b) => a - b));
+  });
+
+  test('event dots are keyboard-accessible and selectable', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await page.locator('.events-tab-btn').click();
+    const hit = page.locator('.events-dot-hit').first();
+    await expect(hit).toBeVisible({ timeout: 20_000 });
+    await expect(hit).toHaveAttribute('role', 'button');
+    await expect(hit).toHaveAttribute('tabindex', '0');
+    await expect(hit).toHaveAttribute('aria-label', /on/);
+    await hit.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#events-tooltip.actionable')).toBeVisible();
+  });
+
+  test('event lanes identify both source and event rule', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await page.locator('.events-tab-btn').click();
+    await expect.poll(() => page.locator('.events-lane-label').count(), { timeout: 20_000 }).toBeGreaterThan(0);
+
+    const labels = await page.locator('.events-lane-label').allTextContents();
+    expect(labels.every(label => label.includes(' · '))).toBeTruthy();
+  });
+
+  test('rules panel shows saved rules and downloads a rules file', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await page.locator('.events-tab-btn').click();
+    await page.locator('#events-rules-btn').click();
+    const panel = page.locator('.events-rules-panel');
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText('Saved for future runs');
+
+    const download = page.waitForEvent('download');
+    await panel.locator('[data-export-rules]').click();
+    const file = await download;
+    expect(file.suggestedFilename()).toBe('embed-log.events.yml');
+  });
+
   test('event marker rendering on log lines uses severity colors', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
@@ -181,6 +232,92 @@ test.describe('event detection', () => {
     await expect(tooltip).toHaveClass(/visible/);
     await expect(page.locator('.events-dot.selected')).toBeVisible();
     await expect(page.locator('.events-jump-log-btn')).toBeVisible();
+  });
+
+  test('event tooltip timestamp follows the display mode toggle', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await page.locator('.events-tab-btn').click();
+    await expect.poll(() => page.locator('.events-dot-hit').count(), { timeout: 20_000 }).toBeGreaterThan(0);
+
+    const selectFirstEvent = () => page.evaluate(() =>
+      document.querySelector('.events-dot-hit')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    );
+    const tooltip = page.locator('#events-tooltip');
+    await page.locator('#btn-settings').click();
+    const toggle = page.locator('#btn-timestamp-mode');
+    if (await toggle.textContent() !== 'Relative') await toggle.click();
+    await page.locator('#btn-settings').click();
+    await selectFirstEvent();
+    await expect(tooltip).toContainText(/T\+\d+:\d{2}:\d{2}\.\d{3}/);
+
+    await page.locator('#btn-settings').click();
+    await page.locator('#btn-timestamp-mode').click();
+    await page.locator('#btn-settings').click();
+    await selectFirstEvent();
+    await expect(tooltip).not.toContainText('T+');
+    await expect(tooltip).toContainText(/\d{2}:\d{2}:\d{2}\.\d{3}/);
+  });
+
+  test('event hover tooltip dismisses promptly after leaving the timeline', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await page.locator('.events-tab-btn').click();
+    await expect.poll(() => page.locator('.events-dot-hit').count(), { timeout: 20_000 }).toBeGreaterThan(0);
+
+    await page.evaluate(() => {
+      const hit = document.querySelector('.events-dot-hit');
+      const rect = hit?.getBoundingClientRect();
+      hit?.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: rect?.left, clientY: rect?.top }));
+      document.querySelector('.events-svg-wrap')?.dispatchEvent(new PointerEvent('pointerleave', { bubbles: true }));
+    });
+    const tooltip = page.locator('#events-tooltip');
+    await expect(tooltip).toHaveClass(/visible/);
+    await expect(tooltip).toBeHidden({ timeout: 500 });
+  });
+
+  test('selected recurring event shows elapsed time since prior events', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await page.locator('.events-tab-btn').click();
+    await expect(page.locator('.events-timeline-svg')).toBeVisible();
+
+    // Pick the second occurrence of any event rule. The regression demo emits
+    // recurring rules, so this exercises both global and same-rule deltas.
+    await expect.poll(() => page.locator('.events-dot-hit').count(), { timeout: 20_000 }).toBeGreaterThan(1);
+    const selected = await page.evaluate(() => {
+      const hits = [...document.querySelectorAll('.events-dot-hit')];
+      const repeated = hits.find((hit, index) => index > 0 &&
+        hits.slice(0, index).some(previous =>
+          previous.dataset.eventId === hit.dataset.eventId &&
+          previous.dataset.sourceId === hit.dataset.sourceId));
+      repeated?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      return repeated?.dataset.eventId || null;
+    });
+    expect(selected).not.toBeNull();
+
+    const tooltip = page.locator('#events-tooltip');
+    await expect(tooltip).toHaveClass(/visible/);
+    await expect(tooltip).toContainText('Δ previous event:');
+    expect(selected).toBeTruthy();
+  });
+
+  test('event filters include every source and severity present in the timeline', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await page.locator('.events-tab-btn').click();
+    await expect.poll(() => page.locator('.events-dot').count(), { timeout: 20_000 }).toBeGreaterThan(0);
+
+    const present = await page.locator('.events-dot').evaluateAll(dots => ({
+      sources: [...new Set(dots.map(dot => dot.dataset.sourceId))],
+      severities: [...new Set(dots.map(dot => dot.dataset.severity))],
+    }));
+    for (const source of present.sources) {
+      await expect(page.locator(`[data-fsrc="${source}"]`)).toBeVisible();
+    }
+    for (const severity of present.severities) {
+      await expect(page.locator(`[data-fsev="${severity}"]`)).toBeVisible();
+    }
   });
 
   test('severity filter checkbox hides matching dots', async ({ page }) => {

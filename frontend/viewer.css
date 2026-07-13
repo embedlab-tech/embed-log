@@ -1223,6 +1223,12 @@ mark.hl {
     font-size: 13px;
 }
 
+/* ── Event rules panel ── */
+.events-rules-panel { padding: 8px; border-bottom: 1px solid var(--border); font-size: 11px; }
+.event-rule-row { display: grid; grid-template-columns: 180px 60px 1fr 60px auto; gap: 8px; align-items: center; padding: 3px 0; }
+.event-rule-row code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.event-rules-actions { margin-bottom: 6px; }
+
 /* ── Events filter bar ── */
 .events-filter-bar {
     display: flex;
@@ -1296,6 +1302,8 @@ mark.hl {
 .et-sev-fatal { background: var(--event-fatal); }
 .et-meta { opacity: 0.6; font-size: 10px; margin-bottom: 4px; }
 .et-msg { white-space: pre-wrap; word-break: break-word; }
+.et-deltas { margin-top: 5px; color: var(--text); opacity: 0.82; }
+.et-deltas code { font-family: var(--font-family, monospace); color: var(--accent); }
 .et-captures { margin-top: 4px; display: flex; gap: 4px; flex-wrap: wrap; }
 .et-captures code {
     font-family: var(--font-family, monospace);

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket};
@@ -16,7 +16,10 @@ use tower_http::services::ServeDir;
 use tracing::{info, warn};
 
 use crate::frontend_assets::FrontendAssets;
-use crate::net::control_ws::{control_ws_handler, SourceInfo};
+use crate::net::control_ws::{
+    control_ws_handler, handle_event_rule_create, handle_event_rule_delete,
+    handle_event_rule_export, handle_event_rule_list, handle_event_rule_promote, SourceInfo,
+};
 use crate::session::SessionManager;
 use crate::sources::TxCommand;
 
@@ -129,6 +132,12 @@ pub struct ServerState {
     pub source_metadata: Arc<HashMap<String, SourceInfo>>,
     /// Per-source line counters for stable `line_idx` in log entries.
     pub line_counters: Arc<HashMap<String, Arc<std::sync::atomic::AtomicU64>>>,
+    /// Rules loaded from the companion event YAML file at server startup.
+    pub static_event_rules: Arc<HashMap<String, Vec<crate::config::EventRule>>>,
+    /// Preferred companion YAML path for persisting promoted runtime rules.
+    pub event_rules_path: PathBuf,
+    /// Event rules added for the lifetime of this server/session.
+    pub runtime_event_rules: Arc<RwLock<HashMap<String, Vec<crate::config::EventRule>>>>,
     /// Whether the /api/v1/control WebSocket endpoint is enabled.
     pub control_api: bool,
 }
@@ -162,6 +171,7 @@ pub async fn start_server(
 
     api = api
         .route("/api/health", axum::routing::get(api_health_handler))
+        .route("/api/v1/status", axum::routing::get(api_status_handler))
         .route(
             "/api/session/current",
             axum::routing::get(api_current_session_handler),
@@ -210,7 +220,9 @@ async fn embedded_fallback(uri: axum::http::Uri) -> impl IntoResponse {
         // Binary/other assets (fonts, images, ...): guess from extension
         // rather than mislabeling them as HTML, which browsers reject for
         // e.g. @font-face loads.
-        mime_guess::from_path(path).first_or_octet_stream().to_string()
+        mime_guess::from_path(path)
+            .first_or_octet_stream()
+            .to_string()
     } else {
         "text/html; charset=utf-8".to_string()
     };
@@ -410,6 +422,29 @@ async fn handle_client_command(text: &str, state: &ServerState) -> Option<String
         "clear_logs" => Some(handle_clear_logs(&cmd, state).to_string()),
         "set_filter" => Some(handle_set_filter(&cmd).to_string()),
         "send_raw" => Some(handle_send_raw(&cmd, state).await.to_string()),
+        "event_rule.create" => Some(handle_event_rule_create(
+            &cmd,
+            state,
+            cmd.get("id").and_then(|value| value.as_str()),
+        )),
+        "event_rule.list" => Some(handle_event_rule_list(
+            state,
+            cmd.get("id").and_then(|value| value.as_str()),
+        )),
+        "event_rule.export" => Some(handle_event_rule_export(
+            state,
+            cmd.get("id").and_then(|value| value.as_str()),
+        )),
+        "event_rule.promote" => Some(handle_event_rule_promote(
+            &cmd,
+            state,
+            cmd.get("id").and_then(|value| value.as_str()),
+        )),
+        "event_rule.delete" => Some(handle_event_rule_delete(
+            &cmd,
+            state,
+            cmd.get("id").and_then(|value| value.as_str()),
+        )),
         _ => None,
     }
 }
@@ -609,6 +644,40 @@ fn current_session_value(state: &ServerState) -> serde_json::Value {
 
 async fn api_health_handler() -> impl IntoResponse {
     axum::Json(serde_json::json!({ "status": "ok" }))
+}
+
+/// GET /api/v1/status — lightweight readiness and source-capability discovery.
+async fn api_status_handler(State(state): State<ServerState>) -> impl IntoResponse {
+    let sources = state
+        .source_metadata
+        .iter()
+        .map(|(name, source)| {
+            let stats = state
+                .stats
+                .source(name)
+                .map(|stats| stats.snapshot(state.stats.queue_size))
+                .unwrap_or(serde_json::Value::Null);
+            (
+                name.clone(),
+                serde_json::json!({
+                    "type": source.source_type,
+                    "label": source.label,
+                    "writable": source.writable,
+                    "available": true,
+                    "stats": stats,
+                }),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>();
+    let session = current_session_value(&state);
+    axum::Json(serde_json::json!({
+        "ok": true,
+        "api_version": "v1",
+        "version": env!("CARGO_PKG_VERSION"),
+        "session_id": session.get("id").cloned().unwrap_or(serde_json::Value::Null),
+        "control_api": state.control_api,
+        "sources": sources,
+    }))
 }
 
 async fn api_current_session_handler(State(state): State<ServerState>) -> impl IntoResponse {
@@ -926,6 +995,9 @@ mod tests {
             source_tx_senders: Arc::new(HashMap::new()),
             source_metadata: Arc::new(HashMap::new()),
             line_counters: Arc::new(HashMap::new()),
+            static_event_rules: Arc::new(HashMap::new()),
+            event_rules_path: std::env::temp_dir().join("embed-log.events.yml"),
+            runtime_event_rules: Arc::new(std::sync::RwLock::new(HashMap::new())),
             control_api: true,
         };
         (state, rx)

@@ -513,7 +513,10 @@ tabs:
         let path = std::env::temp_dir().join("merge-collide-test.yml");
         std::fs::write(&path, yaml).unwrap();
         let err = load_config(&path).unwrap_err().to_string();
-        assert!(err.contains("collides with an existing source name"), "{err}");
+        assert!(
+            err.contains("collides with an existing source name"),
+            "{err}"
+        );
         std::fs::remove_file(&path).ok();
     }
 

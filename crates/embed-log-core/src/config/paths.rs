@@ -15,10 +15,7 @@ pub fn resolve_relative_to_config(config_path: &Path, rel: &str) -> PathBuf {
     if path.is_absolute() {
         path
     } else {
-        let joined = config_path
-            .parent()
-            .unwrap_or(Path::new("."))
-            .join(path);
+        let joined = config_path.parent().unwrap_or(Path::new(".")).join(path);
         joined.canonicalize().unwrap_or(joined)
     }
 }

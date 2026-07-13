@@ -18,6 +18,27 @@ Global options:
 
 ## Run server
 
+### Fast serial start (no YAML)
+
+Pass UART device paths directly to `run` for a temporary configuration:
+
+```bash
+embed-log run /dev/ttyUSB0
+embed-log run /dev/ttyUSB0 /dev/ttyUSB1 --tui
+```
+
+For mixed inputs, use repeatable explicit flags:
+
+```bash
+embed-log run -s /dev/ttyUSB0 -s /dev/ttyUSB1 -f ./device.log --baud 115200
+```
+
+`-s` / `--serial` adds a UART, `-f` / `--file` watches an appended file, and `--baud` applies to every quick-run UART (default: `115200`). Each source gets its own tab. The generated configuration is in memory: no YAML is read or written, and `--config` cannot be combined with quick-run sources. Use `--save-config embed-log.yml` to persist it for later customization.
+
+Quick runs create the same session artifacts as config-based runs, under `./logs/` by default or the `--log-dir` path when supplied. All normal run flags work in this mode, including `--tui`, `--no-open-browser`, `--log-dir`, `--host`, and `--ws-port`. See [Quick start](quickstart.md) for the shortest examples.
+
+### Config-based run
+
 Default command when no subcommand is given:
 
 ```bash
@@ -135,12 +156,15 @@ embed-log version --json
 embed-log version --config embed-log.yml
 ```
 
+Version output includes the package version, Git revision, build time, target triple, and running executable path. Use `--json` for release/support diagnostics.
+
 Doctor:
 
 ```bash
 embed-log doctor
 embed-log doctor --json
 embed-log doctor --config embed-log.yml
+embed-log doctor --serial /dev/ttyUSB0
 ```
 
 `doctor` reports the binary version, host system info, config resolution, and packet-capture readiness:
@@ -151,6 +175,21 @@ embed-log doctor --config embed-log.yml
 - whether the binary was built with the `pcap-capture` feature
 - whether the native packet-capture library is installed (`libpcap` on Unix-like systems, `Npcap`/`WinPcap` on Windows)
 - whether the inspected config contains `network_capture` sources using `network_backend: pcap`
+- configured UART paths, plus explicitly requested repeatable `--serial <path>` checks
+
+Serial checks only test filesystem-level readability/writability and never configure or reset an attached UART. A missing path or permission denial produces an actionable warning.
+
+Check for updates:
+
+```bash
+embed-log update --check
+embed-log update --check --json
+embed-log update --yes
+embed-log update --version v1.2.0 --yes
+embed-log update --version v0.9.0 --yes --allow-downgrade
+```
+
+`--check` reports the latest stable GitHub Release without changing the system. `--yes` downloads the target-matching archive, verifies it against the release `SHA256SUMS`, stages the executable beside the current binary, and replaces it with a rollback backup if replacement fails. Self-update rejects same-version and downgrade installs by default; `--allow-downgrade --yes` is the explicit escape hatch. It currently supports Linux x86_64 and macOS Apple Silicon/Intel. On Windows, use the PowerShell installer again or your package manager: replacing a running `.exe` requires a dedicated updater helper that is not shipped yet. Package-managed or read-only installations should use their package manager instead.
 
 Serial ports:
 
@@ -197,6 +236,35 @@ Show session manifest/info:
 ```bash
 embed-log sessions info <SESSION_ID> --dir logs
 embed-log sessions info latest --dir logs --json
+```
+
+Import an external text log into an existing session. Lines must start with RFC3339 timestamps in UTC or another explicit offset; imported records are merged into `combined.jsonl` in timestamp order:
+
+```bash
+embed-log sessions import latest ./pytest.log --source PYTEST
+embed-log sessions import latest ./pytest.log --source PYTEST --dry-run
+# 2026-07-11T11:21:47.123Z test started
+# [2026-07-11T11:21:48+00:00] assertion passed
+```
+
+Create a portable support bundle. It includes all session artifacts plus `embed-log-version.json` build diagnostics:
+
+```bash
+embed-log sessions bundle latest --dir logs
+embed-log sessions bundle latest --output ./support.tar.gz
+```
+
+Prune older sessions while retaining the newest N. Always preview first:
+
+```bash
+embed-log sessions prune --dir logs --keep 20 --dry-run
+embed-log sessions prune --dir logs --keep 20
+```
+
+Open a session report in the default browser. If the HTML export is missing, it is generated first:
+
+```bash
+embed-log sessions open latest --dir logs
 ```
 
 Export a recorded session:

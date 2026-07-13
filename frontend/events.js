@@ -9,7 +9,7 @@
 // switchTab hides our content when a regular tab is activated.
 
 import { state, TABS, PANES, paneLabel, formatRelativeTimestamp } from './state.js';
-import { switchTab } from './tabs.js';
+import { renderTabBar, switchTab } from './tabs.js';
 import { scrollPaneToLineIdx, scrollPaneToTs } from './lines.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────
@@ -45,6 +45,7 @@ let _svgWrapEl  = null;   // div wrapping the <svg>
 let _filterEl   = null;   // source/severity filter bar
 let _eventsTooltipEl  = null;   // hover tooltip
 let _eventsBtn  = null;   // tab-bar button
+let _rulesPanelEl = null;
 
 let _timelineMode = 'scroll'; // 'scroll' = zoomable horizontal scroll, 'zoom' = fit range to viewport
 let _scrollPxPerMs = SCROLL_DEFAULT_PX_PER_MS;
@@ -63,6 +64,7 @@ let _renderedLaneH = SCROLL_LANE_HEIGHT;
 
 let _hiddenSources    = new Set();
 let _hiddenSeverities = new Set();
+let _filterSignature = '';
 
 // ── Public API ────────────────────────────────────────────────────────────
 
@@ -108,12 +110,19 @@ export function destroyEventsTab() {
     _hasRenderedEventSnapshot = false;
     _hiddenSources.clear();
     _hiddenSeverities.clear();
+    _filterSignature = '';
     state.eventsTabActive = false;
 }
 
 export function addEvent(ev) {
     state.events.push(ev);
+    if (!state.eventsEnabled) {
+        state.eventsEnabled = true;
+        initEventsTab();
+        renderTabBar();
+    }
     _updateCount();
+    if (_contentEl && _filterSignature !== _eventFilterSignature()) _renderFilters();
     // Avoid rebuilding a large hidden SVG for every incoming event. Render the
     // first event so tests/DOM consumers can observe dots, then keep the hidden
     // tab cheap until the user opens it.
@@ -201,6 +210,7 @@ function _buildDom() {
         '<span class="events-title">⚡ Event Timeline</span>' +
         '<span class="events-count"></span>' +
         '<button class="events-nav-toggle" id="events-nav-toggle" title="Include event markers in marker navigation">⚡ in nav</button>' +
+        '<button class="events-btn" id="events-rules-btn">⚙ Rules</button>' +
         '<div class="events-step-controls" title="Select and center events without leaving the timeline">' +
             '<button class="events-btn" data-event-nav="-1" title="Previous event">◀ event</button>' +
             '<button class="events-btn" data-event-nav="1" title="Next event">event ▶</button>' +
@@ -219,8 +229,11 @@ function _buildDom() {
 
     _filterEl = document.createElement('div');
     _filterEl.className = 'events-filter-bar';
+    _rulesPanelEl = document.createElement('div');
+    _rulesPanelEl.className = 'events-rules-panel';
+    _rulesPanelEl.hidden = true;
 
-    _contentEl.append(header, _svgWrapEl, _filterEl);
+    _contentEl.append(header, _rulesPanelEl, _svgWrapEl, _filterEl);
     document.getElementById('container').appendChild(_contentEl);
 
     // Mode + zoom controls.
@@ -239,6 +252,8 @@ function _buildDom() {
         btn.addEventListener('click', () => _navigateEvent(btn.dataset.eventNav));
     });
     _syncModeUi();
+    header.querySelector('#events-rules-btn')?.addEventListener('click', _toggleRulesPanel);
+    window.addEventListener('embed-log-event-rule', _onEventRuleResponse);
 
     // Toggle event markers in main marker navigation
     const navToggle = document.getElementById('events-nav-toggle');
@@ -260,6 +275,56 @@ function _buildDom() {
     _eventsBtn.className = 'tab-btn events-tab-btn';
     _eventsBtn.textContent = '⚡ Events';
     _eventsBtn.addEventListener('click', _activateEventsTab);
+}
+
+function _toggleRulesPanel() {
+    if (!_rulesPanelEl) return;
+    _rulesPanelEl.hidden = !_rulesPanelEl.hidden;
+    if (!_rulesPanelEl.hidden) window.wsSend?.({ cmd: 'event_rule.list' });
+}
+
+function _onEventRuleResponse(event) {
+    const response = event.detail || {};
+    if (response.type === 'event_rule.list.result' && response.ok) {
+        _renderRules(response.rules || []);
+    } else if (response.type === 'event_rule.delete.result' && response.ok) {
+        window.wsSend?.({ cmd: 'event_rule.list' });
+    } else if (response.type === 'event_rule.export.result' && response.ok) {
+        _downloadRulesYaml(response.yaml || '');
+    } else if (response.type === 'event_rule.promote.result') {
+        const status = _rulesPanelEl?.querySelector('.event-rules-status');
+        if (status) status.textContent = response.ok
+            ? 'Saved for future runs. Still watching now.'
+            : `Could not save: ${response.error || 'unknown error'}`;
+    }
+}
+
+function _renderRules(rules) {
+    if (!_rulesPanelEl) return;
+    const rows = rules.map(rule => {
+        const saved = rule.origin === 'static';
+        const status = saved ? 'Saved for future runs' : 'Watching now';
+        return `<div class="event-rule-row"><code>${_esc(paneLabel(rule.source_id))} · ${_esc(rule.name)}</code><span>${_esc(rule.severity)}</span><code>${_esc(rule.pattern)}</code><span>${status}</span>${!saved ? `<span><button data-promote-rule="${_esc(rule.source_id)}|${_esc(rule.name)}">Save for future runs</button><button data-delete-rule="${_esc(rule.source_id)}|${_esc(rule.name)}">Stop watching</button></span>` : ''}</div>`;
+    }).join('');
+    _rulesPanelEl.innerHTML = `<div class="event-rules-actions"><button data-export-rules>Download rules file</button><span class="event-rules-status"></span></div>${rows || '<span>No active event rules.</span>'}`;
+    _rulesPanelEl.querySelector('[data-export-rules]')?.addEventListener('click', () => window.wsSend?.({ cmd: 'event_rule.export' }));
+    _rulesPanelEl.querySelectorAll('[data-delete-rule]').forEach(button => button.addEventListener('click', () => {
+        const [source_id, name] = button.dataset.deleteRule.split('|');
+        window.wsSend?.({ cmd: 'event_rule.delete', source_id, name });
+    }));
+    _rulesPanelEl.querySelectorAll('[data-promote-rule]').forEach(button => button.addEventListener('click', () => {
+        const [source_id, name] = button.dataset.promoteRule.split('|');
+        window.wsSend?.({ cmd: 'event_rule.promote', source_id, name });
+    }));
+}
+
+function _downloadRulesYaml(yaml) {
+    const blob = new Blob([yaml], { type: 'application/x-yaml' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'embed-log.events.yml';
+    link.click();
+    URL.revokeObjectURL(link.href);
 }
 
 function _buildTooltip() {
@@ -297,7 +362,7 @@ function _buildSvg(events, lanes, range, width, height, innerW, laneH) {
             x: LEFT_MARGIN - 8, y: y + laneH / 2 + 4,
             'text-anchor': 'end', class: 'events-lane-label',
         });
-        label.textContent = eventId;
+        label.textContent = _eventLaneLabel(eventId);
         svg.appendChild(label);
     });
 
@@ -322,7 +387,7 @@ function _buildSvg(events, lanes, range, width, height, innerW, laneH) {
 
     // Event dots
     events.forEach((ev, i) => {
-        const laneIdx = lanes.get(ev.event_id);
+        const laneIdx = lanes.get(_eventLaneKey(ev));
         if (laneIdx === undefined) return;
         const cx = xScale(ev.timestamp_num);
         const cy = TOP_MARGIN + laneIdx * laneH + laneH / 2;
@@ -340,12 +405,21 @@ function _buildSvg(events, lanes, range, width, height, innerW, laneH) {
             fill: 'transparent',
             class: 'events-dot-hit' + (selected ? ' selected' : ''),
             'data-event-idx': i,
+            'data-event-id': ev.event_id,
+            'data-source-id': ev.source_id,
+            'data-timestamp-num': ev.timestamp_num,
+            tabindex: 0,
+            role: 'button',
+            'aria-label': `${ev.severity || 'info'} ${ev.event_id} on ${paneLabel(ev.source_id)} at ${_formatEventTime(ev) || ev.timestamp || 'unknown time'}`,
         });
         const dot = _el('circle', {
             cx, cy, r: selected ? 7 : 5,
             fill: SEVERITY_COLORS[ev.severity] || SEVERITY_COLORS.info,
             class: 'events-dot' + (selected ? ' selected' : ''),
             'data-event-idx': i,
+            'data-event-id': ev.event_id,
+            'data-source-id': ev.source_id,
+            'data-timestamp-num': ev.timestamp_num,
             'data-severity': ev.severity || 'info',
         });
         svg.appendChild(hit);
@@ -427,6 +501,15 @@ function _initInteraction() {
     _svgWrapEl.addEventListener('click', e => {
         const hit = e.target.closest('.events-dot-hit');
         if (!hit) return;
+        const ev = _filteredEvents()[parseInt(hit.getAttribute('data-event-idx'), 10)];
+        if (ev) _onEventClick(ev);
+    });
+
+    _svgWrapEl.addEventListener('keydown', e => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        const hit = e.target.closest('.events-dot-hit');
+        if (!hit) return;
+        e.preventDefault();
         const ev = _filteredEvents()[parseInt(hit.getAttribute('data-event-idx'), 10)];
         if (ev) _onEventClick(ev);
     });
@@ -551,13 +634,20 @@ function _showTooltip(ev, x, y, { action = false } = {}) {
     const captures = Array.isArray(ev.captures) && ev.captures.length
         ? `<div class="et-captures">${ev.captures.map(c => `<code>${_esc(c)}</code>`).join(' ')}</div>`
         : '';
+    const deltas = _eventDeltas(ev);
+    const deltaDetails = [
+        deltas.previous && `<div>Δ previous event: <code>${_formatDuration(deltas.previous)}</code></div>`,
+        deltas.sameRule && deltas.sameRule !== deltas.previous &&
+            `<div>Δ previous ${_esc(paneLabel(ev.source_id))} · ${_esc(ev.event_id)}: <code>${_formatDuration(deltas.sameRule)}</code></div>`,
+    ].filter(Boolean).join('');
     const actions = action
         ? '<div class="et-actions"><button type="button" class="events-jump-log-btn">Jump to log</button></div>'
         : '';
     _eventsTooltipEl.innerHTML =
         `<div class="et-head"><span class="et-sev et-sev-${ev.severity}">${ev.severity}</span>${_esc(ev.event_id)}</div>` +
-        `<div class="et-meta">${_esc(paneLabel(ev.source_id))} · ${_esc(ev.timestamp || '')} · line ${ev.line_idx ?? '?'}</div>` +
+        `<div class="et-meta">${_esc(paneLabel(ev.source_id))} · ${_esc(_formatEventTime(ev) || ev.timestamp || '')} · line ${ev.line_idx ?? '?'}</div>` +
         `<div class="et-msg">${_esc(ev.message || '')}</div>` +
+        (deltaDetails ? `<div class="et-deltas">${deltaDetails}</div>` : '') +
         captures + actions;
     _eventsTooltipEl.classList.toggle('actionable', action);
     if (action) {
@@ -576,7 +666,7 @@ function _showTooltip(ev, x, y, { action = false } = {}) {
 function _showTooltipForEvent(ev, options = {}) {
     if (!_svgWrapEl || !_eventsTooltipEl) return;
     const x = _timeToRenderedX(ev.timestamp_num);
-    const laneIdx = _computeLanes().get(ev.event_id);
+    const laneIdx = _computeLanes().get(_eventLaneKey(ev));
     if (x === null || laneIdx === undefined) return;
 
     const rect = _svgWrapEl.getBoundingClientRect();
@@ -593,7 +683,7 @@ function _cancelTooltipHide() {
     }
 }
 
-function _scheduleTooltipHide(delay = 450) {
+function _scheduleTooltipHide(delay = 125) {
     if (_tooltipPinned) return;
     _cancelTooltipHide();
     _tooltipHideTimer = setTimeout(() => {
@@ -615,22 +705,47 @@ window.__embedLogHideEventsTooltip = function () {
 
 // ── Filtering ─────────────────────────────────────────────────────────────
 
+function _chronologicalEvents(events) {
+    return events.slice().sort((a, b) => {
+        const timeA = Number.isFinite(a.timestamp_num) ? a.timestamp_num : Infinity;
+        const timeB = Number.isFinite(b.timestamp_num) ? b.timestamp_num : Infinity;
+        return timeA - timeB;
+    });
+}
+
 function _filteredEvents() {
-    return state.events.filter(ev =>
+    return _chronologicalEvents(state.events.filter(ev =>
         !_hiddenSources.has(ev.source_id) &&
         !_hiddenSeverities.has(ev.severity)
-    );
+    ));
+}
+
+function _eventFilterOptions() {
+    const sources = new Set(Object.keys(state.eventRules || {}));
+    const severities = new Set();
+    Object.values(state.eventRules || {}).forEach(rules => {
+        if (Array.isArray(rules)) rules.forEach(rule => severities.add(rule.severity));
+    });
+    state.events.forEach(event => {
+        if (event.source_id) sources.add(event.source_id);
+        if (event.severity) severities.add(event.severity);
+    });
+    return {
+        sources: [...sources].sort(),
+        severities: [...severities],
+    };
+}
+
+function _eventFilterSignature() {
+    const { sources, severities } = _eventFilterOptions();
+    return JSON.stringify([sources, severities.sort()]);
 }
 
 function _renderFilters() {
     if (!_filterEl) return;
-    const sources = Object.keys(state.eventRules);
+    const { sources, severities } = _eventFilterOptions();
+    _filterSignature = _eventFilterSignature();
     if (sources.length === 0) { _filterEl.innerHTML = ''; return; }
-
-    const usedSeverities = new Set();
-    Object.values(state.eventRules).forEach(rules =>
-        rules.forEach(r => usedSeverities.add(r.severity))
-    );
 
     let html = '<div class="events-filter-group"><span class="events-filter-label">Source</span>';
     sources.forEach(src => {
@@ -641,7 +756,7 @@ function _renderFilters() {
 
     html += '<div class="events-filter-group"><span class="events-filter-label">Severity</span>';
     SEVERITY_ORDER.forEach(sev => {
-        if (!usedSeverities.has(sev)) return;
+        if (!severities.includes(sev)) return;
         const checked = !_hiddenSeverities.has(sev) ? 'checked' : '';
         html += `<label class="events-chip"><input type="checkbox" data-fsev="${sev}" ${checked}><span class="events-sev-dot" style="background:${SEVERITY_COLORS[sev]}"></span>${sev}</label>`;
     });
@@ -671,11 +786,23 @@ function _el(tag, attrs = {}) {
     return e;
 }
 
+const LANE_SEPARATOR = '\u001f';
+
+function _eventLaneKey(ev) {
+    return `${ev.source_id}${LANE_SEPARATOR}${ev.event_id}`;
+}
+
+function _eventLaneLabel(key) {
+    const [sourceId, eventId] = key.split(LANE_SEPARATOR);
+    return `${paneLabel(sourceId)} · ${eventId}`;
+}
+
 function _computeLanes() {
     const lanes = new Map();
     state.events.forEach(ev => {
         if (!_hiddenSources.has(ev.source_id) && !_hiddenSeverities.has(ev.severity)) {
-            if (!lanes.has(ev.event_id)) lanes.set(ev.event_id, lanes.size);
+            const key = _eventLaneKey(ev);
+            if (!lanes.has(key)) lanes.set(key, lanes.size);
         }
     });
     // Before the first live event arrives, still render an SVG with lanes from
@@ -686,7 +813,8 @@ function _computeLanes() {
             if (_hiddenSources.has(src) || !Array.isArray(rules)) return;
             rules.forEach(rule => {
                 if (_hiddenSeverities.has(rule.severity)) return;
-                if (rule?.name && !lanes.has(rule.name)) lanes.set(rule.name, lanes.size);
+                const key = _eventLaneKey({ source_id: src, event_id: rule?.name });
+                if (rule?.name && !lanes.has(key)) lanes.set(key, lanes.size);
             });
         });
     }
@@ -749,6 +877,29 @@ function _eventKey(ev) {
     return [ev.source_id, ev.line_idx ?? '', ev.event_id, ev.timestamp_num].join('|');
 }
 
+function _eventDeltas(ev) {
+    if (!Number.isFinite(ev.timestamp_num)) return {};
+    const ordered = _chronologicalEvents(state.events.filter(candidate => Number.isFinite(candidate.timestamp_num)));
+    const index = ordered.findIndex(candidate => _eventKey(candidate) === _eventKey(ev));
+    if (index <= 0) return {};
+    const previous = ordered[index - 1];
+    const sameRule = ordered.slice(0, index).reverse().find(candidate =>
+        candidate.source_id === ev.source_id && candidate.event_id === ev.event_id
+    );
+    return {
+        previous: ev.timestamp_num - previous.timestamp_num,
+        sameRule: sameRule ? ev.timestamp_num - sameRule.timestamp_num : null,
+    };
+}
+
+function _formatDuration(ms) {
+    if (!Number.isFinite(ms) || ms < 0) return '';
+    if (ms < 1_000) return `${Math.round(ms)} ms`;
+    if (ms < 60_000) return `${(ms / 1_000).toFixed(ms < 10_000 ? 3 : 1)} s`;
+    const minutes = Math.floor(ms / 60_000);
+    return `${minutes}m ${((ms % 60_000) / 1_000).toFixed(1)}s`;
+}
+
 function _isScrolledToRight() {
     if (!_svgWrapEl) return true;
     return _svgWrapEl.scrollWidth - _svgWrapEl.scrollLeft - _svgWrapEl.clientWidth <= SCROLL_EDGE_EPS;
@@ -795,6 +946,13 @@ function _ensureTimeVisibleInZoom(ms) {
     if (ms >= range.start && ms <= range.end) return;
     const span = range.end - range.start || 1000;
     _viewRange = { start: ms - span / 2, end: ms + span / 2 };
+}
+
+function _formatEventTime(ev) {
+    if (state.timestampMode === 'relative' && Number.isFinite(ev.rel_num)) {
+        return formatRelativeTimestamp(ev.rel_num);
+    }
+    return _formatTime(ev.timestamp_num);
 }
 
 function _formatTime(epochMs) {

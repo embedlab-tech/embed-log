@@ -44,6 +44,9 @@ __pycache__/
 .venv/
 .venv-review/
 
+# Pi work-log runtime checkpoint (the extension itself is tracked)
+/.pi/worklog-checkpoint.json
+
 # Local environment files
 .env
 .env.*

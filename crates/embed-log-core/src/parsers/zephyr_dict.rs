@@ -110,7 +110,8 @@ impl ZephyrDictParser {
         if self.text_buf.is_empty() {
             return;
         }
-        if self.text_buf.iter().all(|&b| is_lower_hex(b)) && self.text_buf.len() >= MIN_PROMPT_HEX_LEN
+        if self.text_buf.iter().all(|&b| is_lower_hex(b))
+            && self.text_buf.len() >= MIN_PROMPT_HEX_LEN
         {
             self.hex_collect = String::from_utf8_lossy(&self.text_buf).into_owned();
             self.hex_unhexified = 0;
@@ -356,7 +357,10 @@ fn formalize_fmt_string(fmt: &str, is_64bit: bool) -> String {
 
 enum TakeResult {
     NeedMore,
-    Consumed { len: usize, output: Vec<String> },
+    Consumed {
+        len: usize,
+        output: Vec<String>,
+    },
     /// Malformed message or decode failure — stop parsing, matching upstream
     /// `log_parser_v3.py` (returns `False` / `None` without advancing).
     Stop,
@@ -405,12 +409,17 @@ fn take_normal_message(buf: &[u8], db: &Database) -> TakeResult {
         return malformed();
     };
     let source_off = 6;
-    let Some(source_id) = read_uint_sized(&buf[source_off..source_off + ptr_size], db.little_endian, ptr_size)
-    else {
+    let Some(source_id) = read_uint_sized(
+        &buf[source_off..source_off + ptr_size],
+        db.little_endian,
+        ptr_size,
+    ) else {
         return malformed();
     };
     let ts_off = source_off + ptr_size;
-    let Some(timestamp) = read_uint_sized(&buf[ts_off..ts_off + ts_size], db.little_endian, ts_size) else {
+    let Some(timestamp) =
+        read_uint_sized(&buf[ts_off..ts_off + ts_size], db.little_endian, ts_size)
+    else {
         return malformed();
     };
 
@@ -421,9 +430,15 @@ fn take_normal_message(buf: &[u8], db: &Database) -> TakeResult {
 
     // Matches log_parser_v3.py: bit layout of domain/level flips with endianness.
     let (domain_id, level) = if db.little_endian {
-        ((domain_lvl & 0x0F) as u32, ((domain_lvl >> 4) & 0x0F) as u32)
+        (
+            (domain_lvl & 0x0F) as u32,
+            ((domain_lvl >> 4) & 0x0F) as u32,
+        )
     } else {
-        (((domain_lvl >> 4) & 0x0F) as u32, (domain_lvl & 0x0F) as u32)
+        (
+            ((domain_lvl >> 4) & 0x0F) as u32,
+            (domain_lvl & 0x0F) as u32,
+        )
     };
     if level > 4 {
         return TakeResult::Stop;
@@ -488,7 +503,13 @@ fn hexdump_lines(data: &[u8]) -> Vec<String> {
             let hex: String = chunk.iter().map(|b| format!("{b:02x} ")).collect();
             let ascii: String = chunk
                 .iter()
-                .map(|&b| if (32..=126).contains(&b) { b as char } else { '.' })
+                .map(|&b| {
+                    if (32..=126).contains(&b) {
+                        b as char
+                    } else {
+                        '.'
+                    }
+                })
                 .collect();
             format!("    {hex:<48}|{ascii}")
         })
@@ -510,8 +531,7 @@ fn decode_package(package: &[u8], db: &Database) -> Result<String, String> {
     let num_ro_str_indexes = package[2] as i64;
     let num_rw_str_indexes = package[3] as i64;
 
-    let offset_end_of_args =
-        offset_end_of_args_units * 4 + num_ro_str_indexes + num_rw_str_indexes;
+    let offset_end_of_args = offset_end_of_args_units * 4 + num_ro_str_indexes + num_rw_str_indexes;
     if offset_end_of_args < 0 || offset_end_of_args as usize > package.len() {
         return Err("argument-list end offset out of range".to_string());
     }
@@ -527,13 +547,19 @@ fn decode_package(package: &[u8], db: &Database) -> Result<String, String> {
         return Err("package too short for format-string pointer".to_string());
     }
     let fmt_ptr_off = 4;
-    let fmt_str_ptr = read_uint_sized(&package[fmt_ptr_off..fmt_ptr_off + ptr_size], db.little_endian, ptr_size)
-        .ok_or("failed to read format-string pointer")?;
+    let fmt_str_ptr = read_uint_sized(
+        &package[fmt_ptr_off..fmt_ptr_off + ptr_size],
+        db.little_endian,
+        ptr_size,
+    )
+    .ok_or("failed to read format-string pointer")?;
     // Negative offset: the format string sits one pointer-width *before*
     // where the va_list argument offsets are measured from.
     let fmt_str = get_string(db, fmt_str_ptr, -(ptr_size as i64), &string_tbl);
     if fmt_str.is_empty() {
-        return Err(format!("could not resolve format string @0x{fmt_str_ptr:x}"));
+        return Err(format!(
+            "could not resolve format string @0x{fmt_str_ptr:x}"
+        ));
     }
 
     let arg_list = &package[hdr_len..offset_end_of_args];
@@ -566,7 +592,12 @@ fn extract_string_table(bytes: &[u8]) -> HashMap<i64, String> {
 /// Resolve a string pointer: try the database's static string tables first,
 /// then fall back to the packed message's own inline string table (used for
 /// strings the firmware couldn't statically resolve at compile time).
-fn get_string(db: &Database, ptr: u64, arg_offset: i64, string_tbl: &HashMap<i64, String>) -> String {
+fn get_string(
+    db: &Database,
+    ptr: u64,
+    arg_offset: i64,
+    string_tbl: &HashMap<i64, String>,
+) -> String {
     if let Some(s) = db.find_string(ptr) {
         return s;
     }
@@ -809,7 +840,9 @@ fn extract_args(
                 ArgType::Int => ArgVal::I(read_int_sized(raw, le, read_size)?),
                 ArgType::UInt => ArgVal::U(read_uint_sized(raw, le, read_size)?),
                 ArgType::Long | ArgType::LongLong => ArgVal::I(read_int_sized(raw, le, read_size)?),
-                ArgType::ULong | ArgType::ULongLong => ArgVal::U(read_uint_sized(raw, le, read_size)?),
+                ArgType::ULong | ArgType::ULongLong => {
+                    ArgVal::U(read_uint_sized(raw, le, read_size)?)
+                }
                 ArgType::Ptr => ArgVal::U(read_uint_sized(raw, le, read_size)?),
                 ArgType::Double | ArgType::LongDouble => ArgVal::F(read_f64(raw, le)?),
             };
@@ -1042,8 +1075,9 @@ impl Database {
             .map(|(id, inst)| (id, inst.name))
             .collect();
 
-        let earliest_valid_epoch = parse_kconfig_u64(&raw.kconfigs, "CONFIG_APP_TIMEMGR_EARLIEST_VALID_DATE")
-            .unwrap_or(DEFAULT_EARLIEST_VALID_EPOCH);
+        let earliest_valid_epoch =
+            parse_kconfig_u64(&raw.kconfigs, "CONFIG_APP_TIMEMGR_EARLIEST_VALID_DATE")
+                .unwrap_or(DEFAULT_EARLIEST_VALID_EPOCH);
 
         Ok(Self {
             is_64bit: raw.target.bits.unwrap_or(32) == 64,
@@ -1112,7 +1146,11 @@ fn parse_kconfig_u64(kconfigs: &HashMap<String, serde_json::Value>, key: &str) -
 }
 
 /// Format a Zephyr dictionary log timestamp for human-readable decode output.
-fn format_log_timestamp(timestamp: u64, timestamp_64bit: bool, earliest_valid_epoch: u64) -> String {
+fn format_log_timestamp(
+    timestamp: u64,
+    timestamp_64bit: bool,
+    earliest_valid_epoch: u64,
+) -> String {
     if timestamp < earliest_valid_epoch {
         if timestamp_64bit {
             return format!("[{timestamp:016}] ");
@@ -1329,7 +1367,10 @@ mod tests {
         let mut buf = vec![0xFF]; // unknown type
         buf.extend_from_slice(&encode_normal_message(3, 1, 1, 0x1000, &[], &[]));
         let lines = feed_hex(&mut parser, &buf);
-        assert!(lines.is_empty(), "expected stop before any decoded line, got: {lines:?}");
+        assert!(
+            lines.is_empty(),
+            "expected stop before any decoded line, got: {lines:?}"
+        );
     }
 
     #[test]
@@ -1358,9 +1399,15 @@ mod tests {
         let input = format!("node outside> help\n{LOG_HEX_SEP}{hex}Available commands:\n");
         let lines = parser.feed(input.as_bytes());
 
-        assert!(lines.iter().any(|l| l.contains("node outside> help")), "{lines:?}");
+        assert!(
+            lines.iter().any(|l| l.contains("node outside> help")),
+            "{lines:?}"
+        );
         assert!(lines.iter().any(|l| l.contains("boot ok")), "{lines:?}");
-        assert!(lines.iter().any(|l| l == "Available commands:"), "{lines:?}");
+        assert!(
+            lines.iter().any(|l| l == "Available commands:"),
+            "{lines:?}"
+        );
     }
 
     #[test]
@@ -1403,7 +1450,10 @@ mod tests {
         let lines = parser.feed(input.as_bytes());
 
         assert!(lines.iter().any(|l| l.contains("logged")), "{lines:?}");
-        assert!(lines.iter().any(|l| l.trim() == "node outside>"), "{lines:?}");
+        assert!(
+            lines.iter().any(|l| l.trim() == "node outside>"),
+            "{lines:?}"
+        );
     }
 
     #[test]
@@ -1442,7 +1492,10 @@ mod tests {
         let input = format!("noise before {LOG_HEX_SEP}{hex}\n");
         let lines = parser.feed(input.as_bytes());
 
-        assert!(lines.iter().any(|l| l.trim_end() == "noise before"), "{lines:?}");
+        assert!(
+            lines.iter().any(|l| l.trim_end() == "noise before"),
+            "{lines:?}"
+        );
         assert!(lines.iter().any(|l| l.contains("mid ok")), "{lines:?}");
     }
 
@@ -1461,7 +1514,9 @@ mod tests {
             "expected decoded line, got {lines:?}"
         );
         assert!(
-            !lines.iter().any(|l| l.chars().all(|c| c.is_ascii_hexdigit())),
+            !lines
+                .iter()
+                .any(|l| l.chars().all(|c| c.is_ascii_hexdigit())),
             "raw hex leaked: {lines:?}"
         );
     }
@@ -1514,7 +1569,9 @@ mod tests {
         let lines = parser.feed(hex.as_bytes());
 
         assert!(
-            lines.iter().any(|l| l.contains("[2024-01-01T00:00:00Z]: <inf> app: time set")),
+            lines
+                .iter()
+                .any(|l| l.contains("[2024-01-01T00:00:00Z]: <inf> app: time set")),
             "{lines:?}"
         );
     }
@@ -1522,13 +1579,7 @@ mod tests {
     #[test]
     fn dict_log_parity_roundtrip_matches_plain_text() {
         let dir = temp_dir("parity-rt");
-        let db_path = write_test_db(
-            &dir,
-            &[
-                (0x1000, "boot ok\n"),
-                (0x2000, "count=%d\n"),
-            ],
-        );
+        let db_path = write_test_db(&dir, &[(0x1000, "boot ok\n"), (0x2000, "count=%d\n")]);
         let mut parser = ZephyrDictParser::new(&db_path);
 
         let msg_a = encode_normal_message(3, 1, 10, 0x1000, &[], &[]);
@@ -1539,10 +1590,15 @@ mod tests {
         let hex: String = wire.iter().map(|b| format!("{b:02x}")).collect();
         let lines = parser.feed(hex.as_bytes());
 
-        assert!(lines.iter().any(|l| l.contains("<inf> app: boot ok")), "{lines:?}");
+        assert!(
+            lines.iter().any(|l| l.contains("<inf> app: boot ok")),
+            "{lines:?}"
+        );
         assert!(lines.iter().any(|l| l.contains("count=42")), "{lines:?}");
         assert!(
-            !lines.iter().any(|l| l.chars().all(|c| c.is_ascii_hexdigit())),
+            !lines
+                .iter()
+                .any(|l| l.chars().all(|c| c.is_ascii_hexdigit())),
             "raw hex in output: {lines:?}"
         );
     }
@@ -1555,12 +1611,19 @@ mod tests {
         else {
             eprintln!(
                 "skip dict_log_parity_real_reader_database_boot_prefix: \
-                 set EMBED_LOG_ZEPHYR_DICT_DATABASE to an existing log_dictionary.json"
+                 set EMBED_LOG_ZEPHYR_DICT_DATABASE and EMBED_LOG_ZEPHYR_DICT_FIXTURE"
             );
             return;
         };
-
-        let hex = include_str!("../../tests/fixtures/reader_boot_prefix.hex")
+        let Some(fixture) = std::env::var("EMBED_LOG_ZEPHYR_DICT_FIXTURE")
+            .ok()
+            .filter(|path| std::path::Path::new(path).exists())
+        else {
+            eprintln!("skip dict_log_parity_real_reader_database_boot_prefix: set EMBED_LOG_ZEPHYR_DICT_FIXTURE to a captured HEX log");
+            return;
+        };
+        let hex = std::fs::read_to_string(&fixture)
+            .expect("read EMBED_LOG_ZEPHYR_DICT_FIXTURE")
             .chars()
             .filter(|c| !c.is_whitespace())
             .collect::<String>();
@@ -1572,7 +1635,9 @@ mod tests {
             "expected at least one decoded line from reader boot prefix, got none"
         );
         assert!(
-            lines.iter().any(|l| l.contains("rv8263") || l.contains("<inf>")),
+            lines
+                .iter()
+                .any(|l| l.contains("rv8263") || l.contains("<inf>")),
             "unexpected decode output: {lines:?}"
         );
         assert!(

@@ -144,8 +144,9 @@ fn handle_message(state: &mut State, msg: ServerMessage) {
         ServerMessage::Event(e) => state.push_event(e),
         ServerMessage::SessionInfo(s) => state.apply_session_info(&s.session),
         ServerMessage::MarkersUpdate(m) => state.apply_markers(&m.markers),
-        ServerMessage::SessionHtmlStatus(_) => {
-            // Export status is currently handled by the browser UI/CLI.
+        ServerMessage::SessionHtmlStatus(status) => {
+            let detail = status.reason.as_deref().unwrap_or("requested");
+            state.tx_status = Some(format!("HTML export {} ({detail})", status.html_status));
         }
         ServerMessage::SessionRotated(_) => {
             // Server follows with a fresh config; tear down and await it.

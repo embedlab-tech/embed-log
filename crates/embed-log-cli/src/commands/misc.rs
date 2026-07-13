@@ -17,15 +17,8 @@ use crate::demo_config::DEMO_CONFIG;
 /// `cargo build` invocations unless the source actually changed — the
 /// quickest way to tell a stale installed binary from a freshly built one.
 pub(crate) fn cmd_version(config_path: Option<&Path>, json: bool) -> Result<()> {
-    let version = env!("CARGO_PKG_VERSION");
-    let git_sha = env!("EMBED_LOG_GIT_SHA");
-    let build_time = env!("EMBED_LOG_BUILD_TIME");
+    let mut out = version_report();
     if json {
-        let mut out = serde_json::json!({
-            "version": version,
-            "git_sha": git_sha,
-            "build_time": build_time,
-        });
         if let Some(path) = config_path {
             match load_config(path) {
                 Ok(cfg) => {
@@ -42,7 +35,20 @@ pub(crate) fn cmd_version(config_path: Option<&Path>, json: bool) -> Result<()> 
         }
         println!("{}", serde_json::to_string_pretty(&out)?);
     } else {
-        println!("embed-log {version} ({git_sha}, built {build_time})");
+        println!(
+            "embed-log {} ({}, built {})",
+            out["version"].as_str().unwrap_or("unknown"),
+            out["git_sha"].as_str().unwrap_or("unknown"),
+            out["build_time"].as_str().unwrap_or("unknown"),
+        );
+        println!(
+            "  target:   {}",
+            out["target"].as_str().unwrap_or("unknown")
+        );
+        println!(
+            "  path:     {}",
+            out["executable"].as_str().unwrap_or("unknown")
+        );
         if let Some(path) = config_path {
             match load_config(path) {
                 Ok(cfg) => {
@@ -57,6 +63,271 @@ pub(crate) fn cmd_version(config_path: Option<&Path>, json: bool) -> Result<()> 
         }
     }
     Ok(())
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct GithubRelease {
+    tag_name: String,
+    html_url: String,
+    assets: Vec<GithubAsset>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct GithubAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+const UPDATE_REPO: &str = "krezolekcoder/embed-log";
+
+/// `embed-log update` checks releases by default; replacement requires --yes.
+pub(crate) async fn cmd_update(
+    check: bool,
+    requested_version: Option<&str>,
+    yes: bool,
+    allow_downgrade: bool,
+    json: bool,
+) -> Result<()> {
+    let release = {
+        #[cfg(target_os = "windows")]
+        {
+            let _ = (check, requested_version, yes, allow_downgrade);
+            let guidance = "self-update is not supported on Windows yet; rerun the PowerShell installer or use your package manager";
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({ "self_update_supported": false, "guidance": guidance })
+                );
+                return Ok(());
+            }
+            anyhow::bail!(guidance);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            fetch_release(requested_version).await?
+        }
+    };
+    let current = env!("CARGO_PKG_VERSION");
+    let available = release_is_newer(current, &release.tag_name);
+    let asset_name = update_asset_name().ok_or_else(|| {
+        anyhow::anyhow!("self-update is not supported on this platform; use the release installer")
+    })?;
+    let out = serde_json::json!({
+        "current_version": current,
+        "latest_version": release.tag_name,
+        "update_available": available,
+        "release_url": release.html_url,
+        "asset": asset_name,
+    });
+    if check || !yes {
+        if json {
+            println!("{}", serde_json::to_string_pretty(&out)?);
+        } else if available {
+            println!(
+                "update available: {current} → {}",
+                out["latest_version"].as_str().unwrap_or("unknown")
+            );
+            println!(
+                "  release: {}",
+                out["release_url"].as_str().unwrap_or("unknown")
+            );
+            println!("  install with: embed-log update --yes");
+        } else {
+            println!("embed-log {current} is up to date");
+        }
+        return Ok(());
+    }
+    if !available {
+        if release_is_older(current, &release.tag_name) && !allow_downgrade {
+            anyhow::bail!(
+                "refusing to downgrade from {current} to {}; rerun with --allow-downgrade --yes to override",
+                release.tag_name
+            );
+        }
+        println!("embed-log {current} is already at {}", release.tag_name);
+        return Ok(());
+    }
+    install_release(&release, &asset_name).await?;
+    println!("updated embed-log to {}", release.tag_name);
+    Ok(())
+}
+
+async fn fetch_release(requested_version: Option<&str>) -> Result<GithubRelease> {
+    let api_base = std::env::var("EMBED_LOG_UPDATE_API_BASE")
+        .unwrap_or_else(|_| "https://api.github.com".to_string());
+    let url = release_api_url(&api_base, requested_version);
+    reqwest::Client::new()
+        .get(url)
+        .header(reqwest::header::USER_AGENT, "embed-log-updater")
+        .send()
+        .await
+        .context("contact GitHub Releases")?
+        .error_for_status()
+        .context("read GitHub Release")?
+        .json::<GithubRelease>()
+        .await
+        .context("decode GitHub Release")
+}
+
+fn release_api_url(api_base: &str, requested_version: Option<&str>) -> String {
+    let suffix = requested_version
+        .map(|tag| format!("tags/{tag}"))
+        .unwrap_or_else(|| "latest".to_string());
+    format!(
+        "{}/repos/{UPDATE_REPO}/releases/{suffix}",
+        api_base.trim_end_matches('/')
+    )
+}
+
+fn update_asset_name() -> Option<String> {
+    let target = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => "x86_64-unknown-linux-gnu",
+        ("macos", "aarch64") => "aarch64-apple-darwin",
+        ("macos", "x86_64") => "x86_64-apple-darwin",
+        _ => return None,
+    };
+    Some(format!("embed-log-{target}.tar.gz"))
+}
+
+async fn install_release(release: &GithubRelease, asset_name: &str) -> Result<()> {
+    let asset = release
+        .assets
+        .iter()
+        .find(|asset| asset.name == asset_name)
+        .ok_or_else(|| anyhow::anyhow!("release {} has no asset {asset_name}", release.tag_name))?;
+    let sums = release
+        .assets
+        .iter()
+        .find(|asset| asset.name == "SHA256SUMS")
+        .ok_or_else(|| anyhow::anyhow!("release {} has no SHA256SUMS", release.tag_name))?;
+    let client = reqwest::Client::new();
+    let archive = client
+        .get(&asset.browser_download_url)
+        .send()
+        .await?
+        .error_for_status()?
+        .bytes()
+        .await?;
+    let sums_text = client
+        .get(&sums.browser_download_url)
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?;
+    let expected = checksum_for(&sums_text, asset_name)
+        .ok_or_else(|| anyhow::anyhow!("SHA256SUMS has no checksum for {asset_name}"))?;
+    verify_sha256(&archive, &expected)?;
+
+    let exe = std::env::current_exe().context("locate running executable")?;
+    let parent = exe
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("running executable has no parent directory"))?;
+    let temp = tempfile_path(parent, ".embed-log-update");
+    extract_tar_gz(&archive, &temp)?;
+    replace_executable(&temp, &exe)
+}
+
+/// Replace an executable via a same-directory backup so rename is atomic on
+/// supported filesystems. Kept separate from downloading for safe tests.
+fn replace_executable(staged: &Path, executable: &Path) -> Result<()> {
+    let backup = executable.with_extension("bak");
+    if backup.exists() {
+        std::fs::remove_file(&backup).context("remove stale update backup")?;
+    }
+    std::fs::rename(executable, &backup)
+        .context("backup running executable; package-managed installs may not be self-updatable")?;
+    if let Err(error) = std::fs::rename(staged, executable) {
+        let _ = std::fs::rename(&backup, executable);
+        return Err(error).context("replace executable; restored previous binary");
+    }
+    let _ = std::fs::remove_file(backup);
+    Ok(())
+}
+
+fn tempfile_path(parent: &Path, suffix: &str) -> std::path::PathBuf {
+    parent.join(format!("embed-log{}-{}", suffix, std::process::id()))
+}
+
+fn checksum_for(sums: &str, file: &str) -> Option<String> {
+    sums.lines().find_map(|line| {
+        let (hash, name) = line.split_once("  ")?;
+        (name.trim_start_matches('*') == file).then(|| hash.to_string())
+    })
+}
+
+fn verify_sha256(bytes: &[u8], expected: &str) -> Result<()> {
+    use sha2::{Digest, Sha256};
+    let actual = format!("{:x}", Sha256::digest(bytes));
+    anyhow::ensure!(
+        actual.eq_ignore_ascii_case(expected),
+        "download checksum mismatch"
+    );
+    Ok(())
+}
+
+fn extract_tar_gz(bytes: &[u8], dest: &Path) -> Result<()> {
+    let decoder = flate2::read::GzDecoder::new(bytes);
+    let mut archive = tar::Archive::new(decoder);
+    let mut entries = archive.entries().context("read update archive")?;
+    let mut executable = None;
+    while let Some(entry) = entries.next() {
+        let mut entry = entry.context("read update archive entry")?;
+        let path = entry.path().context("read update archive path")?;
+        anyhow::ensure!(
+            path == Path::new("embed-log") && entry.header().entry_type().is_file(),
+            "update archive has unexpected entry {:?}",
+            path
+        );
+        anyhow::ensure!(
+            executable.is_none(),
+            "update archive contains duplicate executable entries"
+        );
+        let mut output = std::fs::File::create(dest).context("create staged executable")?;
+        std::io::copy(&mut entry, &mut output).context("extract staged executable")?;
+        executable = Some(());
+    }
+    anyhow::ensure!(executable.is_some(), "update archive is empty");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o755))?;
+    }
+    Ok(())
+}
+
+fn release_is_older(current: &str, tag: &str) -> bool {
+    let Ok(current) = semver::Version::parse(current.trim_start_matches('v')) else {
+        return false;
+    };
+    let Ok(release) = semver::Version::parse(tag.trim_start_matches('v')) else {
+        return false;
+    };
+    release < current
+}
+
+fn release_is_newer(current: &str, tag: &str) -> bool {
+    let Ok(current) = semver::Version::parse(current.trim_start_matches('v')) else {
+        return false;
+    };
+    let Ok(latest) = semver::Version::parse(tag.trim_start_matches('v')) else {
+        return false;
+    };
+    latest > current
+}
+
+fn version_report() -> serde_json::Value {
+    let executable = std::env::current_exe()
+        .ok()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "git_sha": env!("EMBED_LOG_GIT_SHA"),
+        "build_time": env!("EMBED_LOG_BUILD_TIME"),
+        "target": env!("EMBED_LOG_TARGET"),
+        "executable": executable,
+    })
 }
 
 /// `embed-log validate` — load/validate config and print resolved summary.
@@ -144,8 +415,12 @@ pub(crate) fn cmd_validate(config_path: &Path, json: bool) -> Result<()> {
 }
 
 /// `embed-log doctor` — environment/config/runtime diagnostics.
-pub(crate) fn cmd_doctor(config_path: Option<&Path>, json: bool) -> Result<()> {
-    let report = build_doctor_report(config_path);
+pub(crate) fn cmd_doctor(
+    config_path: Option<&Path>,
+    serial_paths: &[std::path::PathBuf],
+    json: bool,
+) -> Result<()> {
+    let report = build_doctor_report_with_serial(config_path, serial_paths);
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
         return Ok(());
@@ -198,6 +473,14 @@ pub(crate) fn cmd_doctor(config_path: Option<&Path>, json: bool) -> Result<()> {
     if let Some(error) = report.get("config_error").and_then(|v| v.as_str()) {
         println!("  config error: {error}");
     }
+    if let Some(serial) = report.get("serial").and_then(|v| v.as_array()) {
+        for port in serial {
+            let path = port["path"].as_str().unwrap_or("unknown");
+            let status = port["status"].as_str().unwrap_or("unknown");
+            let detail = port["detail"].as_str().unwrap_or("");
+            println!("  serial:   {path} — {status}{detail}");
+        }
+    }
 
     let capture = &report["packet_capture"];
     println!(
@@ -231,10 +514,19 @@ pub(crate) fn cmd_doctor(config_path: Option<&Path>, json: bool) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
 fn build_doctor_report(config_path: Option<&Path>) -> serde_json::Value {
-    build_doctor_report_with_env(
+    build_doctor_report_with_serial(config_path, &[])
+}
+
+fn build_doctor_report_with_serial(
+    config_path: Option<&Path>,
+    serial_paths: &[std::path::PathBuf],
+) -> serde_json::Value {
+    build_doctor_report_with_env_and_serial(
         config_path,
         std::env::var("EMBED_LOG_CONFIG_YML_PATH").ok(),
+        serial_paths,
     )
 }
 
@@ -242,9 +534,18 @@ fn build_doctor_report(config_path: Option<&Path>) -> serde_json::Value {
 /// value injected rather than read from the real process environment — kept
 /// separate so the env-var precedence is testable without touching global
 /// state (same split `crate::config::resolve_config_path_with_env` already uses).
+#[cfg(test)]
 fn build_doctor_report_with_env(
     config_path: Option<&Path>,
     env_value: Option<String>,
+) -> serde_json::Value {
+    build_doctor_report_with_env_and_serial(config_path, env_value, &[])
+}
+
+fn build_doctor_report_with_env_and_serial(
+    config_path: Option<&Path>,
+    env_value: Option<String>,
+    requested_serial_paths: &[std::path::PathBuf],
 ) -> serde_json::Value {
     let version = env!("CARGO_PKG_VERSION");
     let packet_capture = detect_packet_capture_support();
@@ -273,6 +574,7 @@ fn build_doctor_report_with_env(
     // going to happen. A config that simply doesn't exist yet (fresh
     // checkout, no --config given) is normal, not a warning.
     let mut config_info = None;
+    let mut serial_paths = requested_serial_paths.to_vec();
     if resolved_path.exists() {
         match load_config(&resolved_path) {
             Ok(cfg) => {
@@ -282,6 +584,13 @@ fn build_doctor_report_with_env(
                     "sources": cfg.sources.len(),
                     "tabs": cfg.tabs.len(),
                     "pcap_sources": pcap_sources,
+                }));
+                serial_paths.extend(cfg.sources.iter().filter_map(|source| {
+                    source
+                        .source_type
+                        .eq_ignore_ascii_case("uart")
+                        .then(|| source.port.as_str().map(std::path::PathBuf::from))
+                        .flatten()
                 }));
                 if pcap_sources > 0 {
                     apply_packet_capture_warnings(&mut out, pcap_sources);
@@ -297,7 +606,49 @@ fn build_doctor_report_with_env(
     if let Some(config) = config_info {
         out["config"] = config;
     }
+    serial_paths.sort();
+    serial_paths.dedup();
+    let serial = serial_paths
+        .iter()
+        .map(|path| inspect_serial_path(path))
+        .collect::<Vec<_>>();
+    if serial.iter().any(|port| port["status"] != "ok") {
+        out["status"] = serde_json::json!("warn");
+    }
+    out["serial"] = serde_json::Value::Array(serial);
     out
+}
+
+/// Check filesystem-level serial access without opening/configuring the port;
+/// opening a TTY through the serial library can reset attached hardware.
+fn inspect_serial_path(path: &Path) -> serde_json::Value {
+    let display = path.display().to_string();
+    match std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+    {
+        Ok(_) => serde_json::json!({
+            "path": display,
+            "status": "ok",
+            "detail": " readable and writable",
+        }),
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => serde_json::json!({
+            "path": display,
+            "status": "permission_denied",
+            "detail": " — permission denied; on Linux add your user to the device group (commonly dialout or uucp), then sign in again",
+        }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => serde_json::json!({
+            "path": display,
+            "status": "missing",
+            "detail": " — device path does not exist; reconnect the device or run `embed-log ports`",
+        }),
+        Err(error) => serde_json::json!({
+            "path": display,
+            "status": "unavailable",
+            "detail": format!(" — {error}"),
+        }),
+    }
 }
 
 fn apply_packet_capture_warnings(out: &mut serde_json::Value, pcap_sources: usize) {
@@ -818,6 +1169,124 @@ mod tests {
         assert_eq!(count_pcap_sources(&cfg), 1);
     }
 
+    fn test_tar(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        use std::io::Write;
+        let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        {
+            let mut archive = tar::Builder::new(&mut gzip);
+            for (name, data) in entries {
+                let mut header = tar::Header::new_gnu();
+                header.set_size(data.len() as u64);
+                header.set_mode(0o755);
+                header.set_cksum();
+                archive.append_data(&mut header, *name, *data).unwrap();
+            }
+            archive.finish().unwrap();
+        }
+        gzip.flush().unwrap();
+        gzip.finish().unwrap()
+    }
+
+    #[test]
+    fn extract_update_archive_accepts_only_expected_executable() {
+        let dir =
+            std::env::temp_dir().join(format!("embed-log-archive-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let destination = dir.join("embed-log");
+        extract_tar_gz(&test_tar(&[("embed-log", b"new binary")]), &destination).unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), b"new binary");
+        assert!(extract_tar_gz(&test_tar(&[("other", b"bad")]), &destination).is_err());
+        assert!(extract_tar_gz(
+            &test_tar(&[("embed-log", b"ok"), ("extra", b"bad")]),
+            &destination
+        )
+        .is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn release_api_url_supports_default_and_explicit_tags() {
+        assert_eq!(
+            release_api_url("http://127.0.0.1:9999/", None),
+            "http://127.0.0.1:9999/repos/krezolekcoder/embed-log/releases/latest"
+        );
+        assert_eq!(
+            release_api_url("https://api.github.com", Some("v1.2.3")),
+            "https://api.github.com/repos/krezolekcoder/embed-log/releases/tags/v1.2.3"
+        );
+    }
+
+    #[test]
+    fn replace_executable_swaps_staged_file_and_removes_backup() {
+        let dir =
+            std::env::temp_dir().join(format!("embed-log-update-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let executable = dir.join("embed-log");
+        let staged = dir.join("staged");
+        std::fs::write(&executable, b"old").unwrap();
+        std::fs::write(&staged, b"new").unwrap();
+        replace_executable(&staged, &executable).unwrap();
+        assert_eq!(std::fs::read(&executable).unwrap(), b"new");
+        assert!(!executable.with_extension("bak").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn replace_executable_restores_backup_when_staged_file_is_missing() {
+        let dir =
+            std::env::temp_dir().join(format!("embed-log-update-rollback-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let executable = dir.join("embed-log");
+        std::fs::write(&executable, b"old").unwrap();
+        assert!(replace_executable(&dir.join("missing"), &executable).is_err());
+        assert_eq!(std::fs::read(&executable).unwrap(), b"old");
+        assert!(!executable.with_extension("bak").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn checksum_parser_and_verifier_accept_valid_sha256sums_entry() {
+        let bytes = b"embed-log update";
+        let expected = "f903aaecb874745ce8064823c22bf5397a016b79ef5ec696d5ca7c15a56b2fde";
+        let sums = format!("{expected}  embed-log-test.tar.gz\n");
+        assert_eq!(
+            checksum_for(&sums, "embed-log-test.tar.gz"),
+            Some(expected.into())
+        );
+        verify_sha256(bytes, expected).unwrap();
+        assert!(verify_sha256(bytes, "00").is_err());
+    }
+
+    #[test]
+    fn release_version_comparison_accepts_v_prefix_and_prereleases() {
+        assert!(release_is_newer("0.1.0", "v0.2.0"));
+        assert!(!release_is_newer("0.2.0", "v0.1.0"));
+        assert!(!release_is_newer("1.0.0", "v1.0.0-rc.1"));
+        assert!(release_is_older("1.0.0", "v0.9.0"));
+        assert!(!release_is_older("1.0.0", "v1.0.0"));
+        assert!(!release_is_newer("invalid", "v1.0.0"));
+    }
+
+    #[test]
+    fn version_report_includes_release_diagnostics() {
+        let report = version_report();
+        assert!(!report["version"].as_str().unwrap_or_default().is_empty());
+        assert!(!report["git_sha"].as_str().unwrap_or_default().is_empty());
+        assert!(!report["build_time"].as_str().unwrap_or_default().is_empty());
+        assert!(!report["target"].as_str().unwrap_or_default().is_empty());
+        assert!(!report["executable"].as_str().unwrap_or_default().is_empty());
+    }
+
+    #[test]
+    fn doctor_report_marks_missing_explicit_serial_path() {
+        let path =
+            std::env::temp_dir().join(format!("embed-log-missing-serial-{}", std::process::id()));
+        std::fs::remove_file(&path).ok();
+        let report = build_doctor_report_with_env_and_serial(None, None, &[path]);
+        assert_eq!(report["status"], "warn");
+        assert_eq!(report["serial"][0]["status"], "missing");
+    }
+
     #[test]
     fn doctor_report_includes_packet_capture_section() {
         let report = build_doctor_report(None);
@@ -845,7 +1314,8 @@ mod tests {
 
     #[test]
     fn doctor_report_missing_config_is_not_a_warning() {
-        let report = build_doctor_report_with_env(None, Some("/nonexistent/embed-log.yml".to_string()));
+        let report =
+            build_doctor_report_with_env(None, Some("/nonexistent/embed-log.yml".to_string()));
         assert_eq!(report["status"], "ok");
         assert!(report.get("config").is_none());
         assert!(report.get("config_error").is_none());

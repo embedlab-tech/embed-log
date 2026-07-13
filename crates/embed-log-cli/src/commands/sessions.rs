@@ -13,6 +13,8 @@ use embed_log_core::config::{load_config, resolve_logs_root};
 use embed_log_core::postprocess::{dedupe_entry, denoise_message, elapsed_time};
 use embed_log_core::session::SessionExporter;
 
+use crate::util::open_url_in_default_browser;
+
 /// Shared `--dir`/`--config` args for resolving which logs directory a
 /// `sessions` command operates on. Flattened into every subcommand so the
 /// flags and resolution order are identical everywhere — see
@@ -78,6 +80,17 @@ pub(crate) enum SessionsCommand {
         #[arg(long = "with-markers")]
         with_markers: bool,
     },
+    /// Delete older sessions while keeping the newest N sessions.
+    Prune {
+        #[command(flatten)]
+        log_dir: LogDirArgs,
+        /// Number of newest sessions to retain.
+        #[arg(long)]
+        keep: usize,
+        /// Report files that would be deleted without modifying anything.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Show one session manifest.
     Info {
         session_id: String,
@@ -85,6 +98,34 @@ pub(crate) enum SessionsCommand {
         log_dir: LogDirArgs,
         #[arg(long)]
         json: bool,
+    },
+    /// Import an RFC3339-timestamped external log into a recorded session.
+    Import {
+        session_id: String,
+        /// External text log to merge by timestamp.
+        input: PathBuf,
+        /// Name assigned to the imported source.
+        #[arg(long)]
+        source: String,
+        /// Validate timestamps and report the planned import without modifying the session.
+        #[arg(long)]
+        dry_run: bool,
+        #[command(flatten)]
+        log_dir: LogDirArgs,
+    },
+    /// Create a portable .tar.gz support bundle for a session.
+    Bundle {
+        session_id: String,
+        #[command(flatten)]
+        log_dir: LogDirArgs,
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+    /// Open a session's self-contained HTML report in the default browser.
+    Open {
+        session_id: String,
+        #[command(flatten)]
+        log_dir: LogDirArgs,
     },
     /// Export a session as HTML or raw merged text.
     Export {
@@ -285,6 +326,14 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             list_sessions(&dir, json, limit, with_markers)
         }
         SessionsCommand::Marker { command } => cmd_session_marker(command),
+        SessionsCommand::Prune {
+            log_dir,
+            keep,
+            dry_run,
+        } => {
+            let dir = resolve_sessions_dir(&log_dir)?;
+            prune_sessions(&dir, keep, dry_run)
+        }
         SessionsCommand::Info {
             session_id,
             log_dir,
@@ -359,7 +408,8 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             if limit.is_some() && last.is_some() {
                 anyhow::bail!("cannot combine --limit with --last; pick one");
             }
-            let has_context = context.is_some() || before_context.is_some() || after_context.is_some();
+            let has_context =
+                context.is_some() || before_context.is_some() || after_context.is_some();
             if has_context && count {
                 anyhow::bail!("cannot combine context flags (-C/-B/-A) with --count");
             }
@@ -389,6 +439,43 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
                 search_sessions(&dir, filters, format)
             }
         }
+        SessionsCommand::Import {
+            session_id,
+            input,
+            source,
+            dry_run,
+            log_dir,
+        } => {
+            let dir = resolve_sessions_dir(&log_dir)?;
+            let session = resolve_session(&dir, &session_id)?;
+            import_external_log(&session, &input, &source, dry_run)
+        }
+        SessionsCommand::Bundle {
+            session_id,
+            log_dir,
+            output,
+        } => {
+            let dir = resolve_sessions_dir(&log_dir)?;
+            let session = resolve_session(&dir, &session_id)?;
+            let output = output.unwrap_or_else(|| session.dir.join("support-bundle.tar.gz"));
+            export_session_bundle(&session, &output)
+        }
+        SessionsCommand::Open {
+            session_id,
+            log_dir,
+        } => {
+            let dir = resolve_sessions_dir(&log_dir)?;
+            let session = resolve_session(&dir, &session_id)?;
+            let html = session.dir.join("session.html");
+            if !html.exists() {
+                export_session_html(&session, html.clone())?;
+            }
+            let path = html.canonicalize().unwrap_or(html);
+            open_url_in_default_browser(&path.display().to_string())
+                .context("open session report in default browser")?;
+            println!("opened {}", path.display());
+            Ok(())
+        }
         SessionsCommand::Export {
             session_id,
             log_dir,
@@ -414,6 +501,207 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn export_session_bundle(session: &SessionRecord, output: &Path) -> Result<()> {
+    use std::io::Write;
+    let file =
+        std::fs::File::create(output).with_context(|| format!("create {}", output.display()))?;
+    let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+    let mut archive = tar::Builder::new(encoder);
+    archive
+        .append_dir_all(&session.id, &session.dir)
+        .with_context(|| format!("archive session {}", session.dir.display()))?;
+    let diagnostics = serde_json::json!({
+        "embed_log_version": env!("CARGO_PKG_VERSION"),
+        "git_sha": env!("EMBED_LOG_GIT_SHA"),
+        "build_time": env!("EMBED_LOG_BUILD_TIME"),
+        "target": env!("EMBED_LOG_TARGET"),
+        "session_id": session.id,
+    });
+    let bytes = serde_json::to_vec_pretty(&diagnostics)?;
+    let mut header = tar::Header::new_gnu();
+    header.set_size(bytes.len() as u64);
+    header.set_mode(0o644);
+    header.set_cksum();
+    archive.append_data(
+        &mut header,
+        format!("{}/embed-log-version.json", session.id),
+        bytes.as_slice(),
+    )?;
+    let encoder = archive.into_inner()?;
+    encoder.finish()?.flush()?;
+    println!("{}", output.display());
+    Ok(())
+}
+
+/// Parse an external RFC3339 timestamp at the beginning of a line. Keep this
+/// isolated so future timestamp formats can be added without changing import.
+fn parse_import_timestamp(line: &str) -> Option<(DateTime<FixedOffset>, &str)> {
+    let line = line.trim();
+    let (candidate, body) = if let Some(rest) = line.strip_prefix('[') {
+        let (ts, body) = rest.split_once(']')?;
+        (ts, body.trim_start())
+    } else {
+        let (ts, body) = line.split_once(char::is_whitespace)?;
+        (ts, body.trim_start())
+    };
+    DateTime::parse_from_rfc3339(candidate)
+        .ok()
+        .map(|ts| (ts, body))
+}
+
+fn import_external_log(
+    session: &SessionRecord,
+    input: &Path,
+    source: &str,
+    dry_run: bool,
+) -> Result<()> {
+    anyhow::ensure!(!source.trim().is_empty(), "--source must not be empty");
+    let text = std::fs::read_to_string(input)
+        .with_context(|| format!("read external log {}", input.display()))?;
+    let mut imported = Vec::new();
+    for (index, line) in text.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let (timestamp, message) = parse_import_timestamp(line).ok_or_else(|| {
+            anyhow::anyhow!(
+                "{}:{} has no leading RFC3339 timestamp",
+                input.display(),
+                index + 1
+            )
+        })?;
+        let millis = timestamp.timestamp_millis() as f64;
+        imported.push(serde_json::json!({
+            "data": message, "message": message, "absNum": millis, "timestamp_num": millis,
+            "absTs": timestamp.format("%m-%d %H:%M:%S%.3f").to_string(),
+            "timestamp": timestamp.format("%m-%d %H:%M:%S%.3f").to_string(),
+            "timestamp_iso": timestamp.to_rfc3339(), "source_id": source,
+            "source_kind": "imported", "source_label": source, "line_idx": index,
+            "origin": "import", "is_tx": false,
+        }));
+    }
+    anyhow::ensure!(
+        !imported.is_empty(),
+        "external log contains no importable lines"
+    );
+    if dry_run {
+        println!(
+            "would import {} line(s) from {} as {source}",
+            imported.len(),
+            input.display()
+        );
+        return Ok(());
+    }
+    let combined = manifest_combined_file(session)?;
+    let existing = std::fs::read_to_string(&combined)
+        .with_context(|| format!("read {}", combined.display()))?;
+    let mut entries: Vec<serde_json::Value> = existing
+        .lines()
+        .enumerate()
+        .map(|(index, line)| {
+            serde_json::from_str(line).map_err(|error| {
+                anyhow::anyhow!(
+                    "{}:{} is not valid JSONL: {error}",
+                    combined.display(),
+                    index + 1
+                )
+            })
+        })
+        .collect::<std::result::Result<_, _>>()?;
+    entries.append(&mut imported);
+    entries.sort_by(|a, b| {
+        a["timestamp_num"]
+            .as_f64()
+            .partial_cmp(&b["timestamp_num"].as_f64())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let rendered = entries
+        .into_iter()
+        .map(|entry| serde_json::to_string(&entry))
+        .collect::<std::result::Result<Vec<_>, _>>()?
+        .join("\n")
+        + "\n";
+    let staged_combined = combined.with_extension("jsonl.importing");
+    std::fs::write(&staged_combined, rendered)
+        .with_context(|| format!("write {}", staged_combined.display()))?;
+    std::fs::rename(&staged_combined, &combined)
+        .with_context(|| format!("replace {}", combined.display()))?;
+    let imported_file = session.dir.join(format!("imported-{}.log", source));
+    std::fs::write(&imported_file, &text)
+        .with_context(|| format!("write {}", imported_file.display()))?;
+    let manifest_path = session.dir.join("manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&manifest_path)?)?;
+    anyhow::ensure!(
+        manifest["source_files"].get(source).is_none(),
+        "source {source:?} already exists in this session"
+    );
+    manifest["source_files"][source] = serde_json::json!(imported_file.display().to_string());
+    manifest["pane_labels"][source] = serde_json::json!(source);
+    manifest["pane_kinds"][source] = serde_json::json!("imported");
+    if let Some(tabs) = manifest["tabs"].as_array_mut() {
+        tabs.push(serde_json::json!({ "label": source, "panes": [source] }));
+    }
+    manifest["html_status"] = serde_json::json!("stale");
+    std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
+    std::fs::remove_file(session.dir.join("session.html")).ok();
+    println!(
+        "imported {} line(s) from {} as {source}",
+        text.lines().filter(|line| !line.trim().is_empty()).count(),
+        input.display()
+    );
+    Ok(())
+}
+
+fn directory_size(path: &Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|entry| {
+            let path = entry.path();
+            match entry.metadata() {
+                Ok(metadata) if metadata.is_dir() => directory_size(&path),
+                Ok(metadata) => metadata.len(),
+                Err(_) => 0,
+            }
+        })
+        .sum()
+}
+
+fn prune_sessions(dir: &Path, keep: usize, dry_run: bool) -> Result<()> {
+    let sessions = load_sessions(dir)?;
+    let removed = sessions.into_iter().skip(keep).collect::<Vec<_>>();
+    let bytes: u64 = removed
+        .iter()
+        .map(|session| directory_size(&session.dir))
+        .sum();
+    for session in &removed {
+        println!(
+            "{} {} {}",
+            if dry_run { "would remove" } else { "removed" },
+            session.id,
+            session.dir.display()
+        );
+        if !dry_run {
+            std::fs::remove_dir_all(&session.dir)
+                .with_context(|| format!("remove session {}", session.dir.display()))?;
+        }
+    }
+    println!(
+        "{} {} session(s), {} bytes",
+        if dry_run {
+            "would reclaim"
+        } else {
+            "reclaimed"
+        },
+        removed.len(),
+        bytes
+    );
+    Ok(())
 }
 
 fn list_sessions(dir: &Path, json: bool, limit: Option<usize>, with_markers: bool) -> Result<()> {
@@ -984,7 +1272,10 @@ fn note_elapsed_time_format(format: OutputFormat) {
 /// escape hatch for anyone who needs the original wall-clock time or names.
 fn format_compact_entry(entry: &serde_json::Value, codes: &mut ShortcodeTable) -> String {
     let clock = clock_time(entry);
-    let source = entry.get("source_id").and_then(|v| v.as_str()).unwrap_or("?");
+    let source = entry
+        .get("source_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
     let code = codes.code_for(source);
     let ts = elapsed_time(entry, &clock);
     let message = entry.get("message").and_then(|v| v.as_str()).unwrap_or("");
@@ -1004,7 +1295,10 @@ fn format_compact_entry(entry: &serde_json::Value, codes: &mut ShortcodeTable) -
 /// break that contract.
 fn format_summary_preview_line(entry: &serde_json::Value) -> String {
     let clock = clock_time(entry);
-    let source = entry.get("source_id").and_then(|v| v.as_str()).unwrap_or("?");
+    let source = entry
+        .get("source_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
     let message = entry.get("message").and_then(|v| v.as_str()).unwrap_or("");
     let message = denoise_message(message, &clock);
     match entry.get("line_idx").and_then(|v| v.as_u64()) {
@@ -1018,7 +1312,10 @@ fn format_summary_preview_line(entry: &serde_json::Value) -> String {
 /// elapsed-time/shortcoded/denoised, same as `format_compact_entry`.
 fn format_mini_entry(entry: &serde_json::Value, codes: &mut ShortcodeTable) -> serde_json::Value {
     let clock = clock_time(entry);
-    let source = entry.get("source_id").and_then(|v| v.as_str()).unwrap_or("?");
+    let source = entry
+        .get("source_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
     let message = entry.get("message").and_then(|v| v.as_str()).unwrap_or("");
     let mut mini = serde_json::json!({
         "t": elapsed_time(entry, &clock),
@@ -1099,7 +1396,10 @@ fn format_compact_event(event: &serde_json::Value, codes: &mut ShortcodeTable) -
 /// `format_compact_entry`.
 fn format_mini_event(event: &serde_json::Value, codes: &mut ShortcodeTable) -> serde_json::Value {
     let clock = clock_time(event);
-    let source = event.get("source_id").and_then(|v| v.as_str()).unwrap_or("?");
+    let source = event
+        .get("source_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
     let message = event.get("message").and_then(|v| v.as_str()).unwrap_or("");
     serde_json::json!({
         "t": elapsed_time(event, &clock),
@@ -1112,7 +1412,11 @@ fn format_mini_event(event: &serde_json::Value, codes: &mut ShortcodeTable) -> s
 
 /// Render one event per `--format`. `Jsonl` (the default) keeps today's
 /// human-readable line — `--json` is the separate flag for raw JSONL.
-fn render_event(event: &serde_json::Value, format: OutputFormat, codes: &mut ShortcodeTable) -> String {
+fn render_event(
+    event: &serde_json::Value,
+    format: OutputFormat,
+    codes: &mut ShortcodeTable,
+) -> String {
     match format {
         OutputFormat::MiniJsonl => {
             serde_json::to_string(&format_mini_event(event, codes)).unwrap_or_default()
@@ -1418,7 +1722,10 @@ fn search_sessions_with_context(
                 continue;
             }
             match_num += 1;
-            let source_id = entry.get("source_id").and_then(|v| v.as_str()).unwrap_or("?");
+            let source_id = entry
+                .get("source_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
             println!(
                 "# match {match_num} session={} source={source_id} line={}",
                 session.id,
@@ -1426,7 +1733,9 @@ fn search_sessions_with_context(
             );
             let (start, end) = context_window(idx, before, after, lines.len());
             for (i, line) in lines.iter().enumerate().take(end + 1).skip(start) {
-                let Some(ctx_entry) = &parsed[i] else { continue };
+                let Some(ctx_entry) = &parsed[i] else {
+                    continue;
+                };
                 let rendered = render_entry(ctx_entry, line, format, &mut codes);
                 if i == idx {
                     println!("{rendered}   << MATCH");
@@ -1489,7 +1798,11 @@ fn search_sessions_last_n(
             if !filters.matches_entry(&entry) {
                 continue;
             }
-            push_bounded(&mut buffer, render_entry(&entry, &line, format, &mut codes), last);
+            push_bounded(
+                &mut buffer,
+                render_entry(&entry, &line, format, &mut codes),
+                last,
+            );
         }
     }
 
@@ -1758,7 +2071,11 @@ pub(crate) fn export_session_jsonl_deduped(session: &SessionRecord, output: Path
         .cloned()
         .unwrap_or_default();
 
-    let mut source_ids: Vec<String> = pane_kinds.keys().chain(pane_labels.keys()).cloned().collect();
+    let mut source_ids: Vec<String> = pane_kinds
+        .keys()
+        .chain(pane_labels.keys())
+        .cloned()
+        .collect();
     source_ids.sort();
     source_ids.dedup();
 
@@ -1881,11 +2198,13 @@ fn compute_session_summary(session: &SessionRecord) -> SessionSummary {
                     .to_string();
                 let ts_iso = entry.get("timestamp_iso").and_then(|v| v.as_str());
 
-                let stats = per_source.entry(source_id).or_insert_with(|| SourceSummary {
-                    count: 0,
-                    first: None,
-                    last: None,
-                });
+                let stats = per_source
+                    .entry(source_id)
+                    .or_insert_with(|| SourceSummary {
+                        count: 0,
+                        first: None,
+                        last: None,
+                    });
                 stats.count += 1;
                 if stats.first.is_none() {
                     stats.first = ts_iso.map(str::to_owned);
@@ -2535,6 +2854,52 @@ mod tests {
         assert_eq!(codes.code_for("MCU_LINK_TX"), "MLT");
         assert_eq!(codes.code_for("NODE-RED"), "NR");
         assert_eq!(codes.code_for("NODE-RED-COAP"), "NRC");
+    }
+
+    #[test]
+    fn prune_sessions_dry_run_preserves_and_real_run_removes_oldest() {
+        let root = temp_log_dir();
+        write_test_session(&root, "2026-01-01");
+        write_test_session(&root, "2026-01-02");
+        write_test_session(&root, "2026-01-03");
+        prune_sessions(&root, 1, true).unwrap();
+        assert_eq!(load_sessions(&root).unwrap().len(), 3);
+        prune_sessions(&root, 1, false).unwrap();
+        let sessions = load_sessions(&root).unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "2026-01-03");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn support_bundle_contains_session_and_version_diagnostics() {
+        let root = temp_log_dir();
+        write_test_session(&root, "bundle-session");
+        let session = resolve_session(&root, "bundle-session").unwrap();
+        let output = root.join("bundle.tar.gz");
+        export_session_bundle(&session, &output).unwrap();
+        let decoder = flate2::read::GzDecoder::new(std::fs::File::open(output).unwrap());
+        let mut archive = tar::Archive::new(decoder);
+        let names = archive
+            .entries()
+            .unwrap()
+            .map(|entry| entry.unwrap().path().unwrap().display().to_string())
+            .collect::<Vec<_>>();
+        assert!(names.iter().any(|name| name.ends_with("manifest.json")));
+        assert!(names
+            .iter()
+            .any(|name| name.ends_with("embed-log-version.json")));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn parse_import_timestamp_accepts_rfc3339_plain_and_bracketed() {
+        let (ts, message) = parse_import_timestamp("2026-07-11T11:21:47.123Z boot ok").unwrap();
+        assert_eq!(ts.timestamp_millis(), 1_783_768_907_123);
+        assert_eq!(message, "boot ok");
+        let (_, message) = parse_import_timestamp("[2026-07-11T11:21:48+00:00] done").unwrap();
+        assert_eq!(message, "done");
+        assert!(parse_import_timestamp("no timestamp").is_none());
     }
 
     #[test]

@@ -27,6 +27,29 @@ Release binaries include embedded frontend assets, so users do **not** need Rust
 
 See [docs/releasing.md](docs/releasing.md) for release and installer details.
 
+## Fast start
+
+Connect one UART without creating YAML:
+
+```bash
+embed-log run /dev/ttyUSB0
+```
+
+Multiple UARTs, a watched file, or the terminal UI:
+
+```bash
+embed-log run -s /dev/ttyUSB0 -s /dev/ttyUSB1 -f ./device.log --baud 115200
+embed-log run /dev/ttyUSB0 --tui
+```
+
+This creates an in-memory configuration, opens the web UI (or TUI), and saves a normal session under `./logs/`. Each source gets its own tab. Persist the generated configuration only when you need a custom layout or parser:
+
+```bash
+embed-log run /dev/ttyUSB0 --save-config embed-log.yml
+```
+
+See the [quick-start guide](docs/quickstart.md) for all fast-run options, session locations, and when to switch to YAML. Run `embed-log doctor` if a serial device cannot be opened.
+
 ## Claude Code plugin
 
 This repo bundles a [Claude Code](https://claude.com/claude-code) skill that teaches an AI
@@ -40,7 +63,7 @@ grepping raw log files. Install it once, in any Claude Code session:
 
 It's then available in every project on your machine, not just this repo. Source: `skills/embed-log/SKILL.md`, `.claude-plugin/`.
 
-## Quick start from source
+## Build from source
 
 ```bash
 just build
@@ -208,6 +231,8 @@ The old per-source TCP `inject_port`, `forward_port`, and `forward_ports` config
 
 ## Documentation
 
+- [Getting up to speed](docs/getting-up-to-speed.md)
+- [Quick start](docs/quickstart.md)
 - [Architecture](docs/architecture.md)
 - [Configuration](docs/configuration.md)
 - [CLI reference](docs/cli.md)

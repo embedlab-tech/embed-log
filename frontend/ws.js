@@ -290,6 +290,11 @@ function wsConnect() {
             return;
         }
 
+        if (typeof msg.type === "string" && msg.type.startsWith("event_rule.")) {
+            window.dispatchEvent(new CustomEvent("embed-log-event-rule", { detail: msg }));
+            return;
+        }
+
         if (msg.type === "event") {
             addEvent(msg);
             return;

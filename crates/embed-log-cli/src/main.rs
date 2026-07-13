@@ -15,7 +15,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use commands::misc;
-use commands::run::{cmd_demo, cmd_onboard, cmd_run, RunOverrides};
+use commands::run::{cmd_demo, cmd_onboard, cmd_run, cmd_run_quick, RunOverrides};
 use commands::sessions::{cmd_sessions, SessionsCommand};
 use commands::ui::cmd_ui;
 
@@ -52,11 +52,31 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Start the log server from a config file
+    /// Start the log server from a config file or explicit UART/file sources
     Run {
+        /// UART devices for a no-config quick run (for example: /dev/ttyUSB0).
+        #[arg(value_name = "UART", conflicts_with = "config")]
+        serial_paths: Vec<PathBuf>,
+
         /// YAML config file. Defaults to EMBED_LOG_CONFIG_YML_PATH, then embed-log.yml.
-        #[arg(short, long)]
+        #[arg(short, long, conflicts_with_all = ["serial_paths", "serial", "file"])]
         config: Option<PathBuf>,
+
+        /// Add a UART device for a no-config quick run. Repeat for multiple devices.
+        #[arg(short = 's', long, value_name = "PATH", conflicts_with = "config")]
+        serial: Vec<PathBuf>,
+
+        /// Watch a file for appended logs in a no-config quick run. Repeat for multiple files.
+        #[arg(short = 'f', long, value_name = "PATH", conflicts_with = "config")]
+        file: Vec<PathBuf>,
+
+        /// UART baud rate for every quick-run serial source.
+        #[arg(long, default_value_t = 115_200)]
+        baud: u32,
+
+        /// Write the generated quick-run configuration to this YAML file.
+        #[arg(long, value_name = "PATH", conflicts_with = "config")]
+        save_config: Option<PathBuf>,
 
         /// Path to the frontend directory (default: ./frontend)
         #[arg(long, default_value = "frontend")]
@@ -117,8 +137,30 @@ enum Command {
         /// Config file to inspect
         #[arg(short, long)]
         config: Option<PathBuf>,
+        /// Inspect a UART path directly (repeatable).
+        #[arg(short = 's', long, value_name = "PATH")]
+        serial: Vec<PathBuf>,
         /// Machine-readable JSON output
         #[arg(long)]
+        json: bool,
+    },
+
+    /// Check GitHub Releases for a newer CLI version
+    Update {
+        /// Only check and report; do not download or replace the binary.
+        #[arg(long, conflicts_with = "yes")]
+        check: bool,
+        /// Install this release tag instead of the latest stable release.
+        #[arg(long, value_name = "TAG")]
+        version: Option<String>,
+        /// Confirm executable replacement without prompting.
+        #[arg(long)]
+        yes: bool,
+        /// Permit installing an older release. Requires --yes.
+        #[arg(long, requires = "yes", conflicts_with = "check")]
+        allow_downgrade: bool,
+        /// Machine-readable JSON output.
+        #[arg(long, conflicts_with = "yes")]
         json: bool,
     },
 
@@ -220,7 +262,12 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Some(Command::Run {
+            serial_paths,
             config,
+            serial,
+            file,
+            baud,
+            save_config,
             frontend_dir,
             no_open_browser,
             tui,
@@ -234,17 +281,43 @@ async fn main() -> Result<()> {
                 host,
                 ws_port,
             };
-            cmd_run(
-                config.as_ref(),
-                &frontend_dir,
-                open_browser,
-                tui,
-                &overrides,
-            )
-            .await
+            if serial_paths.is_empty() && serial.is_empty() && file.is_empty() {
+                cmd_run(
+                    config.as_ref(),
+                    &frontend_dir,
+                    open_browser,
+                    tui,
+                    &overrides,
+                )
+                .await
+            } else {
+                let serial = serial_paths.into_iter().chain(serial).collect();
+                cmd_run_quick(
+                    serial,
+                    file,
+                    baud,
+                    save_config.as_deref(),
+                    &frontend_dir,
+                    open_browser,
+                    tui,
+                    &overrides,
+                )
+                .await
+            }
         }
         Some(Command::Version { config, json }) => misc::cmd_version(config.as_deref(), json),
-        Some(Command::Doctor { config, json }) => misc::cmd_doctor(config.as_deref(), json),
+        Some(Command::Doctor {
+            config,
+            serial,
+            json,
+        }) => misc::cmd_doctor(config.as_deref(), &serial, json),
+        Some(Command::Update {
+            check,
+            version,
+            yes,
+            allow_downgrade,
+            json,
+        }) => misc::cmd_update(check, version.as_deref(), yes, allow_downgrade, json).await,
         Some(Command::Ports { json }) => misc::cmd_ports(json),
         Some(Command::Hello) => misc::cmd_hello(),
         Some(Command::Sessions { command }) => cmd_sessions(*command),
@@ -304,6 +377,38 @@ mod tests {
     }
 
     #[test]
+    fn run_accepts_quick_serial_and_file_sources() {
+        let cli = Cli::parse_from([
+            "embed-log",
+            "run",
+            "/dev/ttyUSB0",
+            "-s",
+            "/dev/ttyUSB1",
+            "-f",
+            "device.log",
+            "--baud",
+            "9600",
+        ]);
+        match cli.command {
+            Some(Command::Run {
+                serial_paths,
+                serial,
+                file,
+                baud,
+                config,
+                ..
+            }) => {
+                assert_eq!(serial_paths, vec![PathBuf::from("/dev/ttyUSB0")]);
+                assert_eq!(serial, vec![PathBuf::from("/dev/ttyUSB1")]);
+                assert_eq!(file, vec![PathBuf::from("device.log")]);
+                assert_eq!(baud, 9_600);
+                assert!(config.is_none());
+            }
+            _ => panic!("expected run command"),
+        }
+    }
+
+    #[test]
     fn no_subcommand_is_default_browser_run_mode() {
         let cli = Cli::parse_from([
             "embed-log",
@@ -354,6 +459,17 @@ mod tests {
         for args in [
             ["embed-log", "sessions", "list"].as_slice(),
             ["embed-log", "sessions", "info", "abc"].as_slice(),
+            ["embed-log", "sessions", "open", "latest"].as_slice(),
+            ["embed-log", "sessions", "bundle", "latest"].as_slice(),
+            [
+                "embed-log",
+                "sessions",
+                "prune",
+                "--keep",
+                "10",
+                "--dry-run",
+            ]
+            .as_slice(),
             ["embed-log", "sessions", "export", "abc", "--format", "raw"].as_slice(),
             ["embed-log", "sessions", "combined", "abc", "--lines", "10"].as_slice(),
             [
