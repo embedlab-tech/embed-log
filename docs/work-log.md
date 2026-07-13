@@ -622,3 +622,19 @@ Future entries must include this per-file added/removed-line summary.
 | `.github/workflows/hardware-integration.yml` | 37 | 13 | Configures stable four-UART variables, pinned firmware flash/preflight, exact package testing, and capture upload. |
 | `docs/hardware-ci.md` | 19 | 15 | Documents the STM32G0 rig, required variables, pinned sandbox checkout, and test flow. |
 | `sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py` | 296 | 0 | Adds gated four-UART control, source-isolation, session, and Python UDP-forwarding coverage. |
+
+## 2026-07-13 17:58:08 UTC / 2026-07-13 19:58:08 CEST (Warsaw)
+
+- **Commit:** `9c81362` — `Exercise STM32G0 mixed-baud UART traffic`
+- **Task:** Exercise the STM32G0 hardware integration with 115200, 460800, and 1000000 baud generator streams and higher traffic volume.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 17:58:08 UTC / 2026-07-13 19:58:08 CEST (+0200) (Warsaw)
+- **Validation:** `PATH=/tmp/embed-log-hw-package/bin:$PATH EMBED_LOG_STM32G0_HARDWARE=1 EMBED_LOG_STM32G0_ARTIFACT_DIR=/tmp/embed-log-stm32g0-high-baud-artifacts /tmp/embed-log-hw-venv/bin/python -m pytest sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py -q` — passed (1 passed). Captures contained 689 USART1, 596 USART3, 500 USART4, and 1782 forwarded UDP records.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`9c81362`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `docs/hardware-ci.md` | 1 | 1 | Documents the mixed-baud profile and minimum 500-record capture. |
+| `sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py` | 32 | 16 | Configures per-source baud profiles, increases traffic, and restores 115200 teardown state. |
