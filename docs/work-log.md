@@ -827,3 +827,18 @@ Future entries must include this per-file added/removed-line summary.
 | File | Added | Removed | Summary |
 | --- | ---: | ---: | --- |
 | `sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py` | 33 | 11 | Exercises CONTROL `tx_write`, verifies shell responses, and ignores pre-reset traffic blocks. |
+
+## 2026-07-13 22:21:55 UTC / 2026-07-14 00:21:55 CEST (Warsaw)
+
+- **Commit:** `369a61c` — `Stabilize simulated TUI integration startup`
+- **Task:** Eliminate flaky simulated TUI integration startup and source-log selection.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 22:21:55 UTC / 2026-07-14 00:21:55 CEST (+0200) (Warsaw)
+- **Validation:** `python scripts/test_tui_integration.py --binary /tmp/tui-ci-repro/bin/embed-log --backend simulated` — passed three consecutive runs.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`369a61c`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `scripts/test_tui_integration.py` | 7 | 4 | Retries PTY source writes and selects exact per-source session filenames. |
