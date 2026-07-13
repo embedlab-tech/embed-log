@@ -605,3 +605,20 @@ Future entries must include this per-file added/removed-line summary.
 | `.github/workflows/hardware-integration.yml` | 102 | 0 | Adds hosted artifact build and serialized STM-lab hardware validation workflow. |
 | `docs/hardware-ci.md` | 46 | 0 | Documents runner labels, variables, operation, and hardware-runner security. |
 | `docs/index.md` | 1 | 0 | Links the hardware CI guide. |
+
+## 2026-07-13 17:50:55 UTC / 2026-07-13 19:50:55 CEST (Warsaw)
+
+- **Commit:** `a3396d2` — `Add STM32G0 multi-UART hardware integration test`
+- **Task:** Wire the STM32G0/FT4232H rig into the hardware workflow with four UART sources and Python UDP forwarding.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 17:50:55 UTC / 2026-07-13 19:50:55 CEST (+0200) (Warsaw)
+- **Validation:** `PATH=/tmp/embed-log-hw-package/bin:$PATH EMBED_LOG_STM32G0_HARDWARE=1 EMBED_LOG_STM32G0_ARTIFACT_DIR=/tmp/embed-log-stm32g0-artifacts /tmp/embed-log-hw-venv/bin/python -m pytest sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py -q` — passed (1 passed); `cd /home/krezo/Programming/embed-sandbox && just verify-multi-uart` — passed (USART1: 314, USART3: 192, USART4: 129 matching payloads).
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`a3396d2`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/hardware-integration.yml` | 37 | 13 | Configures stable four-UART variables, pinned firmware flash/preflight, exact package testing, and capture upload. |
+| `docs/hardware-ci.md` | 19 | 15 | Documents the STM32G0 rig, required variables, pinned sandbox checkout, and test flow. |
+| `sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py` | 296 | 0 | Adds gated four-UART control, source-isolation, session, and Python UDP-forwarding coverage. |
