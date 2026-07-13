@@ -744,3 +744,19 @@ Future entries must include this per-file added/removed-line summary.
 | --- | ---: | ---: | --- |
 | `.github/workflows/ci.yml` | 10 | 0 | Pins the hardware harness to the downloaded package and verifies PATH/version before pytest. |
 | `sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py` | 8 | 0 | Honors and validates an explicitly configured hardware-test binary path. |
+
+## 2026-07-13 18:51:56 UTC / 2026-07-13 20:51:56 CEST (Warsaw)
+
+- **Commit:** `402193b` — `Use registered runner labels for hardware CI`
+- **Task:** Match the hardware CI job to the labels actually registered by the dedicated embed-log runner.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 18:51:56 UTC / 2026-07-13 20:51:56 CEST (+0200) (Warsaw)
+- **Validation:** inspected the active `embed-log-runner` service and successful CI jobs, both using `self-hosted, Linux`; workflow YAML assertion confirmed the hardware job uses those labels.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`402193b`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 1 | 1 | Removes unavailable `stm-lab` label from the hardware job. |
+| `docs/hardware-ci.md` | 2 | 3 | Documents the runner's registered labels and dedicated-rig role. |
