@@ -8,7 +8,8 @@ The regular [CI workflow](../.github/workflows/ci.yml) includes the STM32G0 hard
 2. `package-cli-linux` builds and uploads the release CLI tarball.
 3. `backend-hardware-tests` (shown as **STM32G0 hardware integration**) runs on the exclusive `stm-lab` runner, downloads that exact tarball, and installs it only in `.tooling/bin` for the job.
 4. It checks all four stable UART paths and runs the mixed-baud pytest against the connected, pre-flashed rig.
-5. Captured configuration, server output, logs, and session reports under `captures/stm32g0/` are uploaded even if the test fails.
+5. **STM32G0 TUI hardware integration** runs afterward against the same packaged CLI. It drives the Zephyr shell through TUI UART TX, cycles a TUI tab, and verifies persisted records from all three physical generator UARTs.
+6. Captured configuration, server output, logs, and session reports under `captures/stm32g0/` and `captures/tui-stm32g0/` are uploaded even if a test fails.
 
 The hardware job has a global `stm-lab-hardware` concurrency group so physical-rig runs from different branches cannot overlap. Although the runner does not need a custom label, it is dedicated to this repository's physical rig.
 
@@ -40,7 +41,7 @@ The job runs:
 python -m pytest sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py -q
 ```
 
-The test configures `CONTROL` and `USART1` at 115200, `USART3` at 460800, and `USART4` at 1000000. It captures at least 550 deterministic records per generator, requiring at least 500 ordered, unique loopback-UDP deliveries to allow for UDP datagram loss, then stops generators and restores data UARTs to 115200. Because CI enables `EMBED_LOG_STM32G0_HARDWARE=1`, a missing configured UART path fails the job instead of being reported as a passing skip.
+The pytest configures `CONTROL` and `USART1` at 115200, `USART3` at 460800, and `USART4` at 1000000. It captures at least 550 deterministic records per generator, requiring at least 500 ordered, unique loopback-UDP deliveries to allow for UDP datagram loss, then stops generators and restores data UARTs to 115200. The following TUI job uses the same mixed-baud profiles and restores the same default state. Because CI enables `EMBED_LOG_STM32G0_HARDWARE=1`, a missing configured UART path fails the job instead of being reported as a passing skip.
 
 ## Security
 
