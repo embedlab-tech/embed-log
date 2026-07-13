@@ -760,3 +760,19 @@ Future entries must include this per-file added/removed-line summary.
 | --- | ---: | ---: | --- |
 | `.github/workflows/ci.yml` | 1 | 1 | Removes unavailable `stm-lab` label from the hardware job. |
 | `docs/hardware-ci.md` | 2 | 3 | Documents the runner's registered labels and dedicated-rig role. |
+
+## 2026-07-13 21:08:45 UTC / 2026-07-13 23:08:45 CEST (Warsaw)
+
+- **Commit:** `1499d1d` — `Add UDP delivery headroom to hardware test`
+- **Task:** Make the high-rate hardware test resilient to expected loopback UDP datagram loss while retaining the 500-record delivery requirement.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 21:08:45 UTC / 2026-07-13 23:08:45 CEST (+0200) (Warsaw)
+- **Validation:** `EMBED_LOG_HARDWARE_BINARY=/tmp/embed-log-ci-package/bin/embed-log EMBED_LOG_STM32G0_HARDWARE=1 EMBED_LOG_STM32G0_ARTIFACT_DIR=/tmp/embed-log-stm32g0-udp-headroom ... pytest sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py -q` — passed (1 passed). Captures contained 740 USART1, 647 USART3, 551 USART4, and 1934 forwarded UDP records.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`1499d1d`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `docs/hardware-ci.md` | 1 | 1 | Documents UDP headroom and the retained delivery threshold. |
+| `sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py` | 5 | 3 | Captures 550 records and resolves configured artifact directories. |
