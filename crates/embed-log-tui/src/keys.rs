@@ -424,3 +424,39 @@ fn handle_events_key(
         _ => {}
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::{ConfigMessage, TabDef};
+
+    #[test]
+    fn cycle_tab_wraps_and_resets_active_pane() {
+        let mut state = State::default();
+        state.apply_config(&ConfigMessage {
+            tabs: vec![
+                TabDef {
+                    label: "Device".into(),
+                    panes: vec!["DUT".into(), "HOST".into()],
+                    ..Default::default()
+                },
+                TabDef {
+                    label: "UART".into(),
+                    panes: vec!["UART".into()],
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        });
+
+        state.active_pane = 1;
+        cycle_tab(&mut state, true);
+        assert_eq!(state.active_tab, 1);
+        assert_eq!(state.active_pane, 0);
+
+        cycle_tab(&mut state, true);
+        assert_eq!(state.active_tab, 0);
+        cycle_tab(&mut state, false);
+        assert_eq!(state.active_tab, 1);
+    }
+}

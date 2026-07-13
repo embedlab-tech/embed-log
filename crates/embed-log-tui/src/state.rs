@@ -916,6 +916,43 @@ mod tests {
     }
 
     #[test]
+    fn syncs_all_panes_in_active_tab_to_nearest_timestamp() {
+        let mut s = State::default();
+        s.apply_config(&cfg_with(vec![
+            ("Device", vec!["DUT", "HOST"]),
+            ("Other", vec!["OTHER"]),
+        ]));
+        for i in 0..5 {
+            s.append_line(
+                "DUT",
+                StoredLine {
+                    line_idx: i,
+                    abs_num: (i * 100) as f64,
+                    ..Default::default()
+                },
+            );
+            s.append_line(
+                "HOST",
+                StoredLine {
+                    line_idx: i,
+                    abs_num: (i * 100 + 20) as f64,
+                    ..Default::default()
+                },
+            );
+        }
+
+        s.sync_panes_to_ts(250.0, 2);
+
+        // DUT's 200/300 timestamps are equidistant from 250, so the
+        // deterministic binary-search tie-break chooses the later line.
+        assert_eq!(s.scroll_of("DUT"), 2);
+        assert_eq!(s.scroll_of("HOST"), 1);
+        assert_eq!(s.sync_ts, Some(250.0));
+        assert!(s.sync_tab_switch);
+        assert_eq!(s.scroll_of("OTHER"), 0);
+    }
+
+    #[test]
     fn is_writable_only_for_uart() {
         let mut s = State::default();
         let mut cfg = cfg_with(vec![("T", vec!["DUT", "UART_DUT"])]);
