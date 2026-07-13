@@ -139,25 +139,39 @@ def saved_messages(log_path: Path) -> list[str]:
     ]
 
 
+def longest_counter_block(counters: list[int], ordered_only: bool = False) -> list[int]:
+    """Ignore pre-attachment traffic before the test resets generator counters."""
+    best: list[int] = []
+    current: list[int] = []
+    for counter in counters:
+        follows = counter > current[-1] if ordered_only and current else counter == current[-1] + 1 if current else True
+        if follows:
+            current.append(counter)
+        else:
+            if len(current) > len(best):
+                best = current
+            current = [counter]
+    return current if len(current) > len(best) else best
+
+
 def assert_contiguous(counters: list[int], source: str) -> None:
-    assert len(counters) >= SAMPLE_COUNT, f"{source} produced only {len(counters)} counters"
-    assert counters == list(range(counters[0], counters[0] + len(counters))), (
-        f"{source} counters are not contiguous: {counters[:10]} ... {counters[-10:]}"
-    )
+    block = longest_counter_block(counters)
+    assert len(block) >= SAMPLE_COUNT, f"{source} produced no contiguous {SAMPLE_COUNT}-counter block"
 
 
 def assert_strictly_increasing(counters: list[int], source: str) -> None:
     """UDP delivery may drop datagrams, but it must not duplicate or reorder them."""
-    assert len(counters) >= SAMPLE_COUNT, f"{source} produced only {len(counters)} counters"
-    assert counters == sorted(counters) and len(counters) == len(set(counters)), (
-        f"{source} counters are not strictly increasing: {counters[:10]} ... {counters[-10:]}"
-    )
+    block = longest_counter_block(counters, ordered_only=True)
+    assert len(block) >= SAMPLE_COUNT, f"{source} produced no ordered {SAMPLE_COUNT}-counter block"
+    assert len(block) == len(set(block)), f"{source} duplicated UDP counters: {block}"
 
 
-def shell_write(client: object, command: str) -> None:
+def shell_write(client: object, command: str) -> int:
     """Send one shell command at a time; Zephyr's shell RX buffer is small."""
-    client.tx_write("CONTROL", command + "\n")  # type: ignore[attr-defined]
+    written = client.tx_write("CONTROL", command + "\n")  # type: ignore[attr-defined]
+    assert written > 0, f"CONTROL TX accepted no bytes for {command!r}"
     time.sleep(0.35)
+    return written
 
 
 @pytest.fixture(scope="session")
@@ -263,9 +277,12 @@ def test_stm32g0_four_uart_sources_and_udp_forwarding(
         with EmbedLogClient.from_config(config_path, origin="stm32g0-hardware") as client, socket.socket(
             socket.AF_INET, socket.SOCK_DGRAM
         ) as forward_socket:
-            client.subscribe(list(UART_PROFILES))
+            client.subscribe(["CONTROL", *UART_PROFILES])
             try:
+                # CONTROL is the shell-bearing UART. Exercise embed-log's
+                # tx.write API before using it for the generator commands.
                 shell_write(client, "scenario stop")
+                shell_write(client, "uart list")
                 for profile in UART_PROFILES.values():
                     shell_write(client, f"uart {profile['peripheral']} baud {profile['baudrate']}")
                 for profile in UART_PROFILES.values():
@@ -323,6 +340,11 @@ def test_stm32g0_four_uart_sources_and_udp_forwarding(
 
     control_messages = saved_messages(source_files["CONTROL"])
     assert any("scenario stop" in message for message in control_messages)
+    assert any("uart list" in message for message in control_messages)
+    for source, profile in UART_PROFILES.items():
+        assert any(
+            re.search(rf"{profile['peripheral']}\s+ENABLED", message) for message in control_messages
+        ), f"CONTROL shell response did not report {source} as enabled: {control_messages}"
     forwarded = [
         match.groups() for message in saved_messages(source_files["FORWARDED_UDP"])
         if (match := FORWARDED_RE.fullmatch(message))
