@@ -1,0 +1,102 @@
+name: Hardware integration
+
+on:
+  workflow_dispatch:
+    inputs:
+      hardware_test_command:
+        description: "Command run on the STM lab runner after installing the packaged CLI"
+        required: false
+        default: "python -m pytest sdk/python/tests/test_backend_hardware_uart.py -q"
+        type: string
+  schedule:
+    - cron: "0 2 * * *"
+
+permissions:
+  contents: read
+
+# The lab owns physical devices; never run two hardware jobs concurrently.
+concurrency:
+  group: stm-lab-hardware
+  cancel-in-progress: false
+
+jobs:
+  build-linux-cli:
+    name: Build packaged Linux CLI
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release CLI
+        run: cargo build --locked --release --package embed-log-cli --bin embed-log
+
+      - name: Package CLI
+        run: ./scripts/package-cli.sh x86_64-unknown-linux-gnu
+
+      - name: Upload packaged CLI
+        uses: actions/upload-artifact@v4
+        with:
+          name: embed-log-cli-linux
+          path: dist/embed-log-x86_64-unknown-linux-gnu.tar.gz
+          if-no-files-found: error
+
+  stm-lab:
+    name: STM hardware integration
+    runs-on: [self-hosted, Linux, stm-lab]
+    needs: build-linux-cli
+    timeout-minutes: 45
+    # Configure these repository variables for the lab runner. Prefer a stable
+    # /dev/serial/by-id/... path over ttyACM/ttyUSB numbering.
+    env:
+      EMBED_LOG_HARDWARE_UART_PORT: ${{ vars.EMBED_LOG_HARDWARE_UART_PORT }}
+      EMBED_LOG_HARDWARE_UART_BAUD: ${{ vars.EMBED_LOG_HARDWARE_UART_BAUD || '115200' }}
+      HARDWARE_TEST_COMMAND: ${{ inputs.hardware_test_command || 'python -m pytest sdk/python/tests/test_backend_hardware_uart.py -q' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download exact packaged CLI
+        uses: actions/download-artifact@v4
+        with:
+          name: embed-log-cli-linux
+          path: dist
+
+      - name: Install packaged CLI for this job only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/embed-log/bin"
+          tar -xzf dist/embed-log-x86_64-unknown-linux-gnu.tar.gz -C "$RUNNER_TEMP/embed-log/bin"
+          echo "$RUNNER_TEMP/embed-log/bin" >> "$GITHUB_PATH"
+          embed-log version --json
+
+      - name: Verify configured hardware
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$EMBED_LOG_HARDWARE_UART_PORT"
+          embed-log doctor --serial "$EMBED_LOG_HARDWARE_UART_PORT"
+
+      - name: Set up Python harness
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install harness dependencies
+        run: python -m pip install -e 'sdk/python[dev]'
+
+      - name: Run hardware integration tests
+        shell: bash
+        run: $HARDWARE_TEST_COMMAND
+
+      - name: Upload Embed-log sessions and support bundles
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stm-lab-artifacts-${{ github.run_id }}
+          path: |
+            logs/
+            captures/
+            support*.tar.gz
+          if-no-files-found: ignore

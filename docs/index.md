@@ -12,3 +12,4 @@
 - [Terminal UI](tui.md) — launch modes, supported features, limitations, and keybindings.
 - [Tauri desktop app](tauri.md) — config path resolution, onboarding, default session log locations.
 - [Releasing](releasing.md) — self-hosted runner release workflow and installers.
+- [STM hardware CI](hardware-ci.md) — hosted build plus self-hosted physical-device integration template.
