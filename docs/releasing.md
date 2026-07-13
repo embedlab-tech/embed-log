@@ -29,7 +29,7 @@ git push origin v1.0.0
 
 2. The `Release CLI` workflow will test, build, package, and smoke-test each platform artifact, generate `SHA256SUMS`, attach `install.sh` / `install.ps1`, and publish a GitHub Release only after every platform succeeds.
 
-You can also run the workflow manually from GitHub Actions. If running from a branch, provide the release tag input, for example `v1.0.0`.
+You can also run the workflow manually from GitHub Actions. To test every hosted build/test/package job without publishing, select the branch, set `tag` to a prospective value such as `v0.0.0-test`, and leave **publish release** unchecked. To publish from a branch, provide the final tag and check **publish release**.
 
 ## User install commands
 
