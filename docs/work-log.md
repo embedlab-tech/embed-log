@@ -795,3 +795,20 @@ Future entries must include this per-file added/removed-line summary.
 | `crates/embed-log-tui/src/state.rs` | 37 | 0 | Tests timestamp synchronization across the active tab's panes. |
 | `docs/development.md` | 2 | 0 | Documents local TUI test commands. |
 | `scripts/test_tui_integration.py` | 145 | 0 | Runs a PTY-installed-CLI TUI integration scenario with two UDP tabs. |
+
+## 2026-07-13 22:03:16 UTC / 2026-07-14 00:03:16 CEST (Warsaw)
+
+- **Commit:** `44f8e61` — `Add STM32G0 TUI hardware integration job`
+- **Task:** Run the installed CLI TUI against the real STM32G0 rig after the regular UART hardware job, with shared simulated/real backends in the TUI harness.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 22:03:16 UTC / 2026-07-14 00:03:16 CEST (+0200) (Warsaw)
+- **Validation:** `python scripts/test_tui_integration.py --binary /tmp/embed-log-ci-package/bin/embed-log --backend stm32g0 --artifact-dir /tmp/tui-stm32g0-final` — passed; `cargo test --locked --package embed-log-tui` — passed (74 tests).
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`44f8e61`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 78 | 0 | Adds a package-pinned TUI hardware job after UART hardware validation. |
+| `docs/hardware-ci.md` | 3 | 2 | Documents the sequential TUI hardware validation and its captures. |
+| `scripts/test_tui_integration.py` | 228 | 85 | Adds PTY UART simulation and STM32G0 backends, TUI TX shell control, and post-reset counter validation. |
