@@ -728,3 +728,19 @@ Future entries must include this per-file added/removed-line summary.
 | `.github/workflows/hardware-integration.yml` | 0 | 123 | Removes the redundant standalone hardware workflow. |
 | `docs/hardware-ci.md` | 15 | 16 | Documents the CI-integrated hardware job. |
 | `sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py` | 3 | 1 | Fails absent enabled hardware paths and clears configured captures before each run. |
+
+## 2026-07-13 18:29:25 UTC / 2026-07-13 20:29:25 CEST (Warsaw)
+
+- **Commit:** `b7c6b03` — `Verify packaged CLI before hardware test`
+- **Task:** Ensure the CI hardware test runs the exact packaged CLI rather than an arbitrary runner installation.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 18:29:25 UTC / 2026-07-13 20:29:25 CEST (+0200) (Warsaw)
+- **Validation:** configured package-path check plus `embed-log version --json` — passed; `EMBED_LOG_HARDWARE_BINARY=/tmp/embed-log-ci-package/bin/embed-log ... pytest sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py -q` — passed (1 passed).
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`b7c6b03`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 10 | 0 | Pins the hardware harness to the downloaded package and verifies PATH/version before pytest. |
+| `sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py` | 8 | 0 | Honors and validates an explicitly configured hardware-test binary path. |
