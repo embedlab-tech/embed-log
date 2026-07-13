@@ -143,6 +143,14 @@ def assert_contiguous(counters: list[int], source: str) -> None:
     )
 
 
+def assert_strictly_increasing(counters: list[int], source: str) -> None:
+    """UDP delivery may drop datagrams, but it must not duplicate or reorder them."""
+    assert len(counters) >= SAMPLE_COUNT, f"{source} produced only {len(counters)} counters"
+    assert counters == sorted(counters) and len(counters) == len(set(counters)), (
+        f"{source} counters are not strictly increasing: {counters[:10]} ... {counters[-10:]}"
+    )
+
+
 def shell_write(client: object, command: str) -> None:
     """Send one shell command at a time; Zephyr's shell RX buffer is small."""
     client.tx_write("CONTROL", command + "\n")  # type: ignore[attr-defined]
@@ -309,4 +317,4 @@ def test_stm32g0_four_uart_sources_and_udp_forwarding(
     ]
     for source in UART_PROFILES:
         forwarded_counters = [int(counter) for forwarded_source, label, counter in forwarded if forwarded_source == label == source]
-        assert_contiguous(forwarded_counters, f"forwarded {source}")
+        assert_strictly_increasing(forwarded_counters, f"forwarded {source}")
