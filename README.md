@@ -14,13 +14,13 @@ The current workspace contains:
 macOS/Linux latest release:
 
 ```bash
-curl -fsSL https://github.com/krezolekcoder/embed-log/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/embedlab-tech/embed-log/releases/latest/download/install.sh | sh
 ```
 
 Windows PowerShell latest release:
 
 ```powershell
-irm https://github.com/krezolekcoder/embed-log/releases/latest/download/install.ps1 | iex
+irm https://github.com/embedlab-tech/embed-log/releases/latest/download/install.ps1 | iex
 ```
 
 Release binaries include embedded frontend assets, so users do **not** need Rust, Cargo, or a separate `frontend/` directory.
@@ -57,7 +57,7 @@ agent to inspect `embed-log` sessions via the CLI (`sessions summary`/`search`/.
 grepping raw log files. Install it once, in any Claude Code session:
 
 ```
-/plugin marketplace add krezolekcoder/embed-log
+/plugin marketplace add embedlab-tech/embed-log
 /plugin install embed-log@embed-log-tools
 ```
 

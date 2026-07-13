@@ -12,7 +12,7 @@ version = "1.0.0"
 edition = "2021"
 rust-version = "1.77"
 license = "MIT"
-repository = "https://github.com/krezolekcoder/embed-log"
+repository = "https://github.com/embedlab-tech/embed-log"
 
 [workspace.dependencies]
 # Async runtime

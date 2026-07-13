@@ -1,5 +1,5 @@
 param(
-    [string]$Repo = $(if ($env:EMBED_LOG_REPO) { $env:EMBED_LOG_REPO } else { "krezolekcoder/embed-log" }),
+    [string]$Repo = $(if ($env:EMBED_LOG_REPO) { $env:EMBED_LOG_REPO } else { "embedlab-tech/embed-log" }),
     [string]$Version = $(if ($env:EMBED_LOG_VERSION) { $env:EMBED_LOG_VERSION } else { "latest" }),
     [string]$InstallDir = $(if ($env:INSTALL_DIR) { $env:INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA "Programs\embed-log\bin" }),
     [switch]$NoModifyPath,

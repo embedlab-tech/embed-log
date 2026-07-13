@@ -5,29 +5,29 @@ This repo currently has a release path for the `embed-log` CLI binary.
 The released CLI is a prebuilt executable. Users do **not** need Rust or Cargo installed.
 The frontend assets are embedded into the Rust binary at build time via `rust-embed`.
 
-## Self-hosted runner labels
+## Hosted build matrix
 
-The workflow `.github/workflows/release-cli.yml` expects these GitHub self-hosted runners:
+`.github/workflows/release-cli.yml` uses standard GitHub-hosted runners. Its native build/test matrix produces:
 
-| Machine | Required labels | Artifact |
-| --- | --- | --- |
-| Linux x64 mini PC | `self-hosted`, `Linux`, `X64` | `embed-log-x86_64-unknown-linux-gnu.tar.gz` |
-| Windows x64 PC | `self-hosted`, `Windows`, `X64` | `embed-log-x86_64-pc-windows-msvc.zip` |
-| Apple Silicon Mac | `self-hosted`, `macOS`, `ARM64` | `embed-log-aarch64-apple-darwin.tar.gz` and `embed-log-x86_64-apple-darwin.tar.gz` |
+| Runner | Artifact |
+| --- | --- |
+| `ubuntu-latest` | `embed-log-x86_64-unknown-linux-gnu.tar.gz` and `.deb` |
+| `macos-14` | `embed-log-aarch64-apple-darwin.tar.gz` |
+| `macos-13` | `embed-log-x86_64-apple-darwin.tar.gz` |
+| `windows-latest` | `embed-log-x86_64-pc-windows-msvc.zip` |
 
-These are GitHub's default OS/architecture labels for self-hosted runners. If your runner labels differ, update `runs-on` in the workflow.
+Every matrix entry runs the CLI/core/TUI Rust tests, builds a native release binary, packages it, and smoke-tests the extracted archive before the publish job can create a release.
 
 ## Create a CLI release
 
-1. Make sure all three runners are online and not sleeping.
-2. Create and push a tag:
+1. Create and push a tag:
 
 ```bash
 git tag v1.0.0
 git push origin v1.0.0
 ```
 
-3. The `Release CLI` workflow will build each platform artifact, generate `SHA256SUMS`, attach `install.sh` / `install.ps1`, and publish a GitHub Release.
+2. The `Release CLI` workflow will test, build, package, and smoke-test each platform artifact, generate `SHA256SUMS`, attach `install.sh` / `install.ps1`, and publish a GitHub Release only after every platform succeeds.
 
 You can also run the workflow manually from GitHub Actions. If running from a branch, provide the release tag input, for example `v1.0.0`.
 
@@ -36,43 +36,43 @@ You can also run the workflow manually from GitHub Actions. If running from a br
 macOS/Linux latest release:
 
 ```bash
-curl -fsSL https://github.com/krezolekcoder/embed-log/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/embedlab-tech/embed-log/releases/latest/download/install.sh | sh
 ```
 
 macOS/Linux pinned release:
 
 ```bash
-curl -fsSL https://github.com/krezolekcoder/embed-log/releases/download/v1.0.0/install.sh | EMBED_LOG_VERSION=v1.0.0 sh
+curl -fsSL https://github.com/embedlab-tech/embed-log/releases/download/v1.0.0/install.sh | EMBED_LOG_VERSION=v1.0.0 sh
 ```
 
 macOS/Linux custom install directory:
 
 ```bash
-curl -fsSL https://github.com/krezolekcoder/embed-log/releases/latest/download/install.sh | INSTALL_DIR=/usr/local/bin sh
+curl -fsSL https://github.com/embedlab-tech/embed-log/releases/latest/download/install.sh | INSTALL_DIR=/usr/local/bin sh
 ```
 
 macOS/Linux automatic shell profile update:
 
 ```bash
-curl -fsSL https://github.com/krezolekcoder/embed-log/releases/latest/download/install.sh | EMBED_LOG_UPDATE_PATH=1 sh
+curl -fsSL https://github.com/embedlab-tech/embed-log/releases/latest/download/install.sh | EMBED_LOG_UPDATE_PATH=1 sh
 ```
 
 Windows latest release, from PowerShell:
 
 ```powershell
-irm https://github.com/krezolekcoder/embed-log/releases/latest/download/install.ps1 | iex
+irm https://github.com/embedlab-tech/embed-log/releases/latest/download/install.ps1 | iex
 ```
 
 Windows pinned release:
 
 ```powershell
-$env:EMBED_LOG_VERSION = "v1.0.0"; irm https://github.com/krezolekcoder/embed-log/releases/download/v1.0.0/install.ps1 | iex
+$env:EMBED_LOG_VERSION = "v1.0.0"; irm https://github.com/embedlab-tech/embed-log/releases/download/v1.0.0/install.ps1 | iex
 ```
 
 Windows custom install directory:
 
 ```powershell
-$env:INSTALL_DIR = "C:\Tools\embed-log"; irm https://github.com/krezolekcoder/embed-log/releases/latest/download/install.ps1 | iex
+$env:INSTALL_DIR = "C:\Tools\embed-log"; irm https://github.com/embedlab-tech/embed-log/releases/latest/download/install.ps1 | iex
 ```
 
 Default install locations are:
