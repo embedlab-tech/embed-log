@@ -127,7 +127,7 @@ def write_config(path: Path, logs_dir: Path, ws_port: int, sources: list[dict], 
 
 
 def source_messages(logs_dir: Path, source: str) -> list[str]:
-    source_log = next(logs_dir.glob(f"*/*{source.lower()}*.log"), None)
+    source_log = next(logs_dir.glob(f"*/*__{source.lower()}__*.log"), None)
     if source_log is None:
         raise RuntimeError(f"missing {source} source log under {logs_dir}")
     timestamp = re.compile(r"^\[[^\]]+\]\s?(.*)$")
@@ -158,9 +158,12 @@ def run_simulated(binary: Path, root: Path) -> None:
             # The UI connection is ready before the background UART readers may
             # have opened both PTY slaves.
             drain(fd, output, 0.5)
-            os.write(masters[0], b"alpha tab integration record\r\n")
-            os.write(masters[1], b"beta tab integration record\r\n")
-            drain(fd, output, 0.5)
+            # Opening both PTY readers is asynchronous. Repeat the small
+            # idempotent records so a slow reader cannot make CI flaky.
+            for _ in range(3):
+                os.write(masters[0], b"alpha tab integration record\r\n")
+                os.write(masters[1], b"beta tab integration record\r\n")
+                drain(fd, output, 0.2)
             os.write(fd, b"\t")  # Alpha tab -> Beta tab
             drain(fd, output, 0.2)
         finally:
