@@ -776,3 +776,22 @@ Future entries must include this per-file added/removed-line summary.
 | --- | ---: | ---: | --- |
 | `docs/hardware-ci.md` | 1 | 1 | Documents UDP headroom and the retained delivery threshold. |
 | `sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py` | 5 | 3 | Captures 550 records and resolves configured artifact directories. |
+
+## 2026-07-13 21:58:23 UTC / 2026-07-13 23:58:23 CEST (Warsaw)
+
+- **Commit:** `89f6d37` — `Add installed CLI TUI integration tests`
+- **Task:** Add a separate CI job that validates the installed CLI TUI, tab cycling, pane synchronization, UDP log persistence, and clean interactive exit.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 21:58:23 UTC / 2026-07-13 23:58:23 CEST (+0200) (Warsaw)
+- **Validation:** `cargo test --locked --package embed-log-tui` — passed (74 tests); `python scripts/test_tui_integration.py --binary /tmp/embed-log-ci-package/bin/embed-log` — passed (installed CLI connected, switched tabs, persisted both UDP sources, and quit cleanly).
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`89f6d37`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 58 | 0 | Adds a package-dependent, self-hosted TUI integration job that verifies the installed CLI. |
+| `crates/embed-log-tui/src/keys.rs` | 36 | 0 | Tests wrapping tab navigation and active-pane reset. |
+| `crates/embed-log-tui/src/state.rs` | 37 | 0 | Tests timestamp synchronization across the active tab's panes. |
+| `docs/development.md` | 2 | 0 | Documents local TUI test commands. |
+| `scripts/test_tui_integration.py` | 145 | 0 | Runs a PTY-installed-CLI TUI integration scenario with two UDP tabs. |
