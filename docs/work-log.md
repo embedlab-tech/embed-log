@@ -710,3 +710,21 @@ Future entries must include this per-file added/removed-line summary.
 | `crates/embed-log-core/src/session/log_parse.rs` | 5 | 8 | Uses a `while let` prefix-stripping loop. |
 | `crates/embed-log-core/src/sources/network.rs` | 3 | 0 | Documents the config-shaped capture constructor and its argument allowance. |
 | `crates/embed-log-tui/src/draw.rs` | 2 | 2 | Uses explicit size clamping for the help overlay. |
+
+## 2026-07-13 18:28:00 UTC / 2026-07-13 20:28:00 CEST (Warsaw)
+
+- **Commit:** `799c2b9` — `Move STM32G0 hardware test into CI workflow`
+- **Task:** Consolidate hardware validation into the regular CI workflow and prevent successful skips or stale capture reuse.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 18:28:00 UTC / 2026-07-13 20:28:00 CEST (+0200) (Warsaw)
+- **Validation:** `PATH=/tmp/embed-log-ci-package/bin:$PATH EMBED_LOG_STM32G0_HARDWARE=1 EMBED_LOG_STM32G0_ARTIFACT_DIR=/tmp/embed-log-stm32g0-single-ci /tmp/embed-log-hw-venv/bin/python -m pytest sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py -q` — passed (1 passed); resulting artifact directory contained exactly one session.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`799c2b9`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 38 | 9 | Replaces the skipped legacy UART job with serialized STM32G0 hardware validation. |
+| `.github/workflows/hardware-integration.yml` | 0 | 123 | Removes the redundant standalone hardware workflow. |
+| `docs/hardware-ci.md` | 15 | 16 | Documents the CI-integrated hardware job. |
+| `sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py` | 3 | 1 | Fails absent enabled hardware paths and clears configured captures before each run. |
