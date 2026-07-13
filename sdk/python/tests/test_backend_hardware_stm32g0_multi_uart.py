@@ -37,13 +37,18 @@ DEFAULT_PORTS = {
     "USART3": "/dev/serial/by-id/usb-FTDI_Quad_RS232-HS-if02-port0",
     "USART4": "/dev/serial/by-id/usb-FTDI_Quad_RS232-HS-if00-port0",
 }
-PERIPHERALS = {"USART1": "uart1", "USART3": "uart3", "USART4": "uart4"}
+UART_PROFILES = {
+    "USART1": {"peripheral": "uart1", "baudrate": 115200, "interval_ms": 10},
+    "USART3": {"peripheral": "uart3", "baudrate": 460800, "interval_ms": 10},
+    "USART4": {"peripheral": "uart4", "baudrate": 1000000, "interval_ms": 10},
+}
 COUNTER_RE = {
     source: re.compile(rf"^\[{source}\] INFO Counter=(\d+)$")
-    for source in PERIPHERALS
+    for source in UART_PROFILES
 }
 FORWARDED_RE = re.compile(r"^FORWARDED (USART[134]): \[(USART[134])\] INFO Counter=(\d+)$")
-SAMPLE_COUNT = 100
+SAMPLE_COUNT = 500
+CAPTURE_TIMEOUT_SECONDS = 75
 
 
 class HardwareServer:
@@ -170,7 +175,7 @@ def stm32g0_ports() -> dict[str, str]:
         pytest.skip(f"set {HARDWARE_GATE}=1 to run the STM32G0 hardware test")
     ports = dict(DEFAULT_PORTS)
     ports["CONTROL"] = os.environ.get(CONTROL_PORT_ENV, ports["CONTROL"])
-    for source in PERIPHERALS:
+    for source in UART_PROFILES:
         ports[source] = os.environ.get(f"EMBED_LOG_STM32G0_{source}_PORT", ports[source])
     missing = [f"{source}={path}" for source, path in ports.items() if not Path(path).exists()]
     if missing:
@@ -210,7 +215,13 @@ def test_stm32g0_four_uart_sources_and_udp_forwarding(
         "logs": {"dir": str(logs_dir)},
         "baudrate": 115200,
         "sources": [
-            {"name": source, "label": source, "type": "uart", "port": path, "baudrate": 115200}
+            {
+                "name": source,
+                "label": source,
+                "type": "uart",
+                "port": path,
+                "baudrate": UART_PROFILES[source]["baudrate"] if source in UART_PROFILES else 115200,
+            }
             for source, path in stm32g0_ports.items()
         ]
         + [{"name": "FORWARDED_UDP", "label": "Python forwarded UDP", "type": "udp", "port": udp_port}],
@@ -225,22 +236,24 @@ def test_stm32g0_four_uart_sources_and_udp_forwarding(
     server = HardwareServer(embed_log_binary, config_path, frontend_dir, ws_port, artifact_dir / "embed-log.stdout.log")
     server.start()
 
-    observed: dict[str, list[int]] = {source: [] for source in PERIPHERALS}
+    observed: dict[str, list[int]] = {source: [] for source in UART_PROFILES}
     try:
         # Give the loopback UDP task a moment to bind before forwarding records.
         time.sleep(0.5)
         with EmbedLogClient.from_config(config_path, origin="stm32g0-hardware") as client, socket.socket(
             socket.AF_INET, socket.SOCK_DGRAM
         ) as forward_socket:
-            client.subscribe(list(PERIPHERALS))
+            client.subscribe(list(UART_PROFILES))
             try:
                 shell_write(client, "scenario stop")
-                for source, peripheral in PERIPHERALS.items():
-                    shell_write(client, f"gen {peripheral} interval 40")
-                    shell_write(client, f"gen {peripheral} random off")
-                    shell_write(client, f"gen {peripheral} start")
+                for profile in UART_PROFILES.values():
+                    shell_write(client, f"uart {profile['peripheral']} baud {profile['baudrate']}")
+                for profile in UART_PROFILES.values():
+                    shell_write(client, f"gen {profile['peripheral']} interval {profile['interval_ms']}")
+                    shell_write(client, f"gen {profile['peripheral']} random off")
+                    shell_write(client, f"gen {profile['peripheral']} start")
 
-                deadline = time.monotonic() + 35
+                deadline = time.monotonic() + CAPTURE_TIMEOUT_SECONDS
                 while time.monotonic() < deadline and any(len(values) < SAMPLE_COUNT for values in observed.values()):
                     for entry in client.entries(timeout=0.5):
                         pattern = COUNTER_RE.get(entry.source_id)
@@ -259,6 +272,9 @@ def test_stm32g0_four_uart_sources_and_udp_forwarding(
                     assert_contiguous(counters, source)
             finally:
                 shell_write(client, "scenario stop")
+                for profile in UART_PROFILES.values():
+                    if profile["baudrate"] != 115200:
+                        shell_write(client, f"uart {profile['peripheral']} baud 115200")
     finally:
         server.stop()
 
@@ -271,7 +287,7 @@ def test_stm32g0_four_uart_sources_and_udp_forwarding(
     assert Path(manifest["session_html"]).exists()
 
     source_files = {source: Path(path) for source, path in manifest["source_files"].items()}
-    expected_sources = {"CONTROL", *PERIPHERALS, "FORWARDED_UDP"}
+    expected_sources = {"CONTROL", *UART_PROFILES, "FORWARDED_UDP"}
     assert set(source_files) == expected_sources
     for source, path in source_files.items():
         assert path.exists(), f"missing {source} log: {path}"
@@ -280,7 +296,7 @@ def test_stm32g0_four_uart_sources_and_udp_forwarding(
         messages = saved_messages(source_files[source])
         counters = [int(match.group(1)) for message in messages if (match := pattern.fullmatch(message))]
         assert_contiguous(counters, source)
-        for other in set(PERIPHERALS) - {source}:
+        for other in set(UART_PROFILES) - {source}:
             assert not any(f"[{other}]" in message for message in messages), (
                 f"{source} contains traffic from {other}: {messages}"
             )
@@ -291,6 +307,6 @@ def test_stm32g0_four_uart_sources_and_udp_forwarding(
         match.groups() for message in saved_messages(source_files["FORWARDED_UDP"])
         if (match := FORWARDED_RE.fullmatch(message))
     ]
-    for source in PERIPHERALS:
+    for source in UART_PROFILES:
         forwarded_counters = [int(counter) for forwarded_source, label, counter in forwarded if forwarded_source == label == source]
         assert_contiguous(forwarded_counters, f"forwarded {source}")

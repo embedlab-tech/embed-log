@@ -7,7 +7,7 @@
 1. A clean GitHub-hosted `ubuntu-latest` job builds and packages the release CLI tarball.
 2. The `stm-lab` runner downloads and installs that exact tarball only in `RUNNER_TEMP`.
 3. It verifies all four stable UART paths, builds and flashes a pinned pre-provisioned `embed-sandbox` checkout, then runs its independent multi-baud preflight.
-4. The STM32G0 pytest starts embed-log with four UART sources (`CONTROL`, `USART1`, `USART3`, and `USART4`) and a loopback UDP source. Python automation controls the Zephyr shell through `CONTROL`, forwards subscribed generator messages over UDP, and verifies source isolation and persisted session files.
+4. The STM32G0 pytest starts embed-log with four UART sources (`CONTROL` at 115200, `USART1` at 115200, `USART3` at 460800, and `USART4` at 1000000) and a loopback UDP source. Python automation applies the matching Zephyr-shell baud profiles through `CONTROL`, captures at least 500 deterministic records per data UART, forwards subscribed generator messages over UDP, and verifies source isolation and persisted session files.
 5. Captured configuration, server output, logs, and generated session reports are uploaded from `captures/` even when the test fails.
 
 ## Runner setup
