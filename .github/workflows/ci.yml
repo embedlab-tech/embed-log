@@ -574,6 +574,14 @@ jobs:
           which embed-log
           embed-log --version
 
+      - name: Set up Python for self-update test
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verify installed CLI self-update
+        run: python scripts/test_update_integration.py --binary "${{ runner.temp }}/embed-log-bin/embed-log"
+
       - name: Install UI test dependencies
         run: npm --prefix tests-ui ci
 

@@ -47,6 +47,7 @@ just test regression     # broader Playwright regression suite
 just test all            # Rust + ui-unit + ui
 cargo test -p embed-log-tui
 python scripts/test_tui_integration.py --binary target/release/embed-log
+python scripts/test_update_integration.py --binary target/release/embed-log
 ```
 
 Install the CLI from the release build:
