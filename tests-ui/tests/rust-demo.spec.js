@@ -105,20 +105,28 @@ test.describe('Rust backend browser e2e', () => {
       log.dispatchEvent(new Event('scroll'));
       log.scrollTop = maxScroll * 0.8;
       log.dispatchEvent(new Event('scroll'));
+
+      const hasVisibleRow = () => {
+        const viewport = log.getBoundingClientRect();
+        return [...log.querySelectorAll('.log-line')].some(row => {
+          const bounds = row.getBoundingClientRect();
+          return bounds.bottom > viewport.top && bounds.top < viewport.bottom;
+        });
+      };
+      // The viewport is already outside the prior virtual range. It must be
+      // populated in this scroll event, not only in a later animation frame.
+      const hasImmediateVisibleRow = hasVisibleRow();
       await new Promise(requestAnimationFrame);
       await new Promise(requestAnimationFrame);
 
-      const viewport = log.getBoundingClientRect();
-      const rows = [...log.querySelectorAll('.log-line')];
       return {
-        renderedRows: rows.length,
-        hasVisibleRow: rows.some(row => {
-          const bounds = row.getBoundingClientRect();
-          return bounds.bottom > viewport.top && bounds.top < viewport.bottom;
-        }),
+        renderedRows: log.querySelectorAll('.log-line').length,
+        hasImmediateVisibleRow,
+        hasVisibleRow: hasVisibleRow(),
       };
     });
     expect(renderedViewport.renderedRows).toBeGreaterThan(0);
+    expect(renderedViewport.hasImmediateVisibleRow).toBe(true);
     expect(renderedViewport.hasVisibleRow).toBe(true);
   });
 

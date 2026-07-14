@@ -992,6 +992,21 @@ export function _linesSetupPane(id) {
 
         const firstOrdinal = Number.isFinite(vp.firstOrdinal) ? vp.firstOrdinal : 0;
         const lastOrdinal = Number.isFinite(vp.lastOrdinal) ? vp.lastOrdinal : firstOrdinal;
+        const firstVisibleOrdinal = Math.max(0, Math.floor(logEl.scrollTop / rowH));
+        const lastVisibleOrdinal = Math.min(
+            totalCount - 1,
+            Math.ceil((logEl.scrollTop + logEl.clientHeight) / rowH),
+        );
+        const targetIdx = _rawIndexAt(id, vp, midOrdinal);
+
+        // A queued rAF is fine while the viewport remains inside overscan, but
+        // never defer when it has crossed the currently rendered range: the
+        // absolute-positioned rows would otherwise leave a visibly blank pane.
+        if (firstVisibleOrdinal < firstOrdinal || lastVisibleOrdinal > lastOrdinal) {
+            if (targetIdx !== undefined) _renderVirtualWindow(id, { targetIdx });
+            return;
+        }
+
         const rangeCenter = firstOrdinal + Math.floor((lastOrdinal - firstOrdinal) / 2);
         if (Math.abs(midOrdinal - rangeCenter) > OVERSCAN) {
             if (_pendingRaf.has(id)) return;
