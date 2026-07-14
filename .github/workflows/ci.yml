@@ -95,7 +95,7 @@ jobs:
         run: npx playwright install firefox
 
       - name: Run Firefox cached-refresh regression
-        run: npm --prefix tests-ui run test:e2e -- --project=firefox --grep "restores a full cached pane promptly after reload"
+        run: npm --prefix tests-ui run test:e2e -- --project=firefox --grep "renders rapid virtual scrolls"
 
   unit-tests:
     name: Unit tests

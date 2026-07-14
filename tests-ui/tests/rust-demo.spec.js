@@ -56,7 +56,7 @@ test.describe('Rust backend browser e2e', () => {
     await waitForLineContaining(page, 'HOST', 'E2E HOST ready');
   });
 
-  test('restores a full cached pane promptly after reload', async ({ page }) => {
+  test('restores a full cached pane promptly and renders rapid virtual scrolls', async ({ page }) => {
     await page.goto('/');
     await waitForWs(page);
     await expect(page.locator('#pane-DUT .pane-name')).toHaveText('DUT UART');
@@ -93,6 +93,33 @@ test.describe('Rust backend browser e2e', () => {
     await page.reload();
     await expect(page.locator('#log-DUT')).toContainText('E2E cached refresh marker 1499');
     expect(Date.now() - startedAt).toBeLessThan(4_000);
+
+    const renderedViewport = await page.evaluate(async () => {
+      const log = document.getElementById('log-DUT');
+      const maxScroll = log.scrollHeight - log.clientHeight;
+      if (maxScroll <= 0) return { hasVisibleRow: false, renderedRows: 0 };
+
+      // Queue a render for an old position, then make a large second jump
+      // before rAF runs. The renderer must use this final scroll position.
+      log.scrollTop = maxScroll * 0.1;
+      log.dispatchEvent(new Event('scroll'));
+      log.scrollTop = maxScroll * 0.8;
+      log.dispatchEvent(new Event('scroll'));
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+
+      const viewport = log.getBoundingClientRect();
+      const rows = [...log.querySelectorAll('.log-line')];
+      return {
+        renderedRows: rows.length,
+        hasVisibleRow: rows.some(row => {
+          const bounds = row.getBoundingClientRect();
+          return bounds.bottom > viewport.top && bounds.top < viewport.bottom;
+        }),
+      };
+    });
+    expect(renderedViewport.renderedRows).toBeGreaterThan(0);
+    expect(renderedViewport.hasVisibleRow).toBe(true);
   });
 
   test('decodes CBOR datagrams in the browser pane', async ({ page }) => {

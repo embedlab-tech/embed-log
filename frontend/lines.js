@@ -998,7 +998,20 @@ export function _linesSetupPane(id) {
             _pendingRaf.set(id, true);
             requestAnimationFrame(() => {
                 _pendingRaf.delete(id);
-                const targetIdx = _rawIndexAt(id, vp, midOrdinal);
+                // More scroll events can arrive before this frame. Recompute
+                // from the current position instead of rendering the stale
+                // midpoint captured above; otherwise a rapid jump can leave
+                // the viewport outside the newly rendered virtual window.
+                if (_virtualPanes.get(id) !== vp) return;
+                const latestRowH = vp.rowHeight > 0 ? vp.rowHeight : _measureRowHeight(id);
+                const latestTotal = _visibleCount(id, vp);
+                if (!latestTotal) return;
+                const latestViewMid = logEl.scrollTop + logEl.clientHeight / 2;
+                const latestMidOrdinal = Math.max(
+                    0,
+                    Math.min(latestTotal - 1, Math.round(latestViewMid / latestRowH)),
+                );
+                const targetIdx = _rawIndexAt(id, vp, latestMidOrdinal);
                 if (targetIdx !== undefined) _renderVirtualWindow(id, { targetIdx });
             });
         }
