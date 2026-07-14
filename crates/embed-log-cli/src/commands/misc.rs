@@ -88,7 +88,7 @@ pub(crate) async fn cmd_update(
     allow_downgrade: bool,
     json: bool,
 ) -> Result<()> {
-    let release = {
+    let release: GithubRelease = {
         #[cfg(target_os = "windows")]
         {
             let _ = (check, requested_version, yes, allow_downgrade);
