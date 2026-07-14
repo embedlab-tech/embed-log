@@ -997,3 +997,18 @@ Future entries must include this per-file added/removed-line summary.
 | --- | ---: | ---: | --- |
 | `.github/workflows/ci.yml` | 14 | 0 | Runs file-watch checks for the Windows build and installed Linux package. |
 | `scripts/test_file_watch_integration.py` | 124 | 0 | Starts the CLI with an absolute file path, spawns an external appender, and verifies session persistence. |
+
+## 2026-07-14 16:04:34 UTC / 2026-07-14 18:04:34 CEST (Warsaw)
+
+- **Commit:** `a2d3ffe` — `Upload Windows Firefox failure reports`
+- **Task:** Preserve diagnostic artifacts for failures in the native Windows Firefox regression job.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-14 16:04:34 UTC / 2026-07-14 18:04:34 CEST (+0200) (Warsaw)
+- **Validation:** workflow assertion confirms a failure-only Windows Firefox report upload includes Playwright reports and test results; `git diff --check` passed.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`a2d3ffe`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 11 | 0 | Uploads Windows Firefox Playwright report and test-result artifacts on failure. |
