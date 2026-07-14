@@ -1012,3 +1012,19 @@ Future entries must include this per-file added/removed-line summary.
 | File | Added | Removed | Summary |
 | --- | ---: | ---: | --- |
 | `.github/workflows/ci.yml` | 11 | 0 | Uploads Windows Firefox Playwright report and test-result artifacts on failure. |
+
+## 2026-07-14 17:43:03 UTC / 2026-07-14 19:43:03 CEST (Warsaw)
+
+- **Commit:** `f6e78fb` — `Prevent blank virtual viewports while scrolling`
+- **Task:** Remove the remaining blank-pane window when scrolling beyond the virtualized range.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-14 17:43:03 UTC / 2026-07-14 19:43:03 CEST (+0200) (Warsaw)
+- **Validation:** rapid virtual-scroll E2E passed in Chromium (591 ms) and Firefox (1.3 s); the test requires a visible row immediately after the second scroll event as well as after rAF; `git diff --check` passed.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`f6e78fb`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `frontend/lines.js` | 15 | 0 | Synchronously shifts the virtual window if the viewport has left its rendered range. |
+| `tests-ui/tests/rust-demo.spec.js` | 15 | 7 | Requires immediate visible rows after a rapid two-jump scroll. |
