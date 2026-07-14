@@ -1028,3 +1028,21 @@ Future entries must include this per-file added/removed-line summary.
 | --- | ---: | ---: | --- |
 | `frontend/lines.js` | 15 | 0 | Synchronously shifts the virtual window if the viewport has left its rendered range. |
 | `tests-ui/tests/rust-demo.spec.js` | 15 | 7 | Requires immediate visible rows after a rapid two-jump scroll. |
+
+## 2026-07-14 17:46:24 UTC / 2026-07-14 19:46:24 CEST (Warsaw)
+
+- **Commit:** `831e7d0` — `Test live inputs in native Windows Edge`
+- **Task:** Add native Windows Edge coverage for live filter typing and serial-TX entry.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-14 17:46:24 UTC / 2026-07-14 19:46:24 CEST (+0200) (Warsaw)
+- **Validation:** full Chromium Rust-backend browser E2E passed (6 tests); focused Firefox virtual-scroll regression passed (1.6 s); Windows workflow assertion passed; `git diff --check` passed.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`831e7d0`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 7 | 3 | Runs the focused live-input test in native Windows Edge and generalizes failure artifacts. |
+| `tests-ui/playwright.config.js` | 3 | 0 | Enables the Edge channel only when Windows CI requests it. |
+| `tests-ui/rust-demo-server.mjs` | 9 | 0 | Adds a deliberately unavailable UART pane for serial-TX UI testing. |
+| `tests-ui/tests/rust-demo.spec.js` | 36 | 0 | Verifies browser typing filters live logs and Enter sends serial TX. |
