@@ -946,3 +946,21 @@ Future entries must include this per-file added/removed-line summary.
 | File | Added | Removed | Summary |
 | --- | ---: | ---: | --- |
 | `crates/embed-log-cli/src/commands/misc.rs` | 1 | 1 | Explicitly types the cfg-gated `GithubRelease` binding for Windows compilation. |
+
+## 2026-07-14 11:25:05 UTC / 2026-07-14 13:25:05 CEST (Warsaw)
+
+- **Commit:** `b5def9c` — `Batch cached log restoration on browser refresh`
+- **Task:** Eliminate the multi-second browser refresh stall caused by per-row cached-log rendering and cover it with a Windows Firefox regression job.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-14 11:25:05 UTC / 2026-07-14 13:25:05 CEST (+0200) (Warsaw)
+- **Validation:** focused cached-refresh E2E passed in Chromium (594 ms) and Firefox (1.2 s); CI workflow assertion passed; `git diff --check` passed.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`b5def9c`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 32 | 0 | Adds a native Windows Firefox cached-refresh regression job. |
+| `frontend/persist.js` | 21 | 7 | Restores cached log rows through one virtualized batch instead of one render per row. |
+| `tests-ui/playwright.config.js` | 5 | 0 | Enables Firefox only for the focused regression through `E2E_FIREFOX=1`. |
+| `tests-ui/tests/rust-demo.spec.js` | 39 | 0 | Seeds a 1,500-row pane cache, reloads, and enforces prompt restoration. |
