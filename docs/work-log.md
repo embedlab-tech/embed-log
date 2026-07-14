@@ -916,3 +916,18 @@ Future entries must include this per-file added/removed-line summary.
 | `.github/workflows/release-cli.yml` | 14 | 0 | Runs Unix updater replacement fixtures and Windows updater-guidance checks before artifact upload. |
 | `docs/releasing.md` | 1 | 1 | Documents release-matrix updater validation. |
 | `scripts/test_update_integration.py` | 21 | 7 | Selects the correct Linux/macOS update target dynamically. |
+
+## 2026-07-14 05:05:38 UTC / 2026-07-14 07:05:38 CEST (Warsaw)
+
+- **Commit:** `4078025` — `Remove internal transport name from roadmap`
+- **Task:** Remove the remaining internal transport name from tracked documentation.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-14 05:05:38 UTC / 2026-07-14 07:05:38 CEST (+0200) (Warsaw)
+- **Validation:** case-insensitive tracked-text scan for `gwl`, `lnk`, `mcu-link`, `reader controller`, and `lnk121` found no remaining textual matches.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`4078025`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `docs/non-session-roadmap.md` | 1 | 1 | Replaces the internal transport name with neutral custom-transport wording. |
