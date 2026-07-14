@@ -1,6 +1,6 @@
 import { getPanePluginUiState, replacePanePluginUiState } from './pluginRuntime.js';
 import { state, TABS, PANES } from './state.js';
-import { appendLine, updateJumpBtn, setTimestampMode, getLine } from './lines.js';
+import { appendLineBatch, updateJumpBtn, setTimestampMode, getLine } from './lines.js';
 import { createTabWithPanes } from './tabcreate.js';
 import { switchTab } from './tabs.js';
 
@@ -90,22 +90,36 @@ function _restoreIfPossible() {
     }
     replacePanePluginUiState(snap.panePluginUiState);
 
-    // Refill panes that are currently empty.
+    // Refill panes that are currently empty. Restore every cached row in one
+    // batch: appendLine() would render and measure the virtual pane once per
+    // row (up to 1,500 times per pane), making a browser refresh visibly stall.
     const byPane = snap.lines && typeof snap.lines === 'object' ? snap.lines : {};
+    const restoreEntries = [];
+    const restoredPanes = [];
     Object.entries(byPane).forEach(([paneId, entries]) => {
         if (!PANES.includes(paneId)) return;
         if (!Array.isArray(entries) || entries.length === 0) return;
         if ((state.rawLines[paneId] || []).length > 0) return; // avoid duplicates
 
         state.atBottom[paneId] = false;
+        restoredPanes.push(paneId);
         entries.forEach(e => {
-            appendLine(paneId, e.ts || '', e.text || '', !!e.isTx, {
-                absTs: e.absTs ?? null,
-                absNum: e.absNum ?? null,
-                relTs: e.relTs ?? null,
-                relNum: e.relNum ?? null,
+            restoreEntries.push({
+                paneId,
+                ts: e.ts || '',
+                rawText: e.text || '',
+                isTx: !!e.isTx,
+                meta: {
+                    absTs: e.absTs ?? null,
+                    absNum: e.absNum ?? null,
+                    relTs: e.relTs ?? null,
+                    relNum: e.relNum ?? null,
+                },
             });
         });
+    });
+    appendLineBatch(restoreEntries);
+    restoredPanes.forEach(paneId => {
         const logEl = document.getElementById('log-' + paneId);
         if (logEl) {
             logEl.scrollTop = logEl.scrollHeight;

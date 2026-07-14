@@ -29,5 +29,10 @@ export default defineConfig({
   } : undefined,
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    // Keep the broad suite Chromium-only; CI enables Firefox for the focused
+    // refresh regression with E2E_FIREFOX=1.
+    ...(process.env.E2E_FIREFOX === '1'
+      ? [{ name: 'firefox', use: { ...devices['Desktop Firefox'] } }]
+      : []),
   ],
 });

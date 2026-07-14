@@ -56,6 +56,45 @@ test.describe('Rust backend browser e2e', () => {
     await waitForLineContaining(page, 'HOST', 'E2E HOST ready');
   });
 
+  test('restores a full cached pane promptly after reload', async ({ page }) => {
+    await page.goto('/');
+    await waitForWs(page);
+    await expect(page.locator('#pane-DUT .pane-name')).toHaveText('DUT UART');
+
+    await page.evaluate(() => {
+      const sessionId = localStorage.getItem('embed-log:last-session-id');
+      const key = `embed-log:session:${sessionId}:v1`;
+      const marker = 'E2E cached refresh marker 1499';
+      localStorage.setItem(key, JSON.stringify({
+        tabs: [],
+        activeTab: 0,
+        fontSize: 14,
+        timestampMode: 'absolute',
+        panePluginUiState: {},
+        lines: {
+          DUT: Array.from({ length: 1500 }, (_, index) => ({
+            ts: `12:00:${String(index % 60).padStart(2, '0')}`,
+            text: index === 1499 ? marker : `E2E cached refresh row ${index}`,
+            isTx: false,
+          })),
+        },
+        savedAt: Date.now(),
+      }));
+
+      // Do not let beforeunload overwrite the seeded full cache.
+      const setItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (name, value) {
+        if (name === key) return;
+        return setItem.call(this, name, value);
+      };
+    });
+
+    const startedAt = Date.now();
+    await page.reload();
+    await expect(page.locator('#log-DUT')).toContainText('E2E cached refresh marker 1499');
+    expect(Date.now() - startedAt).toBeLessThan(4_000);
+  });
+
   test('decodes CBOR datagrams in the browser pane', async ({ page }) => {
     await page.goto('/');
     await waitForWs(page);

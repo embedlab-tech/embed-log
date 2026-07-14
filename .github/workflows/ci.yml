@@ -65,6 +65,38 @@ jobs:
       - name: Build CLI
         run: cargo build --locked --package embed-log-cli --bin embed-log
 
+  windows-firefox-refresh:
+    name: Windows Firefox refresh regression
+    runs-on: windows-latest
+    needs: format
+    timeout-minutes: 30
+    env:
+      CI: "true"
+      E2E_FIREFOX: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: tests-ui/package-lock.json
+
+      - name: Install UI test dependencies
+        run: npm --prefix tests-ui ci
+
+      - name: Install Playwright Firefox
+        working-directory: tests-ui
+        run: npx playwright install firefox
+
+      - name: Run Firefox cached-refresh regression
+        run: npm --prefix tests-ui run test:e2e -- --project=firefox --grep "restores a full cached pane promptly after reload"
+
   unit-tests:
     name: Unit tests
     runs-on: [self-hosted, Linux]
