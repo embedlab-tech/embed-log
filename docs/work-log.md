@@ -882,3 +882,20 @@ Future entries must include this per-file added/removed-line summary.
 | --- | ---: | ---: | --- |
 | `.github/workflows/release-cli.yml` | 12 | 4 | Adds publish opt-in and correct branch checkout for manual matrix dry runs. |
 | `docs/releasing.md` | 1 | 1 | Documents the non-publishing hosted release test dispatch. |
+
+## 2026-07-14 03:36:39 UTC / 2026-07-14 05:36:39 CEST (Warsaw)
+
+- **Commit:** `3362e78` — `Verify installed CLI self-update in CI`
+- **Task:** Add a deterministic installed-CLI self-update integration test to CI.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-14 03:36:39 UTC / 2026-07-14 05:36:39 CEST (+0200) (Warsaw)
+- **Validation:** `python scripts/test_update_integration.py --binary /tmp/embed-log-ci-package/bin/embed-log` — passed; `cargo test --locked --package embed-log-cli` — passed (90 tests); CI workflow ordering assertion — passed.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`3362e78`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 8 | 0 | Runs the self-update fixture against the installed release package before installed UI E2E. |
+| `docs/development.md` | 1 | 0 | Documents the local self-update integration command. |
+| `scripts/test_update_integration.py` | 121 | 0 | Serves a checksummed local release fixture and verifies check, update, replacement, and executable health. |
