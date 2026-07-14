@@ -16,7 +16,7 @@ The frontend assets are embedded into the Rust binary at build time via `rust-em
 | `macos-13` | `embed-log-x86_64-apple-darwin.tar.gz` |
 | `windows-latest` | `embed-log-x86_64-pc-windows-msvc.zip` |
 
-Every matrix entry runs the CLI/core/TUI Rust tests, builds a native release binary, packages it, and smoke-tests the extracted archive before the publish job can create a release.
+Every matrix entry runs the CLI/core/TUI Rust tests, builds a native release binary, packages it, and smoke-tests the extracted archive before the publish job can create a release. Unix entries also run the checksum-verified self-update fixture against that packaged binary; Windows verifies its documented installer-only update guidance.
 
 ## Create a CLI release
 

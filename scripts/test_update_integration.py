@@ -13,6 +13,7 @@ import hashlib
 import http.server
 import json
 import os
+import platform
 import shutil
 import subprocess
 import tarfile
@@ -20,9 +21,19 @@ import tempfile
 import threading
 from pathlib import Path
 
-TARGET = "x86_64-unknown-linux-gnu"
-ARCHIVE_NAME = f"embed-log-{TARGET}.tar.gz"
 TAG = "v1.0.1"
+
+
+def update_target() -> str:
+    system = platform.system()
+    machine = platform.machine().lower()
+    if system == "Linux" and machine in {"x86_64", "amd64"}:
+        return "x86_64-unknown-linux-gnu"
+    if system == "Darwin" and machine in {"arm64", "aarch64"}:
+        return "aarch64-apple-darwin"
+    if system == "Darwin" and machine == "x86_64":
+        return "x86_64-apple-darwin"
+    raise SystemExit(f"self-update fixture is unsupported on {system} {machine}")
 
 
 def main() -> int:
@@ -32,6 +43,9 @@ def main() -> int:
     binary = args.binary.resolve()
     if not binary.is_file() or not os.access(binary, os.X_OK):
         raise SystemExit(f"not an executable embed-log binary: {binary}")
+
+    target = update_target()
+    archive_name = f"embed-log-{target}.tar.gz"
 
     with tempfile.TemporaryDirectory(prefix="embed-log-update-test-") as directory:
         root = Path(directory)
@@ -46,14 +60,14 @@ def main() -> int:
             output.write(b"\nembed-log-update-integration-fixture\n")
         candidate.chmod(0o755)
 
-        archive = root / ARCHIVE_NAME
+        archive = root / archive_name
         with tarfile.open(archive, "w:gz") as tar:
             info = tar.gettarinfo(candidate, arcname="embed-log")
             info.mode = 0o755
             with candidate.open("rb") as source:
                 tar.addfile(info, source)
         checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
-        sums = f"{checksum}  {ARCHIVE_NAME}\n".encode()
+        sums = f"{checksum}  {archive_name}\n".encode()
 
         class ReleaseHandler(http.server.BaseHTTPRequestHandler):
             def do_GET(self) -> None:  # noqa: N802
@@ -64,12 +78,12 @@ def main() -> int:
                             "tag_name": TAG,
                             "html_url": f"{base}/release/{TAG}",
                             "assets": [
-                                {"name": ARCHIVE_NAME, "browser_download_url": f"{base}/assets/{ARCHIVE_NAME}"},
+                                {"name": archive_name, "browser_download_url": f"{base}/assets/{archive_name}"},
                                 {"name": "SHA256SUMS", "browser_download_url": f"{base}/assets/SHA256SUMS"},
                             ],
                         }
                     ).encode()
-                elif self.path == f"/assets/{ARCHIVE_NAME}":
+                elif self.path == f"/assets/{archive_name}":
                     body = archive.read_bytes()
                 elif self.path == "/assets/SHA256SUMS":
                     body = sums
@@ -98,7 +112,7 @@ def main() -> int:
             )
             status = json.loads(check.stdout)
             assert status["update_available"] is True
-            assert status["asset"] == ARCHIVE_NAME
+            assert status["asset"] == archive_name
 
             subprocess.run(
                 [str(installed), "update", "--version", TAG, "--yes"],

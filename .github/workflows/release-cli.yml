@@ -111,6 +111,20 @@ jobs:
           test -x "smoke/${{ matrix.binary }}"
           "smoke/${{ matrix.binary }}" version --json
 
+      - name: Verify Unix self-update from packaged CLI
+        if: runner.os != 'Windows'
+        shell: bash
+        run: python3 scripts/test_update_integration.py --binary "smoke/${{ matrix.binary }}"
+
+      - name: Verify Windows self-update guidance
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $result = & "smoke/${{ matrix.binary }}" update --json | ConvertFrom-Json
+          if ($result.self_update_supported -ne $false) {
+            throw "Windows update command unexpectedly reported self-update support"
+          }
+
       - name: Smoke-test Windows archive
         if: runner.os == 'Windows'
         shell: pwsh
