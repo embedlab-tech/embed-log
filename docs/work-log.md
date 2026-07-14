@@ -964,3 +964,20 @@ Future entries must include this per-file added/removed-line summary.
 | `frontend/persist.js` | 21 | 7 | Restores cached log rows through one virtualized batch instead of one render per row. |
 | `tests-ui/playwright.config.js` | 5 | 0 | Enables Firefox only for the focused regression through `E2E_FIREFOX=1`. |
 | `tests-ui/tests/rust-demo.spec.js` | 39 | 0 | Seeds a 1,500-row pane cache, reloads, and enforces prompt restoration. |
+
+## 2026-07-14 14:26:44 UTC / 2026-07-14 16:26:44 CEST (Warsaw)
+
+- **Commit:** `3ac3646` — `Render virtual panes at latest scroll position`
+- **Task:** Prevent blank virtual-pane viewports after rapid scrolling and add a Firefox regression check.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-14 14:26:44 UTC / 2026-07-14 16:26:44 CEST (+0200) (Warsaw)
+- **Validation:** rapid virtual-scroll E2E passed in Chromium (642 ms) and Firefox (1.3 s); CI workflow assertion passed; `git diff --check` passed.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`3ac3646`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 1 | 1 | Updates the focused Windows Firefox job to run the virtual-scroll regression. |
+| `frontend/lines.js` | 14 | 1 | Recomputes the target virtual range from the latest scroll position in rAF. |
+| `tests-ui/tests/rust-demo.spec.js` | 28 | 1 | Exercises two large scroll jumps in one frame and requires a rendered visible row. |
