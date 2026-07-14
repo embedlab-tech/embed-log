@@ -931,3 +931,18 @@ Future entries must include this per-file added/removed-line summary.
 | File | Added | Removed | Summary |
 | --- | ---: | ---: | --- |
 | `docs/non-session-roadmap.md` | 1 | 1 | Replaces the internal transport name with neutral custom-transport wording. |
+
+## 2026-07-14 09:45:50 UTC / 2026-07-14 11:45:50 CEST (Warsaw)
+
+- **Commit:** `670e04f` — `Type Windows update release binding`
+- **Task:** Fix Windows compilation of the update command's cfg-gated release binding.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-14 09:45:50 UTC / 2026-07-14 11:45:50 CEST (+0200) (Warsaw)
+- **Validation:** `cargo test --locked --package embed-log-cli` — passed (90 tests). Linux-hosted `cargo check --target x86_64-pc-windows-msvc` reached the MSVC-native `ring` build and stopped because this runner lacks `lib.exe`; native Windows runners provide it.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`670e04f`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-cli/src/commands/misc.rs` | 1 | 1 | Explicitly types the cfg-gated `GithubRelease` binding for Windows compilation. |
