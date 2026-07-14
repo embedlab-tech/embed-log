@@ -41,7 +41,7 @@ This roadmap intentionally excludes session import, export, retention, and brows
 
 ## 4. Zephyr dictionary logging reliability
 
-- Separate standard raw Zephyr dictionary-binary transport from the GWL framed-HEX transport.
+- Separate standard raw Zephyr dictionary-binary transport from the custom framed-HEX transport.
 - Correct timestamp interpretation: do not infer Unix epoch seconds from a raw magnitude without an explicit timestamp source/unit.
 - Add tracked real capture fixtures and transport-specific regression tests.
 - Document supported Zephyr database versions and transport modes precisely.
