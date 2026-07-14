@@ -39,6 +39,13 @@ sources:
     port: 16002
     parser:
       type: cbor-datagram
+  # Intentionally unavailable: it exercises the live UART TX UI without
+  # requiring a physical serial device in browser CI.
+  - name: UART_TX
+    label: Serial TX test
+    type: uart
+    port: COM404
+    baudrate: 115200
 frontend_plugins:
   hex-coap:
     builtin: hex-coap
@@ -50,6 +57,8 @@ tabs:
       - source: HOST
   - label: Sensors
     panes: [SENSORS]
+  - label: Serial
+    panes: [UART_TX]
 `;
   fs.writeFileSync(config, demoConfig);
 }

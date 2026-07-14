@@ -56,6 +56,42 @@ test.describe('Rust backend browser e2e', () => {
     await waitForLineContaining(page, 'HOST', 'E2E HOST ready');
   });
 
+  test('live filter and serial TX inputs accept browser typing', async ({ page }) => {
+    await page.goto('/');
+    await waitForWs(page);
+
+    const keep = 'E2E-FILTER-KEEP';
+    const drop = 'E2E-FILTER-DROP';
+    await sendUdp(16000, `${keep}\n`);
+    await sendUdp(16000, `${drop}\n`);
+    await waitForLineContaining(page, 'DUT', keep);
+    await waitForLineContaining(page, 'DUT', drop);
+
+    const filter = page.locator('.filter-input[data-pane="DUT"]');
+    await filter.fill(keep);
+    await expect(filter).toHaveValue(keep);
+    await expect(page.locator('#log-DUT')).toContainText(keep);
+    await expect(page.locator('#log-DUT')).not.toContainText(drop);
+
+    await page.getByRole('button', { name: 'Serial', exact: true }).click();
+    const txInput = page.locator('#input-UART_TX');
+    await expect(txInput).toBeVisible();
+    await page.evaluate(() => {
+      const original = window.wsSend;
+      window.__embedLogTestSentCommands = [];
+      window.wsSend = command => {
+        window.__embedLogTestSentCommands.push(command);
+        original(command);
+      };
+    });
+    await txInput.fill('status?');
+    await expect(txInput).toHaveValue('status?');
+    await txInput.press('Enter');
+    await expect.poll(() => page.evaluate(() => window.__embedLogTestSentCommands)).toContainEqual({
+      cmd: 'send_raw', id: 'UART_TX', data: 'status?\r',
+    });
+  });
+
   test('restores a full cached pane promptly and renders rapid virtual scrolls', async ({ page }) => {
     await page.goto('/');
     await waitForWs(page);

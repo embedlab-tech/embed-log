@@ -34,5 +34,8 @@ export default defineConfig({
     ...(process.env.E2E_FIREFOX === '1'
       ? [{ name: 'firefox', use: { ...devices['Desktop Firefox'] } }]
       : []),
+    ...(process.env.E2E_EDGE === '1'
+      ? [{ name: 'edge', use: { ...devices['Desktop Chrome'], channel: 'msedge' } }]
+      : []),
   ],
 });
