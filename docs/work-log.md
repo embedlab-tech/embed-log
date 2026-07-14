@@ -981,3 +981,19 @@ Future entries must include this per-file added/removed-line summary.
 | `.github/workflows/ci.yml` | 1 | 1 | Updates the focused Windows Firefox job to run the virtual-scroll regression. |
 | `frontend/lines.js` | 14 | 1 | Recomputes the target virtual range from the latest scroll position in rAF. |
 | `tests-ui/tests/rust-demo.spec.js` | 28 | 1 | Exercises two large scroll jumps in one frame and requires a rendered visible row. |
+
+## 2026-07-14 15:42:10 UTC / 2026-07-14 17:42:10 CEST (Warsaw)
+
+- **Commit:** `72a5afd` — `Verify absolute-path file watching in CI`
+- **Task:** Verify that the CLI tails an absolute-path file receiving appends from a separate process on Linux and Windows CI.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-14 15:42:10 UTC / 2026-07-14 17:42:10 CEST (+0200) (Warsaw)
+- **Validation:** full CLI file-watch fixture passed with `target/debug/embed-log` and the packaged CLI; existing `sources::file::tests::file_source_emits_appended_lines` test passed; CI workflow assertion passed; `git diff --check` passed.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`72a5afd`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 14 | 0 | Runs file-watch checks for the Windows build and installed Linux package. |
+| `scripts/test_file_watch_integration.py` | 124 | 0 | Starts the CLI with an absolute file path, spawns an external appender, and verifies session persistence. |
