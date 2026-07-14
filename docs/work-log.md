@@ -899,3 +899,20 @@ Future entries must include this per-file added/removed-line summary.
 | `.github/workflows/ci.yml` | 8 | 0 | Runs the self-update fixture against the installed release package before installed UI E2E. |
 | `docs/development.md` | 1 | 0 | Documents the local self-update integration command. |
 | `scripts/test_update_integration.py` | 121 | 0 | Serves a checksummed local release fixture and verifies check, update, replacement, and executable health. |
+
+## 2026-07-14 03:51:38 UTC / 2026-07-14 05:51:38 CEST (Warsaw)
+
+- **Commit:** `3e9295c` — `Test updater in every release build`
+- **Task:** Run the deterministic updater verification for every supported release-matrix build.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-14 03:51:38 UTC / 2026-07-14 05:51:38 CEST (+0200) (Warsaw)
+- **Validation:** `python scripts/test_update_integration.py --binary /tmp/embed-log-ci-package/bin/embed-log` — passed; `cargo test --locked --package embed-log-cli` — passed (90 tests); release-matrix updater-step ordering assertion — passed.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`3e9295c`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/release-cli.yml` | 14 | 0 | Runs Unix updater replacement fixtures and Windows updater-guidance checks before artifact upload. |
+| `docs/releasing.md` | 1 | 1 | Documents release-matrix updater validation. |
+| `scripts/test_update_integration.py` | 21 | 7 | Selects the correct Linux/macOS update target dynamically. |
