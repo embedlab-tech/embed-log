@@ -78,7 +78,7 @@ struct GithubAsset {
     browser_download_url: String,
 }
 
-const UPDATE_REPO: &str = "krezolekcoder/embed-log";
+const UPDATE_REPO: &str = "embedlab-tech/embed-log";
 
 /// `embed-log update` checks releases by default; replacement requires --yes.
 pub(crate) async fn cmd_update(
@@ -269,9 +269,9 @@ fn verify_sha256(bytes: &[u8], expected: &str) -> Result<()> {
 fn extract_tar_gz(bytes: &[u8], dest: &Path) -> Result<()> {
     let decoder = flate2::read::GzDecoder::new(bytes);
     let mut archive = tar::Archive::new(decoder);
-    let mut entries = archive.entries().context("read update archive")?;
+    let entries = archive.entries().context("read update archive")?;
     let mut executable = None;
-    while let Some(entry) = entries.next() {
+    for entry in entries {
         let mut entry = entry.context("read update archive entry")?;
         let path = entry.path().context("read update archive path")?;
         anyhow::ensure!(
@@ -1208,11 +1208,11 @@ mod tests {
     fn release_api_url_supports_default_and_explicit_tags() {
         assert_eq!(
             release_api_url("http://127.0.0.1:9999/", None),
-            "http://127.0.0.1:9999/repos/krezolekcoder/embed-log/releases/latest"
+            "http://127.0.0.1:9999/repos/embedlab-tech/embed-log/releases/latest"
         );
         assert_eq!(
             release_api_url("https://api.github.com", Some("v1.2.3")),
-            "https://api.github.com/repos/krezolekcoder/embed-log/releases/tags/v1.2.3"
+            "https://api.github.com/repos/embedlab-tech/embed-log/releases/tags/v1.2.3"
         );
     }
 

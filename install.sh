@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-REPO="${EMBED_LOG_REPO:-krezolekcoder/embed-log}"
+REPO="${EMBED_LOG_REPO:-embedlab-tech/embed-log}"
 BIN="embed-log"
 VERSION="${EMBED_LOG_VERSION:-latest}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"

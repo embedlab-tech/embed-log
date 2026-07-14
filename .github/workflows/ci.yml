@@ -139,16 +139,14 @@ jobs:
           path: dist/embed-log-x86_64-unknown-linux-gnu.tar.gz
           if-no-files-found: error
 
-  backend-hardware-tests:
-    name: Backend hardware tests
+  tui-integration-tests:
+    name: TUI integration tests
     runs-on: [self-hosted, Linux]
     needs: package-cli-linux
-    timeout-minutes: 45
+    timeout-minutes: 30
     env:
       CI: "true"
-      CARGO_TERM_COLOR: always
-      EMBED_LOG_HARDWARE_UART_PORT: /dev/ttyACM3
-      EMBED_LOG_HARDWARE_UART_BAUD: "115200"
+      EMBED_LOG_TUI_BINARY: ${{ github.workspace }}/.tooling/bin/embed-log
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -167,7 +165,98 @@ jobs:
           tar -xzf dist/embed-log-x86_64-unknown-linux-gnu.tar.gz -C .tooling/bin
           echo "$PWD/.tooling/bin" >> "$GITHUB_PATH"
 
-      - name: Setup Python
+      - name: Verify installed CLI selected for TUI test
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="$(readlink -f "$EMBED_LOG_TUI_BINARY")"
+          actual="$(readlink -f "$(command -v embed-log)")"
+          test "$actual" = "$expected"
+          embed-log version --json
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run TUI state and render tests
+        run: cargo test --locked --package embed-log-tui
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run installed CLI TUI integration test
+        run: python scripts/test_tui_integration.py --binary "$EMBED_LOG_TUI_BINARY"
+
+      - name: Uninstall release binary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .tooling/bin/embed-log
+          rmdir .tooling/bin 2>/dev/null || true
+          rmdir .tooling 2>/dev/null || true
+
+  backend-hardware-tests:
+    name: STM32G0 hardware integration
+    # Never operate the rig for pull-request code, including fork PRs.
+    if: github.event_name != 'pull_request'
+    runs-on: [self-hosted, Linux]
+    needs: package-cli-linux
+    timeout-minutes: 60
+    # The lab owns physical devices; serialize this job across all branches.
+    concurrency:
+      group: stm-lab-hardware
+      cancel-in-progress: false
+    env:
+      CI: "true"
+      EMBED_LOG_STM32G0_HARDWARE: "1"
+      EMBED_LOG_STM32G0_CONTROL_PORT: ${{ vars.EMBED_LOG_STM32G0_CONTROL_PORT || '/dev/serial/by-id/usb-STMicroelectronics_STM32_STLink_0669FF485552787187184556-if02' }}
+      EMBED_LOG_STM32G0_USART1_PORT: ${{ vars.EMBED_LOG_STM32G0_USART1_PORT || '/dev/serial/by-id/usb-FTDI_Quad_RS232-HS-if03-port0' }}
+      EMBED_LOG_STM32G0_USART3_PORT: ${{ vars.EMBED_LOG_STM32G0_USART3_PORT || '/dev/serial/by-id/usb-FTDI_Quad_RS232-HS-if02-port0' }}
+      EMBED_LOG_STM32G0_USART4_PORT: ${{ vars.EMBED_LOG_STM32G0_USART4_PORT || '/dev/serial/by-id/usb-FTDI_Quad_RS232-HS-if00-port0' }}
+      EMBED_LOG_STM32G0_ARTIFACT_DIR: captures/stm32g0
+      EMBED_LOG_HARDWARE_BINARY: ${{ github.workspace }}/.tooling/bin/embed-log
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download release package
+        uses: actions/download-artifact@v4
+        with:
+          name: embed-log-cli-linux-release
+          path: dist
+
+      - name: Install release binary from package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .tooling/bin
+          tar -xzf dist/embed-log-x86_64-unknown-linux-gnu.tar.gz -C .tooling/bin
+          echo "$PWD/.tooling/bin" >> "$GITHUB_PATH"
+          .tooling/bin/embed-log version --json
+
+      - name: Verify all configured UARTs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in CONTROL USART1 USART3 USART4; do
+            variable="EMBED_LOG_STM32G0_${name}_PORT"
+            port="${!variable}"
+            test -n "$port"
+            embed-log doctor --serial "$port"
+          done
+
+      - name: Verify packaged CLI selected for hardware test
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="$(readlink -f "$EMBED_LOG_HARDWARE_BINARY")"
+          actual="$(readlink -f "$(command -v embed-log)")"
+          test "$actual" = "$expected"
+          embed-log version --json
+
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -175,8 +264,94 @@ jobs:
       - name: Install Python test dependencies
         run: python -m pip install -e 'sdk/python[dev]'
 
-      - name: Backend UART hardware test
-        run: python -m pytest sdk/python/tests/test_backend_hardware_uart.py -q
+      - name: Run STM32G0 mixed-baud hardware test
+        run: python -m pytest sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py -q
+
+      - name: Upload STM32G0 captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stm32g0-hardware-${{ github.run_id }}
+          path: captures/stm32g0/
+          if-no-files-found: ignore
+
+      - name: Uninstall release binary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .tooling/bin/embed-log
+          rmdir .tooling/bin 2>/dev/null || true
+          rmdir .tooling 2>/dev/null || true
+
+  tui-hardware-integration-tests:
+    name: STM32G0 TUI hardware integration
+    # The preceding hardware job is already restricted to trusted push events.
+    if: github.event_name != 'pull_request'
+    runs-on: [self-hosted, Linux]
+    needs: backend-hardware-tests
+    timeout-minutes: 45
+    concurrency:
+      group: stm-lab-hardware
+      cancel-in-progress: false
+    env:
+      CI: "true"
+      EMBED_LOG_TUI_BINARY: ${{ github.workspace }}/.tooling/bin/embed-log
+      EMBED_LOG_TUI_HARDWARE_ARTIFACT_DIR: captures/tui-stm32g0
+      EMBED_LOG_STM32G0_CONTROL_PORT: ${{ vars.EMBED_LOG_STM32G0_CONTROL_PORT || '/dev/serial/by-id/usb-STMicroelectronics_STM32_STLink_0669FF485552787187184556-if02' }}
+      EMBED_LOG_STM32G0_USART1_PORT: ${{ vars.EMBED_LOG_STM32G0_USART1_PORT || '/dev/serial/by-id/usb-FTDI_Quad_RS232-HS-if03-port0' }}
+      EMBED_LOG_STM32G0_USART3_PORT: ${{ vars.EMBED_LOG_STM32G0_USART3_PORT || '/dev/serial/by-id/usb-FTDI_Quad_RS232-HS-if02-port0' }}
+      EMBED_LOG_STM32G0_USART4_PORT: ${{ vars.EMBED_LOG_STM32G0_USART4_PORT || '/dev/serial/by-id/usb-FTDI_Quad_RS232-HS-if00-port0' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download release package
+        uses: actions/download-artifact@v4
+        with:
+          name: embed-log-cli-linux-release
+          path: dist
+
+      - name: Install release binary from package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .tooling/bin
+          tar -xzf dist/embed-log-x86_64-unknown-linux-gnu.tar.gz -C .tooling/bin
+          echo "$PWD/.tooling/bin" >> "$GITHUB_PATH"
+
+      - name: Verify installed CLI selected for TUI hardware test
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="$(readlink -f "$EMBED_LOG_TUI_BINARY")"
+          actual="$(readlink -f "$(command -v embed-log)")"
+          test "$actual" = "$expected"
+          embed-log version --json
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run STM32G0 TUI integration test
+        run: |
+          python scripts/test_tui_integration.py \
+            --binary "$EMBED_LOG_TUI_BINARY" \
+            --backend stm32g0 \
+            --artifact-dir "$EMBED_LOG_TUI_HARDWARE_ARTIFACT_DIR" \
+            --control-port "$EMBED_LOG_STM32G0_CONTROL_PORT" \
+            --usart1-port "$EMBED_LOG_STM32G0_USART1_PORT" \
+            --usart3-port "$EMBED_LOG_STM32G0_USART3_PORT" \
+            --usart4-port "$EMBED_LOG_STM32G0_USART4_PORT"
+
+      - name: Upload STM32G0 TUI captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stm32g0-tui-${{ github.run_id }}
+          path: captures/tui-stm32g0/
+          if-no-files-found: ignore
 
       - name: Uninstall release binary
         if: always()
@@ -250,8 +425,10 @@ jobs:
             tests-ui/test-results/
           if-no-files-found: ignore
 
+  # Disabled until the runner has the complete WebKitGTK/Tauri dependency set.
   tauri-linux:
-    name: Tauri Linux build
+    name: Tauri Linux build (disabled)
+    if: ${{ false }}
     runs-on: [self-hosted, Linux]
     needs: build-cli
     timeout-minutes: 60
@@ -397,6 +574,14 @@ jobs:
           which embed-log
           embed-log --version
 
+      - name: Set up Python for self-update test
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verify installed CLI self-update
+        run: python scripts/test_update_integration.py --binary "${{ runner.temp }}/embed-log-bin/embed-log"
+
       - name: Install UI test dependencies
         run: npm --prefix tests-ui ci
 
@@ -429,8 +614,5 @@ jobs:
         run: |
           rm -f "${{ runner.temp }}/embed-log-bin/embed-log"
           rm -rf release-staging
-          if command -v embed-log >/dev/null 2>&1; then
-            echo "ERROR: embed-log still on PATH after cleanup" >&2
-            exit 1
-          fi
-          echo "Cleanup complete — embed-log uninstalled"
+          test ! -e "${{ runner.temp }}/embed-log-bin/embed-log"
+          echo "Cleanup complete — job-installed embed-log removed"

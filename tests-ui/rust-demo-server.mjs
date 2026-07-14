@@ -28,15 +28,15 @@ sources:
   - name: DUT
     label: DUT UART
     type: udp
-    port: 6000
+    port: 16000
   - name: HOST
     label: Host Debug
     type: udp
-    port: 6001
+    port: 16001
   - name: SENSORS
     label: Sensor Bus
     type: udp
-    port: 6002
+    port: 16002
     parser:
       type: cbor-datagram
 frontend_plugins:

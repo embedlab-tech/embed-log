@@ -224,7 +224,7 @@ class TestE2eSdkConnect:
 
     def test_tx_write_to_uart_pty(self, e2e_server: E2eServer,
                                    pty_pair: tuple[int, str]):
-        """tx_write() writes exact bytes to the PTY and records a TX log entry.
+        """tx_write() normalizes a Zephyr-shell command and records a TX entry.
 
         Uses the non-exclusive serial port fallback added in
         ``open_serial_with_fallback()`` which works on macOS where
@@ -248,7 +248,7 @@ class TestE2eSdkConnect:
                     chunk = os.read(master_fd, 32)
                     if chunk:
                         data += chunk
-            assert data == b"version\r\n", f"got {data!r}"
+            assert data == b"version\r", f"got {data!r}"
 
             # Verify TX log entry appears in subscription
             entries = list(client.entries(timeout=2.0))

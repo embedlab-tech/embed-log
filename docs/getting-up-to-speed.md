@@ -7,7 +7,7 @@ Embed-log collects embedded-device logs, presents them live in a browser or term
 Install a released binary:
 
 ```bash
-curl -fsSL https://github.com/krezolekcoder/embed-log/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/embedlab-tech/embed-log/releases/latest/download/install.sh | sh
 embed-log version
 embed-log doctor
 ```

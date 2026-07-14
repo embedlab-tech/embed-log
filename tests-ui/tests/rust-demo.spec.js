@@ -49,8 +49,8 @@ test.describe('Rust backend browser e2e', () => {
     await expect(page.locator('#pane-DUT .pane-name')).toHaveText('DUT UART');
     await expect(page.locator('#pane-HOST .pane-name')).toHaveText('Host Debug');
 
-    await sendUdp(6000, 'E2E DUT boot\n');
-    await sendUdp(6001, 'E2E HOST ready\n');
+    await sendUdp(16000, 'E2E DUT boot\n');
+    await sendUdp(16001, 'E2E HOST ready\n');
 
     await waitForLineContaining(page, 'DUT', 'E2E DUT boot');
     await waitForLineContaining(page, 'HOST', 'E2E HOST ready');
@@ -61,7 +61,7 @@ test.describe('Rust backend browser e2e', () => {
     await waitForWs(page);
     await page.getByRole('button', { name: 'Sensors', exact: true }).click();
 
-    await sendUdp(6002, cborMap([['kind', 'sync'], ['seq', 7]]));
+    await sendUdp(16002, cborMap([['kind', 'sync'], ['seq', 7]]));
 
     await waitForLineContaining(page, 'SENSORS', 'kind=sync');
     await waitForLineContaining(page, 'SENSORS', 'seq=7');
@@ -70,7 +70,7 @@ test.describe('Rust backend browser e2e', () => {
   test('session export produces replayable HTML', async ({ page, browser }, testInfo) => {
     await page.goto('/');
     await waitForWs(page);
-    await sendUdp(6000, 'E2E export marker\n');
+    await sendUdp(16000, 'E2E export marker\n');
     await waitForLineContaining(page, 'DUT', 'E2E export marker');
 
     const result = await page.evaluate(async () => {
@@ -94,7 +94,7 @@ test.describe('Rust backend browser e2e', () => {
   test('session rotation clears panes and routes new logs to the new session', async ({ page }) => {
     await page.goto('/');
     await waitForWs(page);
-    await sendUdp(6000, 'E2E before rotate\n');
+    await sendUdp(16000, 'E2E before rotate\n');
     await waitForLineContaining(page, 'DUT', 'E2E before rotate');
 
     const rotated = await page.evaluate(async () => {
@@ -105,7 +105,7 @@ test.describe('Rust backend browser e2e', () => {
     expect(rotated.old_session.id).not.toBe(rotated.session.id);
 
     await expect(page.locator('#log-DUT')).not.toContainText('E2E before rotate');
-    await sendUdp(6000, 'E2E after rotate\n');
+    await sendUdp(16000, 'E2E after rotate\n');
     await waitForLineContaining(page, 'DUT', 'E2E after rotate');
   });
 });

@@ -53,13 +53,13 @@ That means merging the rewrite without an update plan would regress the current 
 #### macOS / Linux
 
 ```bash
-curl -fsSL https://github.com/krezolekcoder/embed-log/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/embedlab-tech/embed-log/releases/latest/download/install.sh | sh
 ```
 
 #### Windows PowerShell
 
 ```powershell
-irm https://github.com/krezolekcoder/embed-log/releases/latest/download/install.ps1 | iex
+irm https://github.com/embedlab-tech/embed-log/releases/latest/download/install.ps1 | iex
 ```
 
 Properties:
@@ -457,11 +457,11 @@ Possible later work:
 ### Install
 
 ```bash
-curl -fsSL https://github.com/krezolekcoder/embed-log/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/embedlab-tech/embed-log/releases/latest/download/install.sh | sh
 ```
 
 ```powershell
-irm https://github.com/krezolekcoder/embed-log/releases/latest/download/install.ps1 | iex
+irm https://github.com/embedlab-tech/embed-log/releases/latest/download/install.ps1 | iex
 ```
 
 ### Update

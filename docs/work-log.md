@@ -573,3 +573,361 @@ Future entries must include this per-file added/removed-line summary.
 | --- | ---: | ---: | --- |
 | `docs/agent-capabilities.md` | 135 | 0 | Documents available session, status, live-event, and event-rule agent workflows. |
 | `docs/index.md` | 1 | 0 | Links the ready-to-use agent reference. |
+
+## 2026-07-13 16:59:16 UTC / 2026-07-13 18:59:16 GMT+2 (Warsaw)
+
+- **Commit:** `dc040a1` — `Fix updater repository and isolate E2E UDP ports`
+- **Task:** Fix Rust demo UDP browser E2E delivery
+- **Started:** 2026-07-13 16:55:07 UTC / 2026-07-13 18:55:07 GMT+2 (Warsaw)
+- **Completed:** 2026-07-13 16:59:16 UTC / 2026-07-13 18:59:16 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`dc040a1`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-cli/src/commands/misc.rs` | 1 | 1 | Points self-update release lookup at the actual origin repository. |
+| `tests-ui/rust-demo-server.mjs` | 3 | 3 | Moves E2E UDP sources to an isolated port range. |
+| `tests-ui/tests/rust-demo.spec.js` | 6 | 6 | Sends E2E fixtures to the isolated test ports. |
+
+## 2026-07-13 17:24:51 UTC / 2026-07-13 19:24:51 GMT+2 (Warsaw)
+
+- **Commit:** `44e2aa6` — `Add STM hardware integration workflow template`
+- **Task:** Add hardware integration workflow template
+- **Started:** 2026-07-13 17:23:18 UTC / 2026-07-13 19:23:18 GMT+2 (Warsaw)
+- **Completed:** 2026-07-13 17:24:51 UTC / 2026-07-13 19:24:51 GMT+2 (Warsaw)
+- **Model-token delta:** ~0 (input: ~0, output: ~0, cache read: ~0, cache write: ~0)
+
+### File changes (`44e2aa6`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/hardware-integration.yml` | 102 | 0 | Adds hosted artifact build and serialized STM-lab hardware validation workflow. |
+| `docs/hardware-ci.md` | 46 | 0 | Documents runner labels, variables, operation, and hardware-runner security. |
+| `docs/index.md` | 1 | 0 | Links the hardware CI guide. |
+
+## 2026-07-13 17:50:55 UTC / 2026-07-13 19:50:55 CEST (Warsaw)
+
+- **Commit:** `a3396d2` — `Add STM32G0 multi-UART hardware integration test`
+- **Task:** Wire the STM32G0/FT4232H rig into the hardware workflow with four UART sources and Python UDP forwarding.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 17:50:55 UTC / 2026-07-13 19:50:55 CEST (+0200) (Warsaw)
+- **Validation:** `PATH=/tmp/embed-log-hw-package/bin:$PATH EMBED_LOG_STM32G0_HARDWARE=1 EMBED_LOG_STM32G0_ARTIFACT_DIR=/tmp/embed-log-stm32g0-artifacts /tmp/embed-log-hw-venv/bin/python -m pytest sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py -q` — passed (1 passed); `cd /home/krezo/Programming/embed-sandbox && just verify-multi-uart` — passed (USART1: 314, USART3: 192, USART4: 129 matching payloads).
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`a3396d2`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/hardware-integration.yml` | 37 | 13 | Configures stable four-UART variables, pinned firmware flash/preflight, exact package testing, and capture upload. |
+| `docs/hardware-ci.md` | 19 | 15 | Documents the STM32G0 rig, required variables, pinned sandbox checkout, and test flow. |
+| `sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py` | 296 | 0 | Adds gated four-UART control, source-isolation, session, and Python UDP-forwarding coverage. |
+
+## 2026-07-13 17:58:08 UTC / 2026-07-13 19:58:08 CEST (Warsaw)
+
+- **Commit:** `9c81362` — `Exercise STM32G0 mixed-baud UART traffic`
+- **Task:** Exercise the STM32G0 hardware integration with 115200, 460800, and 1000000 baud generator streams and higher traffic volume.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 17:58:08 UTC / 2026-07-13 19:58:08 CEST (+0200) (Warsaw)
+- **Validation:** `PATH=/tmp/embed-log-hw-package/bin:$PATH EMBED_LOG_STM32G0_HARDWARE=1 EMBED_LOG_STM32G0_ARTIFACT_DIR=/tmp/embed-log-stm32g0-high-baud-artifacts /tmp/embed-log-hw-venv/bin/python -m pytest sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py -q` — passed (1 passed). Captures contained 689 USART1, 596 USART3, 500 USART4, and 1782 forwarded UDP records.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`9c81362`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `docs/hardware-ci.md` | 1 | 1 | Documents the mixed-baud profile and minimum 500-record capture. |
+| `sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py` | 32 | 16 | Configures per-source baud profiles, increases traffic, and restores 115200 teardown state. |
+
+## 2026-07-13 18:00:55 UTC / 2026-07-13 20:00:55 CEST (Warsaw)
+
+- **Commit:** `4e29f40` — `Run hardware CI against pre-flashed STM32G0 rig`
+- **Task:** Make hardware CI run the mixed-baud test against a connected, pre-flashed STM32G0 rig without sandbox firmware setup.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 18:00:55 UTC / 2026-07-13 20:00:55 CEST (+0200) (Warsaw)
+- **Validation:** `PATH=/tmp/embed-log-hw-package/bin:$PATH EMBED_LOG_STM32G0_HARDWARE=1 EMBED_LOG_STM32G0_ARTIFACT_DIR=/tmp/embed-log-stm32g0-ci-artifacts /tmp/embed-log-hw-venv/bin/python -m pytest sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py -q` — passed (1 passed); workflow YAML parsed with the pre-flashed-rig job shape.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`4e29f40`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/hardware-integration.yml` | 8 | 25 | Uses verified by-id defaults and removes firmware flashing/preflight. |
+| `docs/hardware-ci.md` | 4 | 6 | Documents the connected pre-flashed rig workflow and optional overrides. |
+
+## 2026-07-13 18:04:31 UTC / 2026-07-13 20:04:31 CEST (Warsaw)
+
+- **Commit:** `91f3408` — `Allow UDP datagram loss in hardware forwarding test`
+- **Task:** Make high-rate UDP forwarding validation reflect UDP datagram delivery semantics.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 18:04:31 UTC / 2026-07-13 20:04:31 CEST (+0200) (Warsaw)
+- **Validation:** `PATH=/tmp/embed-log-ci-package/bin:$PATH EMBED_LOG_STM32G0_HARDWARE=1 EMBED_LOG_STM32G0_ARTIFACT_DIR=/tmp/embed-log-stm32g0-push-verify /tmp/embed-log-hw-venv/bin/python -m pytest sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py -q` — passed (1 passed). Artifacts contain 689 USART1, 596 USART3, 500 USART4, and 1759 forwarded UDP records.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`91f3408`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py` | 9 | 1 | Requires minimum, ordered, unique UDP deliveries while retaining contiguous UART checks. |
+
+## 2026-07-13 18:12:08 UTC / 2026-07-13 20:12:08 CEST (Warsaw)
+
+- **Commit:** `8f05923` — `Run full validation locally on STM lab runner`
+- **Task:** Run build, unit, Python integration, Playwright, and STM hardware validation locally on the trusted lab runner; omit Tauri Linux temporarily.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 18:12:08 UTC / 2026-07-13 20:12:08 CEST (+0200) (Warsaw)
+- **Validation:** `cargo test --locked --package embed-log-core --package embed-log-cli` — passed (315 tests); `python -m pytest sdk/python/tests -q --ignore=sdk/python/tests/test_backend_hardware_uart.py --ignore=sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py` — passed (53 tests); `npm --prefix tests-ui run test:e2e` — passed (4 tests); `npm --prefix tests-ui run test:regression` — passed (80 tests, 4 skipped).
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`8f05923`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 3 | 1 | Disables the Tauri Linux job pending runner dependencies. |
+| `.github/workflows/hardware-integration.yml` | 59 | 45 | Replaces hosted packaging with one local STM-lab build, unit, integration, Playwright, and hardware flow. |
+| `crates/embed-log-cli/src/commands/misc.rs` | 2 | 2 | Aligns release URL test expectations with the configured repository. |
+| `docs/hardware-ci.md` | 9 | 8 | Documents local runner validation order and branch trigger. |
+| `sdk/python/tests/test_e2e.py` | 2 | 2 | Aligns PTY expectation with Zephyr-shell CR TX normalization. |
+
+## 2026-07-13 18:18:17 UTC / 2026-07-13 20:18:17 CEST (Warsaw)
+
+- **Commit:** `5c8f46d` — `Fix CI lint and installed binary cleanup`
+- **Task:** Fix failures reported by the CI unit-test and installed-binary jobs.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 18:18:17 UTC / 2026-07-13 20:18:17 CEST (+0200) (Warsaw)
+- **Validation:** `cargo clippy --locked --package embed-log-core --package embed-log-cli --all-targets -- -D warnings` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli` — passed (315 tests); installed-binary cleanup workflow shape verified.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`5c8f46d`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 2 | 5 | Cleans up only the job-installed CLI instead of rejecting unrelated PATH entries. |
+| `crates/embed-log-cli/src/commands/misc.rs` | 2 | 2 | Uses iterator idiom in archive extraction. |
+| `crates/embed-log-cli/src/commands/run.rs` | 3 | 0 | Documents the intentional quick-run argument shape for Clippy. |
+| `crates/embed-log-core/src/config/loader.rs` | 2 | 2 | Removes needless generic-argument borrows. |
+| `crates/embed-log-core/src/parsers/zephyr_dict.rs` | 9 | 13 | Applies Clippy-safe byte slicing, matching, and vector initialization. |
+| `crates/embed-log-core/src/session/log_parse.rs` | 5 | 8 | Uses a `while let` prefix-stripping loop. |
+| `crates/embed-log-core/src/sources/network.rs` | 3 | 0 | Documents the config-shaped capture constructor and its argument allowance. |
+| `crates/embed-log-tui/src/draw.rs` | 2 | 2 | Uses explicit size clamping for the help overlay. |
+
+## 2026-07-13 18:28:00 UTC / 2026-07-13 20:28:00 CEST (Warsaw)
+
+- **Commit:** `799c2b9` — `Move STM32G0 hardware test into CI workflow`
+- **Task:** Consolidate hardware validation into the regular CI workflow and prevent successful skips or stale capture reuse.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 18:28:00 UTC / 2026-07-13 20:28:00 CEST (+0200) (Warsaw)
+- **Validation:** `PATH=/tmp/embed-log-ci-package/bin:$PATH EMBED_LOG_STM32G0_HARDWARE=1 EMBED_LOG_STM32G0_ARTIFACT_DIR=/tmp/embed-log-stm32g0-single-ci /tmp/embed-log-hw-venv/bin/python -m pytest sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py -q` — passed (1 passed); resulting artifact directory contained exactly one session.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`799c2b9`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 38 | 9 | Replaces the skipped legacy UART job with serialized STM32G0 hardware validation. |
+| `.github/workflows/hardware-integration.yml` | 0 | 123 | Removes the redundant standalone hardware workflow. |
+| `docs/hardware-ci.md` | 15 | 16 | Documents the CI-integrated hardware job. |
+| `sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py` | 3 | 1 | Fails absent enabled hardware paths and clears configured captures before each run. |
+
+## 2026-07-13 18:29:25 UTC / 2026-07-13 20:29:25 CEST (Warsaw)
+
+- **Commit:** `b7c6b03` — `Verify packaged CLI before hardware test`
+- **Task:** Ensure the CI hardware test runs the exact packaged CLI rather than an arbitrary runner installation.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 18:29:25 UTC / 2026-07-13 20:29:25 CEST (+0200) (Warsaw)
+- **Validation:** configured package-path check plus `embed-log version --json` — passed; `EMBED_LOG_HARDWARE_BINARY=/tmp/embed-log-ci-package/bin/embed-log ... pytest sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py -q` — passed (1 passed).
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`b7c6b03`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 10 | 0 | Pins the hardware harness to the downloaded package and verifies PATH/version before pytest. |
+| `sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py` | 8 | 0 | Honors and validates an explicitly configured hardware-test binary path. |
+
+## 2026-07-13 18:51:56 UTC / 2026-07-13 20:51:56 CEST (Warsaw)
+
+- **Commit:** `402193b` — `Use registered runner labels for hardware CI`
+- **Task:** Match the hardware CI job to the labels actually registered by the dedicated embed-log runner.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 18:51:56 UTC / 2026-07-13 20:51:56 CEST (+0200) (Warsaw)
+- **Validation:** inspected the active `embed-log-runner` service and successful CI jobs, both using `self-hosted, Linux`; workflow YAML assertion confirmed the hardware job uses those labels.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`402193b`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 1 | 1 | Removes unavailable `stm-lab` label from the hardware job. |
+| `docs/hardware-ci.md` | 2 | 3 | Documents the runner's registered labels and dedicated-rig role. |
+
+## 2026-07-13 21:08:45 UTC / 2026-07-13 23:08:45 CEST (Warsaw)
+
+- **Commit:** `1499d1d` — `Add UDP delivery headroom to hardware test`
+- **Task:** Make the high-rate hardware test resilient to expected loopback UDP datagram loss while retaining the 500-record delivery requirement.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 21:08:45 UTC / 2026-07-13 23:08:45 CEST (+0200) (Warsaw)
+- **Validation:** `EMBED_LOG_HARDWARE_BINARY=/tmp/embed-log-ci-package/bin/embed-log EMBED_LOG_STM32G0_HARDWARE=1 EMBED_LOG_STM32G0_ARTIFACT_DIR=/tmp/embed-log-stm32g0-udp-headroom ... pytest sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py -q` — passed (1 passed). Captures contained 740 USART1, 647 USART3, 551 USART4, and 1934 forwarded UDP records.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`1499d1d`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `docs/hardware-ci.md` | 1 | 1 | Documents UDP headroom and the retained delivery threshold. |
+| `sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py` | 5 | 3 | Captures 550 records and resolves configured artifact directories. |
+
+## 2026-07-13 21:58:23 UTC / 2026-07-13 23:58:23 CEST (Warsaw)
+
+- **Commit:** `89f6d37` — `Add installed CLI TUI integration tests`
+- **Task:** Add a separate CI job that validates the installed CLI TUI, tab cycling, pane synchronization, UDP log persistence, and clean interactive exit.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 21:58:23 UTC / 2026-07-13 23:58:23 CEST (+0200) (Warsaw)
+- **Validation:** `cargo test --locked --package embed-log-tui` — passed (74 tests); `python scripts/test_tui_integration.py --binary /tmp/embed-log-ci-package/bin/embed-log` — passed (installed CLI connected, switched tabs, persisted both UDP sources, and quit cleanly).
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`89f6d37`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 58 | 0 | Adds a package-dependent, self-hosted TUI integration job that verifies the installed CLI. |
+| `crates/embed-log-tui/src/keys.rs` | 36 | 0 | Tests wrapping tab navigation and active-pane reset. |
+| `crates/embed-log-tui/src/state.rs` | 37 | 0 | Tests timestamp synchronization across the active tab's panes. |
+| `docs/development.md` | 2 | 0 | Documents local TUI test commands. |
+| `scripts/test_tui_integration.py` | 145 | 0 | Runs a PTY-installed-CLI TUI integration scenario with two UDP tabs. |
+
+## 2026-07-13 22:03:16 UTC / 2026-07-14 00:03:16 CEST (Warsaw)
+
+- **Commit:** `44f8e61` — `Add STM32G0 TUI hardware integration job`
+- **Task:** Run the installed CLI TUI against the real STM32G0 rig after the regular UART hardware job, with shared simulated/real backends in the TUI harness.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 22:03:16 UTC / 2026-07-14 00:03:16 CEST (+0200) (Warsaw)
+- **Validation:** `python scripts/test_tui_integration.py --binary /tmp/embed-log-ci-package/bin/embed-log --backend stm32g0 --artifact-dir /tmp/tui-stm32g0-final` — passed; `cargo test --locked --package embed-log-tui` — passed (74 tests).
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`44f8e61`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 78 | 0 | Adds a package-pinned TUI hardware job after UART hardware validation. |
+| `docs/hardware-ci.md` | 3 | 2 | Documents the sequential TUI hardware validation and its captures. |
+| `scripts/test_tui_integration.py` | 228 | 85 | Adds PTY UART simulation and STM32G0 backends, TUI TX shell control, and post-reset counter validation. |
+
+## 2026-07-13 22:07:50 UTC / 2026-07-14 00:07:50 CEST (Warsaw)
+
+- **Commit:** `b7cac46` — `Verify CONTROL UART TX through hardware API`
+- **Task:** Explicitly validate embed-log control-API TX against the STM32G0 shell UART before driving the hardware generators.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 22:07:50 UTC / 2026-07-14 00:07:50 CEST (+0200) (Warsaw)
+- **Validation:** `EMBED_LOG_HARDWARE_BINARY=/tmp/embed-log-ci-package/bin/embed-log EMBED_LOG_STM32G0_HARDWARE=1 ... pytest sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py -q` — passed (1 passed). The CONTROL `uart list` API TX response reported USART1/3/4 enabled.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`b7cac46`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py` | 33 | 11 | Exercises CONTROL `tx_write`, verifies shell responses, and ignores pre-reset traffic blocks. |
+
+## 2026-07-13 22:21:55 UTC / 2026-07-14 00:21:55 CEST (Warsaw)
+
+- **Commit:** `369a61c` — `Stabilize simulated TUI integration startup`
+- **Task:** Eliminate flaky simulated TUI integration startup and source-log selection.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 22:21:55 UTC / 2026-07-14 00:21:55 CEST (+0200) (Warsaw)
+- **Validation:** `python scripts/test_tui_integration.py --binary /tmp/tui-ci-repro/bin/embed-log --backend simulated` — passed three consecutive runs.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`369a61c`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `scripts/test_tui_integration.py` | 7 | 4 | Retries PTY source writes and selects exact per-source session filenames. |
+
+## 2026-07-13 22:39:24 UTC / 2026-07-14 00:39:24 CEST (Warsaw)
+
+- **Commit:** `cb7353f` — `Build and test release artifacts on hosted runners`
+- **Task:** Replace the self-hosted release path with a single native hosted-runner build/test/package/publish workflow and align installer documentation with the repository origin.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 22:39:24 UTC / 2026-07-14 00:39:24 CEST (+0200) (Warsaw)
+- **Validation:** release workflow matrix/YAML ordering assertion — passed; `cargo test --locked --package embed-log-core --package embed-log-cli --package embed-log-tui` — passed (389 tests); Linux package extraction and `embed-log version --json` smoke test — passed; `sh -n install.sh` — passed.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`cb7353f`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/release-cli.yml` | 85 | 98 | Adds hosted native Linux/macOS/Windows test/package matrix and gated release publishing. |
+| `Cargo.toml` | 1 | 1 | Corrects workspace repository metadata. |
+| `README.md` | 3 | 3 | Points install and plugin commands at the repository origin. |
+| `RELEASE_AND_UPDATE.md` | 4 | 4 | Corrects release installer URLs. |
+| `docs/getting-up-to-speed.md` | 1 | 1 | Corrects the installer URL. |
+| `docs/releasing.md` | 18 | 18 | Documents the hosted matrix and tested release flow. |
+| `install.ps1` | 1 | 1 | Uses the repository origin by default. |
+| `install.sh` | 1 | 1 | Uses the repository origin by default. |
+| `sdk/python/README.md` | 1 | 1 | Corrects the SDK repository link. |
+| `sdk/python/pyproject.toml` | 1 | 1 | Corrects package repository metadata. |
+
+## 2026-07-13 22:43:08 UTC / 2026-07-14 00:43:08 CEST (Warsaw)
+
+- **Commit:** `f54b88f` — `Add release matrix dry-run mode`
+- **Task:** Make the hosted release build/test matrix manually runnable without publishing a GitHub Release.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-13 22:43:08 UTC / 2026-07-14 00:43:08 CEST (+0200) (Warsaw)
+- **Validation:** release workflow YAML assertion confirmed the manual publish flag defaults false, checkout uses the selected branch, and publishing is gated to tags or an explicit flag.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`f54b88f`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/release-cli.yml` | 12 | 4 | Adds publish opt-in and correct branch checkout for manual matrix dry runs. |
+| `docs/releasing.md` | 1 | 1 | Documents the non-publishing hosted release test dispatch. |
+
+## 2026-07-14 03:36:39 UTC / 2026-07-14 05:36:39 CEST (Warsaw)
+
+- **Commit:** `3362e78` — `Verify installed CLI self-update in CI`
+- **Task:** Add a deterministic installed-CLI self-update integration test to CI.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-14 03:36:39 UTC / 2026-07-14 05:36:39 CEST (+0200) (Warsaw)
+- **Validation:** `python scripts/test_update_integration.py --binary /tmp/embed-log-ci-package/bin/embed-log` — passed; `cargo test --locked --package embed-log-cli` — passed (90 tests); CI workflow ordering assertion — passed.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`3362e78`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 8 | 0 | Runs the self-update fixture against the installed release package before installed UI E2E. |
+| `docs/development.md` | 1 | 0 | Documents the local self-update integration command. |
+| `scripts/test_update_integration.py` | 121 | 0 | Serves a checksummed local release fixture and verifies check, update, replacement, and executable health. |
+
+## 2026-07-14 03:51:38 UTC / 2026-07-14 05:51:38 CEST (Warsaw)
+
+- **Commit:** `3e9295c` — `Test updater in every release build`
+- **Task:** Run the deterministic updater verification for every supported release-matrix build.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-14 03:51:38 UTC / 2026-07-14 05:51:38 CEST (+0200) (Warsaw)
+- **Validation:** `python scripts/test_update_integration.py --binary /tmp/embed-log-ci-package/bin/embed-log` — passed; `cargo test --locked --package embed-log-cli` — passed (90 tests); release-matrix updater-step ordering assertion — passed.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`3e9295c`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/release-cli.yml` | 14 | 0 | Runs Unix updater replacement fixtures and Windows updater-guidance checks before artifact upload. |
+| `docs/releasing.md` | 1 | 1 | Documents release-matrix updater validation. |
+| `scripts/test_update_integration.py` | 21 | 7 | Selects the correct Linux/macOS update target dynamically. |
+
+## 2026-07-14 05:05:38 UTC / 2026-07-14 07:05:38 CEST (Warsaw)
+
+- **Commit:** `4078025` — `Remove internal transport name from roadmap`
+- **Task:** Remove the remaining internal transport name from tracked documentation.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-14 05:05:38 UTC / 2026-07-14 07:05:38 CEST (+0200) (Warsaw)
+- **Validation:** case-insensitive tracked-text scan for `gwl`, `lnk`, `mcu-link`, `reader controller`, and `lnk121` found no remaining textual matches.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`4078025`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `docs/non-session-roadmap.md` | 1 | 1 | Replaces the internal transport name with neutral custom-transport wording. |

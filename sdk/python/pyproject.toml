@@ -17,7 +17,7 @@ dependencies = [
 dev = ["pytest>=8"]
 
 [project.urls]
-repository = "https://github.com/krezolekcoder/embed-log"
+repository = "https://github.com/embedlab-tech/embed-log"
 
 [tool.setuptools.packages.find]
 include = ["embed_log_sdk*"]

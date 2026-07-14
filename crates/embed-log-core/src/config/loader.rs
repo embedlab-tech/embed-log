@@ -41,7 +41,7 @@ pub fn load_config(path: &Path) -> Result<AppConfig, ConfigError> {
 fn reject_removed_fields(raw: &serde_yaml::Value) -> Result<(), ConfigError> {
     if let Some(server) = raw.get("server").and_then(|v| v.as_mapping()) {
         for key in ["open_browser", "ws_ui", "verbose"] {
-            if server.contains_key(&serde_yaml::Value::String(key.to_string())) {
+            if server.contains_key(serde_yaml::Value::String(key.to_string())) {
                 return Err(ConfigError::validation(format!(
                     "server.{key} was removed because it had no effect"
                 )));
@@ -57,7 +57,7 @@ fn reject_removed_fields(raw: &serde_yaml::Value) -> Result<(), ConfigError> {
             continue;
         };
         for key in ["inject_port", "forward_port", "forward_ports"] {
-            if map.contains_key(&serde_yaml::Value::String(key.to_string())) {
+            if map.contains_key(serde_yaml::Value::String(key.to_string())) {
                 return Err(ConfigError::validation(format!(
                     "sources[{i}].{key} was removed; use the /api/v1/control WebSocket API instead"
                 )));

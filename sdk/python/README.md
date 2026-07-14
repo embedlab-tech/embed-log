@@ -1,6 +1,6 @@
 # embed-log SDK
 
-Python SDK for the [embed-log](https://github.com/krezolekcoder/embed-log) live log viewer.
+Python SDK for the [embed-log](https://github.com/embedlab-tech/embed-log) live log viewer.
 
 ## Installation
 
