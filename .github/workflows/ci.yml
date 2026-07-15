@@ -110,6 +110,7 @@ jobs:
         run: npm --prefix tests-ui run test:e2e -- --project=firefox --grep "renders rapid virtual scrolls"
 
       - name: Run Edge live-input regression
+        if: always()
         run: npm --prefix tests-ui run test:e2e -- --project=edge --grep "live filter and serial TX inputs"
 
       - name: Upload Windows browser report on failure
