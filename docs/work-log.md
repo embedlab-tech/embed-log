@@ -1046,3 +1046,18 @@ Future entries must include this per-file added/removed-line summary.
 | `tests-ui/playwright.config.js` | 3 | 0 | Enables the Edge channel only when Windows CI requests it. |
 | `tests-ui/rust-demo-server.mjs` | 9 | 0 | Adds a deliberately unavailable UART pane for serial-TX UI testing. |
 | `tests-ui/tests/rust-demo.spec.js` | 36 | 0 | Verifies browser typing filters live logs and Enter sends serial TX. |
+
+## 2026-07-15 19:07:53 UTC / 2026-07-15 21:07:53 CEST (Warsaw)
+
+- **Commit:** `8602155` — `Run Edge regression after Firefox failures`
+- **Task:** Ensure the native Edge input check still executes when the preceding Firefox regression fails.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-15 19:07:53 UTC / 2026-07-15 21:07:53 CEST (+0200) (Warsaw)
+- **Validation:** workflow assertion confirms the Edge regression uses `if: always()`; `git diff --check` passed.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`8602155`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 1 | 0 | Runs Edge live-input validation after a Firefox failure. |
