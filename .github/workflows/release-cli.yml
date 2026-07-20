@@ -91,6 +91,19 @@ jobs:
       - name: Build native release CLI
         run: cargo build --locked --release --target ${{ matrix.target }} --package embed-log-cli --bin embed-log
 
+      - name: Align binary path for packaging scripts (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p target/release
+          cp target/${{ matrix.target }}/release/embed-log target/release/embed-log
+
+      - name: Align binary path for packaging scripts (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path target/release
+          Copy-Item -Path target/${{ matrix.target }}/release/embed-log.exe -Destination target/release/embed-log.exe
+
       - name: Package Unix CLI
         if: runner.os != 'Windows'
         run: ./scripts/package-cli.sh ${{ matrix.target }}
