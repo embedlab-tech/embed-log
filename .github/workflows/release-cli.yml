@@ -133,7 +133,13 @@ jobs:
       - name: Verify Unix self-update from packaged CLI
         if: runner.os != 'Windows'
         shell: bash
-        run: python3 scripts/test_update_integration.py --binary "smoke/${{ matrix.binary }}"
+        run: |
+          if [ "${{ matrix.target }}" = "x86_64-apple-darwin" ]; then
+            echo "Running Python test script in Intel (x86_64) emulation mode..."
+            arch -x86_64 python3 scripts/test_update_integration.py --binary "smoke/${{ matrix.binary }}"
+          else
+            python3 scripts/test_update_integration.py --binary "smoke/${{ matrix.binary }}"
+          fi
 
       - name: Smoke-test Windows archive
         if: runner.os == 'Windows'
