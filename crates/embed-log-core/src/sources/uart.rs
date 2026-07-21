@@ -437,6 +437,7 @@ fn open_serial_with_fallback(
 }
 
 #[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
     use serialport::TTYPort;

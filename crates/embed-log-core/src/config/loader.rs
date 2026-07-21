@@ -583,9 +583,16 @@ tabs:
         std::fs::write(&path, yaml).unwrap();
         let cfg = load_config(&path).unwrap();
         assert_eq!(cfg.sources[0].parser.parser_type, "zephyr-dict");
+
+        let expected_database = if cfg!(windows) {
+            "C:/tmp/database.json"
+        } else {
+            "/tmp/database.json"
+        };
+
         assert_eq!(
             cfg.sources[0].parser.database.as_deref(),
-            Some("/tmp/database.json")
+            Some(expected_database)
         );
         std::fs::remove_file(&path).ok();
     }

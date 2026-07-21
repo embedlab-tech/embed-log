@@ -50,7 +50,7 @@ jobs:
             deb: false
           - name: macOS Intel
             id: macos-x64
-            os: macos-13
+            os: macos-14
             target: x86_64-apple-darwin
             archive: tar.gz
             binary: embed-log
@@ -73,17 +73,36 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          # A dispatch tests the branch selected in the Actions UI; `tag` is
-          # only the prospective release name until publish is requested.
           ref: ${{ github.ref }}
 
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev pkg-config
+
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Run CLI, core, and TUI tests
-        run: cargo test --locked --package embed-log-core --package embed-log-cli --package embed-log-tui
+        run: cargo test --locked --target ${{ matrix.target }} --package embed-log-core --package embed-log-cli --package embed-log-tui
 
       - name: Build native release CLI
-        run: cargo build --locked --release --package embed-log-cli --bin embed-log
+        run: cargo build --locked --release --target ${{ matrix.target }} --package embed-log-cli --bin embed-log
+
+      - name: Align binary path for packaging scripts (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p target/release
+          cp target/${{ matrix.target }}/release/embed-log target/release/embed-log
+
+      - name: Align binary path for packaging scripts (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path target/release
+          Copy-Item -Path target/${{ matrix.target }}/release/embed-log.exe -Destination target/release/embed-log.exe
 
       - name: Package Unix CLI
         if: runner.os != 'Windows'
@@ -98,7 +117,7 @@ jobs:
         if: matrix.deb
         run: |
           cargo install cargo-deb --locked
-          cargo deb --no-build -p embed-log-cli -o dist/embed-log-x86_64-unknown-linux-gnu.deb
+          cargo deb --no-build --target ${{ matrix.target }} -p embed-log-cli -o dist/embed-log-x86_64-unknown-linux-gnu.deb
 
       - name: Smoke-test Unix archive
         if: runner.os != 'Windows'
@@ -114,16 +133,16 @@ jobs:
       - name: Verify Unix self-update from packaged CLI
         if: runner.os != 'Windows'
         shell: bash
-        run: python3 scripts/test_update_integration.py --binary "smoke/${{ matrix.binary }}"
-
-      - name: Verify Windows self-update guidance
-        if: runner.os == 'Windows'
-        shell: pwsh
         run: |
-          $result = & "smoke/${{ matrix.binary }}" update --json | ConvertFrom-Json
-          if ($result.self_update_supported -ne $false) {
-            throw "Windows update command unexpectedly reported self-update support"
-          }
+          if [ "${{ matrix.target }}" = "x86_64-apple-darwin" ]; then
+            echo "Spoofing x86_64 architecture for Python environment..."
+            echo 'import platform; platform.machine = lambda: "x86_64"; platform.processor = lambda: "i386"' > sitecustomize.py
+            export PYTHONPATH=$PWD
+            python3 scripts/test_update_integration.py --binary "smoke/${{ matrix.binary }}"
+            rm sitecustomize.py
+          else
+            python3 scripts/test_update_integration.py --binary "smoke/${{ matrix.binary }}"
+          fi
 
       - name: Smoke-test Windows archive
         if: runner.os == 'Windows'
@@ -134,6 +153,15 @@ jobs:
           $binary = "smoke/${{ matrix.binary }}"
           if (!(Test-Path $binary)) { throw "Archive is missing $binary" }
           & $binary version --json
+
+      - name: Verify Windows self-update guidance
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $result = & "smoke/${{ matrix.binary }}" update --json | ConvertFrom-Json
+          if ($result.self_update_supported -ne $false) {
+            throw "Windows update command unexpectedly reported self-update support"
+          }
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4

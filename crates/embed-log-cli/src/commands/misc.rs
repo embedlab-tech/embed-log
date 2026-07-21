@@ -88,68 +88,69 @@ pub(crate) async fn cmd_update(
     allow_downgrade: bool,
     json: bool,
 ) -> Result<()> {
-    let release = {
-        #[cfg(target_os = "windows")]
-        {
-            let _ = (check, requested_version, yes, allow_downgrade);
-            let guidance = "self-update is not supported on Windows yet; rerun the PowerShell installer or use your package manager";
-            if json {
-                println!(
-                    "{}",
-                    serde_json::json!({ "self_update_supported": false, "guidance": guidance })
-                );
-                return Ok(());
-            }
-            anyhow::bail!(guidance);
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            fetch_release(requested_version).await?
-        }
-    };
-    let current = env!("CARGO_PKG_VERSION");
-    let available = release_is_newer(current, &release.tag_name);
-    let asset_name = update_asset_name().ok_or_else(|| {
-        anyhow::anyhow!("self-update is not supported on this platform; use the release installer")
-    })?;
-    let out = serde_json::json!({
-        "current_version": current,
-        "latest_version": release.tag_name,
-        "update_available": available,
-        "release_url": release.html_url,
-        "asset": asset_name,
-    });
-    if check || !yes {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = (check, requested_version, yes, allow_downgrade);
+        let guidance = "self-update is not supported on Windows yet; rerun the PowerShell installer or use your package manager";
         if json {
-            println!("{}", serde_json::to_string_pretty(&out)?);
-        } else if available {
             println!(
-                "update available: {current} → {}",
-                out["latest_version"].as_str().unwrap_or("unknown")
+                "{}",
+                serde_json::json!({ "self_update_supported": false, "guidance": guidance })
             );
-            println!(
-                "  release: {}",
-                out["release_url"].as_str().unwrap_or("unknown")
-            );
-            println!("  install with: embed-log update --yes");
-        } else {
-            println!("embed-log {current} is up to date");
+            return Ok(());
         }
-        return Ok(());
+        anyhow::bail!(guidance);
     }
-    if !available {
-        if release_is_older(current, &release.tag_name) && !allow_downgrade {
-            anyhow::bail!(
-                "refusing to downgrade from {current} to {}; rerun with --allow-downgrade --yes to override",
-                release.tag_name
-            );
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let release = fetch_release(requested_version).await?;
+        let current = env!("CARGO_PKG_VERSION");
+        let available = release_is_newer(current, &release.tag_name);
+        let asset_name = update_asset_name().ok_or_else(|| {
+            anyhow::anyhow!(
+                "self-update is not supported on this platform; use the release installer"
+            )
+        })?;
+        let out = serde_json::json!({
+            "current_version": current,
+            "latest_version": release.tag_name,
+            "update_available": available,
+            "release_url": release.html_url,
+            "asset": asset_name,
+        });
+        if check || !yes {
+            if json {
+                println!("{}", serde_json::to_string_pretty(&out)?);
+            } else if available {
+                println!(
+                    "update available: {current} → {}",
+                    out["latest_version"].as_str().unwrap_or("unknown")
+                );
+                println!(
+                    "  release: {}",
+                    out["release_url"].as_str().unwrap_or("unknown")
+                );
+                println!("  install with: embed-log update --yes");
+            } else {
+                println!("embed-log {current} is up to date");
+            }
+            return Ok(());
         }
-        println!("embed-log {current} is already at {}", release.tag_name);
-        return Ok(());
+        if !available {
+            if release_is_older(current, &release.tag_name) && !allow_downgrade {
+                anyhow::bail!(
+                    "refusing to downgrade from {current} to {}; rerun with --allow-downgrade --yes to override",
+                    release.tag_name
+                );
+            }
+            println!("embed-log {current} is already at {}", release.tag_name);
+            return Ok(());
+        }
+        install_release(&release, &asset_name).await?;
+        println!("updated embed-log to {}", release.tag_name);
+        Ok(())
     }
-    install_release(&release, &asset_name).await?;
-    println!("updated embed-log to {}", release.tag_name);
-    Ok(())
 }
 
 async fn fetch_release(requested_version: Option<&str>) -> Result<GithubRelease> {
