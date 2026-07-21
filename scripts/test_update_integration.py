@@ -21,7 +21,7 @@ import tempfile
 import threading
 from pathlib import Path
 
-TAG = "v1.0.1"
+TAG = "v99.0.1"
 
 
 def update_target() -> str:
