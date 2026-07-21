@@ -108,7 +108,9 @@ pub(crate) async fn cmd_update(
         let current = env!("CARGO_PKG_VERSION");
         let available = release_is_newer(current, &release.tag_name);
         let asset_name = update_asset_name().ok_or_else(|| {
-            anyhow::anyhow!("self-update is not supported on this platform; use the release installer")
+            anyhow::anyhow!(
+                "self-update is not supported on this platform; use the release installer"
+            )
         })?;
         let out = serde_json::json!({
             "current_version": current,

@@ -583,7 +583,7 @@ tabs:
         std::fs::write(&path, yaml).unwrap();
         let cfg = load_config(&path).unwrap();
         assert_eq!(cfg.sources[0].parser.parser_type, "zephyr-dict");
-        
+
         let expected_database = if cfg!(windows) {
             "C:/tmp/database.json"
         } else {
