@@ -36,7 +36,7 @@ jobs:
         include:
           - name: Linux x64
             id: linux-x64
-            os: ubuntu-latest
+            os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             archive: tar.gz
             binary: embed-log
