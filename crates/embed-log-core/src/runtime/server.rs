@@ -1380,9 +1380,10 @@ async fn run_writer(
 
         if entry.raw_message.is_some() {
             let decoded_path = current_log_path.with_extension("coap.log");
-            let needs_open = decoded_file
-                .as_ref()
-                .is_none_or(|(path, _)| *path != decoded_path);
+            let needs_open = match decoded_file.as_ref() {
+                None => true,
+                Some((path, _)) => *path != decoded_path,
+            };
             if needs_open {
                 decoded_file = open_log_file(&source_name, &decoded_path)
                     .map(|next_file| (decoded_path.clone(), next_file));

@@ -101,7 +101,7 @@ fn find_best_coap(raw: &str) -> Option<FoundCoap> {
     candidates.extend(compact.find_iter(raw));
     candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.len()));
 
-    let mut best = None;
+    let mut best: Option<FoundCoap> = None;
     for candidate in candidates {
         let normalized = normalize_hex(candidate.as_str(), candidate.start());
         for start in 0..normalized.len().saturating_sub(3) {
@@ -111,10 +111,11 @@ fn find_best_coap(raw: &str) -> Option<FoundCoap> {
             let source_end = normalized[start + decoded.consumed - 1].2;
             decoded.source_start = source_start;
             decoded.source_end = source_end;
-            if best
-                .as_ref()
-                .is_none_or(|current: &FoundCoap| decoded.score > current.score)
-            {
+            let is_better = match best.as_ref() {
+                None => true,
+                Some(current) => decoded.score > current.score,
+            };
+            if is_better {
                 best = Some(decoded);
             }
         }
@@ -229,11 +230,7 @@ fn parse_coap(bytes: &[(u8, usize, usize)]) -> Option<FoundCoap> {
         },
     );
     let code_text = code_text(code);
-    let summary = if is_request(code) {
-        format!("{message_type} {code_text} {uri} id={message_id:04x}")
-    } else {
-        format!("{message_type} {code_text} {uri} id={message_id:04x}")
-    };
+    let summary = format!("{message_type} {code_text} {uri} id={message_id:04x}");
     let score = (usize::from(is_request(code)) * 100)
         + (usize::from(uri != "/") * 40)
         + options.len().min(8)
