@@ -1090,3 +1090,19 @@ Future entries must include this per-file added/removed-line summary.
 | `docs/architecture.md` | 2 | 1 | Documents backend hex-CoAP parser behavior. |
 | `docs/configuration.md` | 20 | 1 | Documents configuration and raw/decoded session artifact semantics. |
 | `frontend/onboarding.js` | 3 | 3 | Offers embedded hex-CoAP in source parser choices. |
+
+## 2026-07-22 09:01:15 UTC / 2026-07-22 11:01:15 CEST (Warsaw)
+
+- **Commit:** `46e5f37` — `Preserve hex CoAP parser MSRV compatibility`
+- **Task:** Correct the CI Clippy/MSRV errors introduced by the hex-CoAP parser and verify the physical UART rig locally.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-22 09:01:15 UTC / 2026-07-22 11:01:15 CEST (+0200) (Warsaw)
+- **Validation:** `cargo clippy --locked --package embed-log-core --package embed-log-cli --all-targets -- -D warnings` — passed; packaged-CLI STM32G0 mixed-baud hardware test — passed (13.76 s), with CONTROL plus USART1/USART3/USART4 records persisted.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`46e5f37`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-core/src/parsers/hex_coap.rs` | 7 | 10 | Replaces post-MSRV `Option::is_none_or` and removes a redundant branch. |
+| `crates/embed-log-core/src/runtime/server.rs` | 4 | 3 | Replaces post-MSRV decoded-writer option handling. |
