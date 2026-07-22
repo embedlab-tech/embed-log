@@ -231,9 +231,9 @@
         const portOptions = src.type === "uart" ? `<select data-field="port" data-source="${src.id}"><option value="">Choose serial port…</option>${serialPorts.map(p => `<option ${p === src.port ? "selected" : ""}>${escapeHtml(p)}</option>`).join("")}<option value="${escapeHtml(src.port)}" ${src.port && !serialPorts.includes(src.port) ? "selected" : ""}>${escapeHtml(src.port || "Custom…")}</option></select><input data-field="port" data-source="${src.id}" placeholder="or type serial path" value="${escapeAttr(src.port)}">`
             : `<input data-field="port" data-source="${src.id}" placeholder="${src.type === "udp" ? "9000" : "/path/to/log.txt"}" value="${escapeAttr(src.port)}">`;
         const parserOptions = src.type === "udp"
-            ? `<option value="text" ${src.parser === "text" ? "selected" : ""}>Text</option><option value="cbor-datagram" ${src.parser === "cbor-datagram" ? "selected" : ""}>CBOR datagram</option>`
-            : `<option value="text" selected>Text</option>`;
-        if (src.type !== "udp") src.parser = "text";
+            ? `<option value="text" ${src.parser === "text" ? "selected" : ""}>Text</option><option value="hex-coap" ${src.parser === "hex-coap" ? "selected" : ""}>Embedded hex CoAP</option><option value="cbor-datagram" ${src.parser === "cbor-datagram" ? "selected" : ""}>CBOR datagram</option>`
+            : `<option value="text" ${src.parser === "text" ? "selected" : ""}>Text</option><option value="hex-coap" ${src.parser === "hex-coap" ? "selected" : ""}>Embedded hex CoAP</option>`;
+        if (src.type !== "udp" && src.parser === "cbor-datagram") src.parser = "text";
         return `<div class="qs-source">
             <div class="qs-row"><strong>${src.type === "uart" ? "Serial" : src.type.toUpperCase()}</strong><button class="qs-danger" data-remove-source="${src.id}">remove</button></div>
             <label>Name <input data-field="name" data-source="${src.id}" value="${escapeAttr(src.name)}"></label>

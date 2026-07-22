@@ -44,6 +44,8 @@ pub struct LogEntry {
     pub timestamp: DateTime<Local>,
     pub source: String,
     pub message: String,
+    /// Original source text when a parser transformed `message` for display.
+    pub raw_message: Option<String>,
     pub color: Option<String>,
     pub no_ws: bool,
     pub meta: Option<Value>,
@@ -59,10 +61,16 @@ impl LogEntry {
             timestamp,
             source: source.into(),
             message: message.into(),
+            raw_message: None,
             color: None,
             no_ws: false,
             meta: None,
         }
+    }
+
+    pub fn with_raw_message(mut self, raw_message: impl Into<String>) -> Self {
+        self.raw_message = Some(raw_message.into());
+        self
     }
 
     pub fn with_color(mut self, color: impl Into<String>) -> Self {

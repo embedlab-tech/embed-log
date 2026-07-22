@@ -319,12 +319,18 @@ impl LogSource for UartSource {
                 continue;
             }
 
-            for line in parser.feed(&buf[..n]) {
-                let trimmed = line.trim_end();
+            for line in parser.feed_entries(&buf[..n]) {
+                let trimmed = line.display.trim_end();
                 if trimmed.is_empty() {
                     continue;
                 }
-                let entry = LogEntry::new(Local::now(), name.clone(), trimmed.to_string());
+                let mut entry = LogEntry::new(Local::now(), name.clone(), trimmed.to_string());
+                if let Some(raw) = line.raw {
+                    entry = entry.with_raw_message(raw.trim_end().to_string());
+                }
+                if let Some(meta) = line.meta {
+                    entry = entry.with_meta(meta);
+                }
                 if tx.send(entry).await.is_err() {
                     return Ok(());
                 }

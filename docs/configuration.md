@@ -133,7 +133,7 @@ Common optional keys:
 | Key | Notes |
 | --- | --- |
 | `label` | Friendly UI label. Defaults to `name`. |
-| `parser.type` | `text`, `cbor-datagram`, `slip-coap`, or `zephyr-dict`. |
+| `parser.type` | `text`, `hex-coap`, `cbor-datagram`, `slip-coap`, or `zephyr-dict`. |
 | `parser.database` | Path to a Zephyr dictionary-logging `database.json`. Required when `parser.type: zephyr-dict`. |
 
 ### UDP source
@@ -177,6 +177,25 @@ sources:
 ```
 
 `port` must be a string. The runtime opens the port through the Rust `serialport` crate.
+
+### Embedded hexadecimal CoAP source
+
+```yaml
+sources:
+  - name: RADIO
+    type: uart # also valid for file and UDP text sources
+    port: /dev/ttyUSB2
+    baudrate: 115200
+    parser:
+      type: hex-coap
+```
+
+`hex-coap` finds a valid compact or separator-delimited CoAP payload anywhere
+in each text line and replaces that payload in the displayed line with a CoAP
+summary. The original line is retained in the session's source `.log` file;
+the decoded display stream is written to a sibling `.coap.log` file. Combined
+JSONL and live WebSocket records use the decoded `message` and add
+`raw_message` plus structured `coap` metadata.
 
 ### UART SLIP/CoAP source
 

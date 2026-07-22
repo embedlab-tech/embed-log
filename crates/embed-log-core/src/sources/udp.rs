@@ -56,7 +56,8 @@ impl LogSource for UdpSource {
 
         let mut buf = vec![0u8; 65536];
         let mut parser = create_parser(&self.parser);
-        let is_text_parser = self.parser.parser_type == "text";
+        let is_line_oriented_parser =
+            matches!(self.parser.parser_type.as_str(), "text" | "hex-coap");
 
         loop {
             let (len, _addr) = match socket.recv_from(&mut buf).await {
@@ -67,21 +68,27 @@ impl LogSource for UdpSource {
                 }
             };
 
-            let lines = if is_text_parser {
+            let lines = if is_line_oriented_parser {
                 let mut datagram = Vec::with_capacity(len + 1);
                 datagram.extend_from_slice(&buf[..len]);
                 datagram.push(b'\n');
-                parser.feed(&datagram)
+                parser.feed_entries(&datagram)
             } else {
-                parser.feed(&buf[..len])
+                parser.feed_entries(&buf[..len])
             };
 
             for line in lines {
-                let trimmed = line.trim_end();
+                let trimmed = line.display.trim_end();
                 if trimmed.is_empty() {
                     continue;
                 }
-                let entry = LogEntry::new(Local::now(), self.name.clone(), trimmed.to_string());
+                let mut entry = LogEntry::new(Local::now(), self.name.clone(), trimmed.to_string());
+                if let Some(raw) = line.raw {
+                    entry = entry.with_raw_message(raw.trim_end().to_string());
+                }
+                if let Some(meta) = line.meta {
+                    entry = entry.with_meta(meta);
+                }
                 if tx.send(entry).await.is_err() {
                     debug!("[{}] channel closed, stopping", self.name);
                     return Ok(());
@@ -129,6 +136,34 @@ mod tests {
             .unwrap();
         assert_eq!(entry.source, "dut");
         assert_eq!(entry.message, "boot complete");
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn hex_coap_udp_datagram_without_newline_keeps_raw_and_decodes_display() {
+        let port = free_udp_port();
+        let (tx, mut rx) = mpsc::channel(4);
+        let handle = tokio::spawn(async move {
+            let source = UdpSource::new_with_parser("coap", port, "hex-coap");
+            let _ = Box::new(source).run(tx).await;
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        let sender = UdpSocket::bind(("127.0.0.1", 0)).await.unwrap();
+        let raw = b"rx: 41 01 12 34 ab b4 74 65 73 74 rssi=-62";
+        sender.send_to(raw, ("127.0.0.1", port)).await.unwrap();
+
+        let entry = timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(entry.message.contains("[COAP CON GET /test id=1234]"));
+        assert_eq!(
+            entry.raw_message.as_deref(),
+            Some("rx: 41 01 12 34 ab b4 74 65 73 74 rssi=-62")
+        );
+        assert_eq!(entry.meta.as_ref().unwrap()["coap"]["uri"], "/test");
 
         handle.abort();
     }

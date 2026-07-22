@@ -207,10 +207,10 @@ fn validate_config(config: &mut AppConfig, config_path: &Path) -> Result<(), Con
         let parser_type = &src.parser.parser_type;
         if !matches!(
             parser_type.as_str(),
-            "text" | "cbor-datagram" | "slip-coap" | "zephyr-dict"
+            "text" | "hex-coap" | "cbor-datagram" | "slip-coap" | "zephyr-dict"
         ) {
             return Err(ConfigError::validation(format!(
-                "{}.parser.type unsupported: {parser_type:?} (use 'text', 'cbor-datagram', 'slip-coap', or 'zephyr-dict')",
+                "{}.parser.type unsupported: {parser_type:?} (use 'text', 'hex-coap', 'cbor-datagram', 'slip-coap', or 'zephyr-dict')",
                 ctx()
             )));
         }

@@ -146,6 +146,25 @@ impl SessionManager {
         }))
     }
 
+    /// Register a display/decoded companion for a lossless raw source file.
+    pub fn register_decoded_source_file(&self, source_name: &str, path: &Path) -> Result<()> {
+        let manifest_path = self.manifest_path();
+        let mut manifest: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&manifest_path)?)?;
+        let object = manifest
+            .as_object_mut()
+            .ok_or_else(|| anyhow::anyhow!("session manifest is not an object"))?;
+        let decoded = object
+            .entry("decoded_source_files")
+            .or_insert_with(|| json!({}));
+        let decoded = decoded
+            .as_object_mut()
+            .ok_or_else(|| anyhow::anyhow!("decoded_source_files is not an object"))?;
+        decoded.insert(source_name.to_string(), json!(path.display().to_string()));
+        std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)
+            .with_context(|| format!("update manifest {}", manifest_path.display()))
+    }
+
     /// Mark the HTML export as failed.
     pub fn mark_html_error(&mut self, error: &str) -> Result<()> {
         self.html_status = "error".to_string();

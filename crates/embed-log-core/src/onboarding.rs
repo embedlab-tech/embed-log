@@ -218,7 +218,7 @@ pub fn build_quick_config_yaml(draft: &QuickConfigDraft) -> Result<String, Strin
                 "source '{name}' uses CBOR parser, which is only supported for UDP sources"
             ));
         }
-        if !matches!(parser_type, "text" | "cbor-datagram") {
+        if !matches!(parser_type, "text" | "hex-coap" | "cbor-datagram") {
             return Err(format!(
                 "unsupported parser type for source '{name}': {parser_type}"
             ));

@@ -145,11 +145,12 @@ bytes/datagram ──▶ StreamParser::feed(&[u8]) ──▶ Vec<String>
 | Parser `type` | Scope | Behavior |
 | --- | --- | --- |
 | `text` | UART, UDP, file | UTF-8-ish line splitting with buffering. |
+| `hex-coap` | Text sources | Replaces embedded hexadecimal CoAP payloads for display while preserving raw input and CoAP metadata. |
 | `cbor-datagram` | UDP only | Decodes a CBOR datagram and formats key/value output. |
 | `slip-coap` | UART only | Decodes SLIP-framed UDP datagrams carrying CoAP messages (device-to-device links). |
 | `zephyr-dict` | Any source | Decodes Zephyr dictionary-logging binary messages against a `database.json` (`parser.database`). Buffers across `feed()` calls since messages are length-prefixed, not delimited. DB format v3 only. |
 
-Config validation rejects `cbor-datagram` on non-UDP sources, `slip-coap` on non-UART sources, and `zephyr-dict` without `parser.database` set.
+Config validation rejects `cbor-datagram` on non-UDP sources, `slip-coap` on non-UART sources, and `zephyr-dict` without `parser.database` set. `hex-coap` is line-oriented and is valid for textual UART, file, and UDP sources.
 
 ## HTTP/WebSocket API
 

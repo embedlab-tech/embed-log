@@ -97,7 +97,16 @@ impl SessionExporter {
         // Parse log files and build entries.
         let mut log_data: HashMap<String, Vec<LogEntry>> = HashMap::new();
         for (source_name, log_path_str) in &self.source_files {
-            let log_path = Path::new(log_path_str);
+            let raw_log_path = Path::new(log_path_str);
+            // A `hex-coap` source writes a complete display companion next to
+            // its lossless raw source file. Older/non-CoAP sessions fall back
+            // to the original path.
+            let decoded_log_path = raw_log_path.with_extension("coap.log");
+            let log_path = if decoded_log_path.exists() {
+                decoded_log_path.as_path()
+            } else {
+                raw_log_path
+            };
             if !log_path.exists() {
                 continue;
             }

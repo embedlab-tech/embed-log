@@ -1318,6 +1318,9 @@ async fn run_writer(
     };
 
     let clock = SessionClock::new(runtime.ts_mode);
+    // Created only when a parser supplies an alternate display line. The
+    // primary source file remains lossless raw input.
+    let mut decoded_file: Option<(PathBuf, std::io::BufWriter<std::fs::File>)> = None;
     use std::io::Write;
 
     while let Some(entry) = entry_rx.recv().await {
@@ -1328,6 +1331,7 @@ async fn run_writer(
                 Some(next_file) => {
                     current_log_path = desired_log_path;
                     file = next_file;
+                    decoded_file = None;
                 }
                 None => continue,
             }
@@ -1360,17 +1364,46 @@ async fn run_writer(
             let _ = runtime.broadcast_tx.send(session_info.to_string());
         }
 
-        // Format for log file: [timestamp] message
+        // The primary source artifact retains exact input. A parser that
+        // transforms a line additionally receives a decoded `.coap.log` file.
         let file_ts = clock.file_timestamp(entry.timestamp);
-        let file_line = format!("[{file_ts}] {}\n", entry.message);
+        let raw_message = entry.raw_message.as_deref().unwrap_or(&entry.message);
+        let raw_file_line = format!("[{file_ts}] {raw_message}\n");
         if let Some(stats) = &runtime.stats {
-            stats.record_dequeued(file_line.len());
+            stats.record_dequeued(raw_file_line.len());
         }
 
-        if let Err(e) = file.write_all(file_line.as_bytes()) {
+        if let Err(e) = file.write_all(raw_file_line.as_bytes()) {
             error!("[{source_name}] log write error: {e}");
         }
         let _ = file.flush();
+
+        if entry.raw_message.is_some() {
+            let decoded_path = current_log_path.with_extension("coap.log");
+            let needs_open = decoded_file
+                .as_ref()
+                .is_none_or(|(path, _)| *path != decoded_path);
+            if needs_open {
+                decoded_file = open_log_file(&source_name, &decoded_path)
+                    .map(|next_file| (decoded_path.clone(), next_file));
+                if decoded_file.is_some() {
+                    if let Ok(manager) = runtime.session_manager.lock() {
+                        if let Err(e) =
+                            manager.register_decoded_source_file(&source_name, &decoded_path)
+                        {
+                            error!("[{source_name}] failed to register decoded log file: {e}");
+                        }
+                    }
+                }
+            }
+            if let Some((_, output)) = decoded_file.as_mut() {
+                let decoded_line = format!("[{file_ts}] {}\n", entry.message);
+                if let Err(e) = output.write_all(decoded_line.as_bytes()) {
+                    error!("[{source_name}] decoded log write error: {e}");
+                }
+                let _ = output.flush();
+            }
+        }
 
         // Build WS payload with BOTH absolute and relative timestamps.
         // The frontend needs both so the timestamp toggle button works.
@@ -1451,6 +1484,11 @@ async fn run_writer(
             "relTs": rel_ts,
             "relNum": rel_num,
         });
+        if let (Some(payload_obj), Some(raw_message)) =
+            (payload.as_object_mut(), entry.raw_message.as_ref())
+        {
+            payload_obj.insert("raw_message".to_string(), json!(raw_message));
+        }
         if let (Some(payload_obj), Some(meta_obj)) = (
             payload.as_object_mut(),
             entry.meta.as_ref().and_then(|m| m.as_object()),
@@ -1653,7 +1691,7 @@ mod tests {
         let mut pane_kinds = HashMap::new();
         pane_kinds.insert("dut".to_string(), "udp".to_string());
 
-        SessionManager::new(
+        let manager = SessionManager::new(
             session_id,
             dir,
             &[json!({ "label": "Main", "panes": ["dut"] })],
@@ -1671,7 +1709,9 @@ mod tests {
             None,
             "absolute",
             None,
-        )
+        );
+        manager.write_manifest().unwrap();
+        manager
     }
 
     fn test_source_meta(session_id: &str) -> SourceRuntimeMeta {
@@ -1811,11 +1851,15 @@ mod tests {
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
 
         entry_tx
-            .send(LogEntry::new(
-                Local::now(),
-                "dut".to_string(),
-                "boot complete".to_string(),
-            ))
+            .send(
+                LogEntry::new(
+                    Local::now(),
+                    "dut".to_string(),
+                    "rx: [COAP CON GET /test id=1234]".to_string(),
+                )
+                .with_raw_message("rx: 41 01 12 34 ab b4 74 65 73 74")
+                .with_meta(json!({ "parser": "hex-coap", "coap": { "uri": "/test" } })),
+            )
             .await
             .unwrap();
         wait_file_contains(&combined_path, "\"source_label\":\"DUT\"").await;
@@ -1828,7 +1872,24 @@ mod tests {
         assert_eq!(parsed["tab_labels"], json!(["Main"]));
         assert_eq!(parsed["session_id"], "session-1");
         assert_eq!(parsed["app_name"], "embed-log");
-        assert_eq!(parsed["message"], "boot complete");
+        assert_eq!(parsed["message"], "rx: [COAP CON GET /test id=1234]");
+        assert_eq!(parsed["raw_message"], "rx: 41 01 12 34 ab b4 74 65 73 74");
+        assert_eq!(parsed["coap"]["uri"], "/test");
+        assert!(std::fs::read_to_string(&log_path)
+            .unwrap()
+            .contains("41 01 12 34"));
+        let decoded_path = log_path.with_extension("coap.log");
+        assert!(std::fs::read_to_string(&decoded_path)
+            .unwrap()
+            .contains("[COAP CON GET /test id=1234]"));
+        let manifest: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(session_dir.join("manifest.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            manifest["decoded_source_files"]["dut"],
+            decoded_path.display().to_string()
+        );
 
         drop(entry_tx);
         handle.await.unwrap();
