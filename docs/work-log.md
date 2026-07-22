@@ -1061,3 +1061,32 @@ Future entries must include this per-file added/removed-line summary.
 | File | Added | Removed | Summary |
 | --- | ---: | ---: | --- |
 | `.github/workflows/ci.yml` | 1 | 0 | Runs Edge live-input validation after a Firefox failure. |
+
+## 2026-07-22 08:49:21 UTC / 2026-07-22 10:49:21 CEST (Warsaw)
+
+- **Commit:** `2ed0edb` — `Add lossless embedded hex CoAP parser`
+- **Task:** Decode embedded hexadecimal CoAP payloads for live consumers while preserving raw source artifacts and adding structured CoAP JSONL metadata.
+- **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
+- **Completed:** 2026-07-22 08:49:21 UTC / 2026-07-22 10:49:21 CEST (+0200) (Warsaw)
+- **Validation:** `cargo test --locked --package embed-log-core` — passed (229 tests); `cargo test --locked --package embed-log-cli` — passed (90 tests); `cargo build --locked --package embed-log-cli --bin embed-log` — passed; manual UDP CLI E2E verified decoded display, lossless raw `.log`, `.coap.log`, `combined.jsonl` `raw_message`/`coap`, and manifest mapping; `cargo fmt --all -- --check` and `git diff --check` — passed.
+- **Model-token delta:** unavailable; no before checkpoint exists.
+
+### File changes (`2ed0edb`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-core/src/config/loader.rs` | 2 | 2 | Accepts `hex-coap` parser configuration. |
+| `crates/embed-log-core/src/models.rs` | 8 | 0 | Carries optional raw source text through log entries. |
+| `crates/embed-log-core/src/onboarding.rs` | 1 | 1 | Permits the parser in onboarding-generated configs. |
+| `crates/embed-log-core/src/parsers/hex_coap.rs` | 374 | 0 | Finds, validates, decodes, and replaces embedded CoAP hex with structured metadata. |
+| `crates/embed-log-core/src/parsers/mod.rs` | 3 | 0 | Registers the parser factory/export. |
+| `crates/embed-log-core/src/parsers/traits.rs` | 29 | 0 | Adds lossless parsed-line metadata while preserving existing parser implementations. |
+| `crates/embed-log-core/src/runtime/server.rs` | 73 | 12 | Writes raw and decoded artifacts plus `raw_message`/CoAP JSONL and WebSocket fields. |
+| `crates/embed-log-core/src/session/exporter.rs` | 10 | 1 | Prefers decoded companion logs for static session HTML. |
+| `crates/embed-log-core/src/session/manager.rs` | 19 | 0 | Records decoded source artifacts in manifests. |
+| `crates/embed-log-core/src/sources/file.rs` | 9 | 3 | Propagates parsed display/raw metadata from watched files. |
+| `crates/embed-log-core/src/sources/uart.rs` | 9 | 3 | Propagates parsed display/raw metadata from UARTs. |
+| `crates/embed-log-core/src/sources/udp.rs` | 41 | 6 | Handles line-oriented UDP CoAP text and tests no-newline datagrams. |
+| `docs/architecture.md` | 2 | 1 | Documents backend hex-CoAP parser behavior. |
+| `docs/configuration.md` | 20 | 1 | Documents configuration and raw/decoded session artifact semantics. |
+| `frontend/onboarding.js` | 3 | 3 | Offers embedded hex-CoAP in source parser choices. |
