@@ -946,3 +946,55 @@ Future entries must include this per-file added/removed-line summary.
 | File | Added | Removed | Summary |
 | --- | ---: | ---: | --- |
 | `mvp-embed-log-todo.md` | 668 | 0 | Documents the MVP scope, retained and removed features, daemon/instance/session CLI, config v2, parser migration, and Linux/agent validation plans. |
+
+## 2026-08-03 16:30:40 UTC / 2026-08-03 18:30:40 CEST (Warsaw)
+
+- **Commit:** `c267f0f` — `Remove Tauri desktop surface`
+- **Task:** Remove the Tauri desktop application, launch path, frontend bridge, CI/release surface, and current documentation while retaining browser and TUI modes.
+- **Started:** 2026-08-03 16:24:50 UTC / 2026-08-03 18:24:50 CEST (+0200) (Warsaw)
+- **Completed:** 2026-08-03 16:30:40 UTC / 2026-08-03 18:30:40 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli --package embed-log-tui` — passed (88 CLI, 225 core, and 74 TUI tests); `cargo clippy --locked --package embed-log-core --package embed-log-cli --package embed-log-tui --all-targets -- -D warnings` — passed; `npm --prefix tests-ui run test:unit` — passed (19 tests); locked workspace metadata and rebuilt CLI `--ui` rejection checks — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`c267f0f`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 0 | 57 | Removes the disabled Tauri Linux CI job. |
+| `Cargo.lock` | 185 | 3033 | Prunes the Tauri desktop dependency graph while retaining locked active dependencies. |
+| `Cargo.toml` | 1 | 2 | Removes the Tauri crate from the workspace. |
+| `README.md` | 4 | 5 | Describes browser and TUI products without the desktop app. |
+| `RELEASE_AND_UPDATE.md` | 0 | 2 | Removes obsolete Tauri updater notes. |
+| `crates/embed-log-cli/src/commands/mod.rs` | 0 | 1 | Removes the UI launcher module. |
+| `crates/embed-log-cli/src/commands/run.rs` | 3 | 3 | Removes Tauri-specific onboarding comments. |
+| `crates/embed-log-cli/src/commands/ui.rs` | 0 | 139 | Deletes Tauri binary discovery and launch behavior. |
+| `crates/embed-log-cli/src/main.rs` | 3 | 15 | Removes `--ui` and adds a regression test that rejects it. |
+| `crates/embed-log-core/src/config/paths.rs` | 2 | 2 | Makes config path documentation frontend-neutral. |
+| `crates/embed-log-core/src/onboarding.rs` | 7 | 17 | Removes desktop-specific onboarding contracts and comments. |
+| `crates/embed-log-tauri/Cargo.toml` | 0 | 22 | Deletes the desktop crate manifest. |
+| `crates/embed-log-tauri/build.rs` | 0 | 3 | Deletes the Tauri build script. |
+| `crates/embed-log-tauri/gen/schemas/acl-manifests.json` | 0 | 1 | Deletes generated desktop ACL data. |
+| `crates/embed-log-tauri/gen/schemas/capabilities.json` | 0 | 1 | Deletes generated desktop capability data. |
+| `crates/embed-log-tauri/gen/schemas/desktop-schema.json` | 0 | 2612 | Deletes generated desktop schema data. |
+| `crates/embed-log-tauri/gen/schemas/macOS-schema.json` | 0 | 2612 | Deletes generated macOS schema data. |
+| `crates/embed-log-tauri/gen/schemas/windows-schema.json` | 0 | 2612 | Deletes generated Windows schema data. |
+| `crates/embed-log-tauri/icons/128x128.png` | binary | binary | Deletes a Tauri application icon. |
+| `crates/embed-log-tauri/icons/256x256.png` | binary | binary | Deletes a Tauri application icon. |
+| `crates/embed-log-tauri/icons/32x32.png` | binary | binary | Deletes a Tauri application icon. |
+| `crates/embed-log-tauri/src/lib.rs` | 0 | 544 | Deletes the desktop application runtime. |
+| `crates/embed-log-tauri/src/main.rs` | 0 | 5 | Deletes the desktop binary entry point. |
+| `crates/embed-log-tauri/tauri.conf.json` | 0 | 35 | Deletes desktop packaging configuration. |
+| `crates/embed-log-tui/src/lib.rs` | 3 | 3 | Describes the TUI directly against the browser-compatible server. |
+| `demo.sh` | 10 | 22 | Removes desktop demo mode. |
+| `docs/architecture.md` | 12 | 27 | Removes the desktop shell from architecture and documents TUI instead. |
+| `docs/cli.md` | 3 | 14 | Removes `--ui`, desktop launch, and desktop environment variables. |
+| `docs/configuration.md` | 1 | 3 | Removes desktop-specific config path behavior. |
+| `docs/development.md` | 4 | 25 | Removes desktop prerequisites, recipes, and workspace entries. |
+| `docs/index.md` | 1 | 2 | Removes the desktop documentation link. |
+| `docs/non-session-roadmap.md` | 0 | 1 | Removes deferred desktop packaging work. |
+| `docs/releasing.md` | 0 | 10 | Removes the desktop release section. |
+| `docs/tauri.md` | 0 | 146 | Deletes desktop application documentation. |
+| `frontend/onboarding.js` | 1 | 4 | Removes Tauri invocation fallback from onboarding. |
+| `frontend/ui.js` | 1 | 14 | Opens session URLs with browser behavior only. |
+| `justfile` | 8 | 18 | Removes desktop build/run/demo recipes and clarifies no-browser mode. |
+| `tui-frontend-plan.md` | 0 | 419 | Deletes the completed plan containing obsolete desktop integration assumptions. |
