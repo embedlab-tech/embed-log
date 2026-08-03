@@ -1,10 +1,9 @@
 //! The grab-bag of leaf subcommands: `version`, `doctor`, `validate`, `ports`,
-//! `hello`, `merge`, `parse`. None of them start the server.
+//! and `hello`. None of them start the server.
 
-use std::collections::HashMap;
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use embed_log_core::config::{load_config, resolve_logs_root};
 
@@ -448,103 +447,9 @@ pub(crate) fn cmd_hello() -> Result<()> {
     Ok(())
 }
 
-/// `embed-log parse` — extract raw log files from an exported session HTML.
-pub(crate) fn cmd_parse(html_path: &Path, output_dir: &Path) -> Result<()> {
-    let html = std::fs::read_to_string(html_path)
-        .with_context(|| format!("read {}", html_path.display()))?;
-
-    let entries = extract_log_data(&html)?;
-    std::fs::create_dir_all(output_dir)?;
-    let by_source = group_entries_by_source(&entries);
-
-    for (source, lines) in &by_source {
-        let path = output_dir.join(format!("{}.log", source));
-        std::fs::write(&path, lines.join("\n") + "\n")?;
-        println!("  {}  {} lines", path.display(), lines.len());
-    }
-    println!(
-        "parsed {} sources → {}",
-        by_source.len(),
-        output_dir.display()
-    );
-    Ok(())
-}
-
-/// Pull the `const logData = [...];` array out of a session HTML document.
-fn extract_log_data(html: &str) -> Result<Vec<serde_json::Value>> {
-    let marker = "const logData = ";
-    let start = html
-        .find(marker)
-        .ok_or_else(|| anyhow::anyhow!("not an embed-log session HTML: missing logData"))?;
-    let data_start = start + marker.len();
-    let end = html[data_start..]
-        .find(";\n")
-        .ok_or_else(|| anyhow::anyhow!("malformed logData in HTML"))?;
-    let json_str = &html[data_start..data_start + end];
-    let entries: Vec<serde_json::Value> =
-        serde_json::from_str(json_str).with_context(|| "parse logData JSON")?;
-    Ok(entries)
-}
-
-/// Group log entries by their `source_id` (missing → "unknown"), preserving order.
-fn group_entries_by_source(entries: &[serde_json::Value]) -> HashMap<String, Vec<String>> {
-    let mut by_source: HashMap<String, Vec<String>> = HashMap::new();
-    for entry in entries {
-        let source_id = entry
-            .get("source_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
-        let data = entry.get("data").and_then(|v| v.as_str()).unwrap_or("");
-        by_source
-            .entry(source_id.to_string())
-            .or_default()
-            .push(data.to_string());
-    }
-    by_source
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn extract_log_data_round_trip() {
-        let entries = serde_json::json!([
-            { "source_id": "dut", "data": "boot" },
-            { "source_id": "host", "data": "hello" },
-        ]);
-        let html = format!("const logData = {};\n</script>", entries);
-        let parsed = extract_log_data(&html).unwrap();
-        assert_eq!(parsed.len(), 2);
-        assert_eq!(parsed[0]["source_id"], "dut");
-    }
-
-    #[test]
-    fn extract_log_data_missing_marker_is_error() {
-        let err = extract_log_data("<html>no logs here</html>").unwrap_err();
-        assert!(err.to_string().contains("missing logData"));
-    }
-
-    #[test]
-    fn extract_log_data_malformed_terminator_is_error() {
-        let err = extract_log_data("const logData = [1, 2] no semicolon newline").unwrap_err();
-        assert!(err.to_string().contains("malformed logData"));
-    }
-
-    #[test]
-    fn group_entries_by_source_preserves_unknown() {
-        let entries: Vec<serde_json::Value> = serde_json::json!([
-            { "source_id": "a", "data": "x" },
-            { "data": "no source" },
-            { "source_id": "a", "data": "y" }
-        ])
-        .as_array()
-        .unwrap()
-        .clone();
-        let grouped = group_entries_by_source(&entries);
-        assert_eq!(grouped["a"], vec!["x".to_string(), "y".to_string()]);
-        assert_eq!(grouped["unknown"], vec!["no source".to_string()]);
-    }
 
     #[test]
     fn version_report_includes_release_diagnostics() {

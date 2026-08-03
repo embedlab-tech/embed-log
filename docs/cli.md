@@ -325,14 +325,6 @@ embed-log sessions search --dir logs --regex panic -B 20 -A 40       # different
 
 Each match prints a `# match N session=... source=... line=...` header, the surrounding lines, and `<< MATCH` on the matching line. Context flags conflict with `--count` and with `--last` (not supported together yet).
 
-## Parse exported HTML back to logs
-
-```bash
-embed-log parse session.html --output parsed/
-```
-
-Extracts embedded `logData` from a session HTML file and writes per-pane raw log files.
-
 ## Environment variables
 
 | Variable | Used by | Meaning |

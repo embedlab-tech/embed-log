@@ -139,4 +139,4 @@ Ignored outputs include:
 - `logs/`
 - `.tmp/`
 - Playwright/test reports
-- generated static exports such as `session.html` and `parsed/`
+- generated static exports such as `session.html`

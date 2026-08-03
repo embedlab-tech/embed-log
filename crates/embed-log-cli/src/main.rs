@@ -145,16 +145,6 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-
-    /// Parse an exported session.html back into raw log files.
-    Parse {
-        /// Path to the session.html file.
-        html: PathBuf,
-
-        /// Output directory (default: parsed/).
-        #[arg(short, long, default_value = "parsed")]
-        output: PathBuf,
-    },
 }
 
 #[tokio::main]
@@ -226,7 +216,6 @@ async fn main() -> Result<()> {
             let path = crate::config::resolve_config_path(config.as_ref());
             misc::cmd_validate(&path, json)
         }
-        Some(Command::Parse { html, output }) => misc::cmd_parse(&html, &output),
         None => {
             let open_browser = !cli.no_open_browser;
             cmd_run(
@@ -311,6 +300,7 @@ mod tests {
             ["embed-log", "onboard"].as_slice(),
             ["embed-log", "update"].as_slice(),
             ["embed-log", "merge"].as_slice(),
+            ["embed-log", "parse"].as_slice(),
         ] {
             assert!(Cli::try_parse_from(args).is_err());
         }
@@ -381,7 +371,7 @@ mod tests {
     }
 
     #[test]
-    fn new_commands_parse() {
+    fn validate_command_parses() {
         Cli::parse_from(["embed-log", "validate"]);
         Cli::parse_from([
             "embed-log",
@@ -390,8 +380,6 @@ mod tests {
             "--config",
             "embed-log.yml",
         ]);
-        Cli::parse_from(["embed-log", "parse", "session.html"]);
-        Cli::parse_from(["embed-log", "parse", "session.html", "-o", "my-parsed"]);
     }
 
     #[test]
