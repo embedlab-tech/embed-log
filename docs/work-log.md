@@ -1118,3 +1118,41 @@ Future entries must include this per-file added/removed-line summary.
 | `tests-ui/regression-categories.mjs` | 0 | 1 | Removes the network regression spec from the data group. |
 | `tests-ui/regression-inventory.json` | 0 | 6 | Removes network-capture test inventory. |
 | `tests-ui/regression-tests/network-capture.spec.js` | 0 | 186 | Deletes BPF/network UI regression scenarios. |
+
+## 2026-08-03 17:19:30 UTC / 2026-08-03 19:19:30 CEST (Warsaw)
+
+- **Commit:** `af0655c` — `Remove CBOR datagram parser`
+- **Task:** Remove the CBOR datagram parser, dependency, configurations, fixtures, tests, and documentation while retaining text and protocol-specific parsers.
+- **Started:** 2026-08-03 16:57:30 UTC / 2026-08-03 18:57:30 CEST (+0200) (Warsaw)
+- **Completed:** 2026-08-03 17:19:30 UTC / 2026-08-03 19:19:30 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli --package embed-log-tui` — passed (84 CLI, 201 core, and 73 TUI tests); `cargo clippy --locked --package embed-log-core --package embed-log-cli --package embed-log-tui --all-targets -- -D warnings` — passed; `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (4 tests); `npm --prefix tests-ui run test:regression -- --workers=1` — 72 passed and 4 skipped, with one known timing-sensitive sync-highlight failure; isolated rerun of that test passed; root config doctor validation, removed-CBOR diagnostic, and lockfile dependency checks — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`af0655c`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `Cargo.lock` | 0 | 28 | Removes ciborium and its transitive lockfile entries. |
+| `config-samples/reference_full_annotated.yml` | 0 | 8 | Removes the CBOR source and sensor tab. |
+| `config-samples/three_udp_cbor_two_tabs.yml` | 0 | 28 | Deletes the CBOR-focused sample configuration. |
+| `crates/embed-log-core/Cargo.toml` | 0 | 1 | Removes the ciborium dependency. |
+| `crates/embed-log-core/src/config/loader.rs` | 31 | 43 | Rejects removed CBOR parser configs and updates parser/sample validation. |
+| `crates/embed-log-core/src/parsers/cbor.rs` | 0 | 153 | Deletes CBOR datagram decoding and unit tests. |
+| `crates/embed-log-core/src/parsers/mod.rs` | 0 | 3 | Removes CBOR parser registration and export. |
+| `crates/embed-log-core/src/parsers/traits.rs` | 1 | 1 | Generalizes stream-buffering documentation. |
+| `crates/embed-log-core/src/sources/udp.rs` | 0 | 30 | Removes the UDP CBOR integration test. |
+| `docs/architecture.md` | 3 | 4 | Documents only retained parser behavior. |
+| `docs/configuration.md` | 1 | 24 | Removes CBOR schema, examples, and reference configuration. |
+| `docs/getting-up-to-speed.md` | 1 | 1 | Lists only retained parsers. |
+| `embed-log.yml` | 0 | 11 | Removes the CBOR source and tab from the root configuration. |
+| `tests-ui/config-regression.yml` | 0 | 10 | Removes the browser CBOR fixture source and tab. |
+| `tests-ui/regression-categories.mjs` | 0 | 1 | Removes the deleted CBOR regression from the data category. |
+| `tests-ui/regression-inventory.json` | 0 | 6 | Removes CBOR browser-test inventory. |
+| `tests-ui/regression-tests/cbor-decoder.spec.js` | 0 | 83 | Deletes CBOR browser regression scenarios. |
+| `tests-ui/regression-tests/copy-format.spec.js` | 3 | 1 | Ignores marker delimiters when checking compact log formatting. |
+| `tests-ui/regression-tests/demo-smoke.spec.js` | 13 | 12 | Updates selection checks and stabilizes virtual-history assertions. |
+| `tests-ui/regression-tests/export-replay.spec.js` | 2 | 2 | Updates unwrapped tab traversal for the retained seven panes. |
+| `tests-ui/regression-tests/layout-sync.spec.js` | 3 | 3 | Updates unwrapped tab traversal for the retained seven panes. |
+| `tests-ui/regression-tests/scope-selection.spec.js` | 8 | 9 | Removes CBOR pane assumptions from selection and export checks. |
+| `tests-ui/rust-test-server.mjs` | 1 | 46 | Replaces synthetic CBOR encoding/traffic with plain UDP text. |
+| `tests-ui/tests/rust-server.spec.js` | 2 | 20 | Replaces CBOR browser coverage with retained UDP text coverage. |
