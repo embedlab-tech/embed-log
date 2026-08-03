@@ -1223,3 +1223,21 @@ Future entries must include this per-file added/removed-line summary.
 | `docs/architecture.md` | 1 | 1 | Removes parse from the top-level CLI utility list. |
 | `docs/cli.md` | 0 | 8 | Removes exported-HTML parse usage and behavior. |
 | `docs/development.md` | 1 | 1 | Removes the parsed-output directory from generated artifact examples. |
+
+## 2026-08-03 18:14:26 UTC / 2026-08-03 20:14:26 CEST (Warsaw)
+
+- **Commit:** `63091d2` — `Remove session import command`
+- **Task:** Remove `embed-log sessions import`, its RFC3339 external-log mutation logic/tests, and documentation while retaining file/UDP capture and session export.
+- **Started:** 2026-08-03 18:11:44 UTC / 2026-08-03 20:11:44 CEST (+0200) (Warsaw)
+- **Completed:** 2026-08-03 18:14:26 UTC / 2026-08-03 20:14:26 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli --package embed-log-tui` — passed (67 CLI, 201 core, and 73 TUI tests); `cargo clippy --locked --package embed-log-core --package embed-log-cli --package embed-log-tui --all-targets -- -D warnings` — passed; `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (4 tests); release CLI build and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged import-command rejection, stale-reference search, and retained file-capture/session-export help checks — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`63091d2`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 0 | 155 | Removes import arguments/dispatch, timestamp parsing, session mutation, and parser test. |
+| `crates/embed-log-cli/src/main.rs` | 1 | 0 | Adds nested removed-command regression coverage for `sessions import`. |
+| `docs/cli.md` | 0 | 9 | Removes external timestamped-log import usage. |
+| `docs/getting-up-to-speed.md` | 1 | 17 | Replaces post-capture import guidance with configured file/UDP capture. |
