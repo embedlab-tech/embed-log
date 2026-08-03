@@ -1,5 +1,5 @@
 server:
-  url: ws://127.0.0.1:8080/api/v1/control
+  url: ws://127.0.0.1:18080/api/v1/control
 
 output:
   path: watch-matches.jsonl

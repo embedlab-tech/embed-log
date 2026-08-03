@@ -62,7 +62,7 @@ def fake_ws(monkeypatch):
 
 def test_subscribe_events_true_sends_correct_command(fake_ws):
     fake_ws.queue("AUTO:subscribe.result")
-    client = EmbedLogClient("ws://127.0.0.1:8080/api/v1/control")
+    client = EmbedLogClient("ws://127.0.0.1:18080/api/v1/control")
 
     client.subscribe(events=True)
 
@@ -74,7 +74,7 @@ def test_subscribe_events_true_sends_correct_command(fake_ws):
 
 def test_subscribe_sources_and_events_sends_both(fake_ws):
     fake_ws.queue("AUTO:subscribe.result")
-    client = EmbedLogClient("ws://127.0.0.1:8080/api/v1/control")
+    client = EmbedLogClient("ws://127.0.0.1:18080/api/v1/control")
 
     client.subscribe(["DUT_UART"], events=True)
 
@@ -86,7 +86,7 @@ def test_subscribe_sources_and_events_sends_both(fake_ws):
 
 def test_unsubscribe_events_sends_events_false_with_empty_sources(fake_ws):
     fake_ws.queue("AUTO:unsubscribe.result")
-    client = EmbedLogClient("ws://127.0.0.1:8080/api/v1/control")
+    client = EmbedLogClient("ws://127.0.0.1:18080/api/v1/control")
 
     client.unsubscribe_events()
 
@@ -109,7 +109,7 @@ def test_events_yields_parsed_event_objects(fake_ws):
         "captures": ["FATAL ERROR"],
     })
     fake_ws.queue("")
-    client = EmbedLogClient("ws://127.0.0.1:8080/api/v1/control")
+    client = EmbedLogClient("ws://127.0.0.1:18080/api/v1/control")
 
     events = list(client.events(timeout=0.1))
 
@@ -144,7 +144,7 @@ def test_event_and_log_entry_messages_interleave_without_loss(fake_ws):
         "captures": ["boot complete"],
     })
     fake_ws.queue("")
-    client = EmbedLogClient("ws://127.0.0.1:8080/api/v1/control")
+    client = EmbedLogClient("ws://127.0.0.1:18080/api/v1/control")
 
     # events() should preserve the log.entry for entries().
     events = list(client.events(timeout=0.1))
@@ -167,7 +167,7 @@ def test_watcher_still_uses_client_side_log_entry_matching():
         )
     ]
     config = WatcherConfig(
-        server_url="ws://127.0.0.1:8080/api/v1/control",
+        server_url="ws://127.0.0.1:18080/api/v1/control",
         rules=[WatchRule(name="err", sources=["DUT_UART"], pattern="ERROR", marker=False)],
     )
 

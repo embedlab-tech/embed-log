@@ -78,7 +78,7 @@ def test_watch_rule_named_groups():
 def test_watcher_config_parsing(tmp_path):
     yml_content = """
 server:
-  url: ws://127.0.0.1:8080/api/v1/control
+  url: ws://127.0.0.1:18080/api/v1/control
 
 output:
   path: matches.jsonl
@@ -98,7 +98,7 @@ watch:
     config_file.write_text(yml_content)
 
     config = WatcherConfig.from_file(config_file)
-    assert config.server_url == "ws://127.0.0.1:8080/api/v1/control"
+    assert config.server_url == "ws://127.0.0.1:18080/api/v1/control"
     assert config.output_path == config_file.resolve().parent / "matches.jsonl"
     assert len(config.rules) == 2
     assert config.rules[0].name == "fatal"
@@ -115,7 +115,7 @@ def test_evidence_written_to_jsonl(tmp_path):
     from embed_log_sdk.watcher import Watcher, WatcherConfig
 
     config = WatcherConfig(
-        server_url="ws://127.0.0.1:8080/api/v1/control",
+        server_url="ws://127.0.0.1:18080/api/v1/control",
         output_path=tmp_path / "evidence.jsonl",
         rules=[
             WatchRule(name="err", sources=["DUT_UART"], pattern="ERROR", marker=False),
@@ -149,7 +149,7 @@ def test_subscribes_to_union_of_source_rules():
     from embed_log_sdk.watcher import Watcher, WatcherConfig
 
     config = WatcherConfig(
-        server_url="ws://127.0.0.1:8080/api/v1/control",
+        server_url="ws://127.0.0.1:18080/api/v1/control",
         rules=[
             WatchRule(name="a", sources=["DUT_UART", "PYTEST"], pattern="ERR", marker=False),
             WatchRule(name="b", sources=["PYTEST"], pattern="WARN", marker=False),
@@ -178,7 +178,7 @@ def test_marker_created_only_for_marker_rules():
     from embed_log_sdk.watcher import Watcher, WatcherConfig
 
     config = WatcherConfig(
-        server_url="ws://127.0.0.1:8080/api/v1/control",
+        server_url="ws://127.0.0.1:18080/api/v1/control",
         rules=[
             WatchRule(name="mark-on", sources=["DUT_UART"], pattern="MATCH", marker=True),
             WatchRule(name="mark-off", sources=["DUT_UART"], pattern="MATCH", marker=False),
@@ -211,7 +211,7 @@ def test_timeout_behavior_is_deterministic():
     from embed_log_sdk.watcher import Watcher, WatcherConfig
 
     config = WatcherConfig(
-        server_url="ws://127.0.0.1:8080/api/v1/control",
+        server_url="ws://127.0.0.1:18080/api/v1/control",
         rules=[],
     )
     client = MagicMock()

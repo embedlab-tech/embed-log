@@ -72,7 +72,7 @@ class WatcherConfig:
         with open(path) as f:
             raw = yaml.safe_load(f)
 
-        server_url = raw.get("server", {}).get("url", "ws://127.0.0.1:8080/api/v1/control")
+        server_url = raw.get("server", {}).get("url", "ws://127.0.0.1:18080/api/v1/control")
         output_path = None
         if "output" in raw and "path" in raw["output"]:
             output_path = config_dir / Path(raw["output"]["path"])

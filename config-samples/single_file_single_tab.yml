@@ -1,14 +1,14 @@
-version: 1
+version: 2
 server:
-  host: 127.0.0.1
-  ws_port: 8080
+  listen: 127.0.0.1:18080
 logs:
   dir: logs
 sources:
-  - name: APP_LOG
+  APP_LOG:
     label: Application log
     type: file
-    port: logs/app.log
-tabs:
-  - label: Application
-    panes: [APP_LOG]
+    path: logs/app.log
+ui:
+  tabs:
+    - title: Application
+      sources: [APP_LOG]

@@ -29,7 +29,28 @@ def test_config_defaults():
     yml = "sources: []"
     cfg = SdkConfig.from_dict(yaml.safe_load(yml))
     assert cfg.server.host == "127.0.0.1"
-    assert cfg.server.ws_port == 8080
+    assert cfg.server.ws_port == 18080
+
+
+def test_config_parses_version_two_listen_and_source_mapping():
+    yml = """
+version: 2
+server:
+  listen: 0.0.0.0:19090
+sources:
+  DUT_UART:
+    type: uart
+    path: /dev/ttyUSB0
+  PYTEST:
+    type: udp
+    port: 16000
+    label: Pytest
+"""
+    cfg = SdkConfig.from_dict(yaml.safe_load(yml))
+    assert cfg.ws_url == "ws://0.0.0.0:19090/api/v1/control"
+    assert cfg.source_names() == ["DUT_UART", "PYTEST"]
+    assert cfg.is_writable("DUT_UART") is True
+    assert cfg.sources["PYTEST"].label == "Pytest"
 
 
 def test_config_parses_sources():

@@ -48,12 +48,12 @@ HTTP status: `200 OK`
 ## Harness example
 
 ```bash
-curl -fsS http://127.0.0.1:8080/api/v1/status
+curl -fsS http://127.0.0.1:18080/api/v1/status
 ```
 
 A harness can require source IDs before adopting an existing server:
 
 ```bash
-curl -fsS http://127.0.0.1:8080/api/v1/status |
+curl -fsS http://127.0.0.1:18080/api/v1/status |
   jq -e '.ok and .sources.NATIVE_SIM_UART and .sources.PYTEST'
 ```

@@ -34,7 +34,7 @@ embed-log run -s /dev/ttyUSB0 -s /dev/ttyUSB1 -f ./device.log --baud 115200
 
 `-s` / `--serial` adds a UART, `-f` / `--file` watches an appended file, and `--baud` applies to every quick-run UART (default: `115200`). Each source gets its own tab. The generated configuration is in memory: no YAML is read or written, and `--config` cannot be combined with quick-run sources. Use `--save-config embed-log.yml` to persist it for later customization.
 
-Quick runs create the same session artifacts as config-based runs, under `./logs/` by default or the `--log-dir` path when supplied. All normal run flags work in this mode, including `--tui`, `--no-open-browser`, `--log-dir`, `--host`, and `--ws-port`. See [Quick start](quickstart.md) for the shortest examples.
+Quick runs create the same session artifacts as config-based runs, under `./logs/` by default or the `--log-dir` path when supplied. All normal run flags work in this mode, including `--tui`, `--no-open-browser`, `--log-dir`, `--host`, and `--port`. See [Quick start](quickstart.md) for the shortest examples.
 
 ### Config-based run
 
@@ -60,7 +60,7 @@ Current behavior:
 
 - fails with config/quick-run guidance if the resolved config does not exist
 - starts `LogServer`
-- serves UI/API on `server.host:server.ws_port`
+- serves UI/API on the configured `server.listen` endpoint
 - opens the browser unless `--no-open-browser` is passed
 - writes session artifacts under `logs.dir`
 - exports `session.html` on Ctrl-C shutdown
@@ -68,10 +68,10 @@ Current behavior:
 Useful runtime overrides:
 
 ```bash
-embed-log run --config embed-log.yml --host 0.0.0.0 --ws-port 9090 --log-dir /tmp/embed-log-runs
+embed-log run --config embed-log.yml --host 0.0.0.0 --port 9090 --log-dir /tmp/embed-log-runs
 ```
 
-`--host` and `--ws-port` override `server.host` / `server.ws_port` in memory. `--log-dir` overrides `logs.dir` and is resolved relative to the current working directory.
+`--host` and `--port` override the host and port from `server.listen` in memory. `--log-dir` overrides `logs.dir` and is resolved relative to the current working directory.
 
 ## Validate config
 

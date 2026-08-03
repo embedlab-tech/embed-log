@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use serde::Deserialize;
 use thiserror::Error;
 
 use super::models::*;
@@ -11,30 +12,334 @@ pub enum ConfigError {
     NotFound(PathBuf),
     #[error("invalid YAML: {0}")]
     InvalidYaml(#[from] serde_yaml::Error),
-    #[error("unsupported config version: {0} (expected 1)")]
+    #[error("unsupported config version: {0} (expected 1 or 2)")]
     UnsupportedVersion(u32),
     #[error("{0}")]
     Validation(String),
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct V2Config {
+    version: u32,
+    #[serde(default)]
+    server: V2ServerConfig,
+    #[serde(default)]
+    logs: LogsConfig,
+    #[serde(default)]
+    sources: serde_yaml::Mapping,
+    #[serde(default)]
+    ui: Option<V2UiConfig>,
+    #[serde(default)]
+    merges: Vec<MergeConfig>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct V2ServerConfig {
+    #[serde(default)]
+    listen: Option<String>,
+    #[serde(default)]
+    app_name: Option<String>,
+    #[serde(default)]
+    verbosity: Option<String>,
+    #[serde(default)]
+    job_id: Option<String>,
+    #[serde(default)]
+    default_light_theme: Option<String>,
+    #[serde(default)]
+    default_dark_theme: Option<String>,
+    #[serde(default)]
+    timestamp_mode: crate::models::TimestampMode,
+    #[serde(default)]
+    queue_size: Option<usize>,
+    #[serde(default)]
+    control_api: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct V2SourceConfig {
+    #[serde(rename = "type")]
+    source_type: String,
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    port: Option<serde_yaml::Value>,
+    #[serde(default)]
+    baud: Option<u32>,
+    #[serde(default)]
+    label: Option<String>,
+    #[serde(default)]
+    parser: ParserConfig,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct V2UiConfig {
+    #[serde(default)]
+    tabs: Vec<V2TabConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct V2TabConfig {
+    title: String,
+    sources: Vec<String>,
+}
+
 /// Load and validate an embed-log config from a YAML file.
+///
+/// Version 2 is the canonical format. Version 1 remains readable during the
+/// migration so existing projects can move independently.
 pub fn load_config(path: &Path) -> Result<AppConfig, ConfigError> {
     let text =
         std::fs::read_to_string(path).map_err(|_| ConfigError::NotFound(path.to_path_buf()))?;
     let raw: serde_yaml::Value = serde_yaml::from_str(&text)?;
 
-    // Extract version before full deserialization
     let version = raw.get("version").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
-    if version != 1 {
+    if !matches!(version, 1 | 2) {
         return Err(ConfigError::UnsupportedVersion(version));
     }
-    reject_removed_fields(&raw)?;
 
-    let mut config: AppConfig = serde_yaml::from_value(raw)?;
-    config.version = version;
+    let mut config = if version == 2 {
+        parse_v2_config(raw)?
+    } else {
+        reject_removed_fields(&raw)?;
+        let mut config: AppConfig = serde_yaml::from_value(raw)?;
+        config.version = 1;
+        config
+    };
 
     validate_config(&mut config, path)?;
     Ok(config)
+}
+
+fn parse_v2_config(raw: serde_yaml::Value) -> Result<AppConfig, ConfigError> {
+    let v2: V2Config = serde_yaml::from_value(raw)?;
+    if v2.version != 2 {
+        return Err(ConfigError::UnsupportedVersion(v2.version));
+    }
+
+    let mut server = ServerConfig::default();
+    if let Some(listen) = v2.server.listen.as_deref() {
+        let (host, port) = parse_listen(listen)?;
+        server.host = host;
+        server.ws_port = port;
+    }
+    if let Some(value) = v2.server.app_name {
+        server.app_name = value;
+    }
+    server.verbosity = v2.server.verbosity;
+    server.job_id = v2.server.job_id;
+    server.default_light_theme = v2.server.default_light_theme;
+    server.default_dark_theme = v2.server.default_dark_theme;
+    server.timestamp_mode = v2.server.timestamp_mode;
+    if let Some(value) = v2.server.queue_size {
+        server.queue_size = value;
+    }
+    if let Some(value) = v2.server.control_api {
+        server.control_api = value;
+    }
+
+    let mut sources = Vec::with_capacity(v2.sources.len());
+    for (name, raw_source) in v2.sources {
+        let name = name
+            .as_str()
+            .ok_or_else(|| ConfigError::validation("version 2 source names must be strings"))?;
+        let source: V2SourceConfig = serde_yaml::from_value(raw_source)?;
+        let has_path = source.path.is_some();
+        let has_port = source.port.is_some();
+        if has_path && source.source_type == "udp" {
+            return Err(ConfigError::validation(format!(
+                "sources.{name}.path is not valid for udp sources; use port"
+            )));
+        }
+        if has_port && source.source_type != "udp" {
+            return Err(ConfigError::validation(format!(
+                "sources.{name}.port is only valid for udp sources; use path"
+            )));
+        }
+        if source.baud.is_some() && source.source_type != "uart" {
+            return Err(ConfigError::validation(format!(
+                "sources.{name}.baud is only valid for uart sources"
+            )));
+        }
+        let port = match source.source_type.as_str() {
+            "uart" | "file" => serde_yaml::Value::String(source.path.clone().ok_or_else(|| {
+                ConfigError::validation(format!(
+                    "sources.{name}.path is required for {} sources",
+                    source.source_type
+                ))
+            })?),
+            "udp" => {
+                let udp_port = source.port.as_ref().and_then(yaml_u64).ok_or_else(|| {
+                    ConfigError::validation(format!(
+                        "sources.{name}.port must be an integer from 0 to 65535 for udp sources"
+                    ))
+                })?;
+                if udp_port > u16::MAX as u64 {
+                    return Err(ConfigError::validation(format!(
+                        "sources.{name}.port must be an integer from 0 to 65535 for udp sources"
+                    )));
+                }
+                serde_yaml::to_value(udp_port)?
+            }
+            _ => serde_yaml::Value::Null,
+        };
+        sources.push(SourceConfig {
+            name: name.to_string(),
+            source_type: source.source_type,
+            port,
+            parser: source.parser,
+            baudrate: source.baud,
+            label: source.label,
+        });
+    }
+
+    let tabs = match v2.ui {
+        Some(ui) => ui
+            .tabs
+            .into_iter()
+            .map(|tab| TabConfig {
+                label: tab.title,
+                panes: tab.sources.into_iter().map(PaneConfig::Simple).collect(),
+            })
+            .collect(),
+        None => sources
+            .iter()
+            .map(|source| TabConfig {
+                label: source.label.clone().unwrap_or_else(|| source.name.clone()),
+                panes: vec![PaneConfig::Simple(source.name.clone())],
+            })
+            .collect(),
+    };
+
+    Ok(AppConfig {
+        version: 2,
+        sources,
+        tabs,
+        merges: v2.merges,
+        server,
+        logs: v2.logs,
+        baudrate: 115_200,
+        frontend_plugins: Default::default(),
+    })
+}
+
+/// Serialize the normalized runtime configuration using canonical YAML v2.
+pub fn config_to_v2_yaml(config: &AppConfig) -> anyhow::Result<String> {
+    let mut source_map = serde_json::Map::new();
+    for source in &config.sources {
+        let mut value = serde_json::Map::new();
+        value.insert("type".to_string(), serde_json::json!(source.source_type));
+        match source.source_type.as_str() {
+            "udp" => {
+                value.insert(
+                    "port".to_string(),
+                    serde_json::json!(yaml_u64(&source.port).unwrap_or_default()),
+                );
+            }
+            _ => {
+                value.insert(
+                    "path".to_string(),
+                    serde_json::json!(yaml_string(&source.port).unwrap_or_default()),
+                );
+            }
+        }
+        if let Some(baud) = source.baudrate {
+            value.insert("baud".to_string(), serde_json::json!(baud));
+        }
+        if let Some(label) = &source.label {
+            value.insert("label".to_string(), serde_json::json!(label));
+        }
+        if source.parser != ParserConfig::default() {
+            value.insert("parser".to_string(), serde_json::to_value(&source.parser)?);
+        }
+        source_map.insert(source.name.clone(), serde_json::Value::Object(value));
+    }
+
+    let tabs: Vec<_> = config
+        .tabs
+        .iter()
+        .map(|tab| {
+            serde_json::json!({
+                "title": tab.label,
+                "sources": tab.panes.iter().map(PaneConfig::source_name).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    let mut server = serde_json::Map::new();
+    server.insert(
+        "listen".to_string(),
+        serde_json::json!(format!("{}:{}", config.server.host, config.server.ws_port)),
+    );
+    server.insert(
+        "app_name".to_string(),
+        serde_json::json!(config.server.app_name),
+    );
+    server.insert(
+        "timestamp_mode".to_string(),
+        serde_json::json!(config.server.timestamp_mode),
+    );
+    server.insert(
+        "queue_size".to_string(),
+        serde_json::json!(config.server.queue_size),
+    );
+    server.insert(
+        "control_api".to_string(),
+        serde_json::json!(config.server.control_api),
+    );
+    for (key, value) in [
+        ("verbosity", config.server.verbosity.as_ref()),
+        ("job_id", config.server.job_id.as_ref()),
+        (
+            "default_light_theme",
+            config.server.default_light_theme.as_ref(),
+        ),
+        (
+            "default_dark_theme",
+            config.server.default_dark_theme.as_ref(),
+        ),
+    ] {
+        if let Some(value) = value {
+            server.insert(key.to_string(), serde_json::json!(value));
+        }
+    }
+
+    let mut root = serde_json::json!({
+        "version": 2,
+        "server": server,
+        "logs": { "dir": config.logs.dir },
+        "sources": source_map,
+        "ui": { "tabs": tabs },
+    });
+    if !config.merges.is_empty() {
+        root["merges"] = serde_json::to_value(&config.merges)?;
+    }
+    Ok(serde_yaml::to_string(&root)?)
+}
+
+fn parse_listen(listen: &str) -> Result<(String, u16), ConfigError> {
+    let (host, port) = listen.rsplit_once(':').ok_or_else(|| {
+        ConfigError::validation(format!("server.listen must be HOST:PORT (got {listen:?})"))
+    })?;
+    if host.trim().is_empty() {
+        return Err(ConfigError::validation(
+            "server.listen host must not be empty",
+        ));
+    }
+    let port = port.parse::<u16>().map_err(|_| {
+        ConfigError::validation(format!(
+            "server.listen port must be an integer from 1 to 65535 (got {port:?})"
+        ))
+    })?;
+    if port == 0 {
+        return Err(ConfigError::validation(
+            "server.listen port must be an integer from 1 to 65535 (got 0)",
+        ));
+    }
+    Ok((host.to_string(), port))
 }
 
 /// Reject compatibility-only fields that were removed from the runtime.
@@ -339,10 +644,141 @@ mod tests {
     }
 
     #[test]
-    fn sample_configs_have_no_legacy_fields() {
-        // Verify that sample config YAML files do NOT contain legacy
-        // inject_port / forward_port / forward_ports directives (except
-        // in comments).  Also verify that each file still parses.
+    fn version_two_mapping_normalizes_sources_listen_and_ui() {
+        let yaml = r#"
+version: 2
+server:
+  listen: 0.0.0.0:19090
+logs:
+  dir: artifacts
+sources:
+  DUT:
+    type: uart
+    path: /dev/ttyUSB0
+    baud: 921600
+  HOST:
+    type: udp
+    port: 16000
+ui:
+  tabs:
+    - title: Device
+      sources: [DUT, HOST]
+"#;
+        let path = std::env::temp_dir().join("embed-log-v2-normalization-test.yml");
+        std::fs::write(&path, yaml).unwrap();
+        let cfg = load_config(&path).unwrap();
+        assert_eq!(cfg.version, 2);
+        assert_eq!(cfg.server.host, "0.0.0.0");
+        assert_eq!(cfg.server.ws_port, 19090);
+        assert_eq!(cfg.sources[0].name, "DUT");
+        assert_eq!(cfg.sources[0].baudrate, Some(921_600));
+        assert_eq!(cfg.sources[1].port.as_u64(), Some(16_000));
+        assert_eq!(cfg.tabs[0].label, "Device");
+        assert_eq!(cfg.tabs[0].panes.len(), 2);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn version_two_defaults_to_18080_and_generates_tabs() {
+        let yaml = r#"
+version: 2
+sources:
+  LOG:
+    type: file
+    path: device.log
+"#;
+        let path = std::env::temp_dir().join("embed-log-v2-defaults-test.yml");
+        std::fs::write(&path, yaml).unwrap();
+        let cfg = load_config(&path).unwrap();
+        assert_eq!(cfg.server.host, "127.0.0.1");
+        assert_eq!(cfg.server.ws_port, 18080);
+        assert_eq!(cfg.tabs.len(), 1);
+        assert_eq!(cfg.tabs[0].label, "LOG");
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn version_two_rejects_legacy_source_fields() {
+        let yaml = r#"
+version: 2
+server:
+  listen: 127.0.0.1:18080
+sources:
+  DUT:
+    type: uart
+    port: /dev/ttyUSB0
+"#;
+        let path = std::env::temp_dir().join("embed-log-v2-legacy-fields-test.yml");
+        std::fs::write(&path, yaml).unwrap();
+        let err = load_config(&path).unwrap_err().to_string();
+        assert!(
+            err.contains("port is only valid for udp sources; use path"),
+            "{err}"
+        );
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn version_two_rejects_legacy_server_fields() {
+        let yaml = r#"
+version: 2
+server:
+  host: 127.0.0.1
+sources: {}
+"#;
+        let path = std::env::temp_dir().join("embed-log-v2-legacy-server-test.yml");
+        std::fs::write(&path, yaml).unwrap();
+        let err = load_config(&path).unwrap_err().to_string();
+        assert!(err.contains("unknown field `host`"), "{err}");
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn version_two_rejects_invalid_listen_endpoint() {
+        let yaml = "version: 2\nserver:\n  listen: localhost\nsources: {}\n";
+        let path = std::env::temp_dir().join("embed-log-v2-listen-test.yml");
+        std::fs::write(&path, yaml).unwrap();
+        let err = load_config(&path).unwrap_err().to_string();
+        assert!(err.contains("server.listen must be HOST:PORT"), "{err}");
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn version_two_round_trip_serializer_uses_canonical_keys() {
+        let mut cfg = AppConfig::default();
+        cfg.sources.push(SourceConfig {
+            name: "DUT".to_string(),
+            source_type: "uart".to_string(),
+            port: serde_yaml::Value::String("/dev/ttyUSB0".to_string()),
+            parser: ParserConfig::default(),
+            baudrate: Some(115_200),
+            label: None,
+        });
+        cfg.tabs.push(TabConfig {
+            label: "DUT".to_string(),
+            panes: vec![PaneConfig::Simple("DUT".to_string())],
+        });
+        let yaml = config_to_v2_yaml(&cfg).unwrap();
+        assert!(yaml.contains("version: 2"));
+        assert!(yaml.contains("listen: 127.0.0.1:18080"));
+        assert!(yaml.contains("path: /dev/ttyUSB0"));
+        assert!(yaml.contains("baud: 115200"));
+        assert!(!yaml.contains("baudrate:"));
+        assert!(!yaml.contains("ws_port:"));
+
+        let path = std::env::temp_dir().join("embed-log-v2-round-trip-test.yml");
+        std::fs::write(&path, yaml).unwrap();
+        let loaded = load_config(&path).unwrap();
+        assert_eq!(loaded.sources[0].name, "DUT");
+        assert_eq!(loaded.sources[0].baudrate, Some(115_200));
+        assert_eq!(loaded.server.ws_port, 18080);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn sample_configs_use_version_two_without_legacy_fields() {
+        // Verify maintained samples use canonical v2 and do not contain
+        // removed inject/forward directives (except in comments).
         let dir = sample_config_dir();
         for entry in std::fs::read_dir(&dir).unwrap() {
             let entry = entry.unwrap();
@@ -376,14 +812,9 @@ mod tests {
                         trimmed
                     );
                 }
-                // Also verify the config still parses.
-                let result = load_config(&path);
-                assert!(
-                    result.is_ok(),
-                    "failed to parse {}: {}",
-                    path.display(),
-                    result.unwrap_err()
-                );
+                let config = load_config(&path)
+                    .unwrap_or_else(|error| panic!("failed to parse {}: {error}", path.display()));
+                assert_eq!(config.version, 2, "{} is not config v2", path.display());
             }
         }
     }
@@ -626,10 +1057,10 @@ tabs:
     #[test]
     fn parse_double_uart_udp_two_tabs() {
         let cfg = load_sample("double_uart_udp_two_tabs.yml").unwrap();
-        assert_eq!(cfg.version, 1);
+        assert_eq!(cfg.version, 2);
         assert_eq!(cfg.sources.len(), 3);
         assert_eq!(cfg.tabs.len(), 2);
-        assert_eq!(cfg.server.ws_port, 8080);
+        assert_eq!(cfg.server.ws_port, 18080);
         assert_eq!(cfg.baudrate, 115200);
     }
 
@@ -653,7 +1084,7 @@ tabs:
         let cfg = load_sample("reference_full_annotated.yml").unwrap();
         assert_eq!(cfg.sources.len(), 2);
         assert_eq!(cfg.tabs.len(), 1);
-        assert!(cfg.frontend_plugins.contains_key("hex-coap"));
+        assert!(cfg.frontend_plugins.is_empty());
         assert_eq!(cfg.server.default_light_theme.as_deref(), Some("whitesand"));
         assert_eq!(cfg.server.default_dark_theme.as_deref(), Some("one-dark"));
     }

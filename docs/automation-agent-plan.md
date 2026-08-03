@@ -17,7 +17,7 @@ Embed-log already provides:
 - normal project runs with `embed-log run --config embed-log.yml`;
 - session manifest, `combined.jsonl`, `events.jsonl`, markers, and HTML reports;
 - compact session summary/search/events commands;
-- a live control WebSocket at `ws://127.0.0.1:8080/api/v1/control`;
+- a live control WebSocket at `ws://127.0.0.1:18080/api/v1/control`;
 - Python SDK subscription, TX, injection, marker, and watcher helpers;
 - companion `.events.yml` rules compiled into `EventRule`/`PatternMatcher`;
 - one event path: match → WebSocket broadcast → `events.jsonl` → event marker → report/TUI.

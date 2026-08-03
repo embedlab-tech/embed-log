@@ -1,8 +1,8 @@
 """Narrow YAML config parser for the embed-log SDK.
 
 Only extracts fields needed to connect and validate early:
-- server.host, server.ws_port
-- sources[].name, sources[].type, sources[].label
+- version 2 server.listen (or legacy server.host/server.ws_port)
+- version 2 source mapping (or legacy source list)
 - companion command file data
 
 Runtime hello.result is authoritative; local config is for early validation.
@@ -35,7 +35,7 @@ class ServerCfg:
     """Server connection settings."""
 
     host: str = "127.0.0.1"
-    ws_port: int = 8080
+    ws_port: int = 18080
 
     @property
     def ws_url(self) -> str:
@@ -75,15 +75,36 @@ class SdkConfig:
         server = ServerCfg()
         server_raw = raw.get("server", {})
         if isinstance(server_raw, dict):
-            server.host = str(server_raw.get("host", server.host))
-            server.ws_port = int(server_raw.get("ws_port", server.ws_port))
+            listen = server_raw.get("listen")
+            if listen is not None:
+                try:
+                    host, port = str(listen).rsplit(":", 1)
+                    if not host or not (1 <= int(port) <= 65535):
+                        raise ValueError
+                    server.host = host
+                    server.ws_port = int(port)
+                except ValueError as exc:
+                    raise ConfigError(
+                        f"server.listen must be HOST:PORT, got {listen!r}"
+                    ) from exc
+            else:
+                server.host = str(server_raw.get("host", server.host))
+                server.ws_port = int(server_raw.get("ws_port", server.ws_port))
 
         sources: dict[str, SourceCfg] = {}
-        for src in raw.get("sources", []):
-            if not isinstance(src, dict):
-                continue
-            name = str(src.get("name", ""))
-            if not name:
+        sources_raw = raw.get("sources", {})
+        if isinstance(sources_raw, dict):
+            source_items = sources_raw.items()
+        elif isinstance(sources_raw, list):
+            source_items = (
+                (str(src.get("name", "")), src)
+                for src in sources_raw
+                if isinstance(src, dict)
+            )
+        else:
+            source_items = []
+        for name, src in source_items:
+            if not name or not isinstance(src, dict):
                 continue
             stype = str(src.get("type", "")).lower()
             writable = stype == "uart"

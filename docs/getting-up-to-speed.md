@@ -63,7 +63,6 @@ Use a config for custom tabs, two-pane layouts, different source baud rates, par
 
 ```bash
 cp config-samples/single_uart_single_tab.yml embed-log.yml
-cp config-samples/single_uart_single_tab.yml embed-log.yml
 embed-log validate --config embed-log.yml
 embed-log run --config embed-log.yml
 ```
@@ -71,19 +70,21 @@ embed-log run --config embed-log.yml
 A minimal UART configuration:
 
 ```yaml
+version: 2
+server:
+  listen: 127.0.0.1:18080
 logs:
   dir: logs/
-
 sources:
-  - name: DUT
+  DUT:
     label: Device
     type: uart
-    port: /dev/ttyUSB0
-    baudrate: 115200
-
-tabs:
-  - label: Device
-    panes: [DUT]
+    path: /dev/ttyUSB0
+    baud: 115200
+ui:
+  tabs:
+    - title: Device
+      sources: [DUT]
 ```
 
 Read [Configuration](configuration.md) for the complete schema and [Architecture](architecture.md) for runtime behavior.
@@ -151,7 +152,7 @@ embed-log sessions export latest --format raw --output merged.log
 The control WebSocket provides source-aware log subscription, injection, UART TX, and markers:
 
 ```text
-ws://127.0.0.1:8080/api/v1/control
+ws://127.0.0.1:18080/api/v1/control
 ```
 
 The Python SDK can inject test output, issue UART commands, subscribe to entries, and run regex watchers. Example:

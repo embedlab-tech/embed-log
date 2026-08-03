@@ -78,7 +78,7 @@ class HardwareServer:
                 "--no-open-browser",
                 "--host",
                 "127.0.0.1",
-                "--ws-port",
+                "--port",
                 str(self.ws_port),
             ],
             stdout=subprocess.PIPE,

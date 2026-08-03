@@ -1,15 +1,15 @@
-version: 1
+version: 2
 server:
-  host: 127.0.0.1
-  ws_port: 8080
+  listen: 127.0.0.1:18080
 logs:
   dir: logs
 sources:
-  - name: DUT_UART
+  DUT_UART:
     label: DUT UART
     type: uart
-    port: /dev/ttyUSB0
-    baudrate: 115200
-tabs:
-  - label: Device
-    panes: [DUT_UART]
+    path: /dev/ttyUSB0
+    baud: 115200
+ui:
+  tabs:
+    - title: Device
+      sources: [DUT_UART]

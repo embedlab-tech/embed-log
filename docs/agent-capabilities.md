@@ -5,7 +5,7 @@ This reference describes Embed-log capabilities agents can use now. For the broa
 ## Discover a running server
 
 ```bash
-curl -fsS http://127.0.0.1:8080/api/v1/status
+curl -fsS http://127.0.0.1:18080/api/v1/status
 ```
 
 The status response identifies the active session, exact source IDs, source type/label, UART write capability, control-API availability, and source counters. See [Status and capabilities API](api-status.md).
@@ -44,7 +44,7 @@ Prefer `compact` for reasoning and `mini-jsonl` for structured processing. Read 
 Connect to the control WebSocket:
 
 ```text
-ws://127.0.0.1:8080/api/v1/control
+ws://127.0.0.1:18080/api/v1/control
 ```
 
 Subscribe to sources and backend-detected events:

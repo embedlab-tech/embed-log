@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use embed_log_core::config::{
-    load_config, resolve_logs_root, AppConfig, PaneConfig, SourceConfig, TabConfig,
+    config_to_v2_yaml, load_config, resolve_logs_root, AppConfig, PaneConfig, SourceConfig,
+    TabConfig,
 };
 use embed_log_core::runtime::LogServer;
 
@@ -98,8 +99,7 @@ pub(crate) async fn cmd_run_quick(
                 path.display()
             );
         }
-        let yaml =
-            serde_yaml::to_string(&config).context("serialize generated quick-run config")?;
+        let yaml = config_to_v2_yaml(&config).context("serialize generated quick-run config")?;
         std::fs::write(path, yaml)
             .with_context(|| format!("write generated config {}", path.display()))?;
         println!("  saved config: {}", path.display());

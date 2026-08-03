@@ -93,7 +93,7 @@ enum Command {
         host: Option<String>,
 
         /// Override HTTP/WebSocket port from config.
-        #[arg(long)]
+        #[arg(long = "port", alias = "ws-port")]
         ws_port: Option<u16>,
     },
 
@@ -385,7 +385,7 @@ mod tests {
             "/tmp/logs",
             "--host",
             "0.0.0.0",
-            "--ws-port",
+            "--port",
             "9090",
         ]);
         match cli.command {

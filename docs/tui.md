@@ -23,9 +23,9 @@ embed-log run -s /dev/ttyUSB0 -s /dev/ttyUSB1 -f ./device.log --tui
 Connect the standalone TUI to an already-running server:
 
 ```bash
-embed-log-tui connect ws://127.0.0.1:8080/ws
+embed-log-tui connect ws://127.0.0.1:18080/ws
 # equivalent shorthand
-embed-log-tui --url ws://127.0.0.1:8080/ws
+embed-log-tui --url ws://127.0.0.1:18080/ws
 ```
 
 The standalone `embed-log-tui` binary is a client only. It does not load YAML configs or start a server; use `embed-log run --tui` for that.

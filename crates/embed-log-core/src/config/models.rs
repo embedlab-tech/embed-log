@@ -154,7 +154,7 @@ impl ServerConfig {
         "127.0.0.1".to_string()
     }
     fn default_ws_port() -> u16 {
-        8080
+        18080
     }
     fn default_app_name() -> String {
         "embed-log".to_string()
@@ -235,7 +235,7 @@ impl AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            version: 1,
+            version: 2,
             sources: Vec::new(),
             tabs: Vec::new(),
             merges: Vec::new(),

@@ -16,38 +16,32 @@ fs.rmSync(tmp, { recursive: true, force: true });
 fs.mkdirSync(logs, { recursive: true });
 
 if (!regressionMode) {
-  const demoConfig = `version: 1
+  const demoConfig = `version: 2
 server:
-  host: 127.0.0.1
-  ws_port: 8080
+  listen: 127.0.0.1:8080
   app_name: embed-log e2e
   timestamp_mode: absolute
 logs:
   dir: ${JSON.stringify(logs).slice(1, -1)}
 sources:
-  - name: DUT
+  DUT:
     label: DUT UART
     type: udp
     port: 16000
-  - name: HOST
+  HOST:
     label: Host Debug
     type: udp
     port: 16001
-  - name: SENSORS
+  SENSORS:
     label: Sensor Bus
     type: udp
     port: 16002
-frontend_plugins:
-  hex-coap:
-    builtin: hex-coap
-tabs:
-  - label: Device
-    panes:
-      - source: DUT
-        plugins: [hex-coap]
-      - source: HOST
-  - label: Sensors
-    panes: [SENSORS]
+ui:
+  tabs:
+    - title: Device
+      sources: [DUT, HOST]
+    - title: Sensors
+      sources: [SENSORS]
 `;
   fs.writeFileSync(config, demoConfig);
 }

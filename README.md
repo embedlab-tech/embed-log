@@ -73,7 +73,7 @@ just run no-browser embed-log.yml
 Then open:
 
 ```text
-http://127.0.0.1:8080/
+http://127.0.0.1:18080/
 ```
 
 Copy a relevant file from `config-samples/`, then validate and run it:
@@ -88,7 +88,7 @@ cargo run --package embed-log-cli --bin embed-log -- run --config embed-log.yml
 Embed-log exposes a single structured JSON WebSocket endpoint for SDK and automation:
 
 ```text
-ws://127.0.0.1:8080/api/v1/control
+ws://127.0.0.1:18080/api/v1/control
 ```
 
 ### Commands
@@ -169,7 +169,7 @@ embed-log run --config embed-log.yml --tui
 Or connect the standalone TUI to an already-running server:
 
 ```bash
-embed-log-tui connect ws://127.0.0.1:8080/ws
+embed-log-tui connect ws://127.0.0.1:18080/ws
 ```
 
 See [docs/tui.md](docs/tui.md) for keybindings and limitations.

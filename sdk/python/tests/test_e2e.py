@@ -101,7 +101,7 @@ class E2eServer:
              "--frontend-dir", str(self.frontend),
              "--no-open-browser",
              "--host", self.host,
-             "--ws-port", str(self.port)],
+             "--port", str(self.port)],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         )
         deadline = time.time() + 15
@@ -143,16 +143,17 @@ def e2e_server(embed_log_binary: Path, frontend_dir: Path, temp_dir: Path,
     port = free_port()
 
     config = {
-        "version": 1,
-        "server": {"host": "127.0.0.1", "ws_port": port,
+        "version": 2,
+        "server": {"listen": f"127.0.0.1:{port}",
                     "app_name": "embed-log-e2e", "timestamp_mode": "absolute"},
         "logs": {"dir": str(temp_dir / "logs")},
-        "baudrate": 115200,
-        "sources": [
-            {"name": "DUT_UART", "label": "DUT", "type": "uart", "port": slave_name},
-            {"name": "PYTEST", "label": "Pytest", "type": "udp", "port": 0},
-        ],
-        "tabs": [{"label": "Main", "panes": ["DUT_UART", "PYTEST"]}],
+        "sources": {
+            "DUT_UART": {"label": "DUT", "type": "uart",
+                         "path": slave_name, "baud": 115200},
+            "PYTEST": {"label": "Pytest", "type": "udp", "port": 0},
+        },
+        "ui": {"tabs": [{"title": "Main",
+                           "sources": ["DUT_UART", "PYTEST"]}]},
     }
     config_path = temp_dir / "embed-log-e2e.yml"
     config_path.write_text(yaml.dump(config))

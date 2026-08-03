@@ -27,7 +27,7 @@ struct Cli {
 enum Command {
     /// Connect to a running embed-log server by WebSocket URL.
     Connect {
-        /// WebSocket URL, e.g. ws://127.0.0.1:8080/ws
+        /// WebSocket URL, e.g. ws://127.0.0.1:18080/ws
         url: String,
     },
 }

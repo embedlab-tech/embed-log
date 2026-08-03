@@ -139,7 +139,7 @@ def test_hello_handshake_merges_runtime_sources(fake_ws):
     }))
 
     client = EmbedLogClient(
-        "ws://127.0.0.1:8080/api/v1/control",
+        "ws://127.0.0.1:18080/api/v1/control",
         sources={
             "DUT_UART": MagicMock(name="DUT_UART", writable=True),
         },
@@ -155,7 +155,7 @@ def test_hello_handshake_requires_hello_result(fake_ws):
     fake_ws.queue_send(json.dumps({"type": "error", "error": "bad"}))
 
     with pytest.raises(ServerError, match="bad"):
-        EmbedLogClient("ws://127.0.0.1:8080/api/v1/control")
+        EmbedLogClient("ws://127.0.0.1:18080/api/v1/control")
 
 
 # ── inject_log ──
@@ -170,7 +170,7 @@ def test_inject_log_success(fake_ws):
     # Use AUTO_ID so the helper matches any id
     fake_ws.queue_send("AUTO:log.inject.result")
 
-    client = EmbedLogClient("ws://127.0.0.1:8080/api/v1/control")
+    client = EmbedLogClient("ws://127.0.0.1:18080/api/v1/control")
     client.inject_log("DUT_UART", "hello", color="cyan")
     # Verify the sent message
     sent = fake_ws.sent()
@@ -188,7 +188,7 @@ def test_inject_log_unknown_source(fake_ws):
         "session": {"id": "s1"},
     }))
 
-    client = EmbedLogClient("ws://127.0.0.1:8080/api/v1/control")
+    client = EmbedLogClient("ws://127.0.0.1:18080/api/v1/control")
     with pytest.raises(UnknownSourceError):
         client.inject_log("NONEXISTENT", "test")
     client.close()
@@ -202,7 +202,7 @@ def test_inject_log_server_error(fake_ws):
     }))
     fake_ws.queue_send("AUTO:log.inject.result:ok=False:error=source queue closed")
 
-    client = EmbedLogClient("ws://127.0.0.1:8080/api/v1/control")
+    client = EmbedLogClient("ws://127.0.0.1:18080/api/v1/control")
     with pytest.raises(ServerError, match="source queue closed"):
         client.inject_log("DUT_UART", "test")
     client.close()
@@ -219,7 +219,7 @@ def test_tx_write_success(fake_ws):
     }))
     fake_ws.queue_send("AUTO:tx.result:ok=True:source_id=DUT_UART:bytes=9")
 
-    client = EmbedLogClient("ws://127.0.0.1:8080/api/v1/control")
+    client = EmbedLogClient("ws://127.0.0.1:18080/api/v1/control")
     written = client.tx_write("DUT_UART", "version\r\n")
     assert written == 9
     client.close()
@@ -232,7 +232,7 @@ def test_tx_write_non_writable(fake_ws):
         "session": {"id": "s1"},
     }))
 
-    client = EmbedLogClient("ws://127.0.0.1:8080/api/v1/control")
+    client = EmbedLogClient("ws://127.0.0.1:18080/api/v1/control")
     with pytest.raises(NotWritableError):
         client.tx_write("PYTEST", "data")
     client.close()
@@ -246,7 +246,7 @@ def test_tx_write_failure(fake_ws):
     }))
     fake_ws.queue_send("AUTO:tx.result:ok=False:source_id=DUT_UART:error=serial port disconnected")
 
-    client = EmbedLogClient("ws://127.0.0.1:8080/api/v1/control")
+    client = EmbedLogClient("ws://127.0.0.1:18080/api/v1/control")
     with pytest.raises(ServerError, match="serial port disconnected"):
         client.tx_write("DUT_UART", "data")
     client.close()
@@ -263,7 +263,7 @@ def test_create_marker_success(fake_ws):
     }))
     fake_ws.queue_send("AUTO:marker.result:ok=True:source_id=DUT_UART")
 
-    client = EmbedLogClient("ws://127.0.0.1:8080/api/v1/control")
+    client = EmbedLogClient("ws://127.0.0.1:18080/api/v1/control")
     client.create_marker("DUT_UART", 42, "test marker")
     client.close()
 
@@ -276,7 +276,7 @@ def test_create_marker_failure(fake_ws):
     }))
     fake_ws.queue_send("AUTO:marker.result:ok=False:source_id=DUT_UART:error=line_idx out of range")
 
-    client = EmbedLogClient("ws://127.0.0.1:8080/api/v1/control")
+    client = EmbedLogClient("ws://127.0.0.1:18080/api/v1/control")
     with pytest.raises(ServerError, match="line_idx out of range"):
         client.create_marker("DUT_UART", 999, "bad")
     client.close()
@@ -299,7 +299,7 @@ def test_interleaved_log_entry_buffered_during_command(fake_ws):
     }))
     fake_ws.queue_send("AUTO:log.inject.result:ok=True")
 
-    client = EmbedLogClient("ws://127.0.0.1:8080/api/v1/control")
+    client = EmbedLogClient("ws://127.0.0.1:18080/api/v1/control")
     # This should not raise — the log.entry is buffered
     client.inject_log("DUT_UART", "hello")
 
@@ -321,7 +321,7 @@ def test_subscribe_sends_correct_message(fake_ws):
     }))
     fake_ws.queue_send("AUTO:subscribe.result")
 
-    client = EmbedLogClient("ws://127.0.0.1:8080/api/v1/control")
+    client = EmbedLogClient("ws://127.0.0.1:18080/api/v1/control")
     client.subscribe(["DUT_UART"])
     sent = fake_ws.sent()
     sub_msgs = [m for m in sent if m.get("type") == "subscribe"]
@@ -344,7 +344,7 @@ def test_command_timed_out_after_deadline(fake_ws):
     # No response queued for the inject command — will hang without timeout
 
     client = EmbedLogClient(
-        "ws://127.0.0.1:8080/api/v1/control",
+        "ws://127.0.0.1:18080/api/v1/control",
         command_timeout=0.2,  # short timeout for testing
     )
     with pytest.raises(SdkConnectionError, match="timed out"):
@@ -367,7 +367,7 @@ def test_stale_wrong_id_result_does_not_match(fake_ws):
     fake_ws.queue_send("AUTO:log.inject.result:ok=True")
 
     client = EmbedLogClient(
-        "ws://127.0.0.1:8080/api/v1/control",
+        "ws://127.0.0.1:18080/api/v1/control",
         command_timeout=5,
     )
     # Should succeed despite the stale message
