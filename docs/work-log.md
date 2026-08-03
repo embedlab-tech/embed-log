@@ -1241,3 +1241,25 @@ Future entries must include this per-file added/removed-line summary.
 | `crates/embed-log-cli/src/main.rs` | 1 | 0 | Adds nested removed-command regression coverage for `sessions import`. |
 | `docs/cli.md` | 0 | 9 | Removes external timestamped-log import usage. |
 | `docs/getting-up-to-speed.md` | 1 | 17 | Replaces post-capture import guidance with configured file/UDP capture. |
+
+## 2026-08-03 18:33:41 UTC / 2026-08-03 20:33:41 CEST (Warsaw)
+
+- **Commit:** `40b06b2` — `Remove session bundle command`
+- **Task:** Remove `embed-log sessions bundle`, archive generation/tests, support-bundle documentation, and direct archive dependencies while preserving HTML/raw/JSONL session exports.
+- **Started:** 2026-08-03 18:31:01 UTC / 2026-08-03 20:31:01 CEST (+0200) (Warsaw)
+- **Completed:** 2026-08-03 18:33:41 UTC / 2026-08-03 20:33:41 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli --package embed-log-tui` — passed (66 CLI, 201 core, and 73 TUI tests); `cargo clippy --locked --package embed-log-core --package embed-log-cli --package embed-log-tui --all-targets -- -D warnings` — passed; `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (4 tests); release CLI build and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged bundle-command rejection, stale-reference search, retained export-format help, and direct archive-dependency checks — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`40b06b2`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `Cargo.lock` | 0 | 23 | Removes the direct CLI archive dependency edges and unused tar/xattr packages. |
+| `Cargo.toml` | 0 | 2 | Removes direct workspace archive dependencies. |
+| `crates/embed-log-cli/Cargo.toml` | 0 | 2 | Removes direct CLI flate2 and tar dependencies. |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 0 | 71 | Removes bundle arguments/dispatch, tarball generation, diagnostics injection, and archive test. |
+| `crates/embed-log-cli/src/main.rs` | 1 | 1 | Moves bundle from accepted session commands to removed-command regression coverage. |
+| `docs/automation-agent-plan.md` | 1 | 1 | Replaces stale import/bundle wording with current mutation safeguards. |
+| `docs/cli.md` | 0 | 7 | Removes support-bundle usage and behavior. |
+| `docs/getting-up-to-speed.md` | 1 | 4 | Uses retained session exports for sharing and diagnosis. |
