@@ -1068,3 +1068,53 @@ Future entries must include this per-file added/removed-line summary.
 | `docs/quickstart.md` | 1 | 1 | Directs advanced setup to saved YAML samples. |
 | `docs/tui.md` | 1 | 1 | Directs config-based TUI users to YAML samples. |
 | `frontend/onboarding.js` | 0 | 336 | Deletes the browser setup frontend. |
+
+## 2026-08-03 16:56:43 UTC / 2026-08-03 18:56:43 CEST (Warsaw)
+
+- **Commit:** `b60b9ee` — `Remove network capture and pcap support`
+- **Task:** Remove network-capture/pcap sources, dependencies, diagnostics, packet-search/UI behavior, fixtures, and documentation while retaining explicit UDP sources.
+- **Started:** 2026-08-03 16:43:53 UTC / 2026-08-03 18:43:53 CEST (+0200) (Warsaw)
+- **Completed:** 2026-08-03 16:56:43 UTC / 2026-08-03 18:56:43 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli --package embed-log-tui` — passed (84 CLI, 207 core, and 73 TUI tests); `cargo clippy --locked --package embed-log-core --package embed-log-cli --package embed-log-tui --all-targets -- -D warnings` — passed; `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e` — passed (4 tests); `npm --prefix tests-ui run test:regression:data` — passed (5 tests); `PYTHONPATH=sdk/python python3 -m pytest sdk/python/tests -q` — passed (53 passed, 2 skipped); rebuilt CLI root-config validation, removed network-source rejection, removed packet-filter rejection, and lockfile checks — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`b60b9ee`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `Cargo.lock` | 3 | 94 | Prunes pcap and dynamic-library dependency entries. |
+| `README.md` | 1 | 34 | Limits sources to UART/UDP/file and removes pcap setup. |
+| `config-samples/reference_full_annotated.yml` | 0 | 9 | Removes the network-capture source and tab. |
+| `config-samples/single_network_single_tab.yml` | 0 | 17 | Deletes the mock network source sample. |
+| `config-samples/single_pcap_udp_single_tab.yml` | 0 | 22 | Deletes the pcap source sample. |
+| `crates/embed-log-cli/Cargo.toml` | 0 | 2 | Removes libloading and the pcap feature. |
+| `crates/embed-log-cli/src/commands/misc.rs` | 1 | 196 | Removes packet-capture validation and doctor diagnostics. |
+| `crates/embed-log-cli/src/commands/run.rs` | 0 | 9 | Removes obsolete network fields from generated sources. |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 13 | 88 | Removes packet-specific search filters and mini output fields. |
+| `crates/embed-log-core/Cargo.toml` | 0 | 5 | Removes the pcap dependency and feature. |
+| `crates/embed-log-core/src/config/loader.rs` | 34 | 127 | Rejects removed network configs and removes backend validation. |
+| `crates/embed-log-core/src/config/models.rs` | 1 | 59 | Removes network, pcap, UDP-filter, and payload config models. |
+| `crates/embed-log-core/src/net/ws_server.rs` | 0 | 31 | Removes the network filter WebSocket command. |
+| `crates/embed-log-core/src/runtime/server.rs` | 1 | 26 | Removes network source resolution. |
+| `crates/embed-log-core/src/sources/mod.rs` | 0 | 2 | Removes the network source module/export. |
+| `crates/embed-log-core/src/sources/network.rs` | 0 | 541 | Deletes mock and pcap packet-capture implementations. |
+| `crates/embed-log-tui/src/app.rs` | 0 | 3 | Removes filter-result handling. |
+| `crates/embed-log-tui/src/protocol.rs` | 1 | 20 | Removes network filter protocol messages and tests. |
+| `docs/api-status.md` | 1 | 1 | Lists only retained source kinds. |
+| `docs/architecture.md` | 2 | 4 | Removes network source and filter architecture. |
+| `docs/automation-agent-plan.md` | 0 | 1 | Removes optional pcap scope. |
+| `docs/cli.md` | 3 | 6 | Removes packet diagnostics and search examples. |
+| `docs/configuration.md` | 3 | 58 | Removes network-capture schema and examples. |
+| `docs/getting-up-to-speed.md` | 0 | 2 | Removes pcap setup guidance. |
+| `embed-log.yml` | 0 | 13 | Removes the obsolete network source/tab and invalid browser field. |
+| `frontend/renderPane.js` | 1 | 1 | Uses regex filtering for every retained pane. |
+| `frontend/ui.js` | 0 | 8 | Removes BPF filter dispatch. |
+| `frontend/ws.js` | 0 | 12 | Removes filter-result handling. |
+| `justfile` | 0 | 6 | Removes the pcap build recipe. |
+| `sdk/python/embed_log_sdk/config.py` | 1 | 1 | Documents retained SDK source kinds. |
+| `sdk/python/embed_log_sdk/models.py` | 1 | 1 | Documents retained API source kinds. |
+| `skills/embed-log/SKILL.md` | 1 | 1 | Uses a retained UDP search example. |
+| `tests-ui/config-regression.yml` | 0 | 12 | Removes the mock network fixture/tab. |
+| `tests-ui/regression-categories.mjs` | 0 | 1 | Removes the network regression spec from the data group. |
+| `tests-ui/regression-inventory.json` | 0 | 6 | Removes network-capture test inventory. |
+| `tests-ui/regression-tests/network-capture.spec.js` | 0 | 186 | Deletes BPF/network UI regression scenarios. |
