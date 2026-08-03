@@ -115,15 +115,13 @@ Relative `logs.dir` values are resolved relative to the config file directory, n
 
 Each session directory also includes a `combined.jsonl` file: one structured JSON object per log line across all configured sources. This is useful for agents and automation that want a single append-only stream instead of reading multiple per-source `.log` files.
 
-For `network_capture` sources, combined entries also include structured packet metadata fields such as `src_ip`, `dst_ip`, `src_port`, `dst_port`, `payload_len`, `payload_preview_len`, `payload_hex_preview`, and `payload_truncated`.
-
 ## `sources`
 
 Every source requires:
 
 ```yaml
 - name: SOURCE_ID
-  type: udp # uart | udp | file | network_capture
+  type: udp # uart | udp | file
 ```
 
 Common optional keys:
@@ -235,51 +233,6 @@ sources:
 ```
 
 `port` is a file path string. The source creates the file if missing, starts reading from the current end, and emits appended lines.
-
-### Network capture source
-
-Deterministic mock source for demos/tests:
-
-```yaml
-sources:
-  - name: NET_CAPTURE
-    type: network_capture
-    interface: mock0
-    network_backend: mock
-    mock_interval: 1.0
-    bpf_filter: udp or coap
-```
-
-Minimal real UDP capture with libpcap/Npcap:
-
-```yaml
-sources:
-  - name: COAP_NET
-    type: network_capture
-    interface: en0
-    network_backend: pcap
-    udp:
-      ports: [8333, 5683, 5684]
-      host: 192.168.1.10
-      src_ips: [192.168.1.20]
-      dst_ips: [224.0.1.187]
-    snaplen: 256
-    promisc: false
-    payload:
-      include_preview: true
-      max_preview_bytes: 192
-```
-
-Notes:
-
-- `network_backend: mock` emits deterministic synthetic events.
-- `network_backend: pcap` is a simplified UDP packet tap, not a full packet sniffer.
-- `udp.ports` narrows capture to matching source or destination UDP ports.
-- `udp.host`, `udp.src_ips`, and `udp.dst_ips` add IP constraints on top of the UDP-port filter.
-- `bpf_filter` may still be set; when present it is combined with the structured UDP filter using `and (...)`.
-- `snaplen` limits captured bytes per packet. Small values like `256` or `512` are recommended for CoAP/UDP use-cases.
-- `payload.max_preview_bytes` limits the emitted hex payload preview in the log line.
-- Real packet capture requires building with the Cargo feature `pcap-capture` and having `libpcap`/`Npcap` available at build/runtime.
 
 ## `tabs`
 
@@ -451,14 +404,6 @@ sources:
     type: file
     port: ./device.log
 
-  - name: NET_CAPTURE
-    label: Network Mock
-    type: network_capture
-    network_backend: mock
-    interface: mock0
-    mock_interval: 1.0
-    bpf_filter: udp or coap
-
 tabs:
   - label: Device
     panes: [DUT, HOST]
@@ -474,8 +419,8 @@ tabs:
   - label: Sensors
     panes: [SENSORS]
 
-  - label: File/Net
-    panes: [FILE_WATCH, NET_CAPTURE]
+  - label: File
+    panes: [FILE_WATCH]
 ```
 
 ## Removed legacy inject/forward ports

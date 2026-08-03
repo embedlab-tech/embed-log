@@ -154,15 +154,6 @@ fn quick_run_config(
                 parser: Default::default(),
                 baudrate: (kind == "UART").then_some(baudrate),
                 label: Some(label),
-                interface: None,
-                bpf_filter: String::new(),
-                network_backend: None,
-                mock_interval: None,
-                udp: None,
-                snaplen: None,
-                promisc: None,
-                pcap: None,
-                payload: None,
             });
         }
     }

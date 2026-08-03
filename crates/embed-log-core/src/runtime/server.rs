@@ -22,9 +22,7 @@ use crate::net::ws_server::{
     start_server, ExportCallback, RotateCallback, RuntimeStats, ServerState, SourceRuntimeStats,
 };
 use crate::session::{SessionExporter, SessionManager};
-use crate::sources::{
-    FileSource, LogSource, NetworkCaptureSource, TxCommand, UartSource, UdpSource,
-};
+use crate::sources::{FileSource, LogSource, TxCommand, UartSource, UdpSource};
 
 const REPLAY_BUFFER_SIZE: usize = 5000;
 
@@ -681,29 +679,6 @@ impl LogServer {
                         FileSource::new_with_parser(&src_cfg.name, file_path, &parser.parser_type)
                             .with_parser(parser),
                     )
-                }
-                "network_capture" => {
-                    let interface = src_cfg.interface.clone().ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "source {}: network_capture interface is required",
-                            src_cfg.name
-                        )
-                    })?;
-                    let backend = src_cfg
-                        .network_backend
-                        .clone()
-                        .unwrap_or_else(|| "mock".to_string());
-                    Box::new(NetworkCaptureSource::new(
-                        &src_cfg.name,
-                        interface,
-                        src_cfg.bpf_filter.clone(),
-                        backend,
-                        src_cfg.mock_interval,
-                        src_cfg.udp.clone(),
-                        src_cfg.payload.clone(),
-                        src_cfg.snaplen,
-                        src_cfg.promisc,
-                    ))
                 }
                 other => {
                     error!(

@@ -41,8 +41,6 @@ pub enum ServerMessage {
     SessionRotated(SessionRotated),
     /// Pane clear broadcast.
     ClearLogs(ClearLogs),
-    /// Filter validation result (response to `set_filter`).
-    FilterResult(Value),
     /// TX write result (response to `send_raw`).
     SendRawResult(Value),
     /// Anything else — kept as raw JSON so the client is forward-compatible.
@@ -71,7 +69,7 @@ pub struct ConfigMessage {
     /// `pane_id → human label`.
     #[serde(default)]
     pub pane_labels: HashMap<String, String>,
-    /// `pane_id → source type` (`"udp"`, `"uart"`, `"file"`, `"network_capture"`).
+    /// `pane_id → source type` (`"udp"`, `"uart"`, or `"file"`).
     #[serde(default)]
     pub pane_kinds: HashMap<String, String>,
     /// `pane_id → UART command suggestion list` (companion `.commands.yml`).
@@ -404,12 +402,6 @@ pub enum ClientCommand {
         #[serde(skip_serializing_if = "Option::is_none")]
         pane: Option<String>,
     },
-    SetFilter {
-        /// Pane/source id.
-        id: String,
-        /// Regex string (empty clears the filter).
-        filter: String,
-    },
     SendRaw {
         /// Pane/source id.
         id: String,
@@ -639,17 +631,6 @@ mod tests {
         let cmd = ClientCommand::ClearLogs { pane: None };
         let s = cmd.to_json();
         assert!(!s.contains(r#""pane""#));
-    }
-
-    #[test]
-    fn client_command_set_filter_serializes() {
-        let cmd = ClientCommand::SetFilter {
-            id: "DUT".into(),
-            filter: "FATAL".into(),
-        };
-        let s = cmd.to_json();
-        assert!(s.contains(r#""id":"DUT""#));
-        assert!(s.contains(r#""filter":"FATAL""#));
     }
 
     #[test]

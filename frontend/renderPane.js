@@ -12,7 +12,7 @@ export function _escHtml(str) {
 
 export function renderPaneShell(paneId, label, { showTx = false, paneKind = "" } = {}) {
     const safeLabel = _escHtml(label);
-    const filterPlaceholder = paneKind === "network_capture" ? "Filter (BPF)…" : "Filter (regex)…";
+    const filterPlaceholder = "Filter (regex)…";
     const txRow = [
         '            <div class="input-row"' + (showTx ? '' : ' style="display:none"') + '>',
         '                <input class="serial-input" id="input-' + paneId + '" autocomplete="off"' + (showTx ? ' placeholder="Serial TX — press Enter to send"' : '') + '>',

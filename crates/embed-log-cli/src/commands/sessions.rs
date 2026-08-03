@@ -188,7 +188,7 @@ pub(crate) enum SessionsCommand {
     },
     /// Search combined JSONL across sessions with structured filters.
     #[command(
-        long_about = "Search all session combined.jsonl files under a log directory.\n\nExamples:\n  embed-log sessions search --dir logs --source DUT\n  embed-log sessions search --dir logs --source DUT --from 2026-07-03T09:00:00 --to 2026-07-03T15:00:00\n  embed-log sessions search --dir logs --job nightly-42 --kind network_capture --dst-port 5683\n  embed-log sessions search --dir logs --contains panic --regex 'ERROR|WARN'\n\nTime filters accept RFC3339 (with timezone) or local wall-clock forms like 2026-07-03T09:00:00 or 2026-07-03 09:00:00."
+        long_about = "Search all session combined.jsonl files under a log directory.\n\nExamples:\n  embed-log sessions search --dir logs --source DUT\n  embed-log sessions search --dir logs --source DUT --from 2026-07-03T09:00:00 --to 2026-07-03T15:00:00\n  embed-log sessions search --dir logs --job nightly-42 --kind udp --contains timeout\n  embed-log sessions search --dir logs --contains panic --regex 'ERROR|WARN'\n\nTime filters accept RFC3339 (with timezone) or local wall-clock forms like 2026-07-03T09:00:00 or 2026-07-03 09:00:00."
     )]
     Search {
         #[command(flatten)]
@@ -202,7 +202,7 @@ pub(crate) enum SessionsCommand {
         /// Restrict to one or more source_id values. Repeatable.
         #[arg(long = "source")]
         sources: Vec<String>,
-        /// Restrict to source_kind (uart, udp, file, network_capture).
+        /// Restrict to source_kind (uart, udp, or file).
         #[arg(long)]
         kind: Option<String>,
         /// Earliest timestamp_iso to include.
@@ -220,15 +220,6 @@ pub(crate) enum SessionsCommand {
         /// Regex that must match the message field.
         #[arg(long)]
         regex: Option<String>,
-        /// Restrict to packet entries with this UDP source port.
-        #[arg(long = "src-port")]
-        src_port: Option<u16>,
-        /// Restrict to packet entries with this UDP destination port.
-        #[arg(long = "dst-port")]
-        dst_port: Option<u16>,
-        /// Restrict to packet entries whose src_ip or dst_ip matches this address.
-        #[arg(long)]
-        ip: Option<String>,
         /// Stop after printing this many matching entries (the first N). Conflicts with --last.
         #[arg(long)]
         limit: Option<usize>,
@@ -391,9 +382,6 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             since,
             contains,
             regex,
-            src_port,
-            dst_port,
-            ip,
             limit,
             last,
             count,
@@ -426,8 +414,7 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
                 None => from,
             };
             let filters = SearchFilters::compile(
-                sessions, job, sources, kind, from, to, contains, regex, src_port, dst_port, ip,
-                limit, count,
+                sessions, job, sources, kind, from, to, contains, regex, limit, count,
             )?;
             if has_context {
                 let before = before_context.or(context).unwrap_or(0);
@@ -1307,8 +1294,8 @@ fn format_summary_preview_line(entry: &serde_json::Value) -> String {
     }
 }
 
-/// `{"t","s","i","m"}` (plus `src`/`dst`/`len` for packet entries) — the
-/// `--format mini-jsonl` object for a combined/search entry. `t`/`s`/`m` are
+/// `{"t","s","i","m"}` — the `--format mini-jsonl` object for a
+/// combined/search entry. `t`/`s`/`m` are
 /// elapsed-time/shortcoded/denoised, same as `format_compact_entry`.
 fn format_mini_entry(entry: &serde_json::Value, codes: &mut ShortcodeTable) -> serde_json::Value {
     let clock = clock_time(entry);
@@ -1324,26 +1311,6 @@ fn format_mini_entry(entry: &serde_json::Value, codes: &mut ShortcodeTable) -> s
     });
     if let Some(idx) = entry.get("line_idx").and_then(|v| v.as_u64()) {
         mini["i"] = serde_json::json!(idx);
-    }
-    if let (Some(src_ip), Some(dst_ip)) = (
-        entry.get("src_ip").and_then(|v| v.as_str()),
-        entry.get("dst_ip").and_then(|v| v.as_str()),
-    ) {
-        let with_port = |ip: &str, port: Option<u64>| match port {
-            Some(p) => format!("{ip}:{p}"),
-            None => ip.to_string(),
-        };
-        mini["src"] = serde_json::json!(with_port(
-            src_ip,
-            entry.get("src_port").and_then(|v| v.as_u64())
-        ));
-        mini["dst"] = serde_json::json!(with_port(
-            dst_ip,
-            entry.get("dst_port").and_then(|v| v.as_u64())
-        ));
-        if let Some(len) = entry.get("payload_len").and_then(|v| v.as_u64()) {
-            mini["len"] = serde_json::json!(len);
-        }
     }
     mini
 }
@@ -1434,9 +1401,6 @@ struct SearchFilters {
     to: Option<DateTime<FixedOffset>>,
     contains: Option<String>,
     regex: Option<Regex>,
-    src_port: Option<u16>,
-    dst_port: Option<u16>,
-    ip: Option<String>,
     limit: Option<usize>,
     count: bool,
 }
@@ -1452,9 +1416,6 @@ impl SearchFilters {
         to: Option<String>,
         contains: Option<String>,
         regex: Option<String>,
-        src_port: Option<u16>,
-        dst_port: Option<u16>,
-        ip: Option<String>,
         limit: Option<usize>,
         count: bool,
     ) -> Result<Self> {
@@ -1467,9 +1428,6 @@ impl SearchFilters {
             to: to.as_deref().map(parse_search_time).transpose()?,
             contains,
             regex: regex.map(|pat| Regex::new(&pat)).transpose()?,
-            src_port,
-            dst_port,
-            ip,
             limit,
             count,
         })
@@ -1539,23 +1497,6 @@ impl SearchFilters {
                 if timestamp > to {
                     return false;
                 }
-            }
-        }
-        if let Some(src_port) = self.src_port {
-            if entry.get("src_port").and_then(|v| v.as_u64()) != Some(src_port as u64) {
-                return false;
-            }
-        }
-        if let Some(dst_port) = self.dst_port {
-            if entry.get("dst_port").and_then(|v| v.as_u64()) != Some(dst_port as u64) {
-                return false;
-            }
-        }
-        if let Some(ip) = &self.ip {
-            let src_ip = entry.get("src_ip").and_then(|v| v.as_str());
-            let dst_ip = entry.get("dst_ip").and_then(|v| v.as_str());
-            if src_ip != Some(ip.as_str()) && dst_ip != Some(ip.as_str()) {
-                return false;
             }
         }
         true
@@ -2595,14 +2536,11 @@ mod tests {
             vec!["s1".to_string()],
             Some("job-1".to_string()),
             vec!["dut".to_string()],
-            Some("network_capture".to_string()),
+            Some("udp".to_string()),
             Some("2026-07-03T09:00:00+00:00".to_string()),
             Some("2026-07-03T15:00:00+00:00".to_string()),
             Some("panic".to_string()),
             Some("panic|fatal".to_string()),
-            Some(49152),
-            Some(5683),
-            Some("127.0.0.1".to_string()),
             None,
             false,
         )
@@ -2614,13 +2552,9 @@ mod tests {
         };
         let entry = serde_json::json!({
             "source_id": "dut",
-            "source_kind": "network_capture",
+            "source_kind": "udp",
             "timestamp_iso": "2026-07-03T10:00:00+00:00",
-            "message": "panic in worker",
-            "src_port": 49152,
-            "dst_port": 5683,
-            "src_ip": "127.0.0.1",
-            "dst_ip": "127.0.0.1"
+            "message": "panic in worker"
         });
         assert!(filters.matches_session(&session));
         assert!(filters.matches_entry(&entry));
@@ -2696,9 +2630,6 @@ mod tests {
             None,
             None,
             None,
-            None,
-            None,
-            None,
             false,
         )
         .unwrap();
@@ -2761,26 +2692,20 @@ mod tests {
     }
 
     #[test]
-    fn format_mini_entry_includes_packet_fields() {
-        let packet = serde_json::json!({
+    fn format_mini_entry_includes_bounded_core_fields() {
+        let entry = serde_json::json!({
             "source_id": "COAP",
             "message": "udp ...",
             "timestamp_iso": "2026-07-03T12:00:01.123+00:00",
             "line_idx": 42,
-            "src_ip": "192.168.1.2",
-            "src_port": 49152,
-            "dst_ip": "224.0.1.187",
-            "dst_port": 5683,
-            "payload_len": 32,
         });
         let mut codes = ShortcodeTable::default();
-        let mini = format_mini_entry(&packet, &mut codes);
+        let mini = format_mini_entry(&entry, &mut codes);
         assert_eq!(mini["t"], "12:00:01.123");
         assert_eq!(mini["s"], "C");
         assert_eq!(mini["i"], 42);
-        assert_eq!(mini["src"], "192.168.1.2:49152");
-        assert_eq!(mini["dst"], "224.0.1.187:5683");
-        assert_eq!(mini["len"], 32);
+        assert_eq!(mini["m"], "udp ...");
+        assert_eq!(mini.as_object().unwrap().len(), 4);
     }
 
     #[test]

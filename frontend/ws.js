@@ -266,18 +266,6 @@ function wsConnect() {
             return;
         }
 
-        if (msg.type === "filter_result") {
-            const input = document.querySelector(`.filter-input[data-pane="${msg.id}"]`);
-            if (input && msg.error) {
-                input.classList.add("invalid");
-                input.title = msg.error;
-            } else if (input) {
-                input.classList.remove("invalid");
-                input.title = "";
-            }
-            return;
-        }
-
         if (msg.type === "clear_logs") {
             const pane = typeof msg.pane === "string" && msg.pane ? msg.pane : null;
             if (pane && pane !== "all") {

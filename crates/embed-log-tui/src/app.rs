@@ -153,9 +153,6 @@ fn handle_message(state: &mut State, msg: ServerMessage) {
             state.teardown_layout();
         }
         ServerMessage::ClearLogs(c) => state.clear(c.pane.as_deref()),
-        ServerMessage::FilterResult(_) => {
-            // Reserved for future interactive filter UI feedback.
-        }
         ServerMessage::SendRawResult(v) => {
             let ok = v.get("ok").and_then(|x| x.as_bool()).unwrap_or(false);
             let source = v.get("source_id").and_then(|x| x.as_str()).unwrap_or("");

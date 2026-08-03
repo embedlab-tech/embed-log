@@ -9,7 +9,6 @@ const categories = {
   ],
   data: [
     'regression-tests/cbor-decoder.spec.js',
-    'regression-tests/network-capture.spec.js',
     'regression-tests/pane-plugin-coap.spec.js',
     'regression-tests/plugin-failure-isolation.spec.js',
   ],

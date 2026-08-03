@@ -63,6 +63,32 @@ fn reject_removed_fields(raw: &serde_yaml::Value) -> Result<(), ConfigError> {
                 )));
             }
         }
+        if map
+            .get(serde_yaml::Value::String("type".to_string()))
+            .and_then(serde_yaml::Value::as_str)
+            == Some("network_capture")
+        {
+            return Err(ConfigError::validation(format!(
+                "sources[{i}].type 'network_capture' was removed; use an explicit UDP source instead"
+            )));
+        }
+        for key in [
+            "interface",
+            "bpf_filter",
+            "network_backend",
+            "mock_interval",
+            "udp",
+            "snaplen",
+            "promisc",
+            "pcap",
+            "payload",
+        ] {
+            if map.contains_key(serde_yaml::Value::String(key.to_string())) {
+                return Err(ConfigError::validation(format!(
+                    "sources[{i}].{key} was removed with network capture support"
+                )));
+            }
+        }
     }
     Ok(())
 }
@@ -129,75 +155,9 @@ fn validate_config(config: &mut AppConfig, config_path: &Path) -> Result<(), Con
                     )));
                 }
             }
-            "network_capture" => {
-                if src.interface.is_none() {
-                    return Err(ConfigError::validation(format!(
-                        "{}.interface is required for network_capture sources",
-                        ctx()
-                    )));
-                }
-                let backend = src.network_backend.as_deref().unwrap_or("mock");
-                if backend != "mock" && backend != "pcap" {
-                    return Err(ConfigError::validation(format!(
-                        "{}.network_backend must be 'mock' or 'pcap'",
-                        ctx()
-                    )));
-                }
-                if let Some(snaplen) = src.snaplen {
-                    if snaplen == 0 {
-                        return Err(ConfigError::validation(format!(
-                            "{}.snaplen must be > 0",
-                            ctx()
-                        )));
-                    }
-                }
-                if let Some(udp) = &src.udp {
-                    if udp.ports.is_empty()
-                        && udp.host.is_none()
-                        && udp.src_ips.is_empty()
-                        && udp.dst_ips.is_empty()
-                    {
-                        return Err(ConfigError::validation(format!(
-                            "{}.udp must set at least one of: ports, host, src_ips, dst_ips",
-                            ctx()
-                        )));
-                    }
-                    if udp.ports.contains(&0) {
-                        return Err(ConfigError::validation(format!(
-                            "{}.udp.ports must contain valid UDP port numbers",
-                            ctx()
-                        )));
-                    }
-                    for (field, values) in [("src_ips", &udp.src_ips), ("dst_ips", &udp.dst_ips)] {
-                        for value in values {
-                            if value.parse::<std::net::IpAddr>().is_err() {
-                                return Err(ConfigError::validation(format!(
-                                    "{}.udp.{field} contains invalid IP address {:?}",
-                                    ctx(),
-                                    value
-                                )));
-                            }
-                        }
-                    }
-                    if let Some(host) = &udp.host {
-                        if host.parse::<std::net::IpAddr>().is_err() {
-                            return Err(ConfigError::validation(format!(
-                                "{}.udp.host must be a valid IP address",
-                                ctx()
-                            )));
-                        }
-                    }
-                }
-                if backend == "pcap" && src.udp.is_none() && src.bpf_filter.trim().is_empty() {
-                    return Err(ConfigError::validation(format!(
-                        "{}.network_backend 'pcap' requires either udp.* filters or bpf_filter",
-                        ctx()
-                    )));
-                }
-            }
             other => {
                 return Err(ConfigError::validation(format!(
-                    "{}.type unsupported: {other:?} (use 'uart', 'udp', 'file', or 'network_capture')",
+                    "{}.type unsupported: {other:?} (use 'uart', 'udp', or 'file')",
                     ctx()
                 )));
             }
@@ -697,19 +657,11 @@ tabs:
     #[test]
     fn parse_reference_full_annotated() {
         let cfg = load_sample("reference_full_annotated.yml").unwrap();
-        assert_eq!(cfg.sources.len(), 4);
-        assert_eq!(cfg.tabs.len(), 3);
+        assert_eq!(cfg.sources.len(), 3);
+        assert_eq!(cfg.tabs.len(), 2);
         assert!(cfg.frontend_plugins.contains_key("hex-coap"));
         assert_eq!(cfg.server.default_light_theme.as_deref(), Some("whitesand"));
         assert_eq!(cfg.server.default_dark_theme.as_deref(), Some("one-dark"));
-    }
-
-    #[test]
-    fn parse_single_network_single_tab() {
-        let cfg = load_sample("single_network_single_tab.yml").unwrap();
-        assert_eq!(cfg.sources.len(), 1);
-        assert_eq!(cfg.sources[0].source_type, "network_capture");
-        assert_eq!(cfg.sources[0].network_backend.as_deref(), Some("mock"));
     }
 
     #[test]
@@ -847,61 +799,16 @@ tabs:
         result
     }
 
-    fn network_config(backend_line: &str) -> String {
-        format!(
-            "version: 1\n\
-             logs:\n  dir: logs\n\
-             sources:\n  - name: NET\n    type: network_capture\n    interface: lo\n{backend_line}\
-             tabs:\n  - label: Network\n    panes: [NET]\n"
-        )
-    }
-
     #[test]
-    fn network_capture_accepts_mock_backend() {
-        let cfg = load_inline("net-mock", &network_config("    network_backend: mock\n")).unwrap();
-        assert_eq!(cfg.sources[0].network_backend.as_deref(), Some("mock"));
-    }
-
-    #[test]
-    fn network_capture_defaults_to_mock_when_backend_omitted() {
-        // No network_backend line: must validate (default is mock, not scapy).
-        load_inline("net-default", &network_config("")).unwrap();
-    }
-
-    #[test]
-    fn network_capture_accepts_pcap_backend_with_udp_ports() {
-        let cfg = load_inline(
-            "net-pcap",
-            &network_config(
-                "    network_backend: pcap\n    udp:\n      ports: [5683, 5684]\n    snaplen: 256\n",
-            ),
-        )
-        .unwrap();
-        assert_eq!(cfg.sources[0].network_backend.as_deref(), Some("pcap"));
-        assert_eq!(cfg.sources[0].udp.as_ref().unwrap().ports, vec![5683, 5684]);
-        assert_eq!(cfg.sources[0].snaplen, Some(256));
-    }
-
-    #[test]
-    fn network_capture_rejects_unknown_backend() {
-        let err =
-            load_inline("net-scapy", &network_config("    network_backend: scapy\n")).unwrap_err();
-        assert!(
-            matches!(err, ConfigError::Validation(msg) if msg.contains("must be 'mock' or 'pcap'")),
-            "expected backend validation error"
-        );
-    }
-
-    #[test]
-    fn network_capture_rejects_pcap_without_filter() {
+    fn removed_network_capture_source_has_actionable_error() {
         let err = load_inline(
-            "net-pcap-empty",
-            &network_config("    network_backend: pcap\n"),
+            "removed-network-capture",
+            "version: 1\nsources:\n  - name: NET\n    type: network_capture\n    interface: lo\ntabs:\n  - label: Network\n    panes: [NET]\n",
         )
         .unwrap_err();
         assert!(
-            matches!(err, ConfigError::Validation(msg) if msg.contains("requires either udp.* filters or bpf_filter")),
-            "expected pcap filter validation error"
+            matches!(err, ConfigError::Validation(msg) if msg.contains("'network_capture' was removed") && msg.contains("explicit UDP source")),
+            "expected removed network capture error"
         );
     }
 }

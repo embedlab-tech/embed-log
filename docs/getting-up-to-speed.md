@@ -199,7 +199,6 @@ See the [README](../README.md#python-sdk), `sdk/python/`, and [CLI reference](cl
 - **UART:** default choice for device console and shell traffic.
 - **File:** follow logs produced by host tools/tests.
 - **UDP:** receive application datagrams.
-- **Network capture:** optional pcap-backed UDP capture; requires a pcap-enabled build and platform permissions.
 - **Parsers:** text, CBOR datagram, SLIP/CoAP, and Zephyr dictionary logging.
 
 Validate configs before lab runs:
@@ -209,7 +208,6 @@ embed-log validate --config embed-log.yml
 embed-log doctor --config embed-log.yml
 ```
 
-For real pcap capture, follow the dependency/permission instructions in [Configuration](configuration.md).
 
 ## 8. Update safely
 

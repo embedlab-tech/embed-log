@@ -420,7 +420,6 @@ async fn handle_client_command(text: &str, state: &ServerState) -> Option<String
         }
         "save_markers" => Some(handle_save_markers(&cmd, state).to_string()),
         "clear_logs" => Some(handle_clear_logs(&cmd, state).to_string()),
-        "set_filter" => Some(handle_set_filter(&cmd).to_string()),
         "send_raw" => Some(handle_send_raw(&cmd, state).await.to_string()),
         "event_rule.create" => Some(handle_event_rule_create(
             &cmd,
@@ -599,36 +598,6 @@ async fn handle_send_raw(cmd: &serde_json::Value, state: &ServerState) -> serde_
             "source_id": source,
             "error": "unknown source",
         })
-    }
-}
-
-fn handle_set_filter(cmd: &serde_json::Value) -> serde_json::Value {
-    let source = cmd
-        .get("source_id")
-        .or_else(|| cmd.get("source"))
-        .and_then(|v| v.as_str());
-    let filter = cmd.get("filter").and_then(|v| v.as_str()).unwrap_or("");
-    // Empty/clear filter means unfiltered.
-    if filter.is_empty() || filter == "null" || filter == "undefined" {
-        return serde_json::json!({
-            "type": "filter_result",
-            "ok": true,
-            "id": source,
-        });
-    }
-    // Validate the regex and return result.
-    match regex::Regex::new(filter) {
-        Ok(_) => serde_json::json!({
-            "type": "filter_result",
-            "ok": true,
-            "id": source,
-        }),
-        Err(e) => serde_json::json!({
-            "type": "filter_result",
-            "ok": false,
-            "id": source,
-            "error": e.to_string(),
-        }),
     }
 }
 

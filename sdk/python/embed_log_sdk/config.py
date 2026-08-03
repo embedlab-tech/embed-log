@@ -25,7 +25,7 @@ class SourceCfg:
     """A single source definition from the config file."""
 
     name: str
-    source_type: str  # "uart", "udp", "file", "network_capture"
+    source_type: str  # "uart", "udp", or "file"
     label: str
     writable: bool  # derived from type
 

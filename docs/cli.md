@@ -80,7 +80,7 @@ embed-log validate --config embed-log.yml
 embed-log validate --config embed-log.yml --json
 ```
 
-Loads the config, runs validation, and prints the resolved server/log/source/tab summary. For packet-capture configs, follow with `embed-log doctor --config <file>` to check the native pcap dependency.
+Loads the config, runs validation, and prints the resolved server/log/source/tab summary.
 
 ## Diagnostics
 
@@ -107,10 +107,7 @@ embed-log doctor --serial /dev/ttyUSB0
 - which OS / architecture the binary is running on
 - `config env: EMBED_LOG_CONFIG_YML_PATH=...` — shown whenever that env var is set, so you can tell why a given config got picked
 - `resolved config: <path>` — always shown; the exact config path `run` would load (`--config` → `EMBED_LOG_CONFIG_YML_PATH` → `embed-log.yml`), even if you didn't pass `--config` to `doctor` itself
-- config summary (sources/tabs/pcap sources) if the resolved config file exists and loads; a missing config is reported as normal, not a warning
-- whether the binary was built with the `pcap-capture` feature
-- whether the native packet-capture library is installed (`libpcap` on Unix-like systems, `Npcap`/`WinPcap` on Windows)
-- whether the inspected config contains `network_capture` sources using `network_backend: pcap`
+- config summary (sources and tabs) if the resolved config file exists and loads; a missing config is reported as normal, not a warning
 - configured UART paths, plus explicitly requested repeatable `--serial <path>` checks
 
 Serial checks only test filesystem-level readability/writability and never configure or reset an attached UART. A missing path or permission denial produces an actionable warning.
@@ -305,7 +302,7 @@ Search across session combined streams:
 ```bash
 embed-log sessions search --dir logs --source DUT
 embed-log sessions search --dir logs --source DUT --from 2026-07-03T09:00:00 --to 2026-07-03T15:00:00
-embed-log sessions search --dir logs --job nightly-42 --kind network_capture --dst-port 5683
+embed-log sessions search --dir logs --job nightly-42 --kind udp --contains timeout
 embed-log sessions search --dir logs --contains panic --regex 'ERROR|WARN'
 embed-log sessions search --dir logs --source DUT --count
 embed-log sessions search --session latest --regex 'timeout' --format compact

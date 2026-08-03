@@ -162,7 +162,6 @@ Report:
 - active session ID;
 - source IDs, labels, kinds, and TX/writable status;
 - supported subscription, marker, export, and event-rule operations;
-- optional features such as pcap;
 - future limits/authentication metadata.
 
 Publish protocol schemas:

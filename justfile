@@ -16,12 +16,6 @@ default:
 build:
     {{cargo}} build --locked --release --package embed-log-cli --bin embed-log
 
-# Build the embed-log CLI with real network packet capture (pcap) support.
-# Requires libpcap-dev/libpcap-devel/Npcap installed. After building, grant capture
-# permission on Linux with: sudo setcap cap_net_raw,cap_net_admin+eip target/release/embed-log
-build-pcap:
-    {{cargo}} build --locked --release --package embed-log-cli --bin embed-log --features pcap-capture
-
 # Build and install the embed-log CLI from target/release.
 # Defaults to /usr/local/bin. Override: just install /opt/homebrew/bin
 install install_dir="/usr/local/bin": build

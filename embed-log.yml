@@ -3,7 +3,6 @@ server:
   host: 127.0.0.1
   ws_port: 8080
   app_name: embed-log
-  open_browser: true
   timestamp_mode: absolute
 
 logs:
@@ -48,14 +47,6 @@ sources:
     parser:
       type: cbor-datagram
 
-  - name: NET_CAPTURE
-    label: Network Mock
-    type: network_capture
-    network_backend: mock
-    interface: mock0
-    mock_interval: 1.0
-    bpf_filter: udp or coap
-
   - name: FILE_WATCH
     label: Watched File
     type: file
@@ -80,10 +71,6 @@ tabs:
   - label: Sensors
     panes:
       - SENSORS
-
-  - label: Network
-    panes:
-      - NET_CAPTURE
 
   - label: File
     panes:

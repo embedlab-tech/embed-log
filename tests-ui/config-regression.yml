@@ -57,15 +57,6 @@ sources:
     type: udp
     port: 6101
 
-  # Network tab (mock capture)
-  - name: NET_CAPTURE
-    label: Net
-    type: network_capture
-    network_backend: mock
-    interface: mock0
-    mock_interval: 1.0
-    bpf_filter: ""
-
 tabs:
   - label: DevA
     panes:
@@ -89,6 +80,3 @@ tabs:
 
   - label: UART
     panes: [UART_DUT, UART_DEBUG]
-
-  - label: Network
-    panes: [NET_CAPTURE]

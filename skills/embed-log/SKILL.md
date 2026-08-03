@@ -57,7 +57,7 @@ embed-log sessions summary <SESSION_ID> --json
 # Search combined logs — the main tool
 embed-log sessions search --session latest --regex 'timeout|panic|fatal' --format compact
 embed-log sessions search --dir logs --source PYTEST --contains "FAILED" --format compact
-embed-log sessions search --dir logs --job nightly-42 --kind network_capture --dst-port 5683
+embed-log sessions search --dir logs --job nightly-42 --kind udp --contains timeout
 embed-log sessions search --session latest --source DUT --last 50 --format compact   # newest N matches
 embed-log sessions search --dir logs --regex 'timeout' --since 1h                    # relative time window
 embed-log sessions search --dir logs --regex panic -C 10 --format compact            # +/- 10 lines of context

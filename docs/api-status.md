@@ -39,7 +39,7 @@ HTTP status: `200 OK`
 | `session_id` | string or null | Active session identifier, when available. |
 | `control_api` | boolean | Whether `/api/v1/control` WebSocket control is enabled. |
 | `sources` | object | Source ID keyed capability map. |
-| `sources.<id>.type` | string | Source kind, such as `uart`, `file`, `udp`, or `network_capture`. |
+| `sources.<id>.type` | string | Source kind: `uart`, `file`, or `udp`. |
 | `sources.<id>.label` | string | Human-facing source label. |
 | `sources.<id>.writable` | boolean | Whether UART TX/control writes are supported. |
 | `sources.<id>.available` | boolean | Source is configured in this running server. It is not a hardware-link health probe. |

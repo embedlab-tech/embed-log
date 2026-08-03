@@ -78,12 +78,6 @@
       "notes": "11/13 scenarios pass; 2 skipped by design."
     },
     {
-      "file": "tests/network-capture.spec.js",
-      "status": "passing",
-      "verified_with": "npm run test:regression",
-      "notes": "Mock backend coverage passes; real packet capture remains unimplemented."
-    },
-    {
       "file": "tests/pane-plugin-coap.spec.js",
       "status": "passing",
       "verified_with": "dependency subset: 7/7 passed",

@@ -60,7 +60,7 @@ Shared library used by the CLI and TUI.
 | `parsers` | Stream parsers: text and UDP CBOR datagram parser. |
 | `runtime` | `LogServer`, the main orchestrator. Resolves sources, starts tasks, writes logs, broadcasts messages, rotates/exports sessions. |
 | `session` | Session manifest, markers, and static HTML export. |
-| `sources` | Source implementations: UART, UDP, file tail, and network capture (mock or pcap-backed UDP tap). |
+| `sources` | Source implementations: UART, UDP, and file tail. |
 
 ### `crates/embed-log-cli`
 
@@ -109,7 +109,6 @@ writer task
 | `uart` | `sources::uart::UartSource` | Opens a serial port with `serialport`, reads in blocking tasks, parses lines. |
 | `udp` | `sources::udp::UdpSource` | Binds UDP on `0.0.0.0:<port>`. Text parser treats each datagram as newline-terminated; CBOR parser decodes one datagram. |
 | `file` | `sources::file::FileSource` | Creates file if missing, watches parent directory with `notify`, polls/appends from current end. |
-| `network_capture` | `sources::network::NetworkCaptureSource` | Supports `network_backend: mock` plus `network_backend: pcap` for simplified UDP packet capture with kernel BPF filters. |
 
 `merges` (config-only, no `sources::` implementation) declares virtual
 pseudo-sources: `runtime::server` taps each constituent source's reader with
@@ -156,7 +155,6 @@ WebSocket commands currently handled by the server:
 | `export_session_html` | Export current session HTML. |
 | `save_markers` | Persist UI markers to `markers.json`. |
 | `clear_logs` | Broadcast a UI clear event. |
-| `set_filter` | Validate frontend regex filter. |
 | `send_raw` | Add a yellow `TX::UI` entry to a source queue. |
 
 ## Session artifacts
@@ -168,7 +166,7 @@ logs/
 └── 2026-06-14_09-30-00__optional-job-id/
     ├── manifest.json
     ├── combined.jsonl            # structured append-only stream across all sources
-    │                              # includes packet fields for network_capture
+    │
     ├── markers.json              # after markers are saved
     ├── session.html              # after export/shutdown/no-client export
     └── <tab>__<source>__<session>.log
