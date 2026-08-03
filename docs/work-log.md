@@ -1303,3 +1303,49 @@ Future entries must include this per-file added/removed-line summary.
 | `sdk-control-api-summary.md` | 1 | 17 | Removes claims that the retired marker inspection CLI remains available. |
 | `sdk/python/tests/test_e2e.py` | 0 | 76 | Removes end-to-end assertions that invoke the retired CLI; existing marker persistence and broadcast coverage remains. |
 | `skills/embed-log/SKILL.md` | 1 | 1 | Removes `marker` from accepted `latest` session commands. |
+
+## 2026-08-03 19:35:56 UTC / 2026-08-03 21:35:56 CEST (Warsaw)
+
+- **Commit:** `3aa8fce` — `Introduce YAML config v2 and port 18080`
+- **Task:** Introduce canonical YAML config v2 with `server.listen`, named source mappings, source-local UART baud/path fields, optional `ui.tabs`, v2 config generation, and the new `127.0.0.1:18080` default while retaining temporary v1 read compatibility for frontend-plugin migration.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-03 19:35:56 UTC / 2026-08-03 21:35:56 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --workspace` — passed (59 CLI, 207 core, and 73 TUI tests); `cargo clippy --locked --workspace --all-targets -- -D warnings` — passed; `PYTHONPATH=sdk/python python3 -m pytest sdk/python/tests -q` — passed (53 tests, 2 skipped), including a real backend/PTTY v2 configuration flow; `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (4 browser tests against a v2 server config); `cargo build --locked --release` and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged binary validation of `embed-log.yml` confirmed host `127.0.0.1` and port `18080`.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`3aa8fce`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 3 | 3 | Updates default browser, control, and TUI endpoints to port 18080. |
+| `config-samples/double_uart_udp_two_tabs.yml` | 15 | 15 | Migrates the multi-source sample to canonical v2. |
+| `config-samples/dual_uart_zephyr_dict.yml` | 17 | 23 | Migrates dictionary UART paths, baud, and UI layout to v2. |
+| `config-samples/reference_full_annotated.yml` | 11 | 17 | Replaces the plugin-oriented v1 reference with retained v2 settings. |
+| `config-samples/single_file_single_tab.yml` | 8 | 8 | Migrates file `path` and UI keys to v2. |
+| `config-samples/single_uart_single_tab.yml` | 9 | 9 | Migrates UART `path`/`baud` and UI keys to v2. |
+| `crates/embed-log-cli/src/commands/run.rs` | 3 | 3 | Writes saved quick-run configurations through the canonical v2 serializer. |
+| `crates/embed-log-cli/src/main.rs` | 2 | 2 | Makes `--port` canonical while retaining `--ws-port` as an alias. |
+| `crates/embed-log-core/src/config/loader.rs` | 452 | 21 | Adds strict v2 parsing/normalization, v2 serialization, actionable validation, generated tabs, and unit coverage. |
+| `crates/embed-log-core/src/config/mod.rs` | 1 | 1 | Exports v2 configuration serialization. |
+| `crates/embed-log-core/src/config/models.rs` | 2 | 2 | Changes runtime defaults to config version 2 and port 18080. |
+| `crates/embed-log-tui/src/main.rs` | 1 | 1 | Updates standalone TUI endpoint help. |
+| `docs/agent-capabilities.md` | 2 | 2 | Updates status and control endpoint examples. |
+| `docs/api-status.md` | 2 | 2 | Updates status API examples. |
+| `docs/automation-agent-plan.md` | 1 | 1 | Updates the documented control endpoint. |
+| `docs/cli.md` | 4 | 4 | Documents `server.listen` and canonical `--port` overrides. |
+| `docs/configuration.md` | 93 | 309 | Rewrites configuration documentation around the concise v2 schema and migration table. |
+| `docs/getting-up-to-speed.md` | 11 | 10 | Replaces the old UART example with v2 and updates the control endpoint. |
+| `docs/tui.md` | 2 | 2 | Updates standalone TUI endpoint examples. |
+| `embed-log.yml` | 19 | 43 | Replaces the checked-in root configuration with valid v2. |
+| `sdk/python/embed_log_sdk/config.py` | 31 | 10 | Parses v2 listen/source mappings and defaults SDK discovery to port 18080. |
+| `sdk/python/embed_log_sdk/watcher.py` | 1 | 1 | Updates the watcher default control endpoint. |
+| `sdk/python/examples/watcher.yml` | 1 | 1 | Updates the watcher example endpoint. |
+| `sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py` | 1 | 1 | Uses canonical `--port` in hardware integration startup. |
+| `sdk/python/tests/test_backend_hardware_uart.py` | 1 | 1 | Uses canonical `--port` in hardware integration startup. |
+| `sdk/python/tests/test_client.py` | 14 | 14 | Updates mocked client endpoints to the new default. |
+| `sdk/python/tests/test_config.py` | 22 | 1 | Adds SDK v2 mapping/listen coverage and updates the default-port assertion. |
+| `sdk/python/tests/test_e2e.py` | 10 | 9 | Runs the real backend/PTTY SDK integration fixture from a v2 config. |
+| `sdk/python/tests/test_events.py` | 6 | 6 | Updates event client endpoint fixtures. |
+| `sdk/python/tests/test_watcher.py` | 6 | 6 | Updates watcher endpoint fixtures and expectations. |
+| `test-mvp.yml` | 10 | 16 | Migrates the checked-in MVP fixture to v2. |
+| `tests-ui/rust-test-server.mjs` | 11 | 17 | Starts browser E2E tests from a generated v2 configuration. |
