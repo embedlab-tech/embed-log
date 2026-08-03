@@ -16,14 +16,7 @@ This roadmap intentionally excludes session import, export, retention, and brows
 - Add release-artifact smoke tests for every published target.
 - Support Linux ARM64 if it is a supported user platform.
 - Add release provenance/signing when CI runners and secrets are available.
-- Keep package-manager installs distinct from self-updated standalone installs.
-
-### 1.3 Self-update completion
-
-- Add a local mock HTTP end-to-end updater test.
-- Detect package-managed/read-only executable locations with clear guidance.
-- Implement a Windows replacement helper or explicitly keep Windows self-update unsupported.
-- Consider signed checksum/provenance verification in addition to SHA256SUMS.
+- Keep package-manager installation and upgrade guidance explicit.
 
 ## 2. First-run developer experience
 

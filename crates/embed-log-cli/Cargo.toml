@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Collects UART, UDP, file-tail, and network-capture logs and serves a live viewer"
+description = "Collects UART, UDP, and file-tail logs and serves a live viewer"
 
 [[bin]]
 name = "embed-log"
@@ -32,11 +32,8 @@ serde_yaml.workspace = true
 chrono.workspace = true
 serialport = "4"
 regex = "1"
-reqwest.workspace = true
-semver.workspace = true
 flate2.workspace = true
 tar.workspace = true
-sha2.workspace = true
 
 [dependencies.embed-log-tui]
 workspace = true

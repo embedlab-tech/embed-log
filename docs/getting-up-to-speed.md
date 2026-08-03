@@ -209,16 +209,7 @@ embed-log doctor --config embed-log.yml
 ```
 
 
-## 8. Update safely
-
-```bash
-embed-log update --check
-embed-log update --yes
-```
-
-The updater selects the platform archive, verifies it against release `SHA256SUMS`, stages it, and retains a rollback backup during replacement. Use package-manager updates for package-managed installations. See [CLI reference](cli.md).
-
-## 9. Suggested team workflow
+## 8. Suggested team workflow
 
 1. Start with quick-run while bringing up hardware.
 2. Save YAML once source names/layout/parser choices stabilize.

@@ -120,25 +120,6 @@ enum Command {
         json: bool,
     },
 
-    /// Check GitHub Releases for a newer CLI version
-    Update {
-        /// Only check and report; do not download or replace the binary.
-        #[arg(long, conflicts_with = "yes")]
-        check: bool,
-        /// Install this release tag instead of the latest stable release.
-        #[arg(long, value_name = "TAG")]
-        version: Option<String>,
-        /// Confirm executable replacement without prompting.
-        #[arg(long)]
-        yes: bool,
-        /// Permit installing an older release. Requires --yes.
-        #[arg(long, requires = "yes", conflicts_with = "check")]
-        allow_downgrade: bool,
-        /// Machine-readable JSON output.
-        #[arg(long, conflicts_with = "yes")]
-        json: bool,
-    },
-
     /// List detected serial ports
     Ports {
         /// Machine-readable JSON output
@@ -256,13 +237,6 @@ async fn main() -> Result<()> {
             serial,
             json,
         }) => misc::cmd_doctor(config.as_deref(), &serial, json),
-        Some(Command::Update {
-            check,
-            version,
-            yes,
-            allow_downgrade,
-            json,
-        }) => misc::cmd_update(check, version.as_deref(), yes, allow_downgrade, json).await,
         Some(Command::Ports { json }) => misc::cmd_ports(json),
         Some(Command::Hello) => misc::cmd_hello(),
         Some(Command::Sessions { command }) => cmd_sessions(*command),
@@ -359,6 +333,7 @@ mod tests {
             ["embed-log", "demo"].as_slice(),
             ["embed-log", "init"].as_slice(),
             ["embed-log", "onboard"].as_slice(),
+            ["embed-log", "update"].as_slice(),
         ] {
             assert!(Cli::try_parse_from(args).is_err());
         }

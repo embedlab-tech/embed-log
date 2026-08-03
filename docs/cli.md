@@ -103,7 +103,7 @@ embed-log doctor --config embed-log.yml
 embed-log doctor --serial /dev/ttyUSB0
 ```
 
-`doctor` reports the binary version, host system info, config resolution, and packet-capture readiness:
+`doctor` reports the binary version, host system info, and config resolution:
 - which OS / architecture the binary is running on
 - `config env: EMBED_LOG_CONFIG_YML_PATH=...` — shown whenever that env var is set, so you can tell why a given config got picked
 - `resolved config: <path>` — always shown; the exact config path `run` would load (`--config` → `EMBED_LOG_CONFIG_YML_PATH` → `embed-log.yml`), even if you didn't pass `--config` to `doctor` itself
@@ -111,18 +111,6 @@ embed-log doctor --serial /dev/ttyUSB0
 - configured UART paths, plus explicitly requested repeatable `--serial <path>` checks
 
 Serial checks only test filesystem-level readability/writability and never configure or reset an attached UART. A missing path or permission denial produces an actionable warning.
-
-Check for updates:
-
-```bash
-embed-log update --check
-embed-log update --check --json
-embed-log update --yes
-embed-log update --version v1.2.0 --yes
-embed-log update --version v0.9.0 --yes --allow-downgrade
-```
-
-`--check` reports the latest stable GitHub Release without changing the system. `--yes` downloads the target-matching archive, verifies it against the release `SHA256SUMS`, stages the executable beside the current binary, and replaces it with a rollback backup if replacement fails. Self-update rejects same-version and downgrade installs by default; `--allow-downgrade --yes` is the explicit escape hatch. It currently supports Linux x86_64 and macOS Apple Silicon/Intel. On Windows, use the PowerShell installer again or your package manager: replacing a running `.exe` requires a dedicated updater helper that is not shipped yet. Package-managed or read-only installations should use their package manager instead.
 
 Serial ports:
 

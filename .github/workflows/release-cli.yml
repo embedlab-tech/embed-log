@@ -130,20 +130,6 @@ jobs:
           test -x "smoke/${{ matrix.binary }}"
           "smoke/${{ matrix.binary }}" version --json
 
-      - name: Verify Unix self-update from packaged CLI
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          if [ "${{ matrix.target }}" = "x86_64-apple-darwin" ]; then
-            echo "Spoofing x86_64 architecture for Python environment..."
-            echo 'import platform; platform.machine = lambda: "x86_64"; platform.processor = lambda: "i386"' > sitecustomize.py
-            export PYTHONPATH=$PWD
-            python3 scripts/test_update_integration.py --binary "smoke/${{ matrix.binary }}"
-            rm sitecustomize.py
-          else
-            python3 scripts/test_update_integration.py --binary "smoke/${{ matrix.binary }}"
-          fi
-
       - name: Smoke-test Windows archive
         if: runner.os == 'Windows'
         shell: pwsh
@@ -153,15 +139,6 @@ jobs:
           $binary = "smoke/${{ matrix.binary }}"
           if (!(Test-Path $binary)) { throw "Archive is missing $binary" }
           & $binary version --json
-
-      - name: Verify Windows self-update guidance
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $result = & "smoke/${{ matrix.binary }}" update --json | ConvertFrom-Json
-          if ($result.self_update_supported -ne $false) {
-            throw "Windows update command unexpectedly reported self-update support"
-          }
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
