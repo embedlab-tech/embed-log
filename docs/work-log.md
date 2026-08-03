@@ -1204,3 +1204,22 @@ Future entries must include this per-file added/removed-line summary.
 | `docs/architecture.md` | 1 | 1 | Removes merge from the top-level CLI utility list. |
 | `docs/cli.md` | 0 | 26 | Removes raw-log merge usage and timestamp examples. |
 | `docs/development.md` | 1 | 1 | Removes `merged.html` from generated artifact examples. |
+
+## 2026-08-03 17:59:31 UTC / 2026-08-03 19:59:31 CEST (Warsaw)
+
+- **Commit:** `266047f` — `Remove HTML parse command`
+- **Task:** Remove the obsolete top-level `embed-log parse` command, exported-HTML extraction implementation/tests, and documentation while preserving session read and export operations.
+- **Started:** 2026-08-03 17:57:44 UTC / 2026-08-03 19:57:44 CEST (+0200) (Warsaw)
+- **Completed:** 2026-08-03 17:59:31 UTC / 2026-08-03 19:59:31 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli --package embed-log-tui` — passed (68 CLI, 201 core, and 73 TUI tests); `cargo clippy --locked --package embed-log-core --package embed-log-cli --package embed-log-tui --all-targets -- -D warnings` — passed; `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (4 tests); release CLI build and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged parse-command rejection, stale-reference search, and retained `sessions export`/`sessions combined` help checks — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`266047f`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-cli/src/commands/misc.rs` | 2 | 97 | Removes HTML extraction/grouping code and four parse-specific unit tests. |
+| `crates/embed-log-cli/src/main.rs` | 2 | 14 | Removes parse arguments/dispatch, adds rejection coverage, and narrows the validate parser test. |
+| `docs/architecture.md` | 1 | 1 | Removes parse from the top-level CLI utility list. |
+| `docs/cli.md` | 0 | 8 | Removes exported-HTML parse usage and behavior. |
+| `docs/development.md` | 1 | 1 | Removes the parsed-output directory from generated artifact examples. |
