@@ -159,13 +159,6 @@ embed-log sessions info <SESSION_ID> --dir logs
 embed-log sessions info latest --dir logs --json
 ```
 
-Prune older sessions while retaining the newest N. Always preview first:
-
-```bash
-embed-log sessions prune --dir logs --keep 20 --dry-run
-embed-log sessions prune --dir logs --keep 20
-```
-
 Open a session report in the default browser. If the HTML export is missing, it is generated first:
 
 ```bash

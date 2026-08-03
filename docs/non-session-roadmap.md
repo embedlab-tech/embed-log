@@ -1,6 +1,6 @@
 # Non-session roadmap
 
-This roadmap intentionally excludes session import, export, retention, and browsing work. Complete the session backlog before starting these items.
+This roadmap intentionally excludes session export and browsing work. Complete the session backlog before starting these items.
 
 ## 1. Distribution and release trust
 

@@ -130,6 +130,6 @@ Promotion writes `<config-stem>.events.yml`. The runtime rule stays active now; 
 - Keep live subscriptions and context windows bounded.
 - Give temporary rules purpose-specific names and delete them after investigation.
 - Promote only rules worth retaining.
-- Do not send UART TX, prune sessions, import logs, or edit project configuration without explicit approval.
+- Do not send UART TX, delete session data, export sensitive logs, or edit project configuration without explicit approval.
 
 A dedicated Embed-log agent skill is planned at `.agents/skills/embed-log/SKILL.md`; until then, use this reference in project agent instructions or task prompts.

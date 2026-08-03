@@ -146,15 +146,6 @@ embed-log sessions export latest --format html --output report.html
 embed-log sessions export latest --format raw --output merged.log
 ```
 
-### Retain disk space
-
-```bash
-embed-log sessions prune --dir logs --keep 20 --dry-run
-embed-log sessions prune --dir logs --keep 20
-```
-
-Always run the dry-run first. It lists sessions affected and reports the bytes that would be reclaimed.
-
 ## 6. Automate embed-log
 
 The control WebSocket provides source-aware log subscription, injection, UART TX, and markers:
@@ -198,7 +189,7 @@ embed-log doctor --config embed-log.yml
 4. Mark failures/events while live.
 5. Capture pytest and host output through configured file or UDP sources.
 6. Share `session.html` or a bounded JSONL export for diagnosis.
-7. Prune old sessions after preserving releases/incidents.
+7. Archive or remove old session directories using project retention tooling.
 
 ## Reference map
 
