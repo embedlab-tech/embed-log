@@ -1,4 +1,4 @@
-//! First-run onboarding shared by the Tauri desktop app and the CLI/browser UI.
+//! First-run onboarding for the CLI/browser UI.
 //!
 //! This module owns everything reusable about onboarding:
 //!
@@ -9,10 +9,8 @@
 //! - `OnboardingServer` — a tiny HTTP server that serves the onboarding page
 //!   and the `serial_ports` / `server_status` / `save_config` endpoints
 //!
-//! Both the Tauri app and the CLI run the exact same `OnboardingServer`. The
-//! only platform-specific behaviour is injected through a `SaveHandler`
-//! closure, which lets Tauri start its `LogServer` at save time while the CLI
-//! simply writes the config and proceeds to start its own server afterwards.
+//! The CLI uses `OnboardingServer` to write a config and then starts the main
+//! `LogServer`.
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -107,8 +105,7 @@ pub fn server_status(config_path: &Path) -> ServerStatus {
 
 /// Turn an onboarding draft into validated YAML.
 ///
-/// This is the single source of truth for the generated config shape; both the
-/// CLI and Tauri use it.
+/// This is the single source of truth for the generated config shape.
 pub fn build_quick_config_yaml(draft: &QuickConfigDraft) -> Result<String, String> {
     use serde_yaml::{Mapping, Number, Value};
     use std::collections::HashSet;
@@ -296,7 +293,6 @@ pub fn save_quick_config(
 }
 
 /// The raw onboarding JavaScript (the contents of `frontend/onboarding.js`).
-/// Used by the Tauri webview eval fallback.
 pub fn onboarding_script() -> String {
     FrontendAssets::get("onboarding.js")
         .map(|file| String::from_utf8_lossy(&file.data).into_owned())
@@ -324,9 +320,7 @@ pub fn onboarding_html() -> String {
 ///
 /// The closure receives the resolved config path and the validated draft. It
 /// must persist the config (via [`save_quick_config`] or otherwise) and return
-/// a [`QuickConfigResult`]. The Tauri app uses this hook to also start its
-/// `LogServer` at save time; the CLI uses [`default_save_handler`] and starts
-/// its own server after the save is reported.
+/// a [`QuickConfigResult`].
 pub type SaveHandler =
     Arc<dyn Fn(PathBuf, QuickConfigDraft) -> Result<QuickConfigResult, String> + Send + Sync>;
 
@@ -362,8 +356,7 @@ pub struct OnboardingServer {
 impl OnboardingServer {
     /// Bind a random localhost port and start serving.
     ///
-    /// `save_handler` performs the actual save and any platform-specific
-    /// follow-up (e.g. starting the Tauri `LogServer`).
+    /// `save_handler` performs the actual save and optional follow-up work.
     pub fn start(config_path: PathBuf, save_handler: SaveHandler) -> std::io::Result<Self> {
         let listener = TcpListener::bind(("127.0.0.1", 0))?;
         let port = listener.local_addr()?.port();
@@ -408,9 +401,6 @@ impl OnboardingServer {
     }
 
     /// Block until the user saves a config, returning the result.
-    ///
-    /// Intended for the CLI/browser flow. The Tauri app ignores this (its save
-    /// handler starts the `LogServer` directly).
     pub fn wait_for_save(self) -> Result<QuickConfigResult, String> {
         self.result_rx
             .recv()
@@ -495,7 +485,7 @@ fn handle_request(
 
             match (state.save_handler)(state.config_path.clone(), request.draft) {
                 Ok(result) => {
-                    // Deliver the result to wait_for_save() (ignored by Tauri).
+                    // Deliver the result to wait_for_save().
                     if let Some(tx) = state.result_tx.lock().unwrap().take() {
                         let _ = tx.send(result.clone());
                     }

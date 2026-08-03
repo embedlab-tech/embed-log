@@ -115,13 +115,3 @@ From Windows PowerShell:
 cargo build --locked --release --package embed-log-cli --bin embed-log
 ./scripts/package-cli.ps1 -Target x86_64-pc-windows-msvc
 ```
-
-## Tauri desktop app
-
-The desktop/Tauri release path is intentionally separate. When ready, add a second workflow that builds native Tauri bundles on each OS runner:
-
-- Linux: `.AppImage` / `.deb`
-- Windows: `.msi` / `.exe`
-- macOS: `.dmg` / `.app`
-
-Signing/notarization can be added later for Windows/macOS.

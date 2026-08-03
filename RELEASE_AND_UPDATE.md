@@ -12,7 +12,6 @@ Primary user paths:
 
 Non-goals for the first implementation:
 
-- Tauri desktop app updater
 - commit-SHA update channel parity with the legacy Python flow
 - package-manager-specific distribution (`brew`, `winget`, `apt`, etc.)
 - delta patches / binary diffs
@@ -520,6 +519,5 @@ For the Rust rewrite, the clean install/update contract should be:
 - **Install once** with release-hosted installer scripts.
 - **Update later** with `embed-log update`.
 - **Distribute only prebuilt release artifacts** to normal users.
-- **Keep Tauri release/update separate** from the CLI/browser-mode distribution.
 
 That preserves the convenience of the current product while moving the system onto safer, versioned, reproducible Rust release artifacts.

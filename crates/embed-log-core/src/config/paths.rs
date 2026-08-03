@@ -1,10 +1,10 @@
-//! Shared path resolution used by all frontends (CLI, Tauri).
+//! Shared config-relative path resolution.
 
 use std::path::{Path, PathBuf};
 
 /// Resolve the logs root directory: an absolute `logs_dir` passes through
 /// unchanged; a relative one resolves against the config file's parent
-/// directory. Kept here so the CLI and Tauri frontends can't drift apart.
+/// directory.
 pub fn resolve_logs_root(config_path: &Path, logs_dir: &str) -> PathBuf {
     resolve_relative_to_config(config_path, logs_dir)
 }

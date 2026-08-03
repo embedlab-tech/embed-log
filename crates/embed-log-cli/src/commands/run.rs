@@ -28,8 +28,8 @@ pub(crate) async fn cmd_run(
 ) -> Result<()> {
     let config_path = resolve_config_path(config_path);
 
-    // First-run onboarding: if no config exists yet, run the browser setup
-    // (same page the Tauri app uses), then proceed to start the real server.
+    // First-run onboarding: if no config exists yet, run the browser setup,
+    // then proceed to start the real server.
     // The onboarding page's post-save redirect lands on the live server, so we
     // suppress the normal browser-open in that case to avoid a second tab.
     let onboarded = if !config_path.exists() {
@@ -331,7 +331,7 @@ pub(crate) async fn run_server_with_tui(
 /// config. Returns `Ok(())` once the config has been written to `config_path`.
 ///
 /// Uses the exact same `OnboardingServer` + `frontend/onboarding.js` page as
-/// the Tauri desktop app — no separate UI.
+/// the main browser UI — no separate setup frontend.
 pub(crate) fn run_onboarding(config_path: &Path, open_browser: bool) -> Result<()> {
     println!("embed-log v{} — first-run setup", env!("CARGO_PKG_VERSION"));
     println!("  no config found at {}", config_path.display());

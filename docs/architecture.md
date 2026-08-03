@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes the current Rust/Tauri implementation.
+This document describes the current Rust implementation.
 
 ## High-level shape
 
@@ -13,9 +13,8 @@ This document describes the current Rust/Tauri implementation.
 ┌──────────────┐        ┌──────────────────────────────┐
 │ embed-log CLI│───────▶│ embed-log-core::runtime      │
 └──────────────┘        │ LogServer                    │
-┌──────────────┐        └──────────────┬───────────────┘
-│ Tauri shell  │───────▶               │
-└──────────────┘                       │ starts tasks
+                        └──────────────┬───────────────┘
+                                       │ starts tasks
                                        ▼
           ┌──────────────┬─────────────┬──────────────┬──────────────┐
           │ UART sources │ UDP sources │ file sources │ mock network │
@@ -39,8 +38,8 @@ This document describes the current Rust/Tauri implementation.
                          ▼
           ┌────────────────────────────────────────┐
           │ frontend viewer                        │
-          │ live browser UI or Tauri webview       │
-          │ static exported HTML uses same assets  │
+          │ live browser UI and terminal UI        │
+          │ static exported HTML uses browser assets│
           └────────────────────────────────────────┘
 ```
 
@@ -48,7 +47,7 @@ This document describes the current Rust/Tauri implementation.
 
 ### `crates/embed-log-core`
 
-Shared library used by both the CLI and Tauri app.
+Shared library used by the CLI and TUI.
 
 | Module | Responsibility |
 | --- | --- |
@@ -59,7 +58,7 @@ Shared library used by both the CLI and Tauri app.
 | `models` | Core runtime data types like `LogEntry`, `TimestampMode`, ANSI color mapping. |
 | `naming` | Slug helpers for filesystem-safe session/log names. |
 | `net` | HTTP/WebSocket server and structured control WebSocket API. |
-| `onboarding` | First-run quick-config builder, serial-port listing, and the shared onboarding HTTP server used by **both** the CLI and the Tauri app. |
+| `onboarding` | First-run quick-config builder, serial-port listing, and onboarding HTTP server. |
 | `parsers` | Stream parsers: text and UDP CBOR datagram parser. |
 | `runtime` | `LogServer`, the main orchestrator. Resolves sources, starts tasks, writes logs, broadcasts messages, rotates/exports sessions. |
 | `session` | Session manifest, markers, and static HTML export. |
@@ -77,25 +76,11 @@ Main responsibilities:
 - run first-run **onboarding** (via the shared core `OnboardingServer`) when no config exists, or on the `onboard` subcommand
 - launch default browser unless `--no-open-browser` is used
 - provide utilities: `init`, `doctor`, `ports`, `sessions`, `merge`, `parse`, `demo`
-- launch the Tauri binary via `--ui` when available
+- launch the integrated terminal UI via `--tui`
 
-### `crates/embed-log-tauri`
+### `crates/embed-log-tui`
 
-Desktop shell around the same core server.
-
-Main responsibilities:
-
-- resolve config path from `--config`, `EMBED_LOG_CONFIG_YML_PATH`, local `embed-log.yml`, or app config directory
-- store the resolved config path in process state before onboarding/server startup
-- reuse the shared core `OnboardingServer` + `save_quick_config`; the Tauri save handler also starts the `LogServer`
-- resolve relative `logs.dir` against the config file directory
-- start `LogServer` in Tauri async runtime
-- navigate the webview to the local server URL
-- provide onboarding when no config exists
-- expose thin Tauri commands (serial ports, server status, quick config) for the webview eval fallback
-- export current session on close when the server is running
-
-See [tauri.md](tauri.md) for exact config/log path behavior.
+Terminal WebSocket client used by integrated `--tui` mode and by the standalone `embed-log-tui` binary.
 
 ## Runtime data flow
 
@@ -199,7 +184,7 @@ Session HTML is self-contained: log data, CSS, JS, plugin metadata/scripts, mark
 The viewer is plain ES modules in `frontend/`. The same UI code supports:
 
 - live browser mode served by Axum
-- Tauri webview mode
+- terminal UI mode
 - static exported HTML mode, where module imports/exports are stripped and data is bootstrapped inline
 
 Important files:
@@ -220,7 +205,7 @@ Important files:
 | `plugin-hex-coap.js` | Built-in CoAP hex plugin. |
 | `tsparse.js` | Timestamp parsing for imports/static logs. |
 | `import.js` | Import `.log` files into panes. |
-| `onboarding.js` | First-run config UI — shared by the browser (CLI) and Tauri desktop apps. |
+| `onboarding.js` | First-run browser config UI. |
 
 ## Plugin path
 

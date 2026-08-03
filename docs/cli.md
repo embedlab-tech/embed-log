@@ -13,7 +13,6 @@ Global options:
 | `-c, --config <PATH>` | Config file. Falls back to `EMBED_LOG_CONFIG_YML_PATH`, then `embed-log.yml`. |
 | `--frontend-dir <PATH>` | Filesystem frontend directory for development. Defaults to `frontend`. Release binaries can use embedded assets. |
 | `--tui` | Launch the terminal UI instead of the browser UI. |
-| `--ui` | Launch the beta Tauri desktop UI instead of the browser UI. |
 | `--no-open-browser` | Do not open the default browser. |
 
 ## Run server
@@ -76,7 +75,7 @@ embed-log run --config embed-log.yml --host 0.0.0.0 --ws-port 9090 --log-dir /tm
 
 ## Onboarding
 
-`embed-log` and the Tauri desktop app share the **same** first-run onboarding page (`frontend/onboarding.js`) and the same onboarding HTTP server (`embed_log_core::onboarding::OnboardingServer`). There is no separate web UI for setup.
+`embed-log` uses the browser onboarding page (`frontend/onboarding.js`) and the core onboarding HTTP server (`embed_log_core::onboarding::OnboardingServer`).
 
 Onboarding runs automatically when `embed-log run` (or the default command) finds no config file. You can also trigger it explicitly:
 
@@ -97,7 +96,7 @@ What happens:
 3. you pick sources, tabs, parser, and logs directory
 4. on **Start logging**, the config is written to the resolved path, validated, and the CLI transitions to the real `LogServer` on the configured `ws_port`
 
-The setup server exposes the same HTTP endpoints used by the page in both browser and Tauri mode:
+The setup server exposes these HTTP endpoints:
 
 | Endpoint | Purpose |
 | --- | --- |
@@ -106,14 +105,6 @@ The setup server exposes the same HTTP endpoints used by the page in both browse
 | `GET /api/server_status` | resolved config path + ws port |
 | `POST /api/save_config` | persist the draft config |
 
-
-## Desktop UI
-
-```bash
-embed-log --ui --config embed-log.yml
-```
-
-The CLI tries to launch the Tauri app directly or through Cargo during development. `EMBED_LOG_TAURI_BIN` can point at a specific Tauri binary.
 
 ## Validate config
 
@@ -442,7 +433,5 @@ Extracts embedded `logData` from a session HTML file and writes per-pane raw log
 
 | Variable | Used by | Meaning |
 | --- | --- | --- |
-| `EMBED_LOG_CONFIG_YML_PATH` | CLI/Tauri | Config path fallback. |
-| `EMBED_LOG_TAURI_BIN` | CLI `--ui` | Explicit Tauri app binary path. |
-| `EMBED_LOG_DEMO_TRAFFIC` | Tauri/dev | Enables generated demo traffic when starting the Tauri server. |
+| `EMBED_LOG_CONFIG_YML_PATH` | CLI | Config path fallback. |
 | `RUST_LOG` | tracing | Log filtering, e.g. `RUST_LOG=debug`. |

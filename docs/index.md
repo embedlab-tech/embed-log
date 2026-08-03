@@ -4,12 +4,11 @@
 - [Automation and agent plan](automation-agent-plan.md) — roadmap for token-efficient agent workflows, dynamic event rules, and API discovery.
 - [Agent capabilities reference](agent-capabilities.md) — commands and control-WebSocket operations agents can use now.
 - [Quick start](quickstart.md) — run UART/file sources without YAML and find sessions.
-- [Architecture](architecture.md) — runtime diagrams, crate/module map, frontend/Tauri/session flow.
+- [Architecture](architecture.md) — runtime diagrams, crate/module map, frontend/TUI/session flow.
 - [Configuration](configuration.md) — YAML schema, source types, tabs, plugins, examples.
 - [CLI reference](cli.md) — commands, options, environment variables.
 - [Status and capabilities API](api-status.md) — REST readiness and source discovery for harnesses.
 - [Development](development.md) — local workflow, `just` recipes, extension points.
 - [Terminal UI](tui.md) — launch modes, supported features, limitations, and keybindings.
-- [Tauri desktop app](tauri.md) — config path resolution, onboarding, default session log locations.
 - [Releasing](releasing.md) — self-hosted runner release workflow and installers.
 - [STM hardware CI](hardware-ci.md) — hosted build plus self-hosted physical-device integration template.

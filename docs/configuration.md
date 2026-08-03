@@ -8,8 +8,6 @@ Config path resolution:
 2. `EMBED_LOG_CONFIG_YML_PATH`
 3. `embed-log.yml` in the current directory
 
-The Tauri app also falls back to its platform app config directory when no local config exists.
-
 ## Minimal UDP example
 
 ```yaml
@@ -113,7 +111,7 @@ logs:
   dir: logs/
 ```
 
-Relative `logs.dir` values are resolved relative to the config file directory, not necessarily the process current directory. This is especially important for Tauri onboarding: the default onboarding config uses `logs/`, so sessions are stored next to the generated app config, under `<tauri app_config_dir>/logs/`. See [tauri.md](tauri.md).
+Relative `logs.dir` values are resolved relative to the config file directory, not necessarily the process current directory.
 
 Each session directory also includes a `combined.jsonl` file: one structured JSON object per log line across all configured sources. This is useful for agents and automation that want a single append-only stream instead of reading multiple per-source `.log` files.
 

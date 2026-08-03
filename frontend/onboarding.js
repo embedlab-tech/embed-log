@@ -1,8 +1,5 @@
 (function () {
     function invoke(command, args) {
-        const fn = window.__TAURI__?.core?.invoke;
-        if (fn) return fn(command, args || {});
-
         if (command === "list_serial_ports") {
             return fetch("/api/serial_ports").then(r => {
                 if (!r.ok) throw new Error(`serial ports API failed: ${r.status}`);
@@ -28,7 +25,7 @@
             });
         }
 
-        return Promise.reject(new Error("Tauri API not ready"));
+        return Promise.reject(new Error(`unsupported onboarding command: ${command}`));
     }
 
     const state = {

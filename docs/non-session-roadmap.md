@@ -48,7 +48,6 @@ This roadmap intentionally excludes session import, export, retention, and brows
 
 ## 5. Deferred product work
 
-- Production Tauri packaging, signing, and notarization.
 - IDE integrations.
 - Cloud sync, accounts, and collaboration.
 - Public APT repository; ship `.deb` artifacts and installer flow first.

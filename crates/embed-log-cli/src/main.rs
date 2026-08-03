@@ -17,7 +17,6 @@ use clap::{Parser, Subcommand};
 use commands::misc;
 use commands::run::{cmd_demo, cmd_onboard, cmd_run, cmd_run_quick, RunOverrides};
 use commands::sessions::{cmd_sessions, SessionsCommand};
-use commands::ui::cmd_ui;
 
 #[derive(Parser)]
 #[command(
@@ -26,7 +25,7 @@ use commands::ui::cmd_ui;
     version
 )]
 struct Cli {
-    /// YAML config file for default browser mode or --ui. Defaults to EMBED_LOG_CONFIG_YML_PATH, then embed-log.yml.
+    /// YAML config file for browser or TUI mode. Defaults to EMBED_LOG_CONFIG_YML_PATH, then embed-log.yml.
     #[arg(short, long)]
     config: Option<PathBuf>,
 
@@ -37,10 +36,6 @@ struct Cli {
     /// Launch the terminal UI (ratatui) instead of the default browser UI.
     #[arg(long)]
     tui: bool,
-
-    /// Launch the Tauri desktop UI instead of the default browser UI.
-    #[arg(long)]
-    ui: bool,
 
     /// Do not open the default browser after starting the web server.
     #[arg(long)]
@@ -256,10 +251,6 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    if cli.ui {
-        return cmd_ui(cli.config.as_ref());
-    }
-
     match cli.command {
         Some(Command::Run {
             serial_paths,
@@ -420,16 +411,13 @@ mod tests {
         ]);
 
         assert!(cli.command.is_none());
-        assert!(!cli.ui);
         assert_eq!(cli.config, Some(PathBuf::from("embed-log.yml")));
         assert!(cli.no_open_browser);
     }
 
     #[test]
-    fn ui_flag_carries_config() {
-        let cli = Cli::parse_from(["embed-log", "--ui", "--config", "desktop.yml"]);
-        assert!(cli.ui);
-        assert_eq!(cli.config, Some(PathBuf::from("desktop.yml")));
+    fn removed_tauri_ui_flag_is_rejected() {
+        assert!(Cli::try_parse_from(["embed-log", "--ui"]).is_err());
     }
 
     #[test]

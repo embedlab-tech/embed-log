@@ -1,12 +1,12 @@
 # embed-log
 
-`embed-log` collects UART, UDP, file-tail, and network-capture logs, stores them as session artifacts, and serves a browser/Tauri UI for live viewing and static HTML exports.
+`embed-log` collects UART, UDP, file-tail, and network-capture logs, stores them as session artifacts, and serves browser and terminal interfaces for live viewing and static HTML exports.
 
 The current workspace contains:
 
-- `embed-log` CLI: run the log server, inspect sessions, export/merge logs.
-- `embed-log-tauri` desktop app: wraps the same server in a Tauri shell with onboarding helpers.
+- `embed-log` CLI: run the log server, inspect sessions, export/merge logs, and launch browser or TUI mode.
 - `embed-log-core`: shared config, sources, parsers, runtime, HTTP/WebSocket server, and session export logic.
+- `embed-log-tui`: terminal client used by integrated and standalone TUI modes.
 - `frontend/`: browser UI assets embedded into release binaries.
 
 ## Install
@@ -238,7 +238,6 @@ The old per-source TCP `inject_port`, `forward_port`, and `forward_ports` config
 - [CLI reference](docs/cli.md)
 - [Development](docs/development.md)
 - [Terminal UI](docs/tui.md)
-- [Tauri desktop app](docs/tauri.md)
 - [Releasing](docs/releasing.md)
 
 ## Repository layout
@@ -246,7 +245,7 @@ The old per-source TCP `inject_port`, `forward_port`, and `forward_ports` config
 ```text
 crates/embed-log-core/     Shared runtime, config, sources, parsers, HTTP/WS, sessions
 crates/embed-log-cli/      CLI binary named `embed-log`
-crates/embed-log-tauri/    Tauri desktop binary
+crates/embed-log-tui/      Terminal UI client and integrated TUI support
 frontend/                  Live/static viewer UI, embedded into release binaries
 sdk/python/                Python SDK, watcher, examples
 config-samples/            Example YAML configs (no legacy fields)

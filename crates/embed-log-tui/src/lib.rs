@@ -1,8 +1,8 @@
 //! Terminal UI frontend for embed-log.
 //!
-//! The TUI is a WebSocket client to the unchanged `embed-log-core` server
-//! (`/ws` + `/api/*`), exactly like the browser frontend and the Tauri
-//! webview. It supports live viewing, tabs/panes, scrolling, selection/copy,
+//! The TUI is a WebSocket client to the `embed-log-core` server
+//! (`/ws` + `/api/*`), like the browser frontend. It supports live viewing,
+//! tabs/panes, scrolling, selection/copy,
 //! markers, events, clear, relative/absolute timestamps, and UART TX with
 //! ratatui + crossterm. It does not execute browser JavaScript plugins or
 //! provide onboarding; use `embed-log run --tui` after creating a config.

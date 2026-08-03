@@ -155,21 +155,8 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
 
     let currentSession = null;
 
-    function tauriInvoke() {
-        return window.__TAURI__?.core?.invoke || null;
-    }
-
-    async function openSessionUrl(url) {
+    function openSessionUrl(url) {
         if (!url) return;
-        const invoke = tauriInvoke();
-        if (invoke) {
-            try {
-                await invoke("open_external_url", { url });
-                return;
-            } catch (_) {
-                // Fall back to browser behavior below.
-            }
-        }
         window.open(url, "_blank", "noopener");
     }
 
