@@ -32,7 +32,7 @@ load) and, if set, `config env: EMBED_LOG_CONFIG_YML_PATH=...`.
 
 1. **Find the session.** `embed-log sessions list --limit 10` (newest first), or if you
    already know it's the most recent run, skip straight to using `latest` as the session id
-   anywhere one is accepted (`info`, `export`, `combined`, `events`, `summary`, `marker`, and
+   anywhere one is accepted (`info`, `export`, `combined`, `events`, `summary`, and
    `search --session latest`).
 2. **Get the shape of it first.** `embed-log sessions summary <SESSION_ID or latest>` —
    per-source line counts, first/last timestamps, event severity counts, session duration,

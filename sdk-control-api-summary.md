@@ -63,21 +63,6 @@ Implemented marker creation through the control API.
 - Broadcasts `markers_update` for UI/frontends.
 - Added tests for marker validation, persistence, replacement, and timestamp behavior.
 
-## Phase 5 — Marker CLI inspection
-
-Added marker inspection commands to the CLI.
-
-- Added:
-  - `embed-log sessions marker list <session-id>`
-  - `embed-log sessions marker show <session-id> <marker-index>`
-  - `--json`
-  - `--search`
-  - `--pane`
-- Added `sessions list --with-markers`.
-- Supports marker wrapper files and plain marker arrays.
-- Handles line ranges and missing marker fields correctly.
-- Added CLI tests and smoke verification for watcher-created marker inspection.
-
 ## Phase 6 — Python SDK
 
 Created the Python SDK under `sdk/python`.
@@ -125,14 +110,13 @@ Added E2E coverage for the Rust backend plus Python SDK.
   - watcher marker creation in `markers.json`
   - `markers_update` broadcast
   - command suggestions in runtime/session metadata
-  - CLI `sessions marker list/show` can verify watcher-created markers
 - Tests run without real hardware.
 
 ## Phase 9 — Docs and config cleanup
 
 Updated documentation and config shape for the new model.
 
-- Documented the control WebSocket model, source-name routing, SDK usage, watcher usage, command suggestions, and marker CLI inspection.
+- Documented the control WebSocket model, source-name routing, SDK usage, watcher usage, and command suggestions.
 - Added `server.control_api` config with default `true`.
 - Wired `server.control_api` into server route registration.
 - Removed active legacy inject/forward fields from generated/demo configs.

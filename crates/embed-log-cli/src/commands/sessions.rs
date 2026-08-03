@@ -1,5 +1,4 @@
-//! `embed-log sessions` — inspect and export recorded sessions, plus the
-//! `sessions marker` sub-subcommands.
+//! `embed-log sessions` — inspect and export recorded sessions.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -209,37 +208,6 @@ pub(crate) enum SessionsCommand {
         #[arg(short = 'A', long = "after-context")]
         after_context: Option<usize>,
     },
-    /// List markers in a session.
-    Marker {
-        #[command(subcommand)]
-        command: MarkerCommand,
-    },
-}
-
-/// `embed-log sessions marker <command>`.
-#[derive(Clone, Debug, Subcommand)]
-pub(crate) enum MarkerCommand {
-    /// List markers for a session.
-    List {
-        session_id: String,
-        #[command(flatten)]
-        log_dir: LogDirArgs,
-        #[arg(long)]
-        json: bool,
-        #[arg(long)]
-        search: Option<String>,
-        #[arg(long)]
-        pane: Option<String>,
-    },
-    /// Show one marker by index (1-based).
-    Show {
-        session_id: String,
-        marker_index: usize,
-        #[command(flatten)]
-        log_dir: LogDirArgs,
-        #[arg(long)]
-        json: bool,
-    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -283,7 +251,6 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             let dir = resolve_sessions_dir(&log_dir)?;
             list_sessions(&dir, json, limit, with_markers)
         }
-        SessionsCommand::Marker { command } => cmd_session_marker(command),
         SessionsCommand::Info {
             session_id,
             log_dir,
@@ -615,178 +582,6 @@ pub(crate) fn count_markers_in_session(session_dir: &Path) -> usize {
         Err(_) => return 0,
     };
     extract_markers(&parsed).len()
-}
-
-/// Handle `sessions marker list/show`.
-fn cmd_session_marker(command: MarkerCommand) -> Result<()> {
-    match command {
-        MarkerCommand::List {
-            session_id,
-            log_dir,
-            json,
-            search,
-            pane,
-        } => {
-            let dir = resolve_sessions_dir(&log_dir)?;
-            list_markers(&dir, &session_id, json, search, pane)
-        }
-        MarkerCommand::Show {
-            session_id,
-            marker_index,
-            log_dir,
-            json,
-        } => {
-            let dir = resolve_sessions_dir(&log_dir)?;
-            show_marker(&dir, &session_id, marker_index, json)
-        }
-    }
-}
-
-fn list_markers(
-    dir: &Path,
-    session_id: &str,
-    json: bool,
-    search: Option<String>,
-    pane: Option<String>,
-) -> Result<()> {
-    let session = resolve_session(dir, session_id)?;
-    let all_markers = load_markers_file(&session.dir)?;
-
-    if json && search.is_none() && pane.is_none() {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "session_id": session.id,
-                "markers": all_markers,
-            }))?
-        );
-        return Ok(());
-    }
-
-    // Apply filters while preserving original 1-based indexes.
-    // Missing fields do NOT match (no false positives).
-    // --search is case-insensitive.
-    let search_lower = search.as_ref().map(|s| s.to_lowercase());
-    let filtered: Vec<(usize, &serde_json::Value)> = all_markers
-        .iter()
-        .enumerate()
-        .filter(|(_, m)| marker_matches(m, &search_lower, &pane))
-        .collect();
-
-    if json {
-        let json_markers: Vec<serde_json::Value> = filtered
-            .iter()
-            .map(|(idx, m)| {
-                let mut entry = serde_json::json!({
-                    "index": idx + 1,
-                });
-                if let Some(obj) = m.as_object() {
-                    for (k, v) in obj {
-                        entry[k] = v.clone();
-                    }
-                }
-                entry
-            })
-            .collect();
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "session_id": session.id,
-                "markers": json_markers,
-            }))?
-        );
-    } else {
-        println!("Session: {}", session.id);
-        println!("Markers: {}", filtered.len());
-        println!();
-        for (orig_idx, m) in &filtered {
-            let pane_id = m.get("paneId").and_then(|v| v.as_str()).unwrap_or("?");
-            let line = m.get("lineIdx").and_then(|v| v.as_u64()).unwrap_or(0);
-            let end_idx = m.get("endIdx").and_then(|v| v.as_u64());
-            let desc = m.get("description").and_then(|v| v.as_str()).unwrap_or("");
-            let num_ts = m.get("numTs").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let lines_str = format_line_range(line, end_idx);
-            println!("  {}. [{}] {}", orig_idx + 1, pane_id, lines_str);
-            println!("     {}", desc);
-            println!("     numTs={}", num_ts);
-            println!();
-        }
-    }
-    Ok(())
-}
-
-fn show_marker(dir: &Path, session_id: &str, marker_index: usize, json: bool) -> Result<()> {
-    let session = resolve_session(dir, session_id)?;
-    let all_markers = load_markers_file(&session.dir)?;
-
-    if marker_index == 0 || marker_index > all_markers.len() {
-        anyhow::bail!(
-            "marker index {marker_index} out of range (session has {} markers)",
-            all_markers.len()
-        );
-    }
-
-    let m = &all_markers[marker_index - 1];
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(m)?);
-    } else {
-        let pane_id = m.get("paneId").and_then(|v| v.as_str()).unwrap_or("?");
-        let line = m.get("lineIdx").and_then(|v| v.as_u64()).unwrap_or(0);
-        let end_idx = m.get("endIdx").and_then(|v| v.as_u64());
-        let desc = m.get("description").and_then(|v| v.as_str()).unwrap_or("");
-        let num_ts = m.get("numTs").and_then(|v| v.as_f64()).unwrap_or(0.0);
-        let created = m.get("createdAt").and_then(|v| v.as_str()).unwrap_or("");
-        let lines_str = match end_idx {
-            Some(end) if end != line => format!("{}-{}", line, end),
-            _ => format!("{}", line),
-        };
-        println!("Marker {}", marker_index);
-        println!("  Pane:        {}", pane_id);
-        println!("  Lines:       {}", lines_str);
-        println!("  Description: {}", desc);
-        println!("  Timestamp:   {}", num_ts);
-        println!("  Created:     {}", created);
-    }
-    Ok(())
-}
-
-/// `lines {l}-{end}` for a range, `line {l}` for a single line (list view).
-fn format_line_range(line: u64, end_idx: Option<u64>) -> String {
-    match end_idx {
-        Some(end) if end != line => format!("lines {}-{}", line, end),
-        _ => format!("line {}", line),
-    }
-}
-
-/// Does a marker match the optional (lowercased) search text and pane filter?
-/// Missing fields never match (no false positives).
-fn marker_matches(
-    m: &serde_json::Value,
-    search_lower: &Option<String>,
-    pane: &Option<String>,
-) -> bool {
-    if let Some(pat) = search_lower {
-        match m.get("description").and_then(|v| v.as_str()) {
-            Some(desc) => {
-                if !desc.to_lowercase().contains(pat) {
-                    return false;
-                }
-            }
-            None => return false, // missing field doesn't match
-        }
-    }
-    if let Some(pane_filter) = pane {
-        match m.get("paneId").and_then(|v| v.as_str()) {
-            Some(pid) => {
-                if pid != pane_filter.as_str() {
-                    return false;
-                }
-            }
-            None => return false, // missing field doesn't match
-        }
-    }
-    true
 }
 
 #[derive(Debug)]
@@ -2082,10 +1877,10 @@ mod tests {
         dir
     }
 
-    // ------------------  Marker loading tests  ------------------
+    // ------------------  Marker artifact tests  ------------------
 
     #[test]
-    fn marker_list_prints_all_markers() {
+    fn marker_file_loads_all_markers() {
         let root = temp_log_dir();
         write_test_session(&root, "s1");
         write_markers(
@@ -2101,7 +1896,7 @@ mod tests {
     }
 
     #[test]
-    fn marker_list_no_file_returns_empty() {
+    fn marker_file_missing_returns_empty() {
         let root = temp_log_dir();
         write_test_session(&root, "s1");
         assert!(load_markers_file(&root.join("s1")).unwrap().is_empty());
@@ -2109,7 +1904,7 @@ mod tests {
     }
 
     #[test]
-    fn marker_list_empty_array_returns_empty() {
+    fn marker_file_empty_array_returns_empty() {
         let root = temp_log_dir();
         write_test_session(&root, "s1");
         write_markers(&root, "s1", &[]);
@@ -2118,15 +1913,7 @@ mod tests {
     }
 
     #[test]
-    fn marker_list_unknown_session_is_error() {
-        let root = temp_log_dir();
-        let err = resolve_session(&root, "nonexistent").unwrap_err();
-        assert!(err.to_string().contains("not found"));
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn marker_list_malformed_json_is_error() {
+    fn marker_file_malformed_json_is_error() {
         let root = temp_log_dir();
         write_test_session(&root, "s1");
         std::fs::write(root.join("s1").join("markers.json"), "not valid json {{").unwrap();
@@ -2150,74 +1937,6 @@ mod tests {
         assert_eq!(markers.len(), 1);
         assert_eq!(markers[0]["description"], "bare");
         std::fs::remove_dir_all(root).unwrap();
-    }
-
-    // ------------------  Marker filter tests  ------------------
-
-    #[test]
-    fn marker_filter_search_case_insensitive_and_missing_excluded() {
-        let markers = [
-            serde_json::json!({"paneId": "DUT_UART", "lineIdx": 1, "description": "Boot Started"}),
-            serde_json::json!({"paneId": "DUT_UART", "lineIdx": 2, "description": "fatal error: PANIC"}),
-            serde_json::json!({"paneId": "DUT_UART", "lineIdx": 3}), // no description
-        ];
-        let pat = Some("fatal".to_string());
-        let f: Vec<_> = markers
-            .iter()
-            .filter(|m| marker_matches(m, &pat, &None))
-            .collect();
-        assert_eq!(f.len(), 1);
-        assert_eq!(f[0]["lineIdx"], 2);
-
-        let pat = Some("boot".to_string());
-        let f: Vec<_> = markers
-            .iter()
-            .filter(|m| marker_matches(m, &pat, &None))
-            .collect();
-        assert_eq!(f.len(), 1);
-        assert_eq!(f[0]["lineIdx"], 1);
-    }
-
-    #[test]
-    fn marker_filter_pane_missing_field_excluded() {
-        let markers = [
-            serde_json::json!({"paneId": "DUT_UART", "lineIdx": 1, "description": "a"}),
-            serde_json::json!({"lineIdx": 2, "description": "b"}), // no paneId
-        ];
-        let pane = Some("DUT_UART".to_string());
-        let f: Vec<_> = markers
-            .iter()
-            .enumerate()
-            .filter(|(_, m)| marker_matches(m, &None, &pane))
-            .collect();
-        assert_eq!(f.len(), 1);
-        assert_eq!(f[0].0, 0);
-    }
-
-    #[test]
-    fn marker_filter_no_filters_matches_all() {
-        let markers = [
-            serde_json::json!({"paneId": "A", "lineIdx": 1}),
-            serde_json::json!({"paneId": "B", "lineIdx": 2}),
-        ];
-        let f: Vec<_> = markers
-            .iter()
-            .filter(|m| marker_matches(m, &None, &None))
-            .collect();
-        assert_eq!(f.len(), 2);
-    }
-
-    // ------------------  Line-range formatting  ------------------
-
-    #[test]
-    fn format_line_range_single_line() {
-        assert_eq!(format_line_range(10, None), "line 10");
-        assert_eq!(format_line_range(10, Some(10)), "line 10");
-    }
-
-    #[test]
-    fn format_line_range_span() {
-        assert_eq!(format_line_range(42, Some(45)), "lines 42-45");
     }
 
     // ------------------  Session listing / export  ------------------

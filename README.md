@@ -158,17 +158,6 @@ sources:
 
 The fallback `embed-log.commands.yml` is checked in the config directory and current working directory.
 
-## Marker CLI inspection
-
-List and inspect markers created by the watcher or UI:
-
-```bash
-embed-log sessions marker list <session-id>
-embed-log sessions marker show <session-id> <marker-index>
-embed-log sessions marker list <session-id> --search fatal --json
-embed-log sessions marker show <session-id> 1 --json
-```
-
 ## Terminal UI
 
 Run the server and terminal UI together:
