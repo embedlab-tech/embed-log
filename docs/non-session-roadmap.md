@@ -30,7 +30,7 @@ This roadmap intentionally excludes session import, export, retention, and brows
 - Improve `doctor` serial diagnostics with platform-specific permission/udev guidance.
 - Keep quick `embed-log run` focused on UART/file sources; move advanced source options to saved YAML.
 - Publish polished one-UART, multi-UART, Zephyr, pytest/watcher, and UDP/CoAP recipes.
-- Keep browser onboarding and quick-run behavior consistent with TUI behavior.
+- Keep quick-run behavior consistent across browser and TUI modes.
 
 ## 3. TUI/browser workflow parity
 

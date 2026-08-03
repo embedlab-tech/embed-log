@@ -14,7 +14,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use commands::misc;
-use commands::run::{cmd_onboard, cmd_run, cmd_run_quick, RunOverrides};
+use commands::run::{cmd_run, cmd_run_quick, RunOverrides};
 use commands::sessions::{cmd_sessions, SessionsCommand};
 
 #[derive(Parser)]
@@ -95,25 +95,6 @@ enum Command {
         /// Override HTTP/WebSocket port from config.
         #[arg(long)]
         ws_port: Option<u16>,
-    },
-
-    /// Run first-run onboarding to build a config interactively in the browser.
-    ///
-    /// Starts a small setup page, lets you pick sources/tabs, saves the config
-    /// to the resolved path, then launches the log server from it. Also runs
-    /// automatically when `run` (or the default command) finds no config.
-    Onboard {
-        /// YAML config file to write. Defaults to EMBED_LOG_CONFIG_YML_PATH, then embed-log.yml.
-        #[arg(short, long)]
-        config: Option<PathBuf>,
-
-        /// Path to the frontend directory (default: ./frontend)
-        #[arg(long, default_value = "frontend")]
-        frontend_dir: PathBuf,
-
-        /// Do not open the default browser for the setup page.
-        #[arg(long)]
-        no_open_browser: bool,
     },
 
     /// Show version and environment information
@@ -285,12 +266,6 @@ async fn main() -> Result<()> {
         Some(Command::Ports { json }) => misc::cmd_ports(json),
         Some(Command::Hello) => misc::cmd_hello(),
         Some(Command::Sessions { command }) => cmd_sessions(*command),
-        Some(Command::Onboard {
-            config,
-            frontend_dir,
-            no_open_browser,
-        }) => cmd_onboard(config.as_ref(), &frontend_dir, !no_open_browser).await,
-
         Some(Command::Validate { config, json }) => {
             let path = crate::config::resolve_config_path(config.as_ref());
             misc::cmd_validate(&path, json)
@@ -383,6 +358,7 @@ mod tests {
             ["embed-log", "--ui"].as_slice(),
             ["embed-log", "demo"].as_slice(),
             ["embed-log", "init"].as_slice(),
+            ["embed-log", "onboard"].as_slice(),
         ] {
             assert!(Cli::try_parse_from(args).is_err());
         }

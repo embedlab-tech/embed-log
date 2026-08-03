@@ -1,4 +1,4 @@
-//! `embed-log run` and `embed-log onboard` — commands that start the log server.
+//! `embed-log run` — starts the log server from YAML or explicit sources.
 
 use std::path::{Path, PathBuf};
 
@@ -7,15 +7,13 @@ use anyhow::{Context, Result};
 use embed_log_core::config::{
     load_config, resolve_logs_root, AppConfig, PaneConfig, SourceConfig, TabConfig,
 };
-use embed_log_core::onboarding as ob;
 use embed_log_core::runtime::LogServer;
 
 use crate::config::resolve_config_path;
-use crate::util::{open_url_in_default_browser, schedule_browser_open};
+use crate::util::schedule_browser_open;
 
-/// `embed-log run` (and the default no-subcommand path): resolve config (running
-/// onboarding first if none exists), start the server, optionally open a
-/// browser or launch the in-process TUI.
+/// `embed-log run` (and the default no-subcommand path): resolve config, start
+/// the server, and optionally open a browser or launch the in-process TUI.
 pub(crate) async fn cmd_run(
     config_path: Option<&PathBuf>,
     frontend_dir: &Path,
@@ -25,17 +23,7 @@ pub(crate) async fn cmd_run(
 ) -> Result<()> {
     let config_path = resolve_config_path(config_path);
 
-    // First-run onboarding: if no config exists yet, run the browser setup,
-    // then proceed to start the real server.
-    // The onboarding page's post-save redirect lands on the live server, so we
-    // suppress the normal browser-open in that case to avoid a second tab.
-    let onboarded = if !config_path.exists() {
-        run_onboarding(&config_path, open_browser)?;
-        true
-    } else {
-        false
-    };
-
+    ensure_config_exists(&config_path)?;
     let mut config = load_config(&config_path).map_err(|e| anyhow::anyhow!("{e}"))?;
     apply_server_overrides(&mut config, overrides);
     let frontend_dir = resolve_dir(frontend_dir)?;
@@ -71,7 +59,7 @@ pub(crate) async fn cmd_run(
         config.server.host, config.server.ws_port
     );
     // In TUI mode, suppress the browser (the terminal is the UI).
-    if open_browser && !onboarded && !tui {
+    if open_browser && !tui {
         schedule_browser_open(config.server.host.clone(), config.server.ws_port);
     }
 
@@ -86,7 +74,7 @@ pub(crate) async fn cmd_run(
 }
 
 /// Start a temporary configuration assembled from explicit command-line sources.
-/// Unlike normal `run`, this never invokes onboarding or reads a default config.
+/// Unlike normal `run`, this does not read a default config.
 ///
 /// The arguments mirror the independent quick-run CLI flags.
 #[allow(clippy::too_many_arguments)]
@@ -275,53 +263,14 @@ pub(crate) async fn run_server_with_tui(
     tui_result
 }
 
-/// Run the interactive browser onboarding, blocking until the user saves a
-/// config. Returns `Ok(())` once the config has been written to `config_path`.
-///
-/// Uses the exact same `OnboardingServer` + `frontend/onboarding.js` page as
-/// the main browser UI — no separate setup frontend.
-pub(crate) fn run_onboarding(config_path: &Path, open_browser: bool) -> Result<()> {
-    println!("embed-log v{} — first-run setup", env!("CARGO_PKG_VERSION"));
-    println!("  no config found at {}", config_path.display());
-
-    let server = ob::OnboardingServer::start(config_path.to_path_buf(), ob::default_save_handler())
-        .context("start onboarding server")?;
-    println!("  setup page:  {}", server.base_url);
-    println!("  waiting for you to finish setup…");
-
-    if open_browser {
-        // The setup server is already bound, so we can open immediately.
-        if let Err(error) = open_url_in_default_browser(&server.base_url) {
-            tracing::warn!("failed to open browser for onboarding: {error}");
-        }
+fn ensure_config_exists(config_path: &Path) -> Result<()> {
+    if config_path.exists() {
+        return Ok(());
     }
-
-    let result = server
-        .wait_for_save()
-        .map_err(|e| anyhow::anyhow!("onboarding did not complete: {e}"))?;
-    println!("  config saved to {}", result.config_path);
-    println!("  launching log server on port {}…", result.ws_port);
-    println!();
-    Ok(())
-}
-
-/// `embed-log onboard` — explicitly run onboarding, then start the log server
-/// from the resulting config.
-pub(crate) async fn cmd_onboard(
-    config_path: Option<&PathBuf>,
-    frontend_dir: &Path,
-    open_browser: bool,
-) -> Result<()> {
-    let config_path = resolve_config_path(config_path);
-    run_onboarding(&config_path, open_browser)?;
-    cmd_run(
-        Some(&config_path),
-        frontend_dir,
-        false,
-        false,
-        &RunOverrides::default(),
+    anyhow::bail!(
+        "config file {} does not exist; pass UART/file sources directly or copy a file from config-samples/ and use --config",
+        config_path.display()
     )
-    .await
 }
 
 /// Resolve a directory path relative to the cwd (absolute paths pass through).
@@ -367,6 +316,15 @@ mod tests {
             PathBuf::from("/srv/frontend")
         };
         assert_eq!(resolve_dir(&abs).unwrap(), abs);
+    }
+
+    #[test]
+    fn missing_config_reports_non_interactive_recovery_options() {
+        let path = PathBuf::from("definitely-missing-embed-log-test.yml");
+        let error = ensure_config_exists(&path).unwrap_err().to_string();
+        assert!(error.contains("does not exist"));
+        assert!(error.contains("pass UART/file sources directly"));
+        assert!(error.contains("config-samples/"));
     }
 
     #[test]

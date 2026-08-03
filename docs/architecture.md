@@ -57,7 +57,6 @@ Shared library used by the CLI and TUI.
 | `models` | Core runtime data types like `LogEntry`, `TimestampMode`, ANSI color mapping. |
 | `naming` | Slug helpers for filesystem-safe session/log names. |
 | `net` | HTTP/WebSocket server and structured control WebSocket API. |
-| `onboarding` | First-run quick-config builder, serial-port listing, and onboarding HTTP server. |
 | `parsers` | Stream parsers: text and UDP CBOR datagram parser. |
 | `runtime` | `LogServer`, the main orchestrator. Resolves sources, starts tasks, writes logs, broadcasts messages, rotates/exports sessions. |
 | `session` | Session manifest, markers, and static HTML export. |
@@ -72,7 +71,6 @@ Main responsibilities:
 - parse CLI arguments with `clap`
 - resolve config path from `--config`, then `EMBED_LOG_CONFIG_YML_PATH`, then `embed-log.yml`
 - run `LogServer`
-- run first-run **onboarding** (via the shared core `OnboardingServer`) when no config exists, or on the `onboard` subcommand
 - launch default browser unless `--no-open-browser` is used
 - provide utilities: `doctor`, `ports`, `sessions`, `merge`, and `parse`
 - launch the integrated terminal UI via `--tui`
@@ -204,7 +202,6 @@ Important files:
 | `plugin-hex-coap.js` | Built-in CoAP hex plugin. |
 | `tsparse.js` | Timestamp parsing for imports/static logs. |
 | `import.js` | Import `.log` files into panes. |
-| `onboarding.js` | First-run browser config UI. |
 
 ## Plugin path
 

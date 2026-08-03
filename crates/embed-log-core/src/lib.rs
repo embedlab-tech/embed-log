@@ -4,7 +4,6 @@ pub mod frontend_assets;
 pub mod models;
 pub mod naming;
 pub mod net;
-pub mod onboarding;
 pub mod parsers;
 pub mod postprocess;
 pub mod runtime;

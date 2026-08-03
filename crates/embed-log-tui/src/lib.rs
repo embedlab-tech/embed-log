@@ -4,8 +4,8 @@
 //! (`/ws` + `/api/*`), like the browser frontend. It supports live viewing,
 //! tabs/panes, scrolling, selection/copy,
 //! markers, events, clear, relative/absolute timestamps, and UART TX with
-//! ratatui + crossterm. It does not execute browser JavaScript plugins or
-//! provide onboarding; use `embed-log run --tui` after creating a config.
+//! ratatui + crossterm. It does not execute browser JavaScript plugins; use
+//! `embed-log run --tui` after creating a config.
 //!
 //! Two entry points:
 //! - [`run_in_process`] — used by `embed-log run --tui` when the server is

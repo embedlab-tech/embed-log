@@ -62,7 +62,7 @@ embed-log run /dev/ttyUSB0 /dev/ttyUSB1 --save-config embed-log.yml
 Use a config for custom tabs, two-pane layouts, different source baud rates, parsers, events, merges, plugins, UDP, and packet capture.
 
 ```bash
-embed-log onboard                 # browser setup flow
+cp config-samples/single_uart_single_tab.yml embed-log.yml
 cp config-samples/single_uart_single_tab.yml embed-log.yml
 embed-log validate --config embed-log.yml
 embed-log run --config embed-log.yml

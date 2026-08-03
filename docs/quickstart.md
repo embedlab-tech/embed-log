@@ -43,4 +43,4 @@ Each session includes source logs, `combined.jsonl`, a manifest, markers/events,
 
 ## When to use YAML
 
-Use `embed-log onboard` or a saved YAML configuration for per-source parsers, different baud rates, event rules, plugins, merges, and custom layouts.
+Use a saved YAML configuration for per-source parsers, different baud rates, event rules, plugins, merges, and custom layouts. Start from a file under `config-samples/` when useful.

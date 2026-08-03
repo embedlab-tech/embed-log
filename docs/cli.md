@@ -58,10 +58,10 @@ embed-log run --config embed-log.yml --no-open-browser
 
 Current behavior:
 
-- if no config exists at the resolved path, automatically runs **onboarding** first (see [Onboarding](#onboarding)), then starts `LogServer` from the generated config
+- fails with config/quick-run guidance if the resolved config does not exist
 - starts `LogServer`
 - serves UI/API on `server.host:server.ws_port`
-- opens the browser unless `--no-open-browser` is passed (skipped when onboarding ran, since the onboarding page redirects to the live server)
+- opens the browser unless `--no-open-browser` is passed
 - writes session artifacts under `logs.dir`
 - exports `session.html` on Ctrl-C shutdown
 
@@ -72,39 +72,6 @@ embed-log run --config embed-log.yml --host 0.0.0.0 --ws-port 9090 --log-dir /tm
 ```
 
 `--host` and `--ws-port` override `server.host` / `server.ws_port` in memory. `--log-dir` overrides `logs.dir` and is resolved relative to the current working directory.
-
-## Onboarding
-
-`embed-log` uses the browser onboarding page (`frontend/onboarding.js`) and the core onboarding HTTP server (`embed_log_core::onboarding::OnboardingServer`).
-
-Onboarding runs automatically when `embed-log run` (or the default command) finds no config file. You can also trigger it explicitly:
-
-```bash
-embed-log onboard
-```
-
-or writing to a specific path:
-
-```bash
-embed-log onboard --config ~/projects/lab-a/embed-log.yml
-```
-
-What happens:
-
-1. a small setup server starts on a random localhost port
-2. your browser opens the setup page (unless `--no-open-browser`)
-3. you pick sources, tabs, parser, and logs directory
-4. on **Start logging**, the config is written to the resolved path, validated, and the CLI transitions to the real `LogServer` on the configured `ws_port`
-
-The setup server exposes these HTTP endpoints:
-
-| Endpoint | Purpose |
-| --- | --- |
-| `GET /` | the onboarding page |
-| `GET /api/serial_ports` | discovered serial ports |
-| `GET /api/server_status` | resolved config path + ws port |
-| `POST /api/save_config` | persist the draft config |
-
 
 ## Validate config
 
