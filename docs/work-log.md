@@ -1263,3 +1263,23 @@ Future entries must include this per-file added/removed-line summary.
 | `docs/automation-agent-plan.md` | 1 | 1 | Replaces stale import/bundle wording with current mutation safeguards. |
 | `docs/cli.md` | 0 | 7 | Removes support-bundle usage and behavior. |
 | `docs/getting-up-to-speed.md` | 1 | 4 | Uses retained session exports for sharing and diagnosis. |
+
+## 2026-08-03 18:41:52 UTC / 2026-08-03 20:41:52 CEST (Warsaw)
+
+- **Commit:** `f48c155` — `Remove session prune command`
+- **Task:** Remove `embed-log sessions prune`, recursive retention/deletion logic/tests, and prune documentation while preserving explicit session listing and exports.
+- **Started:** 2026-08-03 18:39:54 UTC / 2026-08-03 20:39:54 CEST (+0200) (Warsaw)
+- **Completed:** 2026-08-03 18:41:52 UTC / 2026-08-03 20:41:52 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli --package embed-log-tui` — passed (65 CLI, 201 core, and 73 TUI tests); `cargo clippy --locked --package embed-log-core --package embed-log-cli --package embed-log-tui --all-targets -- -D warnings` — passed; `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (4 tests); release CLI build and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged prune-command rejection, stale-reference search, and retained session-list/export help checks — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`f48c155`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 0 | 83 | Removes prune arguments/dispatch, recursive size/deletion logic, and retention test. |
+| `crates/embed-log-cli/src/main.rs` | 1 | 9 | Moves prune from accepted session commands to removed-command regression coverage. |
+| `docs/agent-capabilities.md` | 1 | 1 | Replaces stale prune/import guardrails with general session-data safeguards. |
+| `docs/cli.md` | 0 | 7 | Removes prune usage and behavior. |
+| `docs/getting-up-to-speed.md` | 1 | 10 | Removes built-in retention workflow and points to project retention tooling. |
+| `docs/non-session-roadmap.md` | 1 | 1 | Removes obsolete retention backlog wording. |
