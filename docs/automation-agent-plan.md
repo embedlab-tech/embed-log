@@ -53,7 +53,7 @@ embed-log sessions search --config embed-log.yml --session latest \
 - Start with `sessions summary`; report the resolved session and sources.
 - Prefer `compact` for reasoning and `mini-jsonl` for structured processing.
 - Escalate to raw JSONL only when exact fields are required.
-- Do not start a capture, send TX, import/export/bundle, or prune without explicit user intent.
+- Do not start a capture, send TX, export data, or delete sessions without explicit user intent.
 - Bound live observation time, context size, and match count.
 - Do not assume source IDs; use those reported by the summary/manifest.
 

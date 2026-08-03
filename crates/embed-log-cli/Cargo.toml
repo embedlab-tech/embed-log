@@ -32,8 +32,6 @@ serde_yaml.workspace = true
 chrono.workspace = true
 serialport = "4"
 regex = "1"
-flate2.workspace = true
-tar.workspace = true
 
 [dependencies.embed-log-tui]
 workspace = true

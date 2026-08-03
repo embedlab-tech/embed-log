@@ -159,13 +159,6 @@ embed-log sessions info <SESSION_ID> --dir logs
 embed-log sessions info latest --dir logs --json
 ```
 
-Create a portable support bundle. It includes all session artifacts plus `embed-log-version.json` build diagnostics:
-
-```bash
-embed-log sessions bundle latest --dir logs
-embed-log sessions bundle latest --output ./support.tar.gz
-```
-
 Prune older sessions while retaining the newest N. Always preview first:
 
 ```bash

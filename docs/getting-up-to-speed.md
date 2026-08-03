@@ -144,10 +144,7 @@ embed-log sessions open latest
 ```bash
 embed-log sessions export latest --format html --output report.html
 embed-log sessions export latest --format raw --output merged.log
-embed-log sessions bundle latest --output support.tar.gz
 ```
-
-A support bundle includes the complete session directory plus `embed-log-version.json` diagnostics, making it suitable for bug reports and offline handoff.
 
 ### Retain disk space
 
@@ -200,7 +197,7 @@ embed-log doctor --config embed-log.yml
 3. Keep logs in a project-relative directory or CI artifact path.
 4. Mark failures/events while live.
 5. Capture pytest and host output through configured file or UDP sources.
-6. Share `session.html` for lightweight review or a support bundle for diagnosis.
+6. Share `session.html` or a bounded JSONL export for diagnosis.
 7. Prune old sessions after preserving releases/incidents.
 
 ## Reference map
