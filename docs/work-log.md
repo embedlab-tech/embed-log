@@ -1156,3 +1156,31 @@ Future entries must include this per-file added/removed-line summary.
 | `tests-ui/regression-tests/scope-selection.spec.js` | 8 | 9 | Removes CBOR pane assumptions from selection and export checks. |
 | `tests-ui/rust-test-server.mjs` | 1 | 46 | Replaces synthetic CBOR encoding/traffic with plain UDP text. |
 | `tests-ui/tests/rust-server.spec.js` | 2 | 20 | Replaces CBOR browser coverage with retained UDP text coverage. |
+
+## 2026-08-03 17:35:59 UTC / 2026-08-03 19:35:59 CEST (Warsaw)
+
+- **Commit:** `a2cf3fb` — `Remove self-update command`
+- **Task:** Remove the obsolete `embed-log update` command, updater implementation/dependencies/tests, and self-update release and documentation surfaces while retaining installer checksum verification.
+- **Started:** 2026-08-03 17:32:15 UTC / 2026-08-03 19:32:15 CEST (+0200) (Warsaw; measured from the first implementation file write)
+- **Completed:** 2026-08-03 17:35:59 UTC / 2026-08-03 19:35:59 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli --package embed-log-tui` — passed (78 CLI, 201 core, and 73 TUI tests); `cargo clippy --locked --package embed-log-core --package embed-log-cli --package embed-log-tui --all-targets -- -D warnings` — passed; `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (4 tests); release CLI build and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged `version --json`, removed-command rejection, workflow YAML parsing, stale-reference search, and lockfile dependency checks — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`a2cf3fb`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 0 | 8 | Removes installed-binary self-update setup and integration steps. |
+| `.github/workflows/release-cli.yml` | 0 | 23 | Removes Unix updater and Windows updater-guidance release checks. |
+| `Cargo.lock` | 4 | 538 | Prunes updater HTTP, TLS, semantic-version, hashing, and transitive dependencies. |
+| `Cargo.toml` | 0 | 3 | Removes updater-only workspace dependencies. |
+| `RELEASE_AND_UPDATE.md` | 0 | 523 | Deletes the obsolete built-in self-update plan. |
+| `crates/embed-log-cli/Cargo.toml` | 1 | 4 | Removes updater dependencies and corrects retained-source package metadata. |
+| `crates/embed-log-cli/src/commands/misc.rs` | 0 | 350 | Removes release lookup, download, verification, replacement, and updater tests. |
+| `crates/embed-log-cli/src/main.rs` | 1 | 26 | Removes the update command/dispatch and adds rejection regression coverage. |
+| `docs/cli.md` | 1 | 13 | Removes self-update usage and corrects stale doctor wording. |
+| `docs/development.md` | 0 | 1 | Removes the deleted updater integration-test command. |
+| `docs/getting-up-to-speed.md` | 1 | 10 | Removes the self-update workflow and renumbers the team workflow. |
+| `docs/non-session-roadmap.md` | 1 | 8 | Removes deferred built-in updater work. |
+| `docs/releasing.md` | 1 | 1 | Removes self-update fixture claims from release validation. |
+| `scripts/test_update_integration.py` | 0 | 135 | Deletes the fake GitHub Release self-update integration fixture. |
