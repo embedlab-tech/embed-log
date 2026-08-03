@@ -73,6 +73,27 @@ embed-log run --config embed-log.yml --host 0.0.0.0 --port 9090 --log-dir /tmp/e
 
 `--host` and `--port` override the host and port from `server.listen` in memory. `--log-dir` overrides `logs.dir` and is resolved relative to the current working directory.
 
+### Daemon instances
+
+Start a named config-based daemon and wait for its status API to become ready:
+
+```bash
+embed-log run --daemon --instance bench-a --config embed-log.yml --json
+```
+
+Without an explicit `--port`, daemon startup selects the first free TCP port at or above `server.listen` and records the effective endpoint. Instance records contain the PID, endpoint, config path, logs directory, diagnostic log, executable, and start time. They live under `$XDG_RUNTIME_DIR/embed-log`, with a user-state fallback; tests may override this with `EMBED_LOG_RUNTIME_DIR`.
+
+Inspect or stop it:
+
+```bash
+embed-log status --instance bench-a --json
+embed-log stop --instance bench-a --json
+```
+
+Instance resolution is `--instance`, then `EMBED_LOG_INSTANCE`, then the only running instance. Multiple instances without a selection fail and list valid names. Query an unregistered or remote server directly with `embed-log status --url http://127.0.0.1:18080 --json`.
+
+`stop` verifies that the recorded PID still refers to the same executable before signaling it, waits for clean shutdown, and removes the registry record. Daemon shutdown does not automatically export HTML. CLI-only source definitions are not yet accepted with `--daemon`.
+
 ## Validate config
 
 ```bash

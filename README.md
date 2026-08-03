@@ -50,6 +50,18 @@ embed-log run /dev/ttyUSB0 --save-config embed-log.yml
 
 See the [quick-start guide](docs/quickstart.md) for all fast-run options, session locations, and when to switch to YAML. Run `embed-log doctor` if a serial device cannot be opened.
 
+## Background daemon
+
+Keep configured sources, including UART ownership, alive between experiments:
+
+```bash
+embed-log run --daemon --instance bench-a --config embed-log.yml --json
+embed-log status --instance bench-a --json
+embed-log stop --instance bench-a --json
+```
+
+A daemon chooses the first free port at or above the configured server port unless `--port` is explicit. Use `EMBED_LOG_INSTANCE=bench-a`, or omit `--instance` when exactly one daemon is running. Daemon shutdown skips automatic HTML export by default; foreground modes retain it.
+
 ## Claude Code plugin
 
 This repo bundles a [Claude Code](https://claude.com/claude-code) skill that teaches an AI

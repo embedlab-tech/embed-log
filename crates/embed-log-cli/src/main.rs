@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+use commands::daemon::{cmd_start_daemon, cmd_status, cmd_stop};
 use commands::misc;
 use commands::run::{cmd_run, cmd_run_quick, RunOverrides};
 use commands::sessions::{cmd_sessions, SessionsCommand};
@@ -95,6 +96,45 @@ enum Command {
         /// Override HTTP/WebSocket port from config.
         #[arg(long = "port", alias = "ws-port")]
         ws_port: Option<u16>,
+
+        /// Start as a background daemon.
+        #[arg(long, conflicts_with = "tui")]
+        daemon: bool,
+
+        /// Name used to discover and control this daemon.
+        #[arg(long, requires = "daemon")]
+        instance: Option<String>,
+
+        /// Machine-readable daemon startup result.
+        #[arg(long, requires = "daemon")]
+        json: bool,
+
+        /// Internal foreground mode used by the daemon launcher.
+        #[arg(long, hide = true)]
+        daemon_child: bool,
+    },
+
+    /// Show readiness and source status for a running daemon or URL.
+    Status {
+        /// Registered daemon name. Defaults to EMBED_LOG_INSTANCE or the only running instance.
+        #[arg(long, conflicts_with = "url")]
+        instance: Option<String>,
+        /// Explicit unregistered HTTP endpoint.
+        #[arg(long)]
+        url: Option<String>,
+        /// Machine-readable JSON output.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Gracefully stop a registered daemon.
+    Stop {
+        /// Registered daemon name. Defaults to EMBED_LOG_INSTANCE or the only running instance.
+        #[arg(long)]
+        instance: Option<String>,
+        /// Machine-readable JSON output.
+        #[arg(long)]
+        json: bool,
     },
 
     /// Show version and environment information
@@ -172,6 +212,10 @@ async fn main() -> Result<()> {
             log_dir,
             host,
             ws_port,
+            daemon,
+            instance,
+            json,
+            daemon_child,
         }) => {
             let open_browser = !no_open_browser;
             let overrides = RunOverrides {
@@ -179,12 +223,24 @@ async fn main() -> Result<()> {
                 host,
                 ws_port,
             };
-            if serial_paths.is_empty() && serial.is_empty() && file.is_empty() {
+            if daemon && !daemon_child {
+                if !serial_paths.is_empty() || !serial.is_empty() || !file.is_empty() {
+                    anyhow::bail!("--daemon currently requires --config; CLI-only daemon sources are a later milestone");
+                }
+                cmd_start_daemon(
+                    instance.as_deref().unwrap_or("default"),
+                    config.as_ref(),
+                    &frontend_dir,
+                    &overrides,
+                    json,
+                )
+            } else if serial_paths.is_empty() && serial.is_empty() && file.is_empty() {
                 cmd_run(
                     config.as_ref(),
                     &frontend_dir,
-                    open_browser,
+                    open_browser && !daemon_child,
                     tui,
+                    daemon_child,
                     &overrides,
                 )
                 .await
@@ -203,6 +259,12 @@ async fn main() -> Result<()> {
                 .await
             }
         }
+        Some(Command::Status {
+            instance,
+            url,
+            json,
+        }) => cmd_status(instance.as_deref(), url.as_deref(), json),
+        Some(Command::Stop { instance, json }) => cmd_stop(instance.as_deref(), json),
         Some(Command::Version { config, json }) => misc::cmd_version(config.as_deref(), json),
         Some(Command::Doctor {
             config,
@@ -223,6 +285,7 @@ async fn main() -> Result<()> {
                 &cli.frontend_dir,
                 open_browser,
                 cli.tui,
+                false,
                 &RunOverrides::default(),
             )
             .await

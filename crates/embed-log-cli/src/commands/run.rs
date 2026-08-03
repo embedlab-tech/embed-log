@@ -20,6 +20,7 @@ pub(crate) async fn cmd_run(
     frontend_dir: &Path,
     open_browser: bool,
     tui: bool,
+    daemon_mode: bool,
     overrides: &RunOverrides,
 ) -> Result<()> {
     let config_path = resolve_config_path(config_path);
@@ -66,7 +67,9 @@ pub(crate) async fn cmd_run(
 
     let ws_port = config.server.ws_port;
     let app_name = config.server.app_name.clone();
-    let server = LogServer::new(config, frontend_dir, logs_root).with_config_path(config_path);
+    let server = LogServer::new(config, frontend_dir, logs_root)
+        .with_config_path(config_path)
+        .with_shutdown_export(!daemon_mode);
     if tui {
         run_server_with_tui(server, ws_port, &app_name).await
     } else {

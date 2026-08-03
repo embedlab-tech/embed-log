@@ -32,6 +32,7 @@ pub struct LogServer {
     frontend_dir: PathBuf,
     logs_root: PathBuf,
     config_path: Option<PathBuf>,
+    export_on_shutdown: bool,
 }
 
 /// Resolved source information for the runtime.
@@ -60,12 +61,19 @@ impl LogServer {
             frontend_dir,
             logs_root,
             config_path: None,
+            export_on_shutdown: true,
         }
     }
 
     /// Set the config file path — enables resolving relative plugin paths.
     pub fn with_config_path(mut self, path: PathBuf) -> Self {
         self.config_path = Some(path);
+        self
+    }
+
+    /// Control whether a clean process shutdown automatically exports HTML.
+    pub fn with_shutdown_export(mut self, enabled: bool) -> Self {
+        self.export_on_shutdown = enabled;
         self
     }
 
@@ -509,11 +517,14 @@ impl LogServer {
         tokio::signal::ctrl_c().await?;
         info!("shutting down…");
 
-        // Export current session HTML on shutdown.
-        info!("exporting session HTML before exit…");
-        match shutdown_export() {
-            Ok(path) => info!("session HTML exported: {path}"),
-            Err(e) => error!("session HTML export failed: {e}"),
+        if self.export_on_shutdown {
+            info!("exporting session HTML before exit…");
+            match shutdown_export() {
+                Ok(path) => info!("session HTML exported: {path}"),
+                Err(e) => error!("session HTML export failed: {e}"),
+            }
+        } else {
+            info!("skipping automatic HTML export for daemon shutdown");
         }
 
         Ok(())
