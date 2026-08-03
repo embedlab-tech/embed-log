@@ -39,13 +39,6 @@ sources:
     type: udp
     port: 6005
 
-  - name: SENSOR_CBOR
-    label: CBOR
-    type: udp
-    port: 6003
-    parser:
-      type: cbor-datagram
-
   # UART sources (silent — no PTY fds in test harness)
   - name: UART_DUT
     label: DUT
@@ -69,9 +62,6 @@ tabs:
 
   - label: PYTEST
     panes: [SENSOR_D]
-
-  - label: cbor-tab
-    panes: [SENSOR_CBOR]
 
   - label: CoAP
     panes:

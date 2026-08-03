@@ -57,7 +57,7 @@ Shared library used by the CLI and TUI.
 | `models` | Core runtime data types like `LogEntry`, `TimestampMode`, ANSI color mapping. |
 | `naming` | Slug helpers for filesystem-safe session/log names. |
 | `net` | HTTP/WebSocket server and structured control WebSocket API. |
-| `parsers` | Stream parsers: text and UDP CBOR datagram parser. |
+| `parsers` | Stream parsers: text, SLIP/CoAP, and Zephyr dictionary logging. |
 | `runtime` | `LogServer`, the main orchestrator. Resolves sources, starts tasks, writes logs, broadcasts messages, rotates/exports sessions. |
 | `session` | Session manifest, markers, and static HTML export. |
 | `sources` | Source implementations: UART, UDP, and file tail. |
@@ -107,7 +107,7 @@ writer task
 | Config `type` | Implementation | Notes |
 | --- | --- | --- |
 | `uart` | `sources::uart::UartSource` | Opens a serial port with `serialport`, reads in blocking tasks, parses lines. |
-| `udp` | `sources::udp::UdpSource` | Binds UDP on `0.0.0.0:<port>`. Text parser treats each datagram as newline-terminated; CBOR parser decodes one datagram. |
+| `udp` | `sources::udp::UdpSource` | Binds UDP on `0.0.0.0:<port>`; text datagrams are treated as newline-terminated. |
 | `file` | `sources::file::FileSource` | Creates file if missing, watches parent directory with `notify`, polls/appends from current end. |
 
 `merges` (config-only, no `sources::` implementation) declares virtual
@@ -126,11 +126,10 @@ bytes/datagram ──▶ StreamParser::feed(&[u8]) ──▶ Vec<String>
 | Parser `type` | Scope | Behavior |
 | --- | --- | --- |
 | `text` | UART, UDP, file | UTF-8-ish line splitting with buffering. |
-| `cbor-datagram` | UDP only | Decodes a CBOR datagram and formats key/value output. |
 | `slip-coap` | UART only | Decodes SLIP-framed UDP datagrams carrying CoAP messages (device-to-device links). |
 | `zephyr-dict` | Any source | Decodes Zephyr dictionary-logging binary messages against a `database.json` (`parser.database`). Buffers across `feed()` calls since messages are length-prefixed, not delimited. DB format v3 only. |
 
-Config validation rejects `cbor-datagram` on non-UDP sources, `slip-coap` on non-UART sources, and `zephyr-dict` without `parser.database` set.
+Config validation rejects `slip-coap` on non-UART sources and `zephyr-dict` without `parser.database` set.
 
 ## HTTP/WebSocket API
 

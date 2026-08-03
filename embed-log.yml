@@ -40,13 +40,6 @@ sources:
     type: udp
     port: 6005
 
-  - name: SENSORS
-    label: Sensor CBOR
-    type: udp
-    port: 6002
-    parser:
-      type: cbor-datagram
-
   - name: FILE_WATCH
     label: Watched File
     type: file
@@ -67,10 +60,6 @@ tabs:
     panes:
       - source: COAP_RAW
         plugins: [hex-coap]
-
-  - label: Sensors
-    panes:
-      - SENSORS
 
   - label: File
     panes:

@@ -37,8 +37,6 @@ sources:
     label: Sensor Bus
     type: udp
     port: 16002
-    parser:
-      type: cbor-datagram
 frontend_plugins:
   hex-coap:
     builtin: hex-coap
@@ -57,31 +55,6 @@ tabs:
 const children = [];
 
 const udpSocket = dgram.createSocket('udp4');
-
-function cborText(text) {
-  const bytes = Buffer.from(text, 'utf8');
-  if (bytes.length < 24) return Buffer.concat([Buffer.from([0x60 | bytes.length]), bytes]);
-  if (bytes.length < 256) return Buffer.concat([Buffer.from([0x78, bytes.length]), bytes]);
-  throw new Error(`test CBOR text too long: ${text}`);
-}
-
-function cborUint(n) {
-  if (n < 24) return Buffer.from([n]);
-  if (n < 256) return Buffer.from([0x18, n]);
-  if (n < 65536) return Buffer.from([0x19, n >> 8, n & 0xff]);
-  throw new Error(`test CBOR uint too large: ${n}`);
-}
-
-function cborMap(entries) {
-  if (entries.length >= 24) throw new Error('test CBOR map too large');
-  return Buffer.concat([
-    Buffer.from([0xa0 | entries.length]),
-    ...entries.flatMap(([key, value]) => [
-      cborText(key),
-      typeof value === 'number' ? cborUint(value) : cborText(String(value)),
-    ]),
-  ]);
-}
 
 function sendUdp(port, payload) {
   const buffer = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
@@ -175,17 +148,6 @@ function regressionCoapLines(tick) {
   return lines;
 }
 
-function regressionCborRecord(tick) {
-  const t = String(tick).padStart(3, '0');
-  return cborMap([
-    ['kind', 'sync'],
-    ['src', 'SENSOR_CBOR'],
-    ['tick', tick],
-    ['seq', 1],
-    ['msg', `CBOR synchronized step ${t}`],
-  ]);
-}
-
 let tick = 0;
 function startRegressionTraffic() {
   const tickMs = Number.parseInt(process.env.TEST_TRAFFIC_TICK_MS || '100', 10);
@@ -218,9 +180,6 @@ function startRegressionTraffic() {
     for (const line of regressionCoapLines(t)) {
       sendUdp(6005, line + '\n');
     }
-
-    // SENSOR_CBOR -> port 6003 (CBOR datagrams)
-    sendUdp(6003, regressionCborRecord(t));
   }, interval);
   children.push({ kill: () => clearInterval(timer) });
 }
@@ -234,11 +193,7 @@ function startDeterministicTraffic() {
     const tickText = String(tick).padStart(3, '0');
     sendUdp(6000, `TEST src=DUT tick=${tickText} level=INFO message=deterministic-dut\n`);
     sendUdp(6001, `TEST src=HOST tick=${tickText} status=ok message=deterministic-host\n`);
-    sendUdp(6002, cborMap([
-      ['kind', 'test'],
-      ['src', 'SENSORS'],
-      ['tick', tick],
-    ]));
+    sendUdp(6002, `TEST src=SENSORS tick=${tickText} kind=test message=deterministic-sensor\n`);
     tick += 1;
   }, interval);
   children.push({ kill: () => clearInterval(timer) });

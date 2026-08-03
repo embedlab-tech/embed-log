@@ -129,7 +129,7 @@ Common optional keys:
 | Key | Notes |
 | --- | --- |
 | `label` | Friendly UI label. Defaults to `name`. |
-| `parser.type` | `text`, `cbor-datagram`, `slip-coap`, or `zephyr-dict`. |
+| `parser.type` | `text`, `slip-coap`, or `zephyr-dict`. |
 | `parser.database` | Path to a Zephyr dictionary-logging `database.json`. Required when `parser.type: zephyr-dict`. |
 
 ### UDP source
@@ -145,19 +145,6 @@ sources:
 ```
 
 `port` must be an integer. UDP binds on `0.0.0.0:<port>`.
-
-### UDP CBOR datagram source
-
-```yaml
-sources:
-  - name: SENSORS
-    type: udp
-    port: 6002
-    parser:
-      type: cbor-datagram
-```
-
-`cbor-datagram` is valid only for UDP sources.
 
 ### UART source
 
@@ -392,13 +379,6 @@ sources:
     type: udp
     port: 6005
 
-  - name: SENSORS
-    label: Sensor CBOR
-    type: udp
-    port: 6002
-    parser:
-      type: cbor-datagram
-
   - name: FILE_WATCH
     label: Watched File
     type: file
@@ -415,9 +395,6 @@ tabs:
     panes:
       - source: COAP_RAW
         plugins: [hex-coap]
-
-  - label: Sensors
-    panes: [SENSORS]
 
   - label: File
     panes: [FILE_WATCH]

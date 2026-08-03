@@ -213,7 +213,7 @@ test.describe('scope-aware selection actions', () => {
     const text = fs.readFileSync(downloadedPath, 'utf-8');
 
     expect(text).toMatch(/\[SENSOR_B\]/);
-    expect(text).toMatch(/\[SENSOR_A\].*kind=prefix-cleanup/);
+    expect(text).toMatch(/\[SENSOR_A\]/);
   });
 // Scenario: Exact HTML export contains only selected pane data
 //   Given a range selection with exact scope
@@ -377,10 +377,10 @@ test.describe('scope-aware selection actions', () => {
     expect(copiedSel).not.toContain('SENSOR_B');
   });
 
-// Scenario: Sel… pane selector shows all panes with correct data-pane attributes (5 total)
+// Scenario: Sel… pane selector shows all panes with correct data-pane attributes
 //   Given a Sel… mode selection on SENSOR_A
 //   When  the pane selector is opened
-//   Then  5 checkboxes are shown with correct data-pane attributes and all checked by default
+//   Then  all seven panes are shown with correct data-pane attributes and checked by default
 //
   test('Sel… pane selector shows all panes with correct labels', async ({ page }) => {
     await page.goto('/');
@@ -397,18 +397,17 @@ test.describe('scope-aware selection actions', () => {
     // All panes should have checkboxes with unwrap-style labels
 
     const checkboxes = page.locator('#pane-selector-SENSOR_A .pane-checkbox input[type="checkbox"]');
-    await expect(checkboxes).toHaveCount(9);
+    await expect(checkboxes).toHaveCount(7);
     // Each checkbox should have a pane data attribute
     await expect(checkboxes.nth(0)).toHaveAttribute('data-pane', 'SENSOR_A');
     await expect(checkboxes.nth(1)).toHaveAttribute('data-pane', 'SENSOR_B');
     await expect(checkboxes.nth(2)).toHaveAttribute('data-pane', 'SENSOR_C');
     await expect(checkboxes.nth(3)).toHaveAttribute('data-pane', 'SENSOR_D');
-    await expect(checkboxes.nth(4)).toHaveAttribute('data-pane', 'SENSOR_CBOR');
-    await expect(checkboxes.nth(5)).toHaveAttribute('data-pane', 'SENSOR_COAP');
-    await expect(checkboxes.nth(6)).toHaveAttribute('data-pane', 'UART_DUT');
-    await expect(checkboxes.nth(7)).toHaveAttribute('data-pane', 'UART_DEBUG');
+    await expect(checkboxes.nth(4)).toHaveAttribute('data-pane', 'SENSOR_COAP');
+    await expect(checkboxes.nth(5)).toHaveAttribute('data-pane', 'UART_DUT');
+    await expect(checkboxes.nth(6)).toHaveAttribute('data-pane', 'UART_DEBUG');
     // All checked by default
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 7; i++) {
         await expect(checkboxes.nth(i)).toBeChecked();
     }
   });

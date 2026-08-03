@@ -21,7 +21,6 @@ axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.6", features = ["fs"] }
 serialport = "4"
 notify = "7"
-ciborium = "0.2"
 regex = "1"
 rust-embed = "8"
 mime_guess = "2"

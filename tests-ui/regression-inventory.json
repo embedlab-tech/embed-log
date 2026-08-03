@@ -9,7 +9,6 @@
         "browser connects to Rust backend",
         "pane layout from Rust config",
         "UDP text rendering",
-        "CBOR datagram rendering",
         "session export API and static replay smoke",
         "raw pane download smoke",
         "session rotation smoke"
@@ -46,11 +45,6 @@
     },
     {
       "file": "tests/timestamp-toggle.spec.js",
-      "status": "passing",
-      "verified_with": "npm run test:regression"
-    },
-    {
-      "file": "tests/cbor-decoder.spec.js",
       "status": "passing",
       "verified_with": "npm run test:regression"
     },

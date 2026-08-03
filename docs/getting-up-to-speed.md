@@ -199,7 +199,7 @@ See the [README](../README.md#python-sdk), `sdk/python/`, and [CLI reference](cl
 - **UART:** default choice for device console and shell traffic.
 - **File:** follow logs produced by host tools/tests.
 - **UDP:** receive application datagrams.
-- **Parsers:** text, CBOR datagram, SLIP/CoAP, and Zephyr dictionary logging.
+- **Parsers:** text, SLIP/CoAP, and Zephyr dictionary logging.
 
 Validate configs before lab runs:
 

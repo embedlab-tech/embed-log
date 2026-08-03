@@ -72,6 +72,20 @@ fn reject_removed_fields(raw: &serde_yaml::Value) -> Result<(), ConfigError> {
                 "sources[{i}].type 'network_capture' was removed; use an explicit UDP source instead"
             )));
         }
+        if map
+            .get(serde_yaml::Value::String("parser".to_string()))
+            .and_then(serde_yaml::Value::as_mapping)
+            .and_then(|parser| {
+                parser
+                    .get(serde_yaml::Value::String("type".to_string()))
+                    .and_then(serde_yaml::Value::as_str)
+            })
+            == Some("cbor-datagram")
+        {
+            return Err(ConfigError::validation(format!(
+                "sources[{i}].parser.type 'cbor-datagram' was removed; use text or a retained protocol parser"
+            )));
+        }
         for key in [
             "interface",
             "bpf_filter",
@@ -165,18 +179,9 @@ fn validate_config(config: &mut AppConfig, config_path: &Path) -> Result<(), Con
 
         // Validate parser type
         let parser_type = &src.parser.parser_type;
-        if !matches!(
-            parser_type.as_str(),
-            "text" | "cbor-datagram" | "slip-coap" | "zephyr-dict"
-        ) {
+        if !matches!(parser_type.as_str(), "text" | "slip-coap" | "zephyr-dict") {
             return Err(ConfigError::validation(format!(
-                "{}.parser.type unsupported: {parser_type:?} (use 'text', 'cbor-datagram', 'slip-coap', or 'zephyr-dict')",
-                ctx()
-            )));
-        }
-        if parser_type == "cbor-datagram" && stype != "udp" {
-            return Err(ConfigError::validation(format!(
-                "{}.parser.type 'cbor-datagram' is only valid for UDP sources (got source type {stype:?})",
+                "{}.parser.type unsupported: {parser_type:?} (use 'text', 'slip-coap', or 'zephyr-dict')",
                 ctx()
             )));
         }
@@ -644,21 +649,10 @@ tabs:
     }
 
     #[test]
-    fn parse_three_udp_cbor_two_tabs() {
-        let cfg = load_sample("three_udp_cbor_two_tabs.yml").unwrap();
-        assert_eq!(cfg.sources.len(), 3);
-        // First two sources use cbor-datagram
-        assert_eq!(cfg.sources[0].parser.parser_type, "cbor-datagram");
-        assert_eq!(cfg.sources[1].parser.parser_type, "cbor-datagram");
-        // Third uses default text
-        assert_eq!(cfg.sources[2].parser.parser_type, "text");
-    }
-
-    #[test]
     fn parse_reference_full_annotated() {
         let cfg = load_sample("reference_full_annotated.yml").unwrap();
-        assert_eq!(cfg.sources.len(), 3);
-        assert_eq!(cfg.tabs.len(), 2);
+        assert_eq!(cfg.sources.len(), 2);
+        assert_eq!(cfg.tabs.len(), 1);
         assert!(cfg.frontend_plugins.contains_key("hex-coap"));
         assert_eq!(cfg.server.default_light_theme.as_deref(), Some("whitesand"));
         assert_eq!(cfg.server.default_dark_theme.as_deref(), Some("one-dark"));
@@ -682,25 +676,6 @@ tabs:
             let err = validate_config(&mut cfg, Path::new("test")).unwrap_err();
             assert!(err.to_string().contains("unsupported"), "got: {err}");
         }
-    }
-
-    #[test]
-    fn reject_cbor_on_non_udp() {
-        let yaml = r#"
-version: 1
-sources:
-  - name: UART_A
-    type: uart
-    port: "/dev/ttyUSB0"
-    parser:
-      type: cbor-datagram
-tabs:
-  - label: T
-    panes: [UART_A]
-"#;
-        let mut cfg: AppConfig = serde_yaml::from_str(yaml).unwrap();
-        let err = validate_config(&mut cfg, Path::new("test")).unwrap_err();
-        assert!(err.to_string().contains("cbor-datagram"), "got: {err}");
     }
 
     #[test]
@@ -797,6 +772,19 @@ tabs:
         let result = load_config(&path);
         std::fs::remove_file(&path).ok();
         result
+    }
+
+    #[test]
+    fn removed_cbor_parser_has_actionable_error() {
+        let err = load_inline(
+            "removed-cbor-parser",
+            "version: 1\nsources:\n  - name: SENSOR\n    type: udp\n    port: 6000\n    parser:\n      type: cbor-datagram\ntabs:\n  - label: Sensor\n    panes: [SENSOR]\n",
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, ConfigError::Validation(msg) if msg.contains("'cbor-datagram' was removed") && msg.contains("retained protocol parser")),
+            "expected removed CBOR parser error"
+        );
     }
 
     #[test]

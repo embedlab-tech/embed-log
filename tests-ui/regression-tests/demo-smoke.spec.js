@@ -42,7 +42,7 @@ test.describe('embed-log deterministic demo smoke', () => {
 // Scenario: Connects to backend WS and receives deterministic logs with correct pane labels
 //   Given the user navigates to the app
 //   When  the WebSocket connects
-//   Then  SENSOR_A, SENSOR_B, SENSOR_C, SENSOR_CBOR, and SENSOR_D panes appear with correct labels (DEVICE_A, HOST, AUX, CBOR, PYTEST)
+//   Then  SENSOR_A, SENSOR_B, SENSOR_C, and SENSOR_D panes appear with correct labels (DEVICE_A, HOST, AUX, PYTEST)
 //   And   each pane receives test log lines
 
   test('connects to backend and receives deterministic demo logs', async ({ page }) => {
@@ -62,9 +62,6 @@ test.describe('embed-log deterministic demo smoke', () => {
     await expect(page.locator('#pane-SENSOR_C .pane-name')).toHaveText('AUX');
     await waitForSourceTestLine(page, 'SENSOR_C');
 
-    await page.getByRole('button', { name: 'cbor-tab', exact: true }).click();
-    await expect(page.locator('#pane-SENSOR_CBOR .pane-name')).toHaveText('CBOR');
-    await waitForLineContaining(page, 'SENSOR_CBOR', 'kind=sync');
     await page.getByRole('button', { name: 'PYTEST', exact: true }).click();
     await expect(page.locator('#pane-SENSOR_D .pane-name')).toHaveText('PYTEST');
     await waitForSourceTestLine(page, 'SENSOR_D');
@@ -171,7 +168,7 @@ test.describe('embed-log deterministic demo smoke', () => {
     expect(html).toContain('<div id="toolbar">');
     expect(html).toContain('<div id="tab-bar"></div>');
     expect(html).toContain('hydratePanesFromJson');
-    expect(html).toContain('kind=prefix-cleanup');
+    expect(html).toContain('TEST src=SENSOR_A');
     expect(html).toMatch(/\[SENSOR_A\]/);
     expect(html).not.toContain('<h1>embed-log selection</h1>');
   });
@@ -188,6 +185,17 @@ test('live pane history is retained while tailing', async ({ page }) => {
   await waitForSourceTestLine(page, 'SENSOR_A');
   await waitForSourceTestLine(page, 'SENSOR_B');
 
+  async function scrollPane(paneId, position) {
+    await page.locator(`#log-${paneId}`).evaluate((el, pos) => {
+      el.scrollTop = pos === 'top' ? 0 : el.scrollHeight;
+      el.dispatchEvent(new Event('scroll'));
+    }, position);
+  }
+
+  // Capture the actual oldest model lines, not the first row in the current
+  // virtualized tail window.
+  await scrollPane('SENSOR_A', 'top');
+  await scrollPane('SENSOR_B', 'top');
   const firstA = (await page.locator('#log-SENSOR_A .log-line').first().textContent())?.trim();
   const firstB = (await page.locator('#log-SENSOR_B .log-line').first().textContent())?.trim();
   expect(firstA).toBeTruthy();
@@ -206,13 +214,6 @@ test('live pane history is retained while tailing', async ({ page }) => {
 
   await expect.poll(() => storedLineCount('SENSOR_A')).toBeGreaterThan(200);
   await expect.poll(() => storedLineCount('SENSOR_B')).toBeGreaterThan(200);
-
-  async function scrollPane(paneId, position) {
-    await page.locator(`#log-${paneId}`).evaluate((el, pos) => {
-      el.scrollTop = pos === 'top' ? 0 : el.scrollHeight;
-      el.dispatchEvent(new Event('scroll'));
-    }, position);
-  }
 
   await scrollPane('SENSOR_A', 'top');
   await expect(page.locator('#log-SENSOR_A')).toContainText(firstA);

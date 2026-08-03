@@ -58,7 +58,9 @@ test.describe('copy format levels', () => {
     // (that's what the kind=prefix-cleanup fixture exercises), so a blanket
     // "doesn't contain SENSOR_A" assertion would be wrong. The prefix must
     // use a shortcode (e.g. "SA" for SENSOR_A's initials), not the full name.
-    for (const line of copied.split('\n')) {
+    const logLines = copied.split('\n').filter((line) => !line.startsWith('USER_MARKER_'));
+    expect(logLines.length).toBeGreaterThan(0);
+    for (const line of logLines) {
       expect(line).toMatch(/^\d+(:\d{2}){0,2}\.\d{3} [A-Z]+(#\d+)? /);
       expect(line).not.toMatch(/^\d+(:\d{2}){0,2}\.\d{3} SENSOR_A\b/);
     }

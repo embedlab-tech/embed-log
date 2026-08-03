@@ -8,7 +8,6 @@ const categories = {
     'regression-tests/timestamp-toggle.spec.js',
   ],
   data: [
-    'regression-tests/cbor-decoder.spec.js',
     'regression-tests/pane-plugin-coap.spec.js',
     'regression-tests/plugin-failure-isolation.spec.js',
   ],

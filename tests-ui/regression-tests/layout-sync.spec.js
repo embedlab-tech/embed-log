@@ -196,7 +196,7 @@ test.describe('layout and time synchronization', () => {
 // Scenario: UNWRAP toggle creates one tab per pane with pane names as labels
 //   Given a session with group tabs DevA/DevB
 //   When  UNWRAP is toggled on
-//   Then  tab bar shows [DEVICE_A-DevA, HOST-DevA, AUX-DevB, PYTEST-PYTEST, CBOR-cbor-tab] and no add-tab button
+//   Then  tab bar shows the configured source panes and no add-tab button
 
 test('UNWRAP toggle creates one tab per pane with pane names as labels', async ({ page }) => {
   await page.goto('/');
@@ -211,8 +211,8 @@ test('UNWRAP toggle creates one tab per pane with pane names as labels', async (
   await page.locator('#btn-unwrap').click();
   await expect(page.locator('#btn-unwrap')).toHaveClass(/active/);
   // Now tabs are pane names
-  await expect(page.locator('#tab-bar .tab-btn')).toHaveText(['DEVICE_A-DevA', 'HOST-DevA', 'AUX-DevB', 'PYTEST-PYTEST', 'CBOR-cbor-tab', 'CoAP-CoAP', 'DUT-UART', 'DEBUG-UART', 'Net-Network']);
-  for (let i = 0; i < 9; i++) {
+  await expect(page.locator('#tab-bar .tab-btn')).toHaveText(['DEVICE_A-DevA', 'HOST-DevA', 'AUX-DevB', 'PYTEST-PYTEST', 'CoAP-CoAP', 'DUT-UART', 'DEBUG-UART']);
+  for (let i = 0; i < 7; i++) {
     await page.locator('#tab-bar .tab-btn').nth(i).click();
   }
 

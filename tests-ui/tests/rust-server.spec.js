@@ -13,24 +13,6 @@ async function sendUdp(port, payload) {
   });
 }
 
-function cborText(text) {
-  const bytes = Buffer.from(text, 'utf8');
-  if (bytes.length >= 24) throw new Error('test text too long');
-  return Buffer.concat([Buffer.from([0x60 | bytes.length]), bytes]);
-}
-
-function cborUint(n) {
-  if (n < 24) return Buffer.from([n]);
-  return Buffer.from([0x18, n]);
-}
-
-function cborMap(entries) {
-  return Buffer.concat([
-    Buffer.from([0xa0 | entries.length]),
-    ...entries.flatMap(([key, value]) => [cborText(key), typeof value === 'number' ? cborUint(value) : cborText(value)]),
-  ]);
-}
-
 test.describe('Rust backend browser e2e', () => {
   let errors;
 
@@ -56,12 +38,12 @@ test.describe('Rust backend browser e2e', () => {
     await waitForLineContaining(page, 'HOST', 'E2E HOST ready');
   });
 
-  test('decodes CBOR datagrams in the browser pane', async ({ page }) => {
+  test('renders text UDP datagrams in the sensor pane', async ({ page }) => {
     await page.goto('/');
     await waitForWs(page);
     await page.getByRole('button', { name: 'Sensors', exact: true }).click();
 
-    await sendUdp(16002, cborMap([['kind', 'sync'], ['seq', 7]]));
+    await sendUdp(16002, 'kind=sync seq=7\n');
 
     await waitForLineContaining(page, 'SENSORS', 'kind=sync');
     await waitForLineContaining(page, 'SENSORS', 'seq=7');

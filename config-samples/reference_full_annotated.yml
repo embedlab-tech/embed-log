@@ -24,17 +24,9 @@ sources:
     label: Host UDP
     type: udp
     port: 6000
-  - name: SENSOR_CBOR
-    label: Sensor CBOR
-    type: udp
-    port: 6001
-    parser:
-      type: cbor-datagram
 tabs:
   - label: Device
     panes:
       - source: DUT_UART
         plugins: [hex-coap]
       - HOST_UDP
-  - label: Sensors
-    panes: [SENSOR_CBOR]
