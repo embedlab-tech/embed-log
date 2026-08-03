@@ -1184,3 +1184,23 @@ Future entries must include this per-file added/removed-line summary.
 | `docs/non-session-roadmap.md` | 1 | 8 | Removes deferred built-in updater work. |
 | `docs/releasing.md` | 1 | 1 | Removes self-update fixture claims from release validation. |
 | `scripts/test_update_integration.py` | 0 | 135 | Deletes the fake GitHub Release self-update integration fixture. |
+
+## 2026-08-03 17:47:36 UTC / 2026-08-03 19:47:36 CEST (Warsaw)
+
+- **Commit:** `e1243fa` — `Remove raw log merge command`
+- **Task:** Remove the obsolete top-level `embed-log merge` command, raw-log merge implementation/tests, and its documentation while preserving session export and config-level merged sources.
+- **Started:** 2026-08-03 17:45:36 UTC / 2026-08-03 19:45:36 CEST (+0200) (Warsaw)
+- **Completed:** 2026-08-03 17:47:36 UTC / 2026-08-03 19:47:36 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli --package embed-log-tui` — passed (72 CLI, 201 core, and 73 TUI tests); `cargo clippy --locked --package embed-log-core --package embed-log-cli --package embed-log-tui --all-targets -- -D warnings` — passed; `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (4 tests); release CLI build and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged merge-command rejection, stale-reference search, and retained `sessions export`/`parse` help checks — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`e1243fa`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 1 | 1 | Removes raw-log merge from the CLI capability summary. |
+| `crates/embed-log-cli/src/commands/misc.rs` | 0 | 177 | Removes merge export construction, argument grouping, and unit tests. |
+| `crates/embed-log-cli/src/main.rs` | 1 | 35 | Removes merge arguments/dispatch and adds command-rejection coverage. |
+| `docs/architecture.md` | 1 | 1 | Removes merge from the top-level CLI utility list. |
+| `docs/cli.md` | 0 | 26 | Removes raw-log merge usage and timestamp examples. |
+| `docs/development.md` | 1 | 1 | Removes `merged.html` from generated artifact examples. |
