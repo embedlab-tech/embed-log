@@ -998,3 +998,47 @@ Future entries must include this per-file added/removed-line summary.
 | `frontend/ui.js` | 1 | 14 | Opens session URLs with browser behavior only. |
 | `justfile` | 8 | 18 | Removes desktop build/run/demo recipes and clarifies no-browser mode. |
 | `tui-frontend-plan.md` | 0 | 419 | Deletes the completed plan containing obsolete desktop integration assumptions. |
+
+## 2026-08-03 16:37:40 UTC / 2026-08-03 18:37:40 CEST (Warsaw)
+
+- **Commit:** `f6867e8` — `Remove production demo and init modes`
+- **Task:** Remove production demo/init commands and embedded traffic generation while moving browser coverage onto a test-owned fixture that launches the normal run path.
+- **Started:** 2026-08-03 16:30:40 UTC / 2026-08-03 18:30:40 CEST (+0200) (Warsaw)
+- **Completed:** 2026-08-03 16:37:40 UTC / 2026-08-03 18:37:40 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli --package embed-log-tui` — passed (86 CLI, 220 core, and 74 TUI tests); `cargo clippy --locked --package embed-log-core --package embed-log-cli --package embed-log-tui --all-targets -- -D warnings` — passed; `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e` — passed twice, including after fixture/spec renames (4 tests); rebuilt CLI rejection and run-based fixture checks — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`f6867e8`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 2 | 2 | Renames the browser fixture traffic interval variable. |
+| `README.md` | 2 | 9 | Removes demo/init instructions and points to normal run/config samples. |
+| `crates/embed-log-cli/src/commands/misc.rs` | 1 | 11 | Removes the embedded-config init implementation. |
+| `crates/embed-log-cli/src/commands/run.rs` | 1 | 53 | Removes demo server startup and generated traffic wiring. |
+| `crates/embed-log-cli/src/demo_config.rs` | 0 | 143 | Deletes the embedded production demo configuration. |
+| `crates/embed-log-cli/src/main.rs` | 9 | 45 | Removes demo/init command definitions and tests their rejection. |
+| `crates/embed-log-core/src/demo.rs` | 0 | 475 | Deletes production synthetic traffic generation. |
+| `crates/embed-log-core/src/lib.rs` | 0 | 1 | Removes the demo module export. |
+| `crates/embed-log-tui/src/draw.rs` | 2 | 2 | Renames test fixture application labels. |
+| `crates/embed-log-tui/src/lib.rs` | 3 | 5 | Removes demo-mode references and a deleted planning link. |
+| `crates/embed-log-tui/src/main.rs` | 3 | 3 | Documents only the retained run-based integrated mode. |
+| `crates/embed-log-tui/src/protocol.rs` | 2 | 2 | Renames protocol test fixture labels. |
+| `demo.events.yml` | 0 | 23 | Deletes demo event rules. |
+| `demo.sh` | 0 | 23 | Deletes the production demo launcher. |
+| `demo.yml` | 0 | 90 | Deletes the production demo config. |
+| `demo_traffic.py` | 0 | 240 | Deletes the external demo traffic generator. |
+| `docs/architecture.md` | 1 | 2 | Removes the demo module and commands from architecture. |
+| `docs/cli.md` | 0 | 22 | Removes demo and init command documentation. |
+| `docs/configuration.md` | 1 | 1 | Uses a neutral application name in the example. |
+| `docs/development.md` | 1 | 10 | Removes demo recipes and module layout. |
+| `docs/getting-up-to-speed.md` | 1 | 1 | Directs users to a checked-in config sample instead of init. |
+| `docs/tui.md` | 1 | 2 | Removes demo/init launch guidance. |
+| `embed-log.yml` | 1 | 1 | Uses a neutral application name. |
+| `event-detection-plan.md` | 2 | 2 | Points event validation at test-owned regression fixtures. |
+| `justfile` | 2 | 23 | Removes the demo recipe and defaults run to `embed-log.yml`. |
+| `tests-ui/playwright.config.js` | 3 | 3 | Starts the renamed ordinary-run browser fixture. |
+| `tests-ui/playwright.regression.config.js` | 3 | 3 | Starts the renamed ordinary-run regression fixture. |
+| `tests-ui/regression-inventory.json` | 2 | 2 | Tracks the renamed test spec and test-owned traffic. |
+| `tests-ui/rust-test-server.mjs` | 5 | 5 | Renames and reframes the fixture as test infrastructure using `embed-log run`. |
+| `tests-ui/tests/rust-server.spec.js` | 0 | 0 | Renames the browser backend test away from demo terminology. |
