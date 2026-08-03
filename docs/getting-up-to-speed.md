@@ -63,7 +63,7 @@ Use a config for custom tabs, two-pane layouts, different source baud rates, par
 
 ```bash
 embed-log onboard                 # browser setup flow
-embed-log init --output embed-log.yml
+cp config-samples/single_uart_single_tab.yml embed-log.yml
 embed-log validate --config embed-log.yml
 embed-log run --config embed-log.yml
 ```

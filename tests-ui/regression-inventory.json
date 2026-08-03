@@ -3,7 +3,7 @@
   "updated_at": "2026-06-13",
   "current_rust_specs": [
     {
-      "file": "tests/rust-demo.spec.js",
+      "file": "tests/rust-server.spec.js",
       "status": "passing",
       "covers": [
         "browser connects to Rust backend",
@@ -98,7 +98,7 @@
       "verified_with": "dependency subset: 7/7 passed",
       "fixes": [
         "Spec now spawns the Rust backend.",
-        "Python deterministic_demo_traffic.py dependency replaced with inline Node UDP traffic."
+        "External Python traffic dependency replaced with inline Node UDP fixtures."
       ]
     },
     {

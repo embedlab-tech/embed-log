@@ -1,5 +1,4 @@
-//! `embed-log run`, `embed-log demo`, and `embed-log onboard` — the commands
-//! that start the log server.
+//! `embed-log run` and `embed-log onboard` — commands that start the log server.
 
 use std::path::{Path, PathBuf};
 
@@ -8,12 +7,10 @@ use anyhow::{Context, Result};
 use embed_log_core::config::{
     load_config, resolve_logs_root, AppConfig, PaneConfig, SourceConfig, TabConfig,
 };
-use embed_log_core::demo::{prepare_demo_file_sources, spawn_demo_traffic};
 use embed_log_core::onboarding as ob;
 use embed_log_core::runtime::LogServer;
 
 use crate::config::resolve_config_path;
-use crate::demo_config::DEMO_CONFIG;
 use crate::util::{open_url_in_default_browser, schedule_browser_open};
 
 /// `embed-log run` (and the default no-subcommand path): resolve config (running
@@ -88,8 +85,6 @@ pub(crate) async fn cmd_run(
     }
 }
 
-/// `embed-log demo` — write the embedded demo config if none exists, start
-/// synthetic traffic, then run the server.
 /// Start a temporary configuration assembled from explicit command-line sources.
 /// Unlike normal `run`, this never invokes onboarding or reads a default config.
 ///
@@ -247,53 +242,6 @@ fn print_run_summary(mode: &str, config: &AppConfig, frontend_dir: &Path, logs_r
         "  server:   http://{}:{}",
         config.server.host, config.server.ws_port
     );
-}
-
-pub(crate) async fn cmd_demo(
-    config_path: Option<&PathBuf>,
-    frontend_dir: &Path,
-    open_browser: bool,
-    tui: bool,
-) -> Result<()> {
-    let config_path = resolve_config_path(config_path);
-    if !config_path.exists() {
-        std::fs::write(&config_path, DEMO_CONFIG)
-            .with_context(|| format!("write demo config {}", config_path.display()))?;
-        println!("wrote demo config: {}", config_path.display());
-    }
-    let config = load_config(&config_path).map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    let frontend_dir = resolve_dir(frontend_dir)?;
-    let logs_root = resolve_logs_root(&config_path, &config.logs.dir);
-
-    println!("embed-log v{} (demo)", env!("CARGO_PKG_VERSION"));
-    println!("  config:   {}", config_path.display());
-    println!(
-        "  server:   http://{}:{}",
-        config.server.host, config.server.ws_port
-    );
-    println!(
-        "  tabs:     {}",
-        config
-            .tabs
-            .iter()
-            .map(|t| t.label.as_str())
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
-    if open_browser && !tui {
-        schedule_browser_open(config.server.host.clone(), config.server.ws_port);
-    }
-    prepare_demo_file_sources(&config)?;
-    spawn_demo_traffic(&config);
-    let ws_port = config.server.ws_port;
-    let app_name = config.server.app_name.clone();
-    let server = LogServer::new(config, frontend_dir, logs_root).with_config_path(config_path);
-    if tui {
-        run_server_with_tui(server, ws_port, &app_name).await
-    } else {
-        server.run().await
-    }
 }
 
 /// Spawn the log server as a background task, then run the TUI in the

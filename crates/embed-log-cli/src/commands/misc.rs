@@ -1,5 +1,5 @@
 //! The grab-bag of leaf subcommands: `version`, `doctor`, `validate`, `ports`,
-//! `hello`, `init`, `merge`, `parse`. None of them start the server.
+//! `hello`, `merge`, `parse`. None of them start the server.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -8,8 +8,6 @@ use anyhow::{Context, Result};
 
 use embed_log_core::config::{load_config, resolve_logs_root, AppConfig};
 use embed_log_core::session::SessionExporter;
-
-use crate::demo_config::DEMO_CONFIG;
 
 /// `embed-log version` — package version plus optional config summary.
 ///
@@ -866,14 +864,6 @@ pub(crate) fn cmd_ports(json: bool) -> Result<()> {
 /// `embed-log hello` — smoke-test target.
 pub(crate) fn cmd_hello() -> Result<()> {
     println!("Hello from embed-log!");
-    Ok(())
-}
-
-/// `embed-log init` — write the sample config template.
-pub(crate) fn cmd_init(output: &Path) -> Result<()> {
-    std::fs::write(output, DEMO_CONFIG).with_context(|| format!("write {}", output.display()))?;
-    println!("wrote {}", output.display());
-    println!("edit it and run: embed-log --config {}", output.display());
     Ok(())
 }
 

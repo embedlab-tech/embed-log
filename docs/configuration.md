@@ -404,7 +404,7 @@ version: 1
 server:
   host: 127.0.0.1
   ws_port: 8080
-  app_name: embed-log demo
+  app_name: embed-log
   timestamp_mode: absolute
   control_api: true
 

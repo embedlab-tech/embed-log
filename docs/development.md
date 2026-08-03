@@ -18,18 +18,10 @@ just verify
 Run the app:
 
 ```bash
-just run                 # browser UI with demo.yml
+just run                 # browser UI with embed-log.yml
 just run web app.yml
 just run no-browser app.yml
 just run tui app.yml
-```
-
-Run demos:
-
-```bash
-just demo
-just demo no-browser
-just demo tui
 ```
 
 Tests:
@@ -60,7 +52,6 @@ Cargo.toml
 │   └── src
 │       ├── clock.rs
 │       ├── config/
-│       ├── demo.rs
 │       ├── frontend_assets.rs
 │       ├── models.rs
 │       ├── naming.rs

@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 const defaultBaseURL = 'http://127.0.0.1:8080';
 const baseURL = process.env.E2E_BASE_URL || defaultBaseURL;
-const shouldStartDemo = process.env.E2E_START_DEMO !== '0' && baseURL === defaultBaseURL;
+const shouldStartServer = process.env.E2E_START_SERVER !== '0' && baseURL === defaultBaseURL;
 
 export default defineConfig({
   testDir: './regression-tests',
@@ -20,8 +20,8 @@ export default defineConfig({
     video: 'retain-on-failure',
     acceptDownloads: true,
   },
-  webServer: shouldStartDemo ? {
-    command: 'node rust-demo-server.mjs --regression',
+  webServer: shouldStartServer ? {
+    command: 'node rust-test-server.mjs --regression',
     url: baseURL,
     timeout: 60_000,
     reuseExistingServer: false,

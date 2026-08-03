@@ -115,28 +115,6 @@ embed-log validate --config embed-log.yml --json
 
 Loads the config, runs validation, and prints the resolved server/log/source/tab summary. For packet-capture configs, follow with `embed-log doctor --config <file>` to check the native pcap dependency.
 
-## Init config
-
-```bash
-embed-log init --output embed-log.yml
-```
-
-Writes the embedded demo config. Edit it before using with real devices.
-
-## Demo
-
-```bash
-embed-log demo
-```
-
-or without opening the browser:
-
-```bash
-embed-log demo --no-open-browser
-```
-
-The demo uses an embedded config unless `--config` is supplied. It prepares demo file sources, starts generated traffic, and runs the normal server.
-
 ## Diagnostics
 
 Version:

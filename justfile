@@ -5,7 +5,7 @@ set dotenv-load := true
 
 cargo := "cargo"
 node_package_dir := "tests-ui"
-config := "demo.yml"
+config := "embed-log.yml"
 frontend_dir := "frontend"
 
 # Show available recipes.
@@ -63,7 +63,7 @@ uninstall install_dir="/usr/local/bin":
     echo "Removed $dest"
 
 # Run embed-log in browser, no-browser, or TUI mode.
-# Examples: just run / just run no-browser demo.yml / just run tui embed-log.yml
+# Examples: just run / just run no-browser embed-log.yml / just run tui embed-log.yml
 run mode="web" cfg=config:
     #!/usr/bin/env sh
     set -eu
@@ -79,27 +79,6 @@ run mode="web" cfg=config:
         ;;
       *)
         echo "unknown run mode: {{mode}} (expected: web, no-browser, tui)" >&2
-        exit 1
-        ;;
-    esac
-
-# Run demo traffic in browser, no-browser, or TUI mode.
-# This recipe will be replaced by test-only fixtures in the MVP overhaul.
-demo mode="web":
-    #!/usr/bin/env sh
-    set -eu
-    case "{{mode}}" in
-      web)
-        exec {{cargo}} run --package embed-log-cli --bin embed-log -- demo --config {{config}} --frontend-dir {{frontend_dir}}
-        ;;
-      no-browser)
-        exec {{cargo}} run --package embed-log-cli --bin embed-log -- demo --config {{config}} --frontend-dir {{frontend_dir}} --no-open-browser
-        ;;
-      tui)
-        exec {{cargo}} run --package embed-log-cli --bin embed-log -- demo --tui --config {{config}} --no-open-browser
-        ;;
-      *)
-        echo "unknown demo mode: {{mode}} (expected: web, no-browser, tui)" >&2
         exit 1
         ;;
     esac

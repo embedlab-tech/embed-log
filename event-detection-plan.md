@@ -327,7 +327,7 @@ One JSON event payload per line in the session directory, appended as events fir
 
 **Files:**
 - `crates/embed-log-core/src/demo.rs`
-- `demo.yml`
+- `tests-ui/config-regression.yml`
 - `demo.events.yml` (new)
 
 **Change:**
@@ -457,4 +457,4 @@ Phases 5+6 can run in parallel. Phase 7 can run in parallel with 5+6 once Phase 
 - `just fmt-check`
 - `cargo clippy -p embed-log-core --all-targets -- -D warnings`
 - `cargo check --target x86_64-pc-windows-msvc`
-- `just demo` — visual confirmation of events tab + timeline + markers
+- `npm --prefix tests-ui run test:regression:events` — events tab, timeline, and marker verification

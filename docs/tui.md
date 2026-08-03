@@ -12,7 +12,6 @@ embed-log run /dev/ttyUSB0 --tui
 
 # Saved configuration or demo
 embed-log run --config embed-log.yml --tui
-embed-log demo --tui
 ```
 
 The quick form accepts multiple UARTs and watched files too:
@@ -49,7 +48,7 @@ The standalone `embed-log-tui` binary is a client only. It does not load YAML co
 ## Limitations
 
 - The TUI does not run browser JavaScript plugins. Plugin configuration is visible as metadata, but plugin-rendered browser UI is not reproduced.
-- The TUI does not provide onboarding. Create a config with `embed-log onboard`, `embed-log init`, or by editing YAML first.
+- The TUI does not provide onboarding. Create a config with `embed-log onboard` or by editing YAML first.
 - The TUI can request an HTML export, but opening and browsing the exported HTML remains a browser workflow.
 
 ## Keybindings

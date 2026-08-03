@@ -6,7 +6,6 @@
 
 mod commands;
 mod config;
-mod demo_config;
 mod util;
 
 use std::path::PathBuf;
@@ -15,7 +14,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use commands::misc;
-use commands::run::{cmd_demo, cmd_onboard, cmd_run, cmd_run_quick, RunOverrides};
+use commands::run::{cmd_onboard, cmd_run, cmd_run_quick, RunOverrides};
 use commands::sessions::{cmd_sessions, SessionsCommand};
 
 #[derive(Parser)]
@@ -175,25 +174,6 @@ enum Command {
     #[command(hide = true)]
     Hello,
 
-    /// Start the demo server with the embedded demo config.
-    Demo {
-        /// YAML config file (uses embedded demo config by default).
-        #[arg(short, long)]
-        config: Option<PathBuf>,
-
-        /// Path to the frontend directory.
-        #[arg(long, default_value = "frontend")]
-        frontend_dir: PathBuf,
-
-        /// Do not open the browser.
-        #[arg(long)]
-        no_open_browser: bool,
-
-        /// Launch the terminal UI (ratatui) instead of the browser.
-        #[arg(long)]
-        tui: bool,
-    },
-
     /// Validate a config file and print the resolved runtime summary.
     Validate {
         /// YAML config file. Defaults to EMBED_LOG_CONFIG_YML_PATH, then embed-log.yml.
@@ -202,13 +182,6 @@ enum Command {
         /// Machine-readable JSON output.
         #[arg(long)]
         json: bool,
-    },
-
-    /// Generate a sample embed-log.yml config file.
-    Init {
-        /// Output path (default: embed-log.yml).
-        #[arg(short, long, default_value = "embed-log.yml")]
-        output: PathBuf,
     },
 
     /// Merge raw log files into a static HTML file.
@@ -312,16 +285,6 @@ async fn main() -> Result<()> {
         Some(Command::Ports { json }) => misc::cmd_ports(json),
         Some(Command::Hello) => misc::cmd_hello(),
         Some(Command::Sessions { command }) => cmd_sessions(*command),
-        Some(Command::Demo {
-            config,
-            frontend_dir,
-            no_open_browser,
-            tui,
-        }) => {
-            let config_path = config.as_deref().map(PathBuf::from);
-            cmd_demo(config_path.as_ref(), &frontend_dir, !no_open_browser, tui).await
-        }
-
         Some(Command::Onboard {
             config,
             frontend_dir,
@@ -332,7 +295,6 @@ async fn main() -> Result<()> {
             let path = crate::config::resolve_config_path(config.as_ref());
             misc::cmd_validate(&path, json)
         }
-        Some(Command::Init { output }) => misc::cmd_init(&output),
         Some(Command::Merge {
             tabs,
             output,
@@ -416,8 +378,14 @@ mod tests {
     }
 
     #[test]
-    fn removed_tauri_ui_flag_is_rejected() {
-        assert!(Cli::try_parse_from(["embed-log", "--ui"]).is_err());
+    fn removed_product_surfaces_are_rejected() {
+        for args in [
+            ["embed-log", "--ui"].as_slice(),
+            ["embed-log", "demo"].as_slice(),
+            ["embed-log", "init"].as_slice(),
+        ] {
+            assert!(Cli::try_parse_from(args).is_err());
+        }
     }
 
     #[test]
@@ -494,10 +462,6 @@ mod tests {
             "--config",
             "embed-log.yml",
         ]);
-        Cli::parse_from(["embed-log", "init"]);
-        Cli::parse_from(["embed-log", "init", "-o", "my.yml"]);
-        Cli::parse_from(["embed-log", "demo"]);
-        Cli::parse_from(["embed-log", "demo", "--no-open-browser"]);
         Cli::parse_from(["embed-log", "merge", "--tab", "DevA", "SENSOR_A", "a.log"]);
         Cli::parse_from([
             "embed-log",

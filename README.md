@@ -67,7 +67,7 @@ It's then available in every project on your machine, not just this repo. Source
 
 ```bash
 just build
-just demo headless
+just run no-browser embed-log.yml
 ```
 
 Then open:
@@ -76,13 +76,7 @@ Then open:
 http://127.0.0.1:8080/
 ```
 
-Generate a starter config:
-
-```bash
-cargo run --package embed-log-cli --bin embed-log -- init --output embed-log.yml
-```
-
-Validate and run with a config:
+Copy a relevant file from `config-samples/`, then validate and run it:
 
 ```bash
 cargo run --package embed-log-cli --bin embed-log -- validate --config embed-log.yml
@@ -181,7 +175,6 @@ Run the server and terminal UI together:
 
 ```bash
 embed-log run --config embed-log.yml --tui
-embed-log demo --tui
 ```
 
 Or connect the standalone TUI to an already-running server:

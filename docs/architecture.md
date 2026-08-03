@@ -53,7 +53,6 @@ Shared library used by the CLI and TUI.
 | --- | --- |
 | `clock` | Timestamp formatting and relative timestamp origin handling. |
 | `config` | YAML models, loading, defaulting, and validation. |
-| `demo` | Demo config support and generated demo traffic. |
 | `frontend_assets` | Embeds `frontend/` at compile time with `rust-embed`; runtime can fall back to embedded assets when no filesystem frontend exists. |
 | `models` | Core runtime data types like `LogEntry`, `TimestampMode`, ANSI color mapping. |
 | `naming` | Slug helpers for filesystem-safe session/log names. |
@@ -75,7 +74,7 @@ Main responsibilities:
 - run `LogServer`
 - run first-run **onboarding** (via the shared core `OnboardingServer`) when no config exists, or on the `onboard` subcommand
 - launch default browser unless `--no-open-browser` is used
-- provide utilities: `init`, `doctor`, `ports`, `sessions`, `merge`, `parse`, `demo`
+- provide utilities: `doctor`, `ports`, `sessions`, `merge`, and `parse`
 - launch the integrated terminal UI via `--tui`
 
 ### `crates/embed-log-tui`

@@ -450,7 +450,7 @@ mod tests {
     fn parses_full_config_message() {
         let json = r#"{
             "type":"config",
-            "app_name":"embed-log demo",
+            "app_name":"embed-log test",
             "theme_defaults":{"light":"gruvbox-light","dark":"gruvbox-dark"},
             "session":{"id":"2026-06-14_09-30-00","first_log_at":null,"timestamp_mode":"absolute"},
             "pane_labels":{"DUT":"DUT Device","UART_DUT":"UART Main"},
@@ -466,7 +466,7 @@ mod tests {
         let ServerMessage::Config(c) = serde_json::from_str(json).unwrap() else {
             panic!("not config");
         };
-        assert_eq!(c.app_name, "embed-log demo");
+        assert_eq!(c.app_name, "embed-log test");
         assert_eq!(c.theme_defaults.dark.as_deref(), Some("gruvbox-dark"));
         assert_eq!(c.pane_kinds.get("UART_DUT").unwrap(), "uart");
         assert_eq!(

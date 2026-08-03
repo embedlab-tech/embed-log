@@ -459,7 +459,7 @@ mod tests {
     use std::collections::HashMap;
     fn populated_state() -> State {
         let mut cfg = ConfigMessage {
-            app_name: "embed-log demo".into(),
+            app_name: "embed-log test".into(),
             tabs: vec![
                 TabDef {
                     label: "Device".into(),
@@ -502,7 +502,7 @@ mod tests {
         });
 
         let mut s = State {
-            app_name: "embed-log demo".into(),
+            app_name: "embed-log test".into(),
             ..Default::default()
         };
         s.apply_config(&cfg);

@@ -3,8 +3,8 @@ use clap::{Parser, Subcommand};
 /// Terminal UI for embed-log.
 ///
 /// Connects to a running embed-log server's `/ws` endpoint and renders the
-/// live viewer in the terminal. Use `embed-log run --tui` / `embed-log demo
-/// --tui` to start both server and TUI in one process; this binary is for
+/// live viewer in the terminal. Use `embed-log run --tui` to start both
+/// server and TUI in one process; this binary is for
 /// connecting to an already-running server.
 #[derive(Parser)]
 #[command(
@@ -50,7 +50,7 @@ fn main() -> anyhow::Result<()> {
             } else {
                 anyhow::bail!(
                     "no connection target. Use `embed-log-tui connect <ws-url>` or `--url <ws-url>`, \
-                     or launch via `embed-log run --tui` / `embed-log demo --tui`."
+                     or launch via `embed-log run --tui`."
                 )
             }
         }

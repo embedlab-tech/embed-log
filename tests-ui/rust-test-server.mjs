@@ -10,7 +10,7 @@ const tmp = path.join(here, '.tmp');
 const logs = path.join(tmp, 'logs');
 
 const regressionMode = process.argv.includes('--regression');
-const config = regressionMode ? path.join(here, 'config-regression.yml') : path.join(tmp, 'demo-e2e.yml');
+const config = regressionMode ? path.join(here, 'config-regression.yml') : path.join(tmp, 'browser-e2e.yml');
 
 fs.rmSync(tmp, { recursive: true, force: true });
 fs.mkdirSync(logs, { recursive: true });
@@ -88,7 +88,7 @@ function sendUdp(port, payload) {
   udpSocket.send(buffer, port, '127.0.0.1');
 }
 
-// ── CoAP hex messages (mirrors original deterministic_demo_traffic.py) ──
+// ── CoAP hex messages for deterministic browser tests ──
 
 // Pre-generated CoAP hex payloads (15 variants; loops)
 const COAP_HEX_LIST = [
@@ -188,7 +188,7 @@ function regressionCborRecord(tick) {
 
 let tick = 0;
 function startRegressionTraffic() {
-  const tickMs = Number.parseInt(process.env.DEMO_TEST_TICK_MS || '100', 10);
+  const tickMs = Number.parseInt(process.env.TEST_TRAFFIC_TICK_MS || '100', 10);
   const interval = Number.isFinite(tickMs) && tickMs > 0 ? tickMs : 100;
   const timer = setInterval(() => {
     const t = tick;
@@ -225,10 +225,10 @@ function startRegressionTraffic() {
   children.push({ kill: () => clearInterval(timer) });
 }
 
-// ── Existing demo traffic ──
+// ── Browser E2E traffic ──
 
 function startDeterministicTraffic() {
-  const tickMs = Number.parseInt(process.env.DEMO_TEST_TICK_MS || '100', 10);
+  const tickMs = Number.parseInt(process.env.TEST_TRAFFIC_TICK_MS || '100', 10);
   const interval = Number.isFinite(tickMs) && tickMs > 0 ? tickMs : 100;
   const timer = setInterval(() => {
     const tickText = String(tick).padStart(3, '0');
