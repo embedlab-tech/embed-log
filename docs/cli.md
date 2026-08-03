@@ -325,32 +325,6 @@ embed-log sessions search --dir logs --regex panic -B 20 -A 40       # different
 
 Each match prints a `# match N session=... source=... line=...` header, the surrounding lines, and `<< MATCH` on the matching line. Context flags conflict with `--count` and with `--last` (not supported together yet).
 
-## Merge raw logs into static HTML
-
-```bash
-embed-log merge \
-  --tab Device DUT logs/dut.log HOST logs/host.log \
-  --output merged.html
-```
-
-Pane labels can be supplied as `PANE_ID=Friendly Label`:
-
-```bash
-embed-log merge \
-  --tab Device DUT='DUT Device' logs/dut.log \
-  --output merged.html
-```
-
-Timestamp options:
-
-```bash
-embed-log merge \
-  --tab Device DUT logs/dut.log \
-  --timestamp-mode relative \
-  --first-log-at 2026-06-14T09:00:00+02:00 \
-  --output merged.html
-```
-
 ## Parse exported HTML back to logs
 
 ```bash

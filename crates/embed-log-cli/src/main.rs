@@ -146,24 +146,6 @@ enum Command {
         json: bool,
     },
 
-    /// Merge raw log files into a static HTML file.
-    Merge {
-        /// Repeatable: --tab "LABEL" PANE FILE [PANE FILE]
-        #[arg(short, long = "tab", num_args = 1..)]
-        tabs: Vec<String>,
-
-        /// Output HTML path (default: merged.html).
-        #[arg(short, long, default_value = "merged.html")]
-        output: PathBuf,
-        /// Timestamp mode for static replay.
-        #[arg(long, default_value = "absolute")]
-        timestamp_mode: String,
-
-        /// Absolute timestamp origin used when replay logs contain relative timestamps.
-        #[arg(long)]
-        first_log_at: Option<String>,
-    },
-
     /// Parse an exported session.html back into raw log files.
     Parse {
         /// Path to the session.html file.
@@ -244,12 +226,6 @@ async fn main() -> Result<()> {
             let path = crate::config::resolve_config_path(config.as_ref());
             misc::cmd_validate(&path, json)
         }
-        Some(Command::Merge {
-            tabs,
-            output,
-            timestamp_mode,
-            first_log_at,
-        }) => misc::cmd_merge(&tabs, &output, &timestamp_mode, first_log_at),
         Some(Command::Parse { html, output }) => misc::cmd_parse(&html, &output),
         None => {
             let open_browser = !cli.no_open_browser;
@@ -334,6 +310,7 @@ mod tests {
             ["embed-log", "init"].as_slice(),
             ["embed-log", "onboard"].as_slice(),
             ["embed-log", "update"].as_slice(),
+            ["embed-log", "merge"].as_slice(),
         ] {
             assert!(Cli::try_parse_from(args).is_err());
         }
@@ -412,17 +389,6 @@ mod tests {
             "--json",
             "--config",
             "embed-log.yml",
-        ]);
-        Cli::parse_from(["embed-log", "merge", "--tab", "DevA", "SENSOR_A", "a.log"]);
-        Cli::parse_from([
-            "embed-log",
-            "merge",
-            "-t",
-            "DevA",
-            "SENSOR_A",
-            "a.log",
-            "-o",
-            "out.html",
         ]);
         Cli::parse_from(["embed-log", "parse", "session.html"]);
         Cli::parse_from(["embed-log", "parse", "session.html", "-o", "my-parsed"]);

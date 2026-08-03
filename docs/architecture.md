@@ -72,7 +72,7 @@ Main responsibilities:
 - resolve config path from `--config`, then `EMBED_LOG_CONFIG_YML_PATH`, then `embed-log.yml`
 - run `LogServer`
 - launch default browser unless `--no-open-browser` is used
-- provide utilities: `doctor`, `ports`, `sessions`, `merge`, and `parse`
+- provide utilities: `doctor`, `ports`, `sessions`, and `parse`
 - launch the integrated terminal UI via `--tui`
 
 ### `crates/embed-log-tui`

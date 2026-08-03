@@ -4,7 +4,7 @@
 
 The current workspace contains:
 
-- `embed-log` CLI: run the log server, inspect sessions, export/merge logs, and launch browser or TUI mode.
+- `embed-log` CLI: run the log server, inspect and export sessions, and launch browser or TUI mode.
 - `embed-log-core`: shared config, sources, parsers, runtime, HTTP/WebSocket server, and session export logic.
 - `embed-log-tui`: terminal client used by integrated and standalone TUI modes.
 - `frontend/`: browser UI assets embedded into release binaries.
