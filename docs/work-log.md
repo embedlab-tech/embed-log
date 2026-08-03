@@ -1283,3 +1283,23 @@ Future entries must include this per-file added/removed-line summary.
 | `docs/cli.md` | 0 | 7 | Removes prune usage and behavior. |
 | `docs/getting-up-to-speed.md` | 1 | 10 | Removes built-in retention workflow and points to project retention tooling. |
 | `docs/non-session-roadmap.md` | 1 | 1 | Removes obsolete retention backlog wording. |
+
+## 2026-08-03 19:22:54 UTC / 2026-08-03 21:22:54 CEST (Warsaw)
+
+- **Commit:** `a0b98cf` — `Remove session marker inspection command`
+- **Task:** Remove the offline `embed-log sessions marker list/show` CLI surface, dedicated filtering/formatting code, tests, and documentation while retaining marker persistence, browser/TUI marker behavior, control API creation, exports, and session marker counts.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-03 19:22:54 UTC / 2026-08-03 21:22:54 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --workspace` — passed (59 CLI, 201 core, and 73 TUI tests); `cargo clippy --locked --workspace --all-targets -- -D warnings` — passed; `PYTHONPATH=sdk/python python3 -m pytest sdk/python/tests -q` — passed (52 tests, 2 skipped); `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui test` — passed sequentially (4 Playwright tests with 1 worker); `cargo build --locked --release` and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged `sessions marker` rejection and stale CLI-reference search — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`a0b98cf`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 0 | 11 | Removes marker inspection command examples. |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 6 | 287 | Removes marker list/show arguments, dispatch, rendering/filtering helpers, and dedicated tests while retaining marker artifact loading for exports and counts. |
+| `crates/embed-log-cli/src/main.rs` | 1 | 0 | Adds removed-command regression coverage for `sessions marker`. |
+| `sdk-control-api-summary.md` | 1 | 17 | Removes claims that the retired marker inspection CLI remains available. |
+| `sdk/python/tests/test_e2e.py` | 0 | 76 | Removes end-to-end assertions that invoke the retired CLI; existing marker persistence and broadcast coverage remains. |
+| `skills/embed-log/SKILL.md` | 1 | 1 | Removes `marker` from accepted `latest` session commands. |
