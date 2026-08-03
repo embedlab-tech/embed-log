@@ -931,3 +931,18 @@ Future entries must include this per-file added/removed-line summary.
 | File | Added | Removed | Summary |
 | --- | ---: | ---: | --- |
 | `docs/non-session-roadmap.md` | 1 | 1 | Replaces the internal transport name with neutral custom-transport wording. |
+
+## 2026-08-03 16:21:21 UTC / 2026-08-03 18:21:21 CEST (Warsaw)
+
+- **Commit:** `230a3e3` — `Document Embed-log MVP overhaul`
+- **Task:** Capture the agreed Embed-log MVP overhaul and Linux acceptance plan in an implementer handoff.
+- **Started:** 2026-08-03 16:20:08 UTC / 2026-08-03 18:20:08 CEST (+0200) (Warsaw)
+- **Completed:** 2026-08-03 16:21:21 UTC / 2026-08-03 18:21:21 CEST (+0200) (Warsaw)
+- **Validation:** `git diff --check`; `wc -l -w mvp-embed-log-todo.md`; heading inventory with `rg -n '^## ' mvp-embed-log-todo.md` — passed (668 lines, 2,083 words, all planned sections present).
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`230a3e3`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `mvp-embed-log-todo.md` | 668 | 0 | Documents the MVP scope, retained and removed features, daemon/instance/session CLI, config v2, parser migration, and Linux/agent validation plans. |
