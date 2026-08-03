@@ -149,22 +149,6 @@ embed-log sessions bundle latest --output support.tar.gz
 
 A support bundle includes the complete session directory plus `embed-log-version.json` diagnostics, making it suitable for bug reports and offline handoff.
 
-### Import external logs into a session
-
-Merge a non-embed-log file into the session timeline when each non-empty line begins with RFC3339 time:
-
-```text
-2026-07-11T11:21:47.123Z pytest started
-[2026-07-11T11:21:48+00:00] assertion passed
-```
-
-```bash
-embed-log sessions import latest ./pytest.log --source PYTEST --dry-run
-embed-log sessions import latest ./pytest.log --source PYTEST
-```
-
-The import adds a source/tab, stores the original file, and merges records into `combined.jsonl` in timestamp order. Use `--dry-run` before modifying a valuable session.
-
 ### Retain disk space
 
 ```bash
@@ -215,7 +199,7 @@ embed-log doctor --config embed-log.yml
 2. Save YAML once source names/layout/parser choices stabilize.
 3. Keep logs in a project-relative directory or CI artifact path.
 4. Mark failures/events while live.
-5. Import pytest/host/external RFC3339 logs into the same session.
+5. Capture pytest and host output through configured file or UDP sources.
 6. Share `session.html` for lightweight review or a support bundle for diagnosis.
 7. Prune old sessions after preserving releases/incidents.
 

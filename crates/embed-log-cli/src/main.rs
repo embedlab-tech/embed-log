@@ -301,6 +301,7 @@ mod tests {
             ["embed-log", "update"].as_slice(),
             ["embed-log", "merge"].as_slice(),
             ["embed-log", "parse"].as_slice(),
+            ["embed-log", "sessions", "import"].as_slice(),
         ] {
             assert!(Cli::try_parse_from(args).is_err());
         }

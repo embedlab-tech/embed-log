@@ -99,20 +99,6 @@ pub(crate) enum SessionsCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Import an RFC3339-timestamped external log into a recorded session.
-    Import {
-        session_id: String,
-        /// External text log to merge by timestamp.
-        input: PathBuf,
-        /// Name assigned to the imported source.
-        #[arg(long)]
-        source: String,
-        /// Validate timestamps and report the planned import without modifying the session.
-        #[arg(long)]
-        dry_run: bool,
-        #[command(flatten)]
-        log_dir: LogDirArgs,
-    },
     /// Create a portable .tar.gz support bundle for a session.
     Bundle {
         session_id: String,
@@ -426,17 +412,6 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
                 search_sessions(&dir, filters, format)
             }
         }
-        SessionsCommand::Import {
-            session_id,
-            input,
-            source,
-            dry_run,
-            log_dir,
-        } => {
-            let dir = resolve_sessions_dir(&log_dir)?;
-            let session = resolve_session(&dir, &session_id)?;
-            import_external_log(&session, &input, &source, dry_run)
-        }
         SessionsCommand::Bundle {
             session_id,
             log_dir,
@@ -519,126 +494,6 @@ fn export_session_bundle(session: &SessionRecord, output: &Path) -> Result<()> {
     let encoder = archive.into_inner()?;
     encoder.finish()?.flush()?;
     println!("{}", output.display());
-    Ok(())
-}
-
-/// Parse an external RFC3339 timestamp at the beginning of a line. Keep this
-/// isolated so future timestamp formats can be added without changing import.
-fn parse_import_timestamp(line: &str) -> Option<(DateTime<FixedOffset>, &str)> {
-    let line = line.trim();
-    let (candidate, body) = if let Some(rest) = line.strip_prefix('[') {
-        let (ts, body) = rest.split_once(']')?;
-        (ts, body.trim_start())
-    } else {
-        let (ts, body) = line.split_once(char::is_whitespace)?;
-        (ts, body.trim_start())
-    };
-    DateTime::parse_from_rfc3339(candidate)
-        .ok()
-        .map(|ts| (ts, body))
-}
-
-fn import_external_log(
-    session: &SessionRecord,
-    input: &Path,
-    source: &str,
-    dry_run: bool,
-) -> Result<()> {
-    anyhow::ensure!(!source.trim().is_empty(), "--source must not be empty");
-    let text = std::fs::read_to_string(input)
-        .with_context(|| format!("read external log {}", input.display()))?;
-    let mut imported = Vec::new();
-    for (index, line) in text.lines().enumerate() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let (timestamp, message) = parse_import_timestamp(line).ok_or_else(|| {
-            anyhow::anyhow!(
-                "{}:{} has no leading RFC3339 timestamp",
-                input.display(),
-                index + 1
-            )
-        })?;
-        let millis = timestamp.timestamp_millis() as f64;
-        imported.push(serde_json::json!({
-            "data": message, "message": message, "absNum": millis, "timestamp_num": millis,
-            "absTs": timestamp.format("%m-%d %H:%M:%S%.3f").to_string(),
-            "timestamp": timestamp.format("%m-%d %H:%M:%S%.3f").to_string(),
-            "timestamp_iso": timestamp.to_rfc3339(), "source_id": source,
-            "source_kind": "imported", "source_label": source, "line_idx": index,
-            "origin": "import", "is_tx": false,
-        }));
-    }
-    anyhow::ensure!(
-        !imported.is_empty(),
-        "external log contains no importable lines"
-    );
-    if dry_run {
-        println!(
-            "would import {} line(s) from {} as {source}",
-            imported.len(),
-            input.display()
-        );
-        return Ok(());
-    }
-    let combined = manifest_combined_file(session)?;
-    let existing = std::fs::read_to_string(&combined)
-        .with_context(|| format!("read {}", combined.display()))?;
-    let mut entries: Vec<serde_json::Value> = existing
-        .lines()
-        .enumerate()
-        .map(|(index, line)| {
-            serde_json::from_str(line).map_err(|error| {
-                anyhow::anyhow!(
-                    "{}:{} is not valid JSONL: {error}",
-                    combined.display(),
-                    index + 1
-                )
-            })
-        })
-        .collect::<std::result::Result<_, _>>()?;
-    entries.append(&mut imported);
-    entries.sort_by(|a, b| {
-        a["timestamp_num"]
-            .as_f64()
-            .partial_cmp(&b["timestamp_num"].as_f64())
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    let rendered = entries
-        .into_iter()
-        .map(|entry| serde_json::to_string(&entry))
-        .collect::<std::result::Result<Vec<_>, _>>()?
-        .join("\n")
-        + "\n";
-    let staged_combined = combined.with_extension("jsonl.importing");
-    std::fs::write(&staged_combined, rendered)
-        .with_context(|| format!("write {}", staged_combined.display()))?;
-    std::fs::rename(&staged_combined, &combined)
-        .with_context(|| format!("replace {}", combined.display()))?;
-    let imported_file = session.dir.join(format!("imported-{}.log", source));
-    std::fs::write(&imported_file, &text)
-        .with_context(|| format!("write {}", imported_file.display()))?;
-    let manifest_path = session.dir.join("manifest.json");
-    let mut manifest: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&manifest_path)?)?;
-    anyhow::ensure!(
-        manifest["source_files"].get(source).is_none(),
-        "source {source:?} already exists in this session"
-    );
-    manifest["source_files"][source] = serde_json::json!(imported_file.display().to_string());
-    manifest["pane_labels"][source] = serde_json::json!(source);
-    manifest["pane_kinds"][source] = serde_json::json!("imported");
-    if let Some(tabs) = manifest["tabs"].as_array_mut() {
-        tabs.push(serde_json::json!({ "label": source, "panes": [source] }));
-    }
-    manifest["html_status"] = serde_json::json!("stale");
-    std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest)?)?;
-    std::fs::remove_file(session.dir.join("session.html")).ok();
-    println!(
-        "imported {} line(s) from {} as {source}",
-        text.lines().filter(|line| !line.trim().is_empty()).count(),
-        input.display()
-    );
     Ok(())
 }
 
@@ -2815,16 +2670,6 @@ mod tests {
             .iter()
             .any(|name| name.ends_with("embed-log-version.json")));
         std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn parse_import_timestamp_accepts_rfc3339_plain_and_bracketed() {
-        let (ts, message) = parse_import_timestamp("2026-07-11T11:21:47.123Z boot ok").unwrap();
-        assert_eq!(ts.timestamp_millis(), 1_783_768_907_123);
-        assert_eq!(message, "boot ok");
-        let (_, message) = parse_import_timestamp("[2026-07-11T11:21:48+00:00] done").unwrap();
-        assert_eq!(message, "done");
-        assert!(parse_import_timestamp("no timestamp").is_none());
     }
 
     #[test]
