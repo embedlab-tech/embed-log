@@ -1349,3 +1349,25 @@ Future entries must include this per-file added/removed-line summary.
 | `sdk/python/tests/test_watcher.py` | 6 | 6 | Updates watcher endpoint fixtures and expectations. |
 | `test-mvp.yml` | 10 | 16 | Migrates the checked-in MVP fixture to v2. |
 | `tests-ui/rust-test-server.mjs` | 11 | 17 | Starts browser E2E tests from a generated v2 configuration. |
+
+## 2026-08-03 19:47:14 UTC / 2026-08-03 21:47:14 CEST (Warsaw)
+
+- **Commit:** `6fb9306` — `Add named daemon lifecycle`
+- **Task:** Add config-based background daemons with named instance registration/discovery, automatic port selection, readiness polling, direct or registered status queries, stale PID cleanup, safe graceful stop, diagnostics, and daemon-specific HTML shutdown policy.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-03 19:47:14 UTC / 2026-08-03 21:47:14 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --workspace` plus the final daemon-focused rerun — passed (62 CLI unit tests, 2 Linux process integration tests, 207 core tests, and 73 TUI tests); `cargo clippy --locked --workspace --all-targets -- -D warnings` — passed; `PYTHONPATH=sdk/python python3 -m pytest sdk/python/tests -q` — passed (53 tests, 2 skipped); `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (4 tests); `cargo build --locked --release` and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged daemon start/status/stop lifecycle passed and confirmed daemon shutdown produced no automatic HTML.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`6fb9306`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 12 | 0 | Adds concise named-daemon startup, status, stop, and selection usage. |
+| `crates/embed-log-cli/src/commands/daemon.rs` | 518 | 0 | Implements registry records, stale cleanup, free-port selection, child startup/readiness, HTTP status, instance resolution, safe signaling, and stop cleanup. |
+| `crates/embed-log-cli/src/commands/mod.rs` | 1 | 0 | Registers the daemon command implementation module. |
+| `crates/embed-log-cli/src/commands/run.rs` | 4 | 1 | Passes daemon shutdown policy into the core server. |
+| `crates/embed-log-cli/src/main.rs` | 65 | 2 | Adds `run --daemon --instance`, `status`, `stop`, JSON flags, and hidden child dispatch. |
+| `crates/embed-log-cli/tests/daemon_lifecycle.rs` | 204 | 0 | Adds Linux process E2E coverage for readiness, status paths, stale/duplicate records, ambiguity, distinct ports, clean stop, and skipped daemon HTML. |
+| `crates/embed-log-core/src/runtime/server.rs` | 16 | 5 | Makes clean-shutdown HTML export configurable and disables it for daemon children. |
+| `docs/cli.md` | 21 | 0 | Documents registry location, resolution order, direct URLs, auto ports, diagnostics, and stop safety. |
