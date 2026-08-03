@@ -1042,3 +1042,29 @@ Future entries must include this per-file added/removed-line summary.
 | `tests-ui/regression-inventory.json` | 2 | 2 | Tracks the renamed test spec and test-owned traffic. |
 | `tests-ui/rust-test-server.mjs` | 5 | 5 | Renames and reframes the fixture as test infrastructure using `embed-log run`. |
 | `tests-ui/tests/rust-server.spec.js` | 0 | 0 | Renames the browser backend test away from demo terminology. |
+
+## 2026-08-03 16:41:34 UTC / 2026-08-03 18:41:34 CEST (Warsaw)
+
+- **Commit:** `543b85e` — `Remove interactive onboarding`
+- **Task:** Remove automatic and explicit browser onboarding and replace missing-config interaction with a direct actionable CLI error.
+- **Started:** 2026-08-03 16:38:29 UTC / 2026-08-03 18:38:29 CEST (+0200) (Warsaw)
+- **Completed:** 2026-08-03 16:41:34 UTC / 2026-08-03 18:41:34 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli --package embed-log-tui` — passed (87 CLI, 216 core, and 74 TUI tests); `cargo clippy --locked --package embed-log-core --package embed-log-cli --package embed-log-tui --all-targets -- -D warnings` — passed; `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e` — passed (4 tests); rebuilt CLI missing-config hint and removed `onboard` rejection checks — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`543b85e`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-cli/src/commands/run.rs` | 22 | 64 | Removes onboarding startup and adds tested non-interactive missing-config guidance. |
+| `crates/embed-log-cli/src/main.rs` | 2 | 26 | Removes the onboard command and extends removed-surface regression coverage. |
+| `crates/embed-log-core/src/lib.rs` | 0 | 1 | Removes the onboarding module export. |
+| `crates/embed-log-core/src/onboarding.rs` | 0 | 659 | Deletes quick-config generation and the onboarding HTTP server. |
+| `crates/embed-log-tui/src/lib.rs` | 2 | 2 | Removes onboarding-specific TUI wording. |
+| `docs/architecture.md` | 0 | 3 | Removes onboarding modules, behavior, and frontend assets. |
+| `docs/cli.md` | 2 | 35 | Documents direct missing-config failure and removes onboarding reference. |
+| `docs/getting-up-to-speed.md` | 1 | 1 | Uses a copied checked-in sample instead of browser setup. |
+| `docs/non-session-roadmap.md` | 1 | 1 | Keeps quick-run parity without onboarding scope. |
+| `docs/quickstart.md` | 1 | 1 | Directs advanced setup to saved YAML samples. |
+| `docs/tui.md` | 1 | 1 | Directs config-based TUI users to YAML samples. |
+| `frontend/onboarding.js` | 0 | 336 | Deletes the browser setup frontend. |
