@@ -1395,3 +1395,28 @@ Future entries must include this per-file added/removed-line summary.
 | `crates/embed-log-core/src/session/manager.rs` | 10 | 0 | Persists and exposes the original session title in manifests and session APIs. |
 | `docs/cli.md` | 15 | 0 | Documents titled rotation, validation, client continuity, and HTML behavior. |
 | `tests-ui/tests/rust-server.spec.js` | 7 | 1 | Verifies titled HTTP rotation, slug/title response, pane clearing, and subsequent live routing. |
+
+## 2026-08-04 07:53:21 UTC / 2026-08-04 09:53:21 CEST (Warsaw)
+
+- **Commit:** `740fcfa` — `Make daemon targeting explicit`
+- **Task:** Replace hidden daemon port/target policies with required config, instance, and port inputs; add verified idempotent reuse; require explicit mutation targets; surface registry cleanup/errors; remove disconnect-triggered export; and propagate foreground bind failures.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 07:53:21 UTC / 2026-08-04 09:53:21 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --workspace` plus final daemon-focused reruns — passed (63 CLI unit tests, 3 Linux process integration tests, 207 core tests, and 73 TUI tests); `cargo clippy --locked --workspace --all-targets -- -D warnings` — passed; `PYTHONPATH=sdk/python python3 -m pytest sdk/python/tests -q` — passed (53 tests, 2 skipped); `npm --prefix tests-ui run test:unit` — passed (19 tests); final `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (5 tests), including no export after final-browser disconnect; release build and packaging passed; packaged checks verified missing-port rejection, explicit start, verified reuse with stable PID, implicit-mutation rejection, and explicit stop.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`740fcfa`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 2 | 2 | Replaces automatic port/instance wording with explicit idempotent daemon usage. |
+| `crates/embed-log-cli/src/commands/daemon.rs` | 108 | 32 | Requires an explicit port, fingerprints requested identity, reuses exact instances, rejects conflicts, requires mutation targets, and surfaces registry actions/errors. |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 2 | 2 | Makes titled rotation use explicit mutating endpoint resolution. |
+| `crates/embed-log-cli/src/main.rs` | 6 | 2 | Requires daemon config, instance, and port through CLI argument constraints. |
+| `crates/embed-log-cli/tests/daemon_lifecycle.rs` | 90 | 8 | Covers missing/occupied ports, idempotent reuse, changed-config conflict, endpoint ownership, explicit mutations, malformed registry, and foreground bind exit. |
+| `crates/embed-log-core/src/net/control_ws.rs` | 1 | 8 | Removes obsolete no-client-export state from control API test fixtures. |
+| `crates/embed-log-core/src/net/ws_server.rs` | 4 | 105 | Removes browser-disconnect export scheduling and leaves client-count tracking side-effect free. |
+| `crates/embed-log-core/src/runtime/server.rs` | 14 | 11 | Propagates HTTP server/bind failure instead of waiting indefinitely and removes obsolete export state. |
+| `docs/cli.md` | 5 | 5 | Documents explicit targeting, verified reuse, visible registry handling, and no disconnect export. |
+| `mvp-embed-log-todo.md` | 8 | 6 | Updates the implementation contract to the reviewed explicit policy. |
+| `tests-ui/tests/rust-server.spec.js` | 12 | 0 | Adds browser E2E proof that final-client disconnect does not export HTML. |
