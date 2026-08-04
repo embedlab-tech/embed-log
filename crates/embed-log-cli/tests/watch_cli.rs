@@ -269,11 +269,10 @@ fn watches_retain_matches_expire_timeout_and_remove() {
     assert_eq!(missing_json["error"]["code"], "WATCH_NOT_FOUND");
 
     let session_id = waited_json["match"]["session_id"].as_str().unwrap();
-    let events = fs::read_to_string(logs.join(session_id).join("events.jsonl")).unwrap();
-    assert!(events.contains(&watch_id), "{events}");
-    assert!(events.contains("device ready now"), "{events}");
-    assert!(events.contains(regex_id), "{events}");
-    assert!(!events.contains(expiring_id), "{events}");
+    let session_dir = logs.join(session_id);
+    let combined = fs::read_to_string(session_dir.join("combined.jsonl")).unwrap();
+    assert!(combined.contains("device ready now"), "{combined}");
+    assert!(!session_dir.join("events.jsonl").exists());
 
     let stopped = invoke(&runtime, &["stop", "--instance", "bench", "--json"]);
     assert!(stopped.status.success());

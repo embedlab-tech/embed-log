@@ -33,7 +33,7 @@ from .exceptions import (
     ServerError,
     UnknownSourceError,
 )
-from .models import Event, HelloResult, LogEntry, SessionInfo, SourceInfo
+from .models import HelloResult, LogEntry, SessionInfo, SourceInfo
 
 try:
     from websocket import WebSocket, WebSocketException
@@ -204,23 +204,9 @@ class EmbedLogClient:
             return int(resp.get("bytes", len(data)))
         raise ServerError("tx.write", resp.get("error", "write failed"), source_id)
 
-    def subscribe(self, sources: Optional[list[str]] = None, events: bool = False) -> None:
-        """Subscribe to log sources and/or backend-detected events.
-
-        Parameters
-        ----------
-        sources
-            Source ids to receive as ``log.entry`` messages. May be omitted for
-            an events-only subscription.
-        events
-            When true, also receive backend ``event`` messages produced from
-            ``.events.yml`` rules. Use :meth:`events` to consume them.
-        """
-        body: dict = {}
-        if sources is not None:
-            body["sources"] = sources
-        if events:
-            body["events"] = True
+    def subscribe(self, sources: list[str]) -> None:
+        """Subscribe to selected sources as structured ``log.entry`` messages."""
+        body: dict = {"sources": sources}
         self._send_and_wait(
             f"sub-{time.time_ns()}",
             "subscribe",
@@ -236,15 +222,6 @@ class EmbedLogClient:
             "unsubscribe",
             "unsubscribe.result",
             extra={"sources": sources},
-        )
-
-    def unsubscribe_events(self) -> None:
-        """Unsubscribe from backend event messages."""
-        self._send_and_wait(
-            f"unsub-events-{time.time_ns()}",
-            "unsubscribe",
-            "unsubscribe.result",
-            extra={"sources": [], "events": False},
         )
 
     def create_marker(
@@ -280,10 +257,9 @@ class EmbedLogClient:
         Blocks for up to `timeout` seconds between entries.
         If timeout is None, blocks indefinitely.
 
-        Buffered messages from command calls (e.g. ``log.entry`` that arrived
-        while ``create_marker`` was waiting) are drained at the top of
-        **every** loop iteration, so the watcher does not miss matches.
-        Interleaved ``event`` messages stay buffered for :meth:`events`.
+        Buffered messages from command calls (for example ``log.entry`` that
+        arrived while ``create_marker`` was waiting) are drained at the top of
+        every loop iteration.
         """
         if self._ws is None:
             return
@@ -291,14 +267,10 @@ class EmbedLogClient:
         deadline = (time.time() + timeout) if timeout is not None else None
 
         while True:
-            # Scan the current buffer once. Keep event messages so event
-            # consumers do not lose interleaved data.
             for _ in range(len(self._msg_buffer)):
                 msg = self._msg_buffer.popleft()
                 if msg.get("type") == "log.entry":
                     yield LogEntry.from_dict(msg)
-                elif msg.get("type") == "event":
-                    self._msg_buffer.append(msg)
 
             if deadline is not None and time.time() >= deadline:
                 break
@@ -321,52 +293,6 @@ class EmbedLogClient:
 
             if msg.get("type") == "log.entry":
                 yield LogEntry.from_dict(msg)
-            elif msg.get("type") == "event":
-                self._msg_buffer.append(msg)
-
-    def events(self, timeout: Optional[float] = None) -> Generator[Event, None, None]:
-        """Yield backend-detected events from the control WebSocket stream.
-
-        Call ``subscribe(events=True)`` first (optionally with sources too).
-        Log entries encountered while waiting for events are preserved in the
-        client's buffer for :meth:`entries`.
-        """
-        if self._ws is None:
-            return
-
-        deadline = (time.time() + timeout) if timeout is not None else None
-
-        while True:
-            for _ in range(len(self._msg_buffer)):
-                msg = self._msg_buffer.popleft()
-                if msg.get("type") == "event":
-                    yield Event.from_dict(msg)
-                elif msg.get("type") == "log.entry":
-                    self._msg_buffer.append(msg)
-
-            if deadline is not None and time.time() >= deadline:
-                break
-
-            try:
-                self._ws.settimeout(timeout or 30)
-                raw = self._ws.recv()
-            except WebSocketException:
-                break
-            except Exception:
-                break
-
-            if not raw:
-                break
-
-            try:
-                msg = json.loads(raw)
-            except json.JSONDecodeError:
-                continue
-
-            if msg.get("type") == "event":
-                yield Event.from_dict(msg)
-            elif msg.get("type") == "log.entry":
-                self._msg_buffer.append(msg)
 
     # ── Internal: send + match-by-id ──
 
@@ -448,8 +374,8 @@ class EmbedLogClient:
                     f"expected {expected_result_type}, got {resp_type}: {resp}"
                 )
 
-            # log.entry/event or other unsolicited messages -> buffer
-            if resp_type in ("log.entry", "event"):
+            # Unsolicited log entries are buffered.
+            if resp_type == "log.entry":
                 self._msg_buffer.append(resp)
                 continue
 

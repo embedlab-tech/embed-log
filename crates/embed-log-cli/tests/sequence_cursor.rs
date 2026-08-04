@@ -318,28 +318,6 @@ fn global_sequence_bounded_reads_context_and_rotation() {
         .any(|record| record[0] == event_sequence));
     assert!(around["records"].as_array().unwrap().len() <= 3);
 
-    let by_event = invoke(
-        &runtime,
-        &[
-            "sessions",
-            "around",
-            session_id,
-            "--dir",
-            logs.to_str().unwrap(),
-            "--event",
-            &watch_id,
-            "--before",
-            "1",
-            "--after",
-            "1",
-            "--json",
-        ],
-    );
-    assert!(by_event.status.success());
-    let by_event = json(&by_event);
-    assert_eq!(by_event["target"]["sequence"], event_sequence);
-    assert_eq!(by_event["target"]["event"]["event_id"], watch_id);
-
     let invalid = invoke(
         &runtime,
         &[

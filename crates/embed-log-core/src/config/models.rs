@@ -45,19 +45,6 @@ pub struct SourceConfig {
     pub label: Option<String>,
 }
 
-/// A compiled event rule loaded from a companion .events.yml file.
-#[derive(Debug, Clone)]
-pub struct EventRule {
-    /// Unique name within its source.
-    pub name: String,
-    /// Raw regex pattern string (as written in the YAML).
-    pub pattern: String,
-    /// Severity label: "info", "warn", "error", or "fatal".
-    pub severity: String,
-    /// Compiled regex for fast matching.
-    pub regex: regex::Regex,
-}
-
 /// Frontend plugin definition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrontendPluginDefinition {

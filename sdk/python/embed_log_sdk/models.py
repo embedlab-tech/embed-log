@@ -1,6 +1,6 @@
 """Data models for the embed-log control API."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 
@@ -56,46 +56,6 @@ class LogEntry:
             session_id=data.get("session_id", ""),
             color=data.get("color"),
             is_tx=data.get("is_tx", False),
-        )
-
-
-@dataclass
-class Event:
-    """A backend-detected event received via event subscription."""
-
-    event_id: str
-    source_id: str
-    severity: str
-    timestamp_num: float
-    rel_num: float
-    line_idx: int
-    message: str
-    captures: list[str] = field(default_factory=list)
-    timestamp_iso: str = ""
-    timestamp: str = ""
-    origin: str = ""
-    sequence: Optional[int] = None
-    session_id: str = ""
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "Event":
-        captures = data.get("captures", [])
-        if not isinstance(captures, list):
-            captures = []
-        return cls(
-            event_id=data.get("event_id", ""),
-            source_id=data.get("source_id", ""),
-            severity=data.get("severity", "info"),
-            timestamp_num=float(data.get("timestamp_num") or 0.0),
-            rel_num=float(data.get("rel_num") or 0.0),
-            line_idx=int(data.get("line_idx") or 0),
-            message=data.get("message", ""),
-            captures=[str(c) for c in captures],
-            timestamp_iso=data.get("timestamp_iso", ""),
-            timestamp=data.get("timestamp", ""),
-            origin=data.get("origin", ""),
-            sequence=data.get("sequence"),
-            session_id=data.get("session_id", ""),
         )
 
 

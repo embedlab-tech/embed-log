@@ -161,21 +161,14 @@ pub(crate) enum SessionsCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Read bounded cross-source context around a sequence or unique event.
+    /// Read bounded cross-source context around a sequence.
     Around {
         session_id: String,
         #[command(flatten)]
         log_dir: LogDirArgs,
         /// Target session-global sequence.
-        #[arg(long, conflicts_with = "event", required_unless_present = "event")]
-        sequence: Option<u64>,
-        /// Target a unique event_id from events.jsonl.
-        #[arg(
-            long,
-            conflicts_with = "sequence",
-            required_unless_present = "sequence"
-        )]
-        event: Option<String>,
+        #[arg(long)]
+        sequence: u64,
         /// Number of combined records before the target.
         #[arg(long, default_value_t = 10)]
         before: usize,
@@ -192,33 +185,6 @@ pub(crate) enum SessionsCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Print recorded event-detection hits from events.jsonl.
-    Events {
-        session_id: String,
-        #[command(flatten)]
-        log_dir: LogDirArgs,
-        /// Print JSONL instead of compact human-readable lines.
-        #[arg(long)]
-        json: bool,
-        /// Restrict to event severity (info, warn, error, fatal).
-        #[arg(long)]
-        severity: Option<String>,
-        /// Restrict to source_id.
-        #[arg(long)]
-        source: Option<String>,
-        /// Substring that must appear in the event message.
-        #[arg(long)]
-        contains: Option<String>,
-        /// Regex that must match the event message.
-        #[arg(long)]
-        regex: Option<String>,
-        /// Stop after printing this many events.
-        #[arg(long)]
-        limit: Option<usize>,
-        /// Output format: jsonl (default), compact, or mini-jsonl. Ignored when --json is set.
-        #[arg(long, value_enum, default_value_t = OutputFormat::Jsonl)]
-        format: OutputFormat,
-    },
     /// Show a token-efficient overview of one session (recommended first call for agents).
     Summary {
         session_id: String,
@@ -233,7 +199,7 @@ pub(crate) enum SessionsCommand {
     )]
     Search {
         #[command(flatten)]
-        log_dir: LogDirArgs,
+        log_dir: Box<LogDirArgs>,
         /// Restrict to session ids or unique prefixes. Repeatable.
         #[arg(long = "session")]
         sessions: Vec<String>,
@@ -291,7 +257,6 @@ impl SessionsCommand {
             Self::New { json, .. }
             | Self::List { json, .. }
             | Self::Info { json, .. }
-            | Self::Events { json, .. }
             | Self::Summary { json, .. } => *json,
             Self::Read { json, format, .. } | Self::Around { json, format, .. } => {
                 *json || *format == ReadFormat::FullJson
@@ -311,13 +276,13 @@ pub(crate) enum ExportFormat {
     /// Lossless, structurally deduplicated `combined.jsonl` — same information,
     /// pure duplicate fields removed and session/source-constant fields hoisted
     /// to a one-time header instead of repeated per line. Not to be confused
-    /// with `--format mini-jsonl` on search/combined/events, which is a
+    /// with `--format mini-jsonl` on search/combined, which is a
     /// smaller, lossy, per-line rendering — this is a whole-session, lossless
     /// export meant for handing off to another tool for offline analysis.
     JsonlDeduped,
 }
 
-/// Output format shared by `sessions search`, `sessions combined`, and `sessions events`.
+/// Output format shared by `sessions search` and `sessions combined`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum, Default)]
 pub(crate) enum OutputFormat {
     #[default]
@@ -412,7 +377,6 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             session_id,
             log_dir,
             sequence,
-            event,
             before,
             after,
             time,
@@ -425,33 +389,12 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
                 &session_id,
                 AroundOptions {
                     sequence,
-                    event,
                     before,
                     after,
                     time,
                     format,
                     json,
                 },
-            )
-        }
-        SessionsCommand::Events {
-            session_id,
-            log_dir,
-            json,
-            severity,
-            source,
-            contains,
-            regex,
-            limit,
-            format,
-        } => {
-            let dir = resolve_sessions_dir(&log_dir)?;
-            show_session_events(
-                &dir,
-                &session_id,
-                EventsFilters::compile(severity, source, contains, regex, limit)?,
-                json,
-                format,
             )
         }
         SessionsCommand::Summary {
@@ -809,58 +752,6 @@ pub(crate) fn count_markers_in_session(session_dir: &Path) -> usize {
     extract_markers(&parsed).len()
 }
 
-#[derive(Debug)]
-struct EventsFilters {
-    severity: Option<String>,
-    source: Option<String>,
-    contains: Option<String>,
-    regex: Option<Regex>,
-    limit: Option<usize>,
-}
-
-impl EventsFilters {
-    fn compile(
-        severity: Option<String>,
-        source: Option<String>,
-        contains: Option<String>,
-        regex: Option<String>,
-        limit: Option<usize>,
-    ) -> Result<Self> {
-        Ok(Self {
-            severity,
-            source,
-            contains,
-            regex: regex.map(|pat| Regex::new(&pat)).transpose()?,
-            limit,
-        })
-    }
-
-    fn matches(&self, event: &serde_json::Value) -> bool {
-        if let Some(severity) = &self.severity {
-            if event.get("severity").and_then(|v| v.as_str()) != Some(severity.as_str()) {
-                return false;
-            }
-        }
-        if let Some(source) = &self.source {
-            if event.get("source_id").and_then(|v| v.as_str()) != Some(source.as_str()) {
-                return false;
-            }
-        }
-        let message = event.get("message").and_then(|v| v.as_str()).unwrap_or("");
-        if let Some(contains) = &self.contains {
-            if !message.contains(contains) {
-                return false;
-            }
-        }
-        if let Some(regex) = &self.regex {
-            if !regex.is_match(message) {
-                return false;
-            }
-        }
-        true
-    }
-}
-
 const MAX_BOUNDED_RECORDS: usize = 1_000;
 
 struct ReadOptions {
@@ -874,8 +765,7 @@ struct ReadOptions {
 }
 
 struct AroundOptions {
-    sequence: Option<u64>,
-    event: Option<String>,
+    sequence: u64,
     before: usize,
     after: usize,
     time: TimeDisplay,
@@ -993,11 +883,7 @@ fn around_session(dir: &Path, session_id: &str, options: AroundOptions) -> Resul
         "--before + --after + target must not exceed {MAX_BOUNDED_RECORDS} records"
     );
     let session = resolve_session(dir, session_id)?;
-    let (target_sequence, target_event) = match (options.sequence, options.event.as_deref()) {
-        (Some(sequence), None) => (sequence, None),
-        (None, Some(event_id)) => resolve_unique_event_sequence(&session, event_id)?,
-        _ => anyhow::bail!("provide exactly one of --sequence or --event"),
-    };
+    let target_sequence = options.sequence;
     let path = manifest_combined_file(&session)?;
     let file = std::fs::File::open(&path)
         .with_context(|| format!("open combined file {}", path.display()))?;
@@ -1061,7 +947,6 @@ fn around_session(dir: &Path, session_id: &str, options: AroundOptions) -> Resul
         invalid_records,
         Some(serde_json::json!({
             "sequence": target_sequence,
-            "event": target_event,
         })),
     )
 }
@@ -1094,66 +979,6 @@ fn validated_sequence(
         );
     }
     Ok(sequence)
-}
-
-fn resolve_unique_event_sequence(
-    session: &SessionRecord,
-    event_id: &str,
-) -> Result<(u64, Option<serde_json::Value>)> {
-    use std::io::{BufRead, BufReader};
-
-    let path = events_file_path(session);
-    let file = std::fs::File::open(&path)
-        .with_context(|| format!("open events file {}", path.display()))?;
-    let mut match_count = 0usize;
-    let mut first_match = None;
-    let mut sample_sequences = Vec::new();
-    for line_result in BufReader::new(file).lines() {
-        let line = line_result.with_context(|| format!("read {}", path.display()))?;
-        let Ok(event) = serde_json::from_str::<serde_json::Value>(&line) else {
-            continue;
-        };
-        if event.get("event_id").and_then(|value| value.as_str()) == Some(event_id) {
-            match_count += 1;
-            if sample_sequences.len() < 20 {
-                if let Some(sequence) = event.get("sequence").and_then(|value| value.as_u64()) {
-                    sample_sequences.push(sequence);
-                }
-            }
-            if first_match.is_none() {
-                first_match = Some(event);
-            }
-        }
-    }
-    match match_count {
-        0 => anyhow::bail!(
-            "event {event_id:?} was not found in session {:?}",
-            session.id
-        ),
-        1 => {
-            let event = first_match.unwrap();
-            let sequence = event
-                .get("sequence")
-                .and_then(|value| value.as_u64())
-                .with_context(|| format!("event {event_id:?} has no global sequence"))?;
-            Ok((sequence, Some(event)))
-        }
-        count => {
-            let sequences = sample_sequences
-                .iter()
-                .map(u64::to_string)
-                .collect::<Vec<_>>()
-                .join(", ");
-            let suffix = if count > sample_sequences.len() {
-                ", ..."
-            } else {
-                ""
-            };
-            anyhow::bail!(
-                "event_id {event_id:?} has {count} occurrences at sequences [{sequences}{suffix}]; repeat with --sequence"
-            )
-        }
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1299,67 +1124,6 @@ fn agent_relative_time(record: &serde_json::Value) -> String {
     } else {
         format!("T+{minutes:02}:{seconds:02}.{millis:03}")
     }
-}
-
-fn show_session_events(
-    dir: &Path,
-    session_id: &str,
-    filters: EventsFilters,
-    json: bool,
-    format: OutputFormat,
-) -> Result<()> {
-    use std::io::{BufRead, BufReader};
-
-    let session = resolve_session(dir, session_id)?;
-    let path = events_file_path(&session);
-    if !path.exists() {
-        return Ok(());
-    }
-    let file = std::fs::File::open(&path)
-        .with_context(|| format!("open events file {}", path.display()))?;
-    let reader = BufReader::new(file);
-    let mut printed = 0usize;
-    let mut codes = ShortcodeTable::default();
-    if !json {
-        note_elapsed_time_format(format);
-    }
-
-    for line_result in reader.lines() {
-        let line = line_result.with_context(|| format!("read {}", path.display()))?;
-        let event: serde_json::Value = match serde_json::from_str(&line) {
-            Ok(value) => value,
-            Err(_) => continue,
-        };
-        if !filters.matches(&event) {
-            continue;
-        }
-        printed += 1;
-        if json {
-            println!("{line}");
-        } else {
-            println!("{}", render_event(&event, format, &mut codes));
-        }
-        if filters.limit.is_some_and(|limit| printed >= limit) {
-            break;
-        }
-    }
-    Ok(())
-}
-
-fn events_file_path(session: &SessionRecord) -> PathBuf {
-    session
-        .manifest
-        .get("events_file")
-        .and_then(|v| v.as_str())
-        .map(|path| {
-            let path = PathBuf::from(path);
-            if path.is_absolute() {
-                path
-            } else {
-                session.dir.join(path)
-            }
-        })
-        .unwrap_or_else(|| session.dir.join("events.jsonl"))
 }
 
 /// `HH:MM:SS.mmm` clock time, preferring `timestamp_iso`, falling back to the
@@ -1526,66 +1290,6 @@ fn render_entry(
         OutputFormat::MiniJsonl => {
             serde_json::to_string(&format_mini_entry(entry, codes)).unwrap_or_default()
         }
-    }
-}
-
-/// `{ts}  {severity:<5}  {source:<16}  {name}: {message}` — the human-readable
-/// line for an event (used for both the default and `--format compact`).
-/// `message` is denoised, same as `format_compact_entry`.
-fn format_compact_event(event: &serde_json::Value, codes: &mut ShortcodeTable) -> String {
-    let clock = clock_time(event);
-    let ts = elapsed_time(event, &clock);
-    let severity = event
-        .get("severity")
-        .and_then(|v| v.as_str())
-        .unwrap_or("info");
-    let source = event
-        .get("source_id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("?");
-    let code = codes.code_for(source);
-    let name = event
-        .get("event_id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("event");
-    let message = event.get("message").and_then(|v| v.as_str()).unwrap_or("");
-    let message = denoise_message(message, &clock);
-    // `code` is a 1-2 char shortcode now, not a full source name — no point
-    // padding it to a 16-wide column like the old full-name alignment did.
-    format!("{ts}  {severity:<5}  {code}  {name}: {message}")
-}
-
-/// `{"t","s","sev","ev","m"}` — the `--format mini-jsonl` object for an event.
-/// `t`/`s`/`m` are elapsed-time/shortcoded/denoised, same as
-/// `format_compact_entry`.
-fn format_mini_event(event: &serde_json::Value, codes: &mut ShortcodeTable) -> serde_json::Value {
-    let clock = clock_time(event);
-    let source = event
-        .get("source_id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("?");
-    let message = event.get("message").and_then(|v| v.as_str()).unwrap_or("");
-    serde_json::json!({
-        "t": elapsed_time(event, &clock),
-        "s": codes.code_for(source),
-        "sev": event.get("severity").and_then(|v| v.as_str()).unwrap_or("info"),
-        "ev": event.get("event_id").and_then(|v| v.as_str()).unwrap_or("event"),
-        "m": denoise_message(message, &clock),
-    })
-}
-
-/// Render one event per `--format`. `Jsonl` (the default) keeps today's
-/// human-readable line — `--json` is the separate flag for raw JSONL.
-fn render_event(
-    event: &serde_json::Value,
-    format: OutputFormat,
-    codes: &mut ShortcodeTable,
-) -> String {
-    match format {
-        OutputFormat::MiniJsonl => {
-            serde_json::to_string(&format_mini_event(event, codes)).unwrap_or_default()
-        }
-        OutputFormat::Jsonl | OutputFormat::Compact => format_compact_event(event, codes),
     }
 }
 
@@ -2085,12 +1789,6 @@ pub(crate) fn export_session_html(session: &SessionRecord, output: PathBuf) -> R
         .map(str::to_owned);
     let frontend_dir = std::env::current_dir()?.join("frontend");
     let markers = load_markers_file(&session.dir)?;
-    let events = load_events_file(&events_file_path(session));
-    let event_rules = session
-        .manifest
-        .get("event_rules")
-        .cloned()
-        .unwrap_or_else(|| serde_json::json!({}));
     let frontend_plugins = session
         .manifest
         .get("frontend_plugins")
@@ -2117,23 +1815,10 @@ pub(crate) fn export_session_html(session: &SessionRecord, output: PathBuf) -> R
         first_log_at,
     )
     .with_plugins(frontend_plugins, pane_plugins, plugin_scripts)
-    .with_markers(markers)
-    .with_events(events, event_rules);
+    .with_markers(markers);
     exporter.export()?;
     println!("{}", output.display());
     Ok(())
-}
-
-/// Load events from a session's events.jsonl file. Missing/unreadable file -> empty.
-/// Mirrors `SessionManager::load_events` for callers that only have a `SessionRecord`.
-fn load_events_file(path: &Path) -> Vec<serde_json::Value> {
-    let text = match std::fs::read_to_string(path) {
-        Ok(t) => t,
-        Err(_) => return Vec::new(),
-    };
-    text.lines()
-        .filter_map(|line| serde_json::from_str(line).ok())
-        .collect()
 }
 
 pub(crate) fn export_session_raw(session: &SessionRecord, output: PathBuf) -> Result<()> {
@@ -2295,11 +1980,10 @@ struct SessionSummary {
     started_at: Option<String>,
     duration: String,
     sources: std::collections::BTreeMap<String, SourceSummary>,
-    events: std::collections::BTreeMap<String, u64>,
     recent: VecDeque<String>,
 }
 
-/// Single pass over `combined.jsonl` (+ `events.jsonl` if present) computing
+/// Single pass over `combined.jsonl` computing
 /// everything `sessions summary` reports. Kept separate from printing so the
 /// aggregation logic is unit-testable without capturing stdout.
 fn compute_session_summary(session: &SessionRecord) -> SessionSummary {
@@ -2364,25 +2048,6 @@ fn compute_session_summary(session: &SessionRecord) -> SessionSummary {
         }
     }
 
-    let mut severity_counts: BTreeMap<String, u64> = BTreeMap::new();
-    let events_path = events_file_path(session);
-    if events_path.exists() {
-        if let Ok(file) = std::fs::File::open(&events_path) {
-            for line_result in BufReader::new(file).lines() {
-                let Ok(line) = line_result else { continue };
-                let Ok(event) = serde_json::from_str::<serde_json::Value>(&line) else {
-                    continue;
-                };
-                let severity = event
-                    .get("severity")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("info")
-                    .to_string();
-                *severity_counts.entry(severity).or_insert(0) += 1;
-            }
-        }
-    }
-
     let duration = match (overall_first, overall_last) {
         (Some(first), Some(last)) => human_duration(first, last),
         _ => "00:00:00".to_string(),
@@ -2393,13 +2058,12 @@ fn compute_session_summary(session: &SessionRecord) -> SessionSummary {
         started_at,
         duration,
         sources: per_source,
-        events: severity_counts,
         recent,
     }
 }
 
 /// `sessions summary <SESSION_ID>` — a single token-efficient overview: per-source
-/// line counts/first/last timestamps, event severity counts, and the last 5
+/// line counts/first/last timestamps and the last 5
 /// combined.jsonl lines. Recommended first call for agents inspecting a session.
 fn show_session_summary(dir: &Path, session_id: &str, json: bool) -> Result<()> {
     let session = resolve_session(dir, session_id)?;
@@ -2426,7 +2090,6 @@ fn show_session_summary(dir: &Path, session_id: &str, json: bool) -> Result<()> 
                 "started_at": summary.started_at,
                 "duration": summary.duration,
                 "sources": sources_json,
-                "events": summary.events,
                 "recent": summary.recent,
             }))?
         );
@@ -2444,15 +2107,6 @@ fn show_session_summary(dir: &Path, session_id: &str, json: bool) -> Result<()> 
                 s.first.as_deref().unwrap_or("?"),
                 s.last.as_deref().unwrap_or("?")
             );
-        }
-        if !summary.events.is_empty() {
-            let parts: Vec<String> = summary
-                .events
-                .iter()
-                .map(|(severity, count)| format!("{severity}={count}"))
-                .collect();
-            println!("events:");
-            println!("  {}", parts.join(" "));
         }
         if !summary.recent.is_empty() {
             println!("recent:");
@@ -2997,7 +2651,7 @@ mod tests {
     }
 
     #[test]
-    fn summary_counts_sources_and_events() {
+    fn summary_counts_sources_and_recent_lines() {
         let root = temp_log_dir();
         let dir = write_test_session(&root, "2026-07-06_14-31-18");
         std::fs::write(
@@ -3008,18 +2662,11 @@ mod tests {
             ),
         )
         .unwrap();
-        std::fs::write(
-            dir.join("events.jsonl"),
-            "{\"severity\":\"error\",\"source_id\":\"PYTEST\",\"message\":\"timeout\"}\n",
-        )
-        .unwrap();
-
         let session = resolve_session(&root, "2026-07-06_14-31-18").unwrap();
         let summary = compute_session_summary(&session);
         assert_eq!(summary.sources.len(), 2);
         assert_eq!(summary.sources["PYTEST"].count, 1);
         assert_eq!(summary.duration, "00:10:05");
-        assert_eq!(summary.events["error"], 1);
         assert_eq!(summary.recent.len(), 2);
         std::fs::remove_dir_all(root).unwrap();
     }

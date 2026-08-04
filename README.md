@@ -147,7 +147,7 @@ ws://127.0.0.1:18080/api/v1/control
 
 ### `subscribe` / `log.entry`
 
-Subscribe to sources and receive structured events replacing the legacy per-source forward ports:
+Subscribe to sources and receive structured log entries replacing the legacy per-source forward ports:
 
 ```json
 {
@@ -177,14 +177,6 @@ with EmbedLogClient.from_config("embed-log.yml", origin="pytest") as client:
     client.subscribe(["DUT_UART"])
     for entry in client.entries(timeout=5.0):
         print(entry.source_id, entry.message)
-```
-
-## Watcher
-
-The watcher (`embed_log_sdk.watcher`) observes log entries matching regex patterns, writes JSONL evidence, and optionally creates UI markers:
-
-```bash
-python sdk/python/examples/watcher_run.py --config watcher.yml --timeout 30
 ```
 
 ## Companion UART command files

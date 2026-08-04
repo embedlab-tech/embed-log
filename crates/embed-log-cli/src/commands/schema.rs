@@ -476,7 +476,7 @@ fn semantics(path: &str) -> Semantics {
             targeting: session_target,
             output: compact_cursor,
             errors: &[],
-            notes: &["target plus before and after context is capped at 1000 records", "event IDs must identify exactly one persisted event"],
+            notes: &["target plus before and after context is capped at 1000 records"],
         },
         "sessions.list" | "sessions.search" => Semantics {
             mutates: false,

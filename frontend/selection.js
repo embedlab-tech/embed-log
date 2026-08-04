@@ -130,13 +130,6 @@ export function _selectionSetupPane(id) {
     rawBtn.addEventListener("click", e => { e.stopPropagation(); _downloadRaw(id); });
     moreDropdown.appendChild(rawBtn);
 
-    const eventRuleBtn = document.createElement("button");
-    eventRuleBtn.className = "copy-btn";
-    eventRuleBtn.id = "create-event-rule-" + id;
-    eventRuleBtn.textContent = "✨ Remember this pattern";
-    eventRuleBtn.title = "Watch for similar messages and add future occurrences to Events";
-    eventRuleBtn.addEventListener("click", e => { e.stopPropagation(); _createEventRule(id); });
-    moreDropdown.appendChild(eventRuleBtn);
     actionRow.appendChild(copyBtn);
     // Marker toggle (runtime only) — in the main action row
     if (can('markers')) {
@@ -271,7 +264,6 @@ function _flatMarkerList() {
     const all = [];
     Object.keys(state.markers).forEach(paneId => {
         (state.markers[paneId] || []).forEach(m => {
-            if ((m.kind || "user") === "event" && !state.includeEventMarkers) return;
             all.push({ paneId, ...m });
         });
     });
@@ -280,20 +272,11 @@ function _flatMarkerList() {
 }
 
 function _markerMatchesRawIndex(paneId, marker, rawIdx) {
-    const line = getLine(paneId, rawIdx);
-    const isEvent = (marker.kind || "user") === "event";
-    const lineKey = isEvent && Number.isFinite(line?.serverLineIdx) ? line.serverLineIdx : rawIdx;
     const end = marker.endIdx ?? marker.lineIdx;
-    return lineKey >= marker.lineIdx && lineKey <= end;
+    return rawIdx >= marker.lineIdx && rawIdx <= end;
 }
 
 function _markerRawIndex(marker) {
-    const paneId = marker.paneId;
-    if ((marker.kind || "user") !== "event") return marker.lineIdx;
-    const lines = state.rawLines[paneId] || [];
-    for (let i = 0; i < lines.length; i++) {
-        if (_markerMatchesRawIndex(paneId, marker, i)) return i;
-    }
     return marker.lineIdx;
 }
 
@@ -426,12 +409,8 @@ export function applyMarkers() {
             div.classList.toggle("has-marker", hasMarker);
             if (hasMarker) {
                 div.dataset.markerTooltip = m.description || "";
-                div.dataset.kind = m.kind || "user";
-                div.dataset.severity = m.severity || "";
             } else {
                 delete div.dataset.markerTooltip;
-                delete div.dataset.kind;
-                delete div.dataset.severity;
             }
         });
     });
@@ -463,24 +442,12 @@ function _hideMarkerTooltip({ force = false } = {}) {
     _tooltipEl.classList.remove("visible", "actionable");
 }
 
-function _showMarkerTooltip(line, { action = false } = {}) {
+function _showMarkerTooltip(line) {
     const desc = line.dataset.markerTooltip || "";
     if (!desc) return;
-    const marker = _markerForLine(line);
-    const isEvent = (marker?.kind || line.dataset.kind) === "event";
-    _markerTooltipPinned = action;
-    const jump = action && isEvent
-        ? '<div class="mt-actions"><button type="button" class="marker-jump-event-btn">Jump to event</button></div>'
-        : '';
-    _tooltipEl.innerHTML = '<span class="mt-label">' + (isEvent ? "Event" : "Marker") + '</span>' + _escHtml(desc) + jump;
-    _tooltipEl.classList.toggle("actionable", action && isEvent);
-    if (action && isEvent) {
-        _tooltipEl.querySelector('.marker-jump-event-btn')?.addEventListener('click', ev => {
-            ev.stopPropagation();
-            _hideMarkerTooltip({ force: true });
-            window.__embedLogJumpToEvent?.(marker);
-        });
-    }
+    _markerTooltipPinned = false;
+    _tooltipEl.innerHTML = '<span class="mt-label">Marker</span>' + _escHtml(desc);
+    _tooltipEl.classList.remove("actionable");
     const rect = line.getBoundingClientRect();
     // Position above the line so it doesn't cover log text below.
     _tooltipEl.style.left = Math.max(4, rect.left) + "px";
@@ -496,12 +463,7 @@ document.addEventListener("mouseover", e => {
 });
 
 document.addEventListener("click", e => {
-    const line = e.target.closest(".log-line.has-marker[data-kind='event']");
-    if (!line) {
-        if (!_tooltipEl.contains(e.target)) _hideMarkerTooltip({ force: true });
-        return;
-    }
-    _showMarkerTooltip(line, { action: true });
+    if (!_tooltipEl.contains(e.target)) _hideMarkerTooltip({ force: true });
 });
 
 
@@ -906,31 +868,6 @@ function _flashButton(id, text, restoreMs = 900) {
 // ---------------------------------------------------------------------------
 // Copy — scope-aware
 // ---------------------------------------------------------------------------
-function _createEventRule(paneId) {
-    const selected = [...(state.selected[paneId] || [])];
-    if (selected.length !== 1) {
-        window.alert("Select exactly one log line to create an event rule.");
-        return;
-    }
-    const line = getLine(paneId, selected[0]);
-    const message = line?.rawText?.trim();
-    if (!message) return;
-    // Generalize changing numbers so a line such as "reset after 5s" also
-    // catches future "reset after 10s" messages. Advanced regex editing stays
-    // in the Rules panel rather than interrupting this common workflow.
-    const placeholder = "__EMBED_LOG_NUMBER__";
-    const escaped = message.replace(/\d+/g, placeholder).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const pattern = escaped.replace(placeholder, "\\d+");
-    window.wsSend?.({
-        cmd: "event_rule.create",
-        source_id: paneId,
-        name: `remembered-${Date.now()}`,
-        pattern,
-        severity: "info",
-    });
-    _flashButton("create-event-rule-" + paneId, "Watching");
-}
-
 function _copy(paneId) {
     if (state.selectionScope !== "exact") return _copyContext(paneId);
     return _copyExact(paneId);
@@ -1191,10 +1128,5 @@ document.addEventListener("keyup", e => {
 window.addEventListener("blur", () => document.body.classList.remove("alt-held"));
 // Update marker nav when markers arrive from server
 window.__embedLogOnMarkers = () => {
-    _updateMarkerNav();
-};
-// Events tab calls this to toggle event-marker inclusion in navigation.
-window.__embedLogToggleEventMarkers = function () {
-    state.includeEventMarkers = !state.includeEventMarkers;
     _updateMarkerNav();
 };

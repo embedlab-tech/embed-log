@@ -627,15 +627,6 @@ mod tests {
             [
                 "embed-log",
                 "sessions",
-                "events",
-                "abc",
-                "--severity",
-                "fatal",
-            ]
-            .as_slice(),
-            [
-                "embed-log",
-                "sessions",
                 "search",
                 "--source",
                 "DUT",

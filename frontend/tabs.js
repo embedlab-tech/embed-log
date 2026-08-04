@@ -43,9 +43,6 @@ export function renderTabBar() {
             if (el) el.style.display = idx === activeIdx ? "flex" : "none";
         });
     }
-
-    // Let the Events module append its tab button (if enabled).
-    window.__embedLogRenderEventsTab?.(bar);
 }
 
 // ---------------------------------------------------------------------------
@@ -55,17 +52,7 @@ export function renderTabBar() {
 export function switchTab(newIdx) {
     const activeIdx = state.unwrap ? state.activePaneTab : state.activeTab;
 
-    window.__embedLogHideEventsTooltip?.();
-
-    // Deactivate the Events timeline tab when switching to a regular tab.
-    const wasEvents = state.eventsTabActive;
-    if (wasEvents) {
-        document.getElementById("events-tab-content")?.style.setProperty("display", "none");
-        document.querySelector(".events-tab-btn")?.classList.remove("active");
-        state.eventsTabActive = false;
-    }
-
-    if (newIdx === activeIdx && !wasEvents) return;
+    if (newIdx === activeIdx) return;
 
     // Hide current tab content
     const curId = state.unwrap ? "u-tab-content-" + activeIdx : "tab-content-" + activeIdx;

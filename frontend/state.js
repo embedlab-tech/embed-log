@@ -115,13 +115,6 @@ export const state = {
     firstLogAtMs: _isoToEpochMs(INITIAL_FIRST_LOG_AT),
     useClientRelativeBase: false,
     clientRelativeBaseMs: null,
-
-    // ── Event detection ──
-    events: [],             // [{event_id, source_id, severity, timestamp_num, ...}]
-    eventsEnabled: false,   // true when config has ≥1 event rule
-    eventsTabActive: false, // true while the Events timeline tab is shown
-    includeEventMarkers: false, // nav includes kind:"event" markers when true
-    eventRules: {},         // source → [{name, severity}] from config message
 };
 
 export function setTimestampContext({ mode = null, firstLogAt = undefined, resetMode = false } = {}) {

@@ -27,8 +27,6 @@ pub struct SessionExporter {
     frontend_plugins: serde_json::Value,
     plugin_scripts: serde_json::Value,
     markers: Vec<serde_json::Value>,
-    events: Vec<serde_json::Value>,
-    event_rules: serde_json::Value,
 }
 
 impl SessionExporter {
@@ -54,8 +52,6 @@ impl SessionExporter {
             frontend_plugins: json!({}),
             plugin_scripts: json!({}),
             markers: vec![],
-            events: vec![],
-            event_rules: json!({}),
         }
     }
 
@@ -75,17 +71,6 @@ impl SessionExporter {
     /// Set markers for the exported session.
     pub fn with_markers(mut self, markers: Vec<serde_json::Value>) -> Self {
         self.markers = markers;
-        self
-    }
-
-    /// Set detected events and event rules for the exported session.
-    pub fn with_events(
-        mut self,
-        events: Vec<serde_json::Value>,
-        event_rules: serde_json::Value,
-    ) -> Self {
-        self.events = events;
-        self.event_rules = event_rules;
         self
     }
 
@@ -147,8 +132,6 @@ impl SessionExporter {
         let pane_plugins_json = serde_json::to_string(&self.pane_plugins)?;
         let plugin_scripts_json = serde_json::to_string(&self.plugin_scripts)?;
         let markers_json = serde_json::to_string(&self.markers)?;
-        let events_json = serde_json::to_string(&self.events)?;
-        let event_rules_json = serde_json::to_string(&self.event_rules)?;
 
         // Build static profile.
         let static_profile = json!({
@@ -183,9 +166,7 @@ impl SessionExporter {
              window.__embedLogInitialThemeState = {{\"mode\":\"light\",\"lightKey\":\"whitesand\",\"darkKey\":\"one-dark\"}};\n\
              window.__embedLogInitialTimestampMode = {tm};\n\
              window.__embedLogFirstLogAt = {fla};\n\
-             window.__embedLogInitialFontSize = 14;\n\
-             window.__embedLogEventRules = {event_rules_json};\n\
-             window.__embedLogEvents = {events_json};",
+             window.__embedLogInitialFontSize = 14;",
             tm = json!(self.timestamp_mode),
             fla = json!(effective_first_log_at),
         ));
@@ -251,16 +232,6 @@ impl SessionExporter {
                  if (typeof applyMarkers === \"function\") applyMarkers();\n\
                  if (typeof window.__embedLogOnMarkers === \"function\") window.__embedLogOnMarkers();\n\
              }}\n\
-             var _eventRules = window.__embedLogEventRules || {{}};\n\
-             var _events = window.__embedLogEvents || [];\n\
-             var _hasRules = Object.values(_eventRules).some(function (r) {{ return Array.isArray(r) && r.length > 0; }});\n\
-             if (_hasRules || _events.length) {{\n\
-                 state.eventRules = _eventRules;\n\
-                 state.eventsEnabled = true;\n\
-                 if (typeof initEventsTab === \"function\") initEventsTab();\n\
-                 _events.forEach(function (ev) {{ if (typeof addEvent === \"function\") addEvent(ev); }});\n\
-                 if (typeof renderTabBar === \"function\") renderTabBar();\n\
-             }}\n\
              }})();"
         ));
 
@@ -282,7 +253,6 @@ impl SessionExporter {
             "export.js",
             "postprocess.js",
             "selection.js",
-            "events.js",
             "tsparse.js",
             "import.js",
         ];

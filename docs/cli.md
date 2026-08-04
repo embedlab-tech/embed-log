@@ -159,7 +159,7 @@ embed-log watch wait "$watch_id" \
 embed-log watch remove "$watch_id" --instance bench-a --json
 ```
 
-`watch add` accepts exactly one of literal `--contains` or `--regex`. Watches are server-side, temporary, one-shot conditions backed by the runtime event-rule pipeline. They do not stream ordinary logs to the waiting CLI. A match is retained, so `watch wait` still succeeds if the event occurred before it connected. Matches use the normal event path and are persisted in `events.jsonl` with source, line, timestamps, message, origin, and captures.
+`watch add` accepts exactly one of literal `--contains` or `--regex`. Watches are server-side, process-local, temporary, one-shot conditions. They match committed RX records directly and do not stream ordinary logs to the waiting CLI. A match is retained in memory, so `watch wait` still succeeds if the record arrived before it connected. Watch state is never persisted to the session.
 
 `--ttl` controls how long the server actively matches; it defaults to 30 seconds and is capped at 24 hours. Matched or expired state remains queryable until `watch remove` or process shutdown. `watch wait --timeout` only limits that CLI invocation and does not alter server TTL. JSON failures use `WATCH_EXPIRED`, `WATCH_WAIT_TIMEOUT`, or `WATCH_NOT_FOUND`. All watch mutations require `--instance`, `EMBED_LOG_INSTANCE`, or `--url`; they never infer the sole daemon. Matched watch output includes the triggering record's session-global `sequence` and exposes it as `next_cursor` for bounded follow-up reads.
 
@@ -330,24 +330,23 @@ Timestamp display is independent of output representation:
 
 Use `--format full-json` when complete stored records, including all timestamp and parser metadata, are required. It always emits a JSON envelope. Sessions captured before global sequencing fail with an actionable compatibility error instead of inventing cursors.
 
-Fetch deterministic cross-source context by sequence or by a unique persisted event ID:
+Fetch deterministic cross-source context by sequence:
 
 ```bash
 embed-log sessions around latest --sequence 719 --before 10 --after 20 --json
-embed-log sessions around latest --event watch-3 --before 10 --after 20 --time none
 ```
 
-If an event ID has multiple occurrences, `around --event` lists a bounded sequence sample and requires an explicit `--sequence`. The total around window is capped at 1000 records. Sequence and source-local line counters reset to 1 and 0 respectively on titled rotation. TX expectations, persisted events, watch matches, browser records, and TUI records carry the same sequence.
+The total around window is capped at 1000 records. Sequence and source-local line counters reset to 1 and 0 respectively on titled rotation. TX expectations, watch matches, browser records, and TUI records carry the same sequence.
 
 ### Legacy search/combined output format: `--format`
 
-`sessions search`, `sessions combined`, and `sessions events` all take `--format`, useful for keeping agent/script output small:
+`sessions search` and `sessions combined` take `--format`, useful for keeping agent/script output small:
 
 | Format | What it looks like | Size vs. `jsonl`\* |
 | --- | --- | --- |
 | `jsonl` (default) | The full JSONL record, byte-for-byte as stored. | baseline |
 | `compact` | One human-readable line: `1:23.644 D#1234 panic: watchdog reset`. | ~81% smaller |
-| `mini-jsonl` | Small JSON object with short keys: `{"t":"1:23.644","s":"D","i":1234,"m":"panic: watchdog reset"}` (adds `src`/`dst`/`len` for packet entries, `sev`/`ev` for events). | ~77% smaller |
+| `mini-jsonl` | Small JSON object with short keys: `{"t":"1:23.644","s":"D","i":1234,"m":"panic: watchdog reset"}` (adds `src`/`dst`/`len` for packet entries). | ~77% smaller |
 
 \* Measured on a real 43k-line session. `compact`/`mini-jsonl` apply two layers on top of the raw
 record:
@@ -376,7 +375,6 @@ byte-exact format (original wall-clock timestamps, full source names) for anyone
 ```bash
 embed-log sessions search --dir logs --regex 'panic|fatal' --format compact
 embed-log sessions combined latest --lines 50 --format mini-jsonl
-embed-log sessions events latest --severity fatal --format compact
 ```
 
 Read the session-wide combined JSONL stream:
@@ -388,15 +386,6 @@ embed-log sessions tail-combined <SESSION_ID> --dir logs --follow
 embed-log sessions combined latest --follow --format compact
 ```
 
-Read event-detection hits from a session:
-
-```bash
-embed-log sessions events <SESSION_ID> --dir logs
-embed-log sessions events <SESSION_ID> --dir logs --severity fatal
-embed-log sessions events <SESSION_ID> --dir logs --source DUT --contains watchdog
-embed-log sessions events <SESSION_ID> --dir logs --json
-```
-
 Show a token-efficient overview of one session — the recommended first call before searching, especially for agents:
 
 ```bash
@@ -404,7 +393,7 @@ embed-log sessions summary latest
 embed-log sessions summary latest --json
 ```
 
-Prints per-source line counts and first/last timestamps, event severity counts, session duration, and the last 5 combined-log lines — a small, bounded summary instead of scanning the full log.
+Prints per-source line counts and first/last timestamps, session duration, and the last 5 combined-log lines — a small, bounded summary instead of scanning the full log.
 
 Search across session combined streams:
 

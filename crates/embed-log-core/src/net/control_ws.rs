@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
@@ -28,15 +28,11 @@ pub async fn control_ws_handler(
     ws.on_upgrade(move |socket| handle_control_client(socket, state))
 }
 
-/// Per-client subscription state.
-///
-/// - `sources`: source names subscribed to for `log.entry` messages.
-///   Empty set means no log entries are forwarded.
-/// - `events`: whether `type: "event"` messages are forwarded.
+/// Per-client source subscription state. An empty set means no log entries
+/// are forwarded.
 #[derive(Clone, Default)]
 pub struct ControlSubscription {
     pub sources: HashSet<String>,
-    pub events: bool,
 }
 
 /// Determine whether a broadcast message should be forwarded to a control client.
@@ -48,8 +44,6 @@ pub fn should_forward_to_control_client(
     match msg_type {
         // Always forward these.
         "markers_update" | "session_info" => true,
-        // Forward events only if subscribed.
-        "event" => sub.events,
         // Forward rx/tx as log.entry only if source is subscribed.
         "rx" | "tx" => {
             let source_id = match parsed.get("source_id").and_then(|v| v.as_str()) {
@@ -92,7 +86,6 @@ impl<const N: usize> From<[String; N]> for ControlSubscription {
     fn from(arr: [String; N]) -> Self {
         Self {
             sources: HashSet::from(arr),
-            events: false,
         }
     }
 }
@@ -147,16 +140,7 @@ async fn handle_control_client(mut socket: WebSocket, state: super::ServerState)
                             continue;
                         }
 
-                        // Event messages are forwarded as-is.
-                        if msg_type == "event" {
-                            if let Err(e) = socket.send(Message::Text(payload_str.clone().into())).await {
-                                warn!("control WS send error: {e}");
-                                break;
-                            }
-                            continue;
-                        }
-
-                        // rx/tx messages are forwarded as structured log.entry events.
+                        // RX/TX records are forwarded as structured log.entry messages.
                         let source_id = match parsed.get("source_id").and_then(|v| v.as_str()) {
                             Some(s) => s.to_string(),
                             None => continue,
@@ -189,7 +173,7 @@ async fn handle_control_client(mut socket: WebSocket, state: super::ServerState)
     }
 }
 
-/// Build a `log.entry` event from a broadcast payload.
+/// Build a `log.entry` message from a broadcast payload.
 ///
 /// The broadcast now carries these structured fields added by the writer:
 /// - `origin` (String): the origin string ("SERIAL", "TX::<origin>", or injected origin)
@@ -289,11 +273,6 @@ async fn handle_control_command(
         "log.inject" => Some(handle_log_inject(&cmd, state, msg_id).await),
         "tx.write" => Some(handle_tx_write(&cmd, state, msg_id).await),
         "marker.create" => Some(handle_marker_create(&cmd, state, msg_id).await),
-        "event_rule.create" => Some(handle_event_rule_create(&cmd, state, msg_id)),
-        "event_rule.list" => Some(handle_event_rule_list(state, msg_id)),
-        "event_rule.export" => Some(handle_event_rule_export(state, msg_id)),
-        "event_rule.promote" => Some(handle_event_rule_promote(&cmd, state, msg_id)),
-        "event_rule.delete" => Some(handle_event_rule_delete(&cmd, state, msg_id)),
         "watch.create" => Some(handle_watch_create(&cmd, state, msg_id)),
         "watch.get" => Some(handle_watch_get(&cmd, state, msg_id)),
         "watch.delete" => Some(handle_watch_delete(&cmd, state, msg_id)),
@@ -386,8 +365,6 @@ fn handle_subscribe(
     subscribed_sources: &mut ControlSubscription,
     msg_id: Option<&str>,
 ) -> String {
-    let wants_events = cmd.get("events").and_then(|v| v.as_bool()).unwrap_or(false);
-
     let source_names: Vec<String> = cmd
         .get("sources")
         .and_then(|v| v.as_array())
@@ -399,11 +376,10 @@ fn handle_subscribe(
         })
         .unwrap_or_default();
 
-    // Require sources unless events-only subscription.
-    if source_names.is_empty() && !wants_events {
+    if source_names.is_empty() {
         return serde_json::json!({
             "type": "error",
-            "error": "missing or empty 'sources' array (provide sources or set events:true)",
+            "error": "missing or empty 'sources' array",
         })
         .to_string();
     }
@@ -421,10 +397,6 @@ fn handle_subscribe(
 
     for name in source_names {
         subscribed_sources.insert(name);
-    }
-
-    if wants_events {
-        subscribed_sources.events = true;
     }
 
     make_response("subscribe.result", msg_id, serde_json::json!({}))
@@ -455,13 +427,6 @@ fn handle_unsubscribe(
 
     for name in &source_names {
         subscribed_sources.remove(name);
-    }
-
-    // Unsubscribe from events if requested.
-    if let Some(events) = cmd.get("events").and_then(|v| v.as_bool()) {
-        if !events {
-            subscribed_sources.events = false;
-        }
     }
 
     make_response("unsubscribe.result", msg_id, serde_json::json!({}))
@@ -649,7 +614,7 @@ async fn handle_tx_write(
     }
 }
 
-/// Create a temporary one-shot watch backed by the runtime event-rule pipeline.
+/// Create a temporary one-shot watch matched directly against committed logs.
 pub(crate) fn handle_watch_create(
     cmd: &serde_json::Value,
     state: &super::ServerState,
@@ -738,6 +703,7 @@ pub(crate) fn handle_watch_create(
         source_id: source_id.to_string(),
         kind: kind.to_string(),
         pattern: pattern.to_string(),
+        regex: compiled,
         created_at,
         expires_at,
         once: true,
@@ -747,37 +713,11 @@ pub(crate) fn handle_watch_create(
     watches.insert(watch_id.clone(), watch.clone());
     drop(watches);
 
-    let mut rules = match state.runtime_event_rules.write() {
-        Ok(rules) => rules,
-        Err(_) => {
-            if let Ok(mut watches) = state.watches.write() {
-                watches.remove(&watch_id);
-            }
-            return make_result_error(
-                "watch",
-                msg_id,
-                source_id,
-                "runtime rule registry is unavailable",
-            );
-        }
-    };
-    rules
-        .entry(source_id.to_string())
-        .or_default()
-        .push(crate::config::EventRule {
-            name: watch_id.clone(),
-            pattern: pattern.to_string(),
-            severity: "info".to_string(),
-            regex: compiled,
-        });
-    drop(rules);
-
     let watches = state.watches.clone();
-    let rules = state.runtime_event_rules.clone();
     let expiring_id = watch_id.clone();
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(ttl_ms)).await;
-        crate::net::watch::expire_watch(&watches, &rules, &expiring_id);
+        crate::net::watch::expire_watch(&watches, &expiring_id);
     });
 
     make_response(
@@ -810,7 +750,7 @@ pub(crate) fn handle_watch_get(
                 && chrono::Utc::now() >= watch.expires_at
         });
     if should_expire {
-        crate::net::watch::expire_watch(&state.watches, &state.runtime_event_rules, watch_id);
+        crate::net::watch::expire_watch(&state.watches, watch_id);
     }
     let watches = match state.watches.read() {
         Ok(watches) => watches,
@@ -846,409 +786,10 @@ pub(crate) fn handle_watch_delete(
     let Some(watch) = watch else {
         return make_result_error("watch", msg_id, "", "watch not found");
     };
-    crate::net::watch::remove_runtime_rule(&state.runtime_event_rules, &watch.source_id, watch_id);
     make_response(
         "watch.delete.result",
         msg_id,
         serde_json::json!({"ok":true,"watch_id":watch_id,"source_id":watch.source_id}),
-    )
-}
-
-/// Handle `event_rule.create` — add a rule for the current server/session.
-pub(crate) fn handle_event_rule_create(
-    cmd: &serde_json::Value,
-    state: &super::ServerState,
-    msg_id: Option<&str>,
-) -> String {
-    let source_id = match cmd
-        .get("source_id")
-        .and_then(|value| value.as_str())
-        .filter(|value| !value.is_empty())
-    {
-        Some(value) if state.source_metadata.contains_key(value) => value,
-        Some(value) => return make_result_error("event_rule", msg_id, value, "unknown source"),
-        None => {
-            return make_response(
-                "event_rule.create.result",
-                msg_id,
-                serde_json::json!({ "ok": false, "error": "missing 'source_id'" }),
-            )
-        }
-    };
-    let name = match cmd
-        .get("name")
-        .and_then(|value| value.as_str())
-        .filter(|value| !value.trim().is_empty())
-    {
-        Some(value) => value.trim(),
-        None => return make_result_error("event_rule", msg_id, source_id, "missing 'name'"),
-    };
-    let pattern = match cmd
-        .get("pattern")
-        .and_then(|value| value.as_str())
-        .filter(|value| !value.is_empty())
-    {
-        Some(value) => value,
-        None => return make_result_error("event_rule", msg_id, source_id, "missing 'pattern'"),
-    };
-    let regex = match regex::Regex::new(pattern) {
-        Ok(regex) => regex,
-        Err(error) => {
-            return make_result_error(
-                "event_rule",
-                msg_id,
-                source_id,
-                &format!("invalid regex: {error}"),
-            )
-        }
-    };
-    let severity = cmd
-        .get("severity")
-        .and_then(|value| value.as_str())
-        .unwrap_or("info");
-    if !matches!(severity, "info" | "warn" | "error" | "fatal") {
-        return make_result_error(
-            "event_rule",
-            msg_id,
-            source_id,
-            "severity must be info, warn, error, or fatal",
-        );
-    }
-    let mut rules = match state.runtime_event_rules.write() {
-        Ok(rules) => rules,
-        Err(_) => {
-            return make_result_error(
-                "event_rule",
-                msg_id,
-                source_id,
-                "runtime rule registry is unavailable",
-            )
-        }
-    };
-    let source_rules = rules.entry(source_id.to_string()).or_default();
-    if source_rules.iter().any(|rule| rule.name == name) {
-        return make_result_error(
-            "event_rule",
-            msg_id,
-            source_id,
-            "a runtime rule with this name already exists for the source",
-        );
-    }
-    source_rules.push(crate::config::EventRule {
-        name: name.to_string(),
-        pattern: pattern.to_string(),
-        severity: severity.to_string(),
-        regex,
-    });
-    make_response(
-        "event_rule.create.result",
-        msg_id,
-        serde_json::json!({
-            "ok": true, "source_id": source_id, "name": name, "pattern": pattern, "severity": severity,
-        }),
-    )
-}
-
-pub(crate) fn handle_event_rule_list(state: &super::ServerState, msg_id: Option<&str>) -> String {
-    let rules = match state.runtime_event_rules.read() {
-        Ok(rules) => rules,
-        Err(_) => {
-            return make_response(
-                "event_rule.list.result",
-                msg_id,
-                serde_json::json!({ "ok": false, "error": "runtime rule registry is unavailable" }),
-            )
-        }
-    };
-    let static_rules = state.static_event_rules.iter().flat_map(|(source_id, source_rules)| {
-        source_rules.iter().map(move |rule| serde_json::json!({ "source_id": source_id, "name": rule.name, "pattern": rule.pattern, "severity": rule.severity, "origin": "static" }))
-    });
-    let watch_ids = state
-        .watches
-        .read()
-        .map(|watches| watches.keys().cloned().collect::<HashSet<_>>())
-        .unwrap_or_default();
-    let runtime_rules = rules.iter().flat_map(|(source_id, source_rules)| {
-        let watch_ids = &watch_ids;
-        source_rules
-            .iter()
-            .filter(move |rule| !watch_ids.contains(&rule.name))
-            .map(move |rule| serde_json::json!({ "source_id": source_id, "name": rule.name, "pattern": rule.pattern, "severity": rule.severity, "origin": "runtime" }))
-    });
-    let rules = static_rules.chain(runtime_rules).collect::<Vec<_>>();
-    make_response(
-        "event_rule.list.result",
-        msg_id,
-        serde_json::json!({ "ok": true, "rules": rules }),
-    )
-}
-
-pub(crate) fn handle_event_rule_export(state: &super::ServerState, msg_id: Option<&str>) -> String {
-    let runtime = match state.runtime_event_rules.read() {
-        Ok(rules) => rules,
-        Err(_) => {
-            return make_response(
-                "event_rule.export.result",
-                msg_id,
-                serde_json::json!({ "ok": false, "error": "runtime rule registry is unavailable" }),
-            )
-        }
-    };
-    let mut sources: BTreeMap<String, Vec<&crate::config::EventRule>> = BTreeMap::new();
-    for (source, rules) in state.static_event_rules.iter() {
-        sources
-            .entry(source.clone())
-            .or_default()
-            .extend(rules.iter());
-    }
-    let watch_ids = state
-        .watches
-        .read()
-        .map(|watches| watches.keys().cloned().collect::<HashSet<_>>())
-        .unwrap_or_default();
-    for (source, rules) in runtime.iter() {
-        sources
-            .entry(source.clone())
-            .or_default()
-            .extend(rules.iter().filter(|rule| !watch_ids.contains(&rule.name)));
-    }
-    let mut root = serde_yaml::Mapping::new();
-    for (source, rules) in sources {
-        let values = rules
-            .into_iter()
-            .map(|rule| {
-                let mut rule_map = serde_yaml::Mapping::new();
-                rule_map.insert(
-                    serde_yaml::Value::String("name".into()),
-                    serde_yaml::Value::String(rule.name.clone()),
-                );
-                rule_map.insert(
-                    serde_yaml::Value::String("pattern".into()),
-                    serde_yaml::Value::String(rule.pattern.clone()),
-                );
-                rule_map.insert(
-                    serde_yaml::Value::String("severity".into()),
-                    serde_yaml::Value::String(rule.severity.clone()),
-                );
-                serde_yaml::Value::Mapping(rule_map)
-            })
-            .collect();
-        root.insert(
-            serde_yaml::Value::String(source),
-            serde_yaml::Value::Sequence(values),
-        );
-    }
-    match serde_yaml::to_string(&serde_yaml::Value::Mapping(root)) {
-        Ok(yaml) => make_response(
-            "event_rule.export.result",
-            msg_id,
-            serde_json::json!({ "ok": true, "yaml": yaml }),
-        ),
-        Err(error) => make_response(
-            "event_rule.export.result",
-            msg_id,
-            serde_json::json!({ "ok": false, "error": error.to_string() }),
-        ),
-    }
-}
-
-pub(crate) fn handle_event_rule_promote(
-    cmd: &serde_json::Value,
-    state: &super::ServerState,
-    msg_id: Option<&str>,
-) -> String {
-    let source_id = match cmd.get("source_id").and_then(|value| value.as_str()) {
-        Some(value) => value,
-        None => {
-            return make_response(
-                "event_rule.promote.result",
-                msg_id,
-                serde_json::json!({"ok":false,"error":"missing 'source_id'"}),
-            )
-        }
-    };
-    let name = match cmd.get("name").and_then(|value| value.as_str()) {
-        Some(value) => value,
-        None => {
-            return make_response(
-                "event_rule.promote.result",
-                msg_id,
-                serde_json::json!({"ok":false,"error":"missing 'name'"}),
-            )
-        }
-    };
-    if state
-        .watches
-        .read()
-        .is_ok_and(|watches| watches.contains_key(name))
-    {
-        return make_response(
-            "event_rule.promote.result",
-            msg_id,
-            serde_json::json!({"ok":false,"error":"temporary watches cannot be promoted"}),
-        );
-    }
-    let runtime = match state.runtime_event_rules.read() {
-        Ok(rules) => rules,
-        Err(_) => {
-            return make_response(
-                "event_rule.promote.result",
-                msg_id,
-                serde_json::json!({"ok":false,"error":"runtime rule registry is unavailable"}),
-            )
-        }
-    };
-    let rule = match runtime
-        .get(source_id)
-        .and_then(|rules| rules.iter().find(|rule| rule.name == name))
-    {
-        Some(rule) => rule,
-        None => {
-            return make_response(
-                "event_rule.promote.result",
-                msg_id,
-                serde_json::json!({"ok":false,"error":"runtime rule not found"}),
-            )
-        }
-    };
-    let path = &state.event_rules_path;
-    let mut root: serde_yaml::Mapping = if path.exists() {
-        match std::fs::read_to_string(path)
-            .ok()
-            .and_then(|text| serde_yaml::from_str::<serde_yaml::Value>(&text).ok())
-            .and_then(|value| value.as_mapping().cloned())
-        {
-            Some(map) => map,
-            None => {
-                return make_response(
-                    "event_rule.promote.result",
-                    msg_id,
-                    serde_json::json!({"ok":false,"error":"existing event file is not a valid YAML mapping"}),
-                )
-            }
-        }
-    } else {
-        serde_yaml::Mapping::new()
-    };
-    let source_key = serde_yaml::Value::String(source_id.to_string());
-    let rules = root
-        .entry(source_key)
-        .or_insert_with(|| serde_yaml::Value::Sequence(vec![]))
-        .as_sequence_mut()
-        .unwrap();
-    if rules.iter().any(|value| {
-        value
-            .as_mapping()
-            .and_then(|map| map.get("name"))
-            .and_then(|value| value.as_str())
-            == Some(name)
-    }) {
-        return make_response(
-            "event_rule.promote.result",
-            msg_id,
-            serde_json::json!({"ok":false,"error":"a static rule with this name already exists"}),
-        );
-    }
-    let mut map = serde_yaml::Mapping::new();
-    map.insert(
-        serde_yaml::Value::String("name".into()),
-        serde_yaml::Value::String(rule.name.clone()),
-    );
-    map.insert(
-        serde_yaml::Value::String("pattern".into()),
-        serde_yaml::Value::String(rule.pattern.clone()),
-    );
-    map.insert(
-        serde_yaml::Value::String("severity".into()),
-        serde_yaml::Value::String(rule.severity.clone()),
-    );
-    rules.push(serde_yaml::Value::Mapping(map));
-    let yaml = match serde_yaml::to_string(&serde_yaml::Value::Mapping(root)) {
-        Ok(yaml) => yaml,
-        Err(error) => {
-            return make_response(
-                "event_rule.promote.result",
-                msg_id,
-                serde_json::json!({"ok":false,"error":error.to_string()}),
-            )
-        }
-    };
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let staged = path.with_extension("events.yml.tmp");
-    if let Err(error) = std::fs::write(&staged, yaml).and_then(|_| std::fs::rename(&staged, path)) {
-        let _ = std::fs::remove_file(&staged);
-        return make_response(
-            "event_rule.promote.result",
-            msg_id,
-            serde_json::json!({"ok":false,"error":error.to_string()}),
-        );
-    }
-    make_response(
-        "event_rule.promote.result",
-        msg_id,
-        serde_json::json!({"ok":true,"path":path,"message":"runtime rule remains active; saved rule loads next run"}),
-    )
-}
-
-pub(crate) fn handle_event_rule_delete(
-    cmd: &serde_json::Value,
-    state: &super::ServerState,
-    msg_id: Option<&str>,
-) -> String {
-    let source_id = match cmd.get("source_id").and_then(|value| value.as_str()) {
-        Some(value) => value,
-        None => {
-            return make_response(
-                "event_rule.delete.result",
-                msg_id,
-                serde_json::json!({ "ok": false, "error": "missing 'source_id'" }),
-            )
-        }
-    };
-    let name = match cmd.get("name").and_then(|value| value.as_str()) {
-        Some(value) => value,
-        None => return make_result_error("event_rule", msg_id, source_id, "missing 'name'"),
-    };
-    if state
-        .watches
-        .read()
-        .is_ok_and(|watches| watches.contains_key(name))
-    {
-        return make_result_error(
-            "event_rule",
-            msg_id,
-            source_id,
-            "temporary watches must be removed with watch.delete",
-        );
-    }
-    let mut rules = match state.runtime_event_rules.write() {
-        Ok(rules) => rules,
-        Err(_) => {
-            return make_result_error(
-                "event_rule",
-                msg_id,
-                source_id,
-                "runtime rule registry is unavailable",
-            )
-        }
-    };
-    let Some(source_rules) = rules.get_mut(source_id) else {
-        return make_result_error("event_rule", msg_id, source_id, "runtime rule not found");
-    };
-    let old_len = source_rules.len();
-    source_rules.retain(|rule| rule.name != name);
-    if source_rules.len() == old_len {
-        return make_result_error("event_rule", msg_id, source_id, "runtime rule not found");
-    }
-    if source_rules.is_empty() {
-        rules.remove(source_id);
-    }
-    make_response(
-        "event_rule.delete.result",
-        msg_id,
-        serde_json::json!({ "ok": true, "source_id": source_id, "name": name }),
     )
 }
 
@@ -1378,7 +919,7 @@ async fn handle_marker_create(
         });
 
         // Replace any existing marker at this (paneId, lineIdx) and persist.
-        match mgr.replace_marker(source_id, line_idx, new_marker, false) {
+        match mgr.replace_marker(source_id, line_idx, new_marker) {
             Ok(markers) => {
                 let broadcast_payload = serde_json::json!({
                     "type": "markers_update",
@@ -1478,7 +1019,6 @@ mod tests {
             config_msg: Arc::new(Mutex::new("{}".to_string())),
             broadcast_tx,
             replay: Arc::new(Mutex::new(std::collections::VecDeque::new())),
-            events_replay: Arc::new(Mutex::new(std::collections::VecDeque::new())),
             on_export: None,
             on_rotate: None,
             session_manager: None,
@@ -1489,9 +1029,6 @@ mod tests {
             source_tx_senders: Arc::new(HashMap::new()),
             source_metadata: Arc::new(source_metadata),
             line_counters: Arc::new(HashMap::new()),
-            static_event_rules: Arc::new(HashMap::new()),
-            event_rules_path: std::env::temp_dir().join("embed-log.events.yml"),
-            runtime_event_rules: Arc::new(std::sync::RwLock::new(HashMap::new())),
             watches: Arc::new(std::sync::RwLock::new(HashMap::new())),
             watch_counter: Arc::new(AtomicU64::new(1)),
             control_api: true,
@@ -1513,32 +1050,6 @@ mod tests {
         assert_eq!(create["type"], "watch.create.result");
         assert_eq!(create["watch"]["id"], "watch-1");
         assert_eq!(create["watch"]["status"], "active");
-        {
-            let rules = state.runtime_event_rules.read().unwrap();
-            let rule = &rules["DUT_UART"][0];
-            assert!(rule.regex.is_match("ready.*literal"));
-            assert!(!rule.regex.is_match("ready anything literal"));
-        }
-        let list = handle_control_command(
-            r#"{"id":"wl","type":"event_rule.list"}"#,
-            &state,
-            &mut subscribed,
-        )
-        .await
-        .unwrap();
-        let list: serde_json::Value = serde_json::from_str(&list).unwrap();
-        assert!(list["rules"].as_array().unwrap().is_empty());
-        let promote = handle_control_command(
-            r#"{"id":"wp","type":"event_rule.promote","source_id":"DUT_UART","name":"watch-1"}"#,
-            &state,
-            &mut subscribed,
-        )
-        .await
-        .unwrap();
-        let promote: serde_json::Value = serde_json::from_str(&promote).unwrap();
-        assert_eq!(promote["ok"], false);
-        assert_eq!(promote["error"], "temporary watches cannot be promoted");
-
         tokio::time::sleep(std::time::Duration::from_millis(80)).await;
         let get = handle_control_command(
             r#"{"id":"w2","type":"watch.get","watch_id":"watch-1"}"#,
@@ -1549,12 +1060,6 @@ mod tests {
         .unwrap();
         let get: serde_json::Value = serde_json::from_str(&get).unwrap();
         assert_eq!(get["watch"]["status"], "expired");
-        assert!(state
-            .runtime_event_rules
-            .read()
-            .unwrap()
-            .get("DUT_UART")
-            .is_none());
 
         let delete = handle_control_command(
             r#"{"id":"w3","type":"watch.delete","watch_id":"watch-1"}"#,
@@ -1566,90 +1071,6 @@ mod tests {
         let delete: serde_json::Value = serde_json::from_str(&delete).unwrap();
         assert_eq!(delete["ok"], true);
         assert!(state.watches.read().unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn runtime_event_rules_can_be_created_listed_and_deleted() {
-        let state = test_control_state();
-        let mut subscribed = ControlSubscription::new();
-        let create = handle_control_command(
-            r#"{"id":"rule-1","type":"event_rule.create","source_id":"DUT_UART","name":"watchdog","pattern":"watchdog: \\d+s","severity":"error"}"#,
-            &state,
-            &mut subscribed,
-        ).await.unwrap();
-        let create: serde_json::Value = serde_json::from_str(&create).unwrap();
-        assert_eq!(create["type"], "event_rule.create.result");
-        assert_eq!(create["ok"], true);
-
-        let list = handle_control_command(
-            r#"{"id":"rule-2","type":"event_rule.list"}"#,
-            &state,
-            &mut subscribed,
-        )
-        .await
-        .unwrap();
-        let list: serde_json::Value = serde_json::from_str(&list).unwrap();
-        assert_eq!(list["rules"][0]["name"], "watchdog");
-        assert_eq!(list["rules"][0]["origin"], "runtime");
-
-        let export = handle_control_command(
-            r#"{"id":"rule-export","type":"event_rule.export"}"#,
-            &state,
-            &mut subscribed,
-        )
-        .await
-        .unwrap();
-        let export: serde_json::Value = serde_json::from_str(&export).unwrap();
-        assert!(export["yaml"].as_str().unwrap().contains("DUT_UART:"));
-        assert!(export["yaml"]
-            .as_str()
-            .unwrap()
-            .contains("pattern: 'watchdog: \\d+s'"));
-
-        let delete = handle_control_command(
-            r#"{"id":"rule-3","type":"event_rule.delete","source_id":"DUT_UART","name":"watchdog"}"#,
-            &state,
-            &mut subscribed,
-        ).await.unwrap();
-        let delete: serde_json::Value = serde_json::from_str(&delete).unwrap();
-        assert_eq!(delete["ok"], true);
-    }
-
-    #[tokio::test]
-    async fn promote_runtime_rule_writes_and_rejects_duplicate_companion_rule() {
-        let mut state = test_control_state();
-        let root = temp_session_dir("promote-event-rule");
-        state.event_rules_path = root.join("capture.events.yml");
-        let mut subscribed = ControlSubscription::new();
-        let create = r#"{"type":"event_rule.create","source_id":"DUT_UART","name":"watchdog","pattern":"watchdog: \\d+s","severity":"error"}"#;
-        handle_control_command(create, &state, &mut subscribed)
-            .await
-            .unwrap();
-
-        let promote = r#"{"type":"event_rule.promote","source_id":"DUT_UART","name":"watchdog"}"#;
-        let response = handle_control_command(promote, &state, &mut subscribed)
-            .await
-            .unwrap();
-        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
-        assert_eq!(response["ok"], true);
-        let yaml = std::fs::read_to_string(&state.event_rules_path).unwrap();
-        assert!(yaml.contains("DUT_UART:"));
-        assert!(yaml.contains("name: watchdog"));
-
-        let duplicate = handle_control_command(promote, &state, &mut subscribed)
-            .await
-            .unwrap();
-        let duplicate: serde_json::Value = serde_json::from_str(&duplicate).unwrap();
-        assert_eq!(duplicate["ok"], false);
-        assert!(duplicate["error"]
-            .as_str()
-            .unwrap()
-            .contains("already exists"));
-        assert!(!state
-            .event_rules_path
-            .with_extension("events.yml.tmp")
-            .exists());
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]
@@ -2135,7 +1556,6 @@ mod tests {
             config_msg: Arc::new(Mutex::new("{}".to_string())),
             broadcast_tx,
             replay,
-            events_replay: Arc::new(Mutex::new(std::collections::VecDeque::new())),
             on_export: None,
             on_rotate: None,
             session_manager: Some(Arc::new(Mutex::new(mgr))),
@@ -2146,9 +1566,6 @@ mod tests {
             source_tx_senders: Arc::new(HashMap::new()),
             source_metadata: Arc::new(source_metadata),
             line_counters: Arc::new(line_counters),
-            static_event_rules: Arc::new(HashMap::new()),
-            event_rules_path: std::env::temp_dir().join("embed-log.events.yml"),
-            runtime_event_rules: Arc::new(std::sync::RwLock::new(HashMap::new())),
             watches: Arc::new(std::sync::RwLock::new(HashMap::new())),
             watch_counter: Arc::new(AtomicU64::new(1)),
             control_api: true,
@@ -2392,7 +1809,6 @@ mod tests {
             config_msg: Arc::new(Mutex::new("{}".to_string())),
             broadcast_tx,
             replay,
-            events_replay: Arc::new(Mutex::new(std::collections::VecDeque::new())),
             on_export: None,
             on_rotate: None,
             session_manager: Some(session_mgr),
@@ -2403,9 +1819,6 @@ mod tests {
             source_tx_senders: Arc::new(HashMap::new()),
             source_metadata: Arc::new(source_metadata),
             line_counters: Arc::new(line_counters),
-            static_event_rules: Arc::new(HashMap::new()),
-            event_rules_path: std::env::temp_dir().join("embed-log.events.yml"),
-            runtime_event_rules: Arc::new(std::sync::RwLock::new(HashMap::new())),
             watches: Arc::new(std::sync::RwLock::new(HashMap::new())),
             watch_counter: Arc::new(AtomicU64::new(1)),
             control_api: true,
@@ -2433,108 +1846,6 @@ mod tests {
         }
 
         std::fs::remove_dir_all(dir).ok();
-    }
-
-    #[tokio::test]
-    async fn subscribe_with_events_true_enables_events() {
-        let state = test_control_state();
-        let mut sub = ControlSubscription::new();
-        assert!(!sub.events);
-
-        let response = handle_control_command(
-            r#"{"id":"s1","type":"subscribe","sources":["DUT_UART"],"events":true}"#,
-            &state,
-            &mut sub,
-        )
-        .await
-        .unwrap();
-        let resp: serde_json::Value = serde_json::from_str(&response).unwrap();
-        assert_eq!(resp["type"], "subscribe.result");
-        assert!(
-            sub.events,
-            "events flag should be true after subscribe with events:true"
-        );
-    }
-
-    #[tokio::test]
-    async fn subscribe_without_events_does_not_enable_events() {
-        let state = test_control_state();
-        let mut sub = ControlSubscription::new();
-        assert!(!sub.events);
-
-        let response = handle_control_command(
-            r#"{"id":"s1","type":"subscribe","sources":["DUT_UART"]}"#,
-            &state,
-            &mut sub,
-        )
-        .await
-        .unwrap();
-        let resp: serde_json::Value = serde_json::from_str(&response).unwrap();
-        assert_eq!(resp["type"], "subscribe.result");
-        assert!(
-            !sub.events,
-            "events flag should remain false when not requested"
-        );
-    }
-
-    #[tokio::test]
-    async fn subscribe_with_events_false_leaves_events_unchanged() {
-        let state = test_control_state();
-        let mut sub = ControlSubscription::new();
-        sub.events = true;
-
-        // subscribe with events:false should NOT disable events
-        let response = handle_control_command(
-            r#"{"id":"s1","type":"subscribe","sources":["DUT_UART"],"events":false}"#,
-            &state,
-            &mut sub,
-        )
-        .await
-        .unwrap();
-        let resp: serde_json::Value = serde_json::from_str(&response).unwrap();
-        assert_eq!(resp["type"], "subscribe.result");
-        assert!(
-            sub.events,
-            "events flag should remain true; only unsubscribe with events:false disables it"
-        );
-    }
-
-    #[tokio::test]
-    async fn unsubscribe_events_disables_events_flag() {
-        let state = test_control_state();
-        let mut sub = ControlSubscription::new();
-        sub.events = true;
-
-        let response = handle_control_command(
-            r#"{"id":"u1","type":"unsubscribe","sources":[],"events":false}"#,
-            &state,
-            &mut sub,
-        )
-        .await
-        .unwrap();
-        let resp: serde_json::Value = serde_json::from_str(&response).unwrap();
-        assert_eq!(resp["type"], "unsubscribe.result");
-        assert!(
-            !sub.events,
-            "events flag should be false after unsubscribe with events:false"
-        );
-    }
-
-    #[test]
-    fn should_forward_event_when_events_subscribed() {
-        let sub = ControlSubscription {
-            events: true,
-            ..Default::default()
-        };
-        let parsed = serde_json::json!({"type": "event", "event_id": "boot"});
-        assert!(should_forward_to_control_client(&parsed, &sub));
-    }
-
-    #[test]
-    fn should_not_forward_event_when_events_not_subscribed() {
-        let sub = ControlSubscription::new();
-        let parsed = serde_json::json!({"type": "event", "event_id": "boot"});
-        assert!(!should_forward_to_control_client(&parsed, &sub));
     }
 
     #[test]
@@ -2572,64 +1883,8 @@ mod tests {
         assert!(!should_forward_to_control_client(&parsed, &sub));
     }
 
-    #[test]
-    fn event_and_log_entry_interleave() {
-        let sub = ControlSubscription {
-            sources: HashSet::from(["DUT_UART".to_string()]),
-            events: true,
-        };
-
-        let event = serde_json::json!({"type": "event", "event_id": "boot"});
-        let log_entry = serde_json::json!({"type": "rx", "source_id": "DUT_UART"});
-        let unknown = serde_json::json!({"type": "unknown"});
-
-        // Both event and subscribed log entry are forwarded.
-        assert!(should_forward_to_control_client(&event, &sub));
-        assert!(should_forward_to_control_client(&log_entry, &sub));
-        // Unknown type is not.
-        assert!(!should_forward_to_control_client(&unknown, &sub));
-    }
-
     #[tokio::test]
-    async fn subscribe_events_only_without_sources() {
-        let state = test_control_state();
-        let mut sub = ControlSubscription::new();
-
-        let response = handle_control_command(
-            r#"{"id":"s1","type":"subscribe","events":true}"#,
-            &state,
-            &mut sub,
-        )
-        .await
-        .unwrap();
-        let resp: serde_json::Value = serde_json::from_str(&response).unwrap();
-        assert_eq!(resp["type"], "subscribe.result");
-        assert!(sub.events, "events-only subscribe should enable events");
-        assert!(sub.is_empty(), "no sources should be subscribed");
-    }
-
-    #[tokio::test]
-    async fn subscribe_events_only_with_empty_sources() {
-        let state = test_control_state();
-        let mut sub = ControlSubscription::new();
-
-        let response = handle_control_command(
-            r#"{"id":"s1","type":"subscribe","sources":[],"events":true}"#,
-            &state,
-            &mut sub,
-        )
-        .await
-        .unwrap();
-        let resp: serde_json::Value = serde_json::from_str(&response).unwrap();
-        assert_eq!(resp["type"], "subscribe.result");
-        assert!(
-            sub.events,
-            "events-only subscribe with empty sources should enable events"
-        );
-    }
-
-    #[tokio::test]
-    async fn subscribe_missing_sources_without_events_returns_error() {
+    async fn subscribe_missing_sources_returns_error() {
         let state = test_control_state();
         let mut sub = ControlSubscription::new();
 
@@ -2639,6 +1894,5 @@ mod tests {
                 .unwrap();
         let resp: serde_json::Value = serde_json::from_str(&response).unwrap();
         assert_eq!(resp["type"], "error");
-        assert!(!sub.events);
     }
 }

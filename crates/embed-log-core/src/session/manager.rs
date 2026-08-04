@@ -214,35 +214,6 @@ impl SessionManager {
         Ok(sequence)
     }
 
-    /// Append one event as a JSON line to events.jsonl.
-    pub fn append_event(&self, event: &serde_json::Value) -> Result<()> {
-        let path = self.session_dir.join("events.jsonl");
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-            .with_context(|| format!("open events.jsonl {}", path.display()))?;
-        let line = serde_json::to_string(event)?;
-        use std::io::Write;
-        writeln!(file, "{line}").with_context(|| format!("append event to {}", path.display()))?;
-        Ok(())
-    }
-
-    /// Load all events from events.jsonl, preserving order.
-    pub fn load_events(&self) -> Vec<serde_json::Value> {
-        let path = self.session_dir.join("events.jsonl");
-        if !path.exists() {
-            return Vec::new();
-        }
-        let text = match std::fs::read_to_string(&path) {
-            Ok(t) => t,
-            Err(_) => return Vec::new(),
-        };
-        text.lines()
-            .filter_map(|line| serde_json::from_str(line).ok())
-            .collect()
-    }
-
     /// Save markers to markers.json using the original-compatible wrapper shape.
     pub fn save_markers(&self, markers: &[serde_json::Value]) -> Result<()> {
         let path = self.session_dir.join("markers.json");
@@ -256,27 +227,19 @@ impl SessionManager {
     }
 
     /// Insert `new_marker`, replacing any existing marker at the same
-    /// `(paneId, lineIdx)`, and persist. With `events_only`, only `kind:
-    /// "event"` markers at that position are replaced (user markers are
-    /// preserved); otherwise any marker there is replaced. Returns the full
-    /// persisted list so the caller can broadcast a `markers_update`.
-    ///
-    /// Shared by the control-API marker.create handler and the event-marker
-    /// writer so the load/replace/save logic lives in one place.
+    /// `(paneId, lineIdx)`, and persist. Returns the full marker list so the
+    /// caller can broadcast a `markers_update`.
     pub fn replace_marker(
         &self,
         pane_id: &str,
         line_idx: u64,
         new_marker: serde_json::Value,
-        events_only: bool,
     ) -> Result<Vec<serde_json::Value>> {
         let mut markers = self.load_markers();
         markers.retain(|m| {
             let same_pane = m.get("paneId").and_then(|v| v.as_str()) == Some(pane_id);
             let same_idx = m.get("lineIdx").and_then(|v| v.as_u64()) == Some(line_idx);
-            let is_event = m.get("kind").and_then(|v| v.as_str()).unwrap_or("user") == "event";
-            let drop = same_pane && same_idx && (!events_only || is_event);
-            !drop
+            !(same_pane && same_idx)
         });
         markers.push(new_marker);
         self.save_markers(&markers)?;
@@ -325,7 +288,6 @@ impl SessionManager {
 
     fn build_manifest(&self) -> serde_json::Value {
         let html_path = self.html_path();
-        let events_path = self.session_dir.join("events.jsonl");
         json!({
             "session_id": self.session_id,
             "session_dir": self.session_dir.display().to_string(),
@@ -346,7 +308,6 @@ impl SessionManager {
             "source_files": self.source_files,
             "combined_file": self.combined_file,
             "session_html": html_path.display().to_string(),
-            "events_file": events_path.display().to_string(),
             "last_export_reason": serde_json::Value::Null,
             "html_status": self.html_status,
             "html_updated_at": self.html_updated_at,
@@ -416,29 +377,7 @@ mod tests {
     }
 
     #[test]
-    fn replace_marker_events_only_preserves_user_markers() {
-        let dir = temp_session_dir("replace-marker-event");
-        let mgr = manager(dir);
-
-        let user = json!({ "paneId": "dut", "lineIdx": 5, "kind": "user", "description": "mine" });
-        let old_event =
-            json!({ "paneId": "dut", "lineIdx": 5, "kind": "event", "description": "old" });
-        mgr.save_markers(&[user.clone(), old_event]).unwrap();
-
-        let new_event =
-            json!({ "paneId": "dut", "lineIdx": 5, "kind": "event", "description": "new" });
-        let markers = mgr.replace_marker("dut", 5, new_event, true).unwrap();
-
-        // User marker survives; the old event at this line is replaced.
-        assert_eq!(markers.len(), 2);
-        assert!(markers.iter().any(|m| m["kind"] == "user"));
-        let events: Vec<_> = markers.iter().filter(|m| m["kind"] == "event").collect();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0]["description"], "new");
-    }
-
-    #[test]
-    fn replace_marker_non_events_only_overwrites_any_marker_at_line() {
+    fn replace_marker_overwrites_existing_marker_at_line() {
         let dir = temp_session_dir("replace-marker-any");
         let mgr = manager(dir);
 
@@ -448,7 +387,7 @@ mod tests {
 
         let replacement =
             json!({ "paneId": "dut", "lineIdx": 5, "kind": "user", "description": "new" });
-        let markers = mgr.replace_marker("dut", 5, replacement, false).unwrap();
+        let markers = mgr.replace_marker("dut", 5, replacement).unwrap();
 
         assert_eq!(markers.len(), 1);
         assert_eq!(markers[0]["description"], "new");
@@ -584,66 +523,6 @@ mod tests {
         assert_eq!(raw["markers"], json!(markers));
         assert_eq!(mgr.load_markers(), markers);
 
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn append_event_writes_jsonl() {
-        let dir = temp_session_dir("append-event");
-        let mgr = manager(dir.clone());
-
-        let event1 = json!({"type": "event", "event_id": "boot_complete", "severity": "info"});
-        let event2 = json!({"type": "event", "event_id": "fatal_error", "severity": "error"});
-
-        mgr.append_event(&event1).unwrap();
-        mgr.append_event(&event2).unwrap();
-
-        let path = dir.join("events.jsonl");
-        assert!(path.exists());
-
-        let text = std::fs::read_to_string(&path).unwrap();
-        let lines: Vec<&str> = text.lines().collect();
-        assert_eq!(lines.len(), 2);
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(lines[0]).unwrap(),
-            event1
-        );
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(lines[1]).unwrap(),
-            event2
-        );
-
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn load_events_reads_all_events_in_order() {
-        let dir = temp_session_dir("load-events");
-        let mgr = manager(dir.clone());
-
-        let event1 = json!({"type": "event", "event_id": "a"});
-        let event2 = json!({"type": "event", "event_id": "b"});
-        let event3 = json!({"type": "event", "event_id": "c"});
-
-        mgr.append_event(&event1).unwrap();
-        mgr.append_event(&event2).unwrap();
-        mgr.append_event(&event3).unwrap();
-
-        let events = mgr.load_events();
-        assert_eq!(events.len(), 3);
-        assert_eq!(events[0], event1);
-        assert_eq!(events[1], event2);
-        assert_eq!(events[2], event3);
-
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn load_events_empty_when_no_file() {
-        let dir = temp_session_dir("no-events");
-        let mgr = manager(dir.clone());
-        let events = mgr.load_events();
-        assert!(events.is_empty());
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

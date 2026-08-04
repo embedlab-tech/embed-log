@@ -72,7 +72,7 @@ pub(crate) enum WatchCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Remove a watch and deactivate its event rule.
+    /// Remove a temporary watch.
     Remove {
         /// Watch identifier returned by `watch add`.
         watch_id: String,

@@ -29,7 +29,7 @@ This roadmap intentionally excludes session export and browsing work. Complete t
 
 - Surface source reconnect/failure state clearly in the TUI.
 - Show browser-only plugin capability notices in the TUI.
-- Keep core workflows equivalent: view, filter, TX, markers, events, export, and session opening.
+- Keep core workflows equivalent: view, filter, TX, markers, export, and session opening.
 - Do not attempt to execute browser JavaScript plugins in the TUI.
 
 ## 4. Zephyr dictionary logging reliability

@@ -3,7 +3,6 @@
 //! These mirror the JSON shapes produced by `embed-log-core`:
 //! - config message: `build_ws_config_message` (`runtime/server.rs`)
 //! - live log payload: `run_writer` (`runtime/server.rs`)
-//! - event payload: `run_writer` event branch
 //! - session info: `SessionManager::build_session_info`
 //! - markers_update / session_info / session_html_status / session_rotated / clear_logs
 //!
@@ -29,11 +28,9 @@ pub enum ServerMessage {
     Rx(LogPayload),
     #[serde(rename = "tx")]
     Tx(LogPayload),
-    /// Real-time or replayed event detection hit.
-    Event(EventPayload),
     /// Session metadata update (first_log_at set, rotation, etc.).
     SessionInfo(SessionInfoMessage),
-    /// Marker set replaced (user toggle or event-marker creation).
+    /// Marker set replaced.
     MarkersUpdate(MarkersUpdate),
     /// HTML export status change.
     SessionHtmlStatus(SessionHtmlStatus),
@@ -87,10 +84,7 @@ pub struct ConfigMessage {
     /// `plugin_name → JS source` (ignored by TUI; JS can't run here).
     #[serde(default)]
     pub plugin_scripts: Value,
-    /// `source_id → list of rule summaries` (name + severity).
-    #[serde(default)]
-    pub event_rules: HashMap<String, Vec<EventRuleSummary>>,
-    /// Existing markers (user + event).
+    /// Existing user markers.
     #[serde(default)]
     pub markers: Vec<Marker>,
 }
@@ -137,15 +131,6 @@ impl PanePluginEntry {
             Self::Detailed { name, .. } => name,
         }
     }
-}
-
-/// Rule summary from the config message (`event_rules[source][i]`).
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct EventRuleSummary {
-    #[serde(default)]
-    pub name: String,
-    #[serde(default)]
-    pub severity: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -205,42 +190,6 @@ pub struct LogPayload {
     /// Relative millis from first log.
     #[serde(default, rename = "relNum")]
     pub rel_num: f64,
-}
-
-// ---------------------------------------------------------------------------
-// Event payload
-// ---------------------------------------------------------------------------
-
-/// `type: "event"` — one event-detection hit.
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct EventPayload {
-    #[serde(default)]
-    pub event_id: String,
-    #[serde(default)]
-    pub source_id: String,
-    /// `"info" | "warn" | "error" | "fatal"`.
-    #[serde(default)]
-    pub severity: String,
-    #[serde(default)]
-    pub timestamp: String,
-    #[serde(default)]
-    pub timestamp_iso: String,
-    #[serde(default)]
-    pub timestamp_num: f64,
-    #[serde(default)]
-    pub rel_num: f64,
-    #[serde(default)]
-    pub line_idx: u64,
-    #[serde(default)]
-    pub sequence: u64,
-    #[serde(default)]
-    pub session_id: String,
-    #[serde(default)]
-    pub message: String,
-    #[serde(default)]
-    pub origin: String,
-    #[serde(default)]
-    pub captures: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -312,10 +261,7 @@ pub struct MarkersUpdate {
     pub session: Value,
 }
 
-/// A marker on a log line (user or event).
-///
-/// Shape matches `save_event_marker` and the frontend `save_markers` command.
-/// Missing `kind` defaults to `"user"` (backward compatible with older sessions).
+/// A user marker on a log line.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Marker {
@@ -329,25 +275,8 @@ pub struct Marker {
     pub num_ts: f64,
     #[serde(default)]
     pub description: String,
-    /// `"user"` (default if missing) or `"event"`.
-    #[serde(default = "default_user_kind")]
-    pub kind: String,
-    /// Severity for event markers; empty for user markers.
-    #[serde(default)]
-    pub severity: String,
     #[serde(default)]
     pub created_at: String,
-}
-
-fn default_user_kind() -> String {
-    "user".to_string()
-}
-
-impl Marker {
-    /// Whether this is an event-detected marker (vs a user-placed one).
-    pub fn is_event(&self) -> bool {
-        self.kind == "event"
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -462,7 +391,6 @@ mod tests {
             "frontend_plugins":{"custom-line":{"path":"custom-line.js"}},
             "pane_plugins":{"COAP_RAW":[{"name":"custom-line"}]},
             "plugin_scripts":{"custom-line":"/* js */"},
-            "event_rules":{"DUT":[{"name":"fatal_error","severity":"error"}]},
             "markers":[{"paneId":"DUT","lineIdx":3,"endIdx":3,"numTs":5000.0,"description":"note","kind":"user"}]
         }"#;
         let ServerMessage::Config(c) = serde_json::from_str(json).unwrap() else {
@@ -478,10 +406,8 @@ mod tests {
         assert_eq!(c.tabs.len(), 1);
         assert_eq!(c.tabs[0].label, "Device");
         assert_eq!(c.tabs[0].panes, ["DUT", "HOST"]);
-        assert_eq!(c.event_rules.get("DUT").unwrap()[0].severity, "error");
         assert_eq!(c.markers.len(), 1);
         assert_eq!(c.markers[0].pane_id, "DUT");
-        assert!(!c.markers[0].is_event());
         // pane_plugins entry: detailed variant
         let entry = &c.pane_plugins.get("COAP_RAW").unwrap()[0];
         assert_eq!(entry.name(), "custom-line");
@@ -522,32 +448,16 @@ mod tests {
     }
 
     #[test]
-    fn parses_event_payload() {
-        let json = r#"{"type":"event","event_id":"fatal_error","source_id":"DUT",
-            "severity":"error","timestamp":"06-14 09:30:45.123","timestamp_iso":"",
-            "timestamp_num":1718347845123.0,"rel_num":45123.0,"line_idx":42,
-            "message":"ZEPHYR FATAL ERROR","origin":"SERIAL","captures":["FATAL ERROR"]}"#;
-        let ServerMessage::Event(e) = serde_json::from_str(json).unwrap() else {
-            panic!("not event");
-        };
-        assert_eq!(e.event_id, "fatal_error");
-        assert_eq!(e.severity, "error");
-        assert_eq!(e.captures, ["FATAL ERROR"]);
-    }
-
-    #[test]
     fn parses_markers_update() {
         let json = r#"{"type":"markers_update","markers":[
-            {"paneId":"DUT","lineIdx":1,"endIdx":1,"numTs":100.0,"description":"u","kind":"user"},
-            {"paneId":"DUT","lineIdx":2,"endIdx":2,"numTs":200.0,"description":"e: boom","kind":"event","severity":"error"}
+            {"paneId":"DUT","lineIdx":1,"endIdx":1,"numTs":100.0,"description":"first"},
+            {"paneId":"DUT","lineIdx":2,"endIdx":2,"numTs":200.0,"description":"second"}
         ],"session":null}"#;
         let ServerMessage::MarkersUpdate(m) = serde_json::from_str(json).unwrap() else {
             panic!("not markers_update");
         };
         assert_eq!(m.markers.len(), 2);
-        assert!(!m.markers[0].is_event());
-        assert!(m.markers[1].is_event());
-        assert_eq!(m.markers[1].severity, "error");
+        assert_eq!(m.markers[1].description, "second");
     }
 
     #[test]
@@ -644,11 +554,9 @@ mod tests {
     }
 
     #[test]
-    fn marker_without_kind_defaults_to_user() {
-        // Older sessions/markers may omit `kind`; the TUI must treat them as user markers.
-        let json = r#"{"paneId":"DUT","lineIdx":1,"endIdx":1,"numTs":100.0,"description":"old"}"#;
+    fn marker_ignores_legacy_extra_fields() {
+        let json = r#"{"paneId":"DUT","lineIdx":1,"endIdx":1,"numTs":100.0,"description":"old","kind":"event","severity":"error"}"#;
         let m: Marker = serde_json::from_str(json).unwrap();
-        assert_eq!(m.kind, "user");
-        assert!(!m.is_event());
+        assert_eq!(m.description, "old");
     }
 }

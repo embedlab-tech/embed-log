@@ -17,9 +17,7 @@ use std::collections::{HashMap, HashSet};
 
 use regex::Regex;
 
-use crate::protocol::{
-    ConfigMessage, EventPayload, EventRuleSummary, LogPayload, Marker, SessionInfo,
-};
+use crate::protocol::{ConfigMessage, LogPayload, Marker, SessionInfo};
 
 /// Per-pane cap on retained log lines. The browser virtualizes over the full array,
 /// but a terminal viewer rarely needs more than this in memory; older lines are
@@ -146,14 +144,6 @@ pub struct State {
     pub scroll: HashMap<String, usize>,
     /// Markers keyed by pane → list.
     pub markers: HashMap<String, Vec<Marker>>,
-    /// Whether event-marker navigation includes event markers.
-    pub include_event_markers: bool,
-    /// Detected events (append-only except rebuild).
-    pub events: Vec<EventPayload>,
-    /// `source_id → rule summaries` (non-empty ⇒ events tab shown).
-    pub event_rules: HashMap<String, Vec<EventRuleSummary>>,
-    /// Cached "events enabled" flag (any source has ≥1 rule).
-    pub events_enabled: bool,
     /// Timestamp display mode.
     pub timestamp_mode: TimestampMode,
     /// First-log RFC3339 (drives relative timestamps).
@@ -196,8 +186,6 @@ pub struct State {
     pub tx_match_pos: Option<usize>,
     /// Last TX result/status line shown in the status bar.
     pub tx_status: Option<String>,
-    /// Events view state (cursor, zoom, filters, detail popup).
-    pub events_view: crate::events::EventsView,
     /// Whether the keyboard help overlay is visible.
     pub show_help: bool,
 }
@@ -226,23 +214,12 @@ impl State {
         }
     }
 
-    /// Whether the events tab is currently active.
-    /// The events tab sits at index `tabs.len()` (appended when events_enabled).
-    pub fn events_tab_active(&self) -> bool {
-        self.events_enabled && !self.unwrap && self.active_tab == self.tabs.len()
-    }
-
-    /// Number of tab slots (tabs + 1 for events if enabled, or panes in unwrap).
+    /// Number of tab slots, or panes while unwrapped.
     pub fn tab_count(&self) -> usize {
         if self.unwrap {
             self.panes.len()
         } else {
-            let n = self.tabs.len();
-            if self.events_enabled {
-                n + 1
-            } else {
-                n
-            }
+            self.tabs.len()
         }
     }
 
@@ -298,9 +275,6 @@ impl State {
             .iter()
             .map(|(k, v)| (k.clone(), v.iter().map(|e| e.name().to_string()).collect()))
             .collect();
-        self.event_rules = cfg.event_rules.clone();
-        self.events_enabled = self.event_rules.values().any(|rs| !rs.is_empty());
-
         // Rebuild tabs + deduped pane list (insertion order).
         self.tabs = cfg
             .tabs
@@ -337,9 +311,6 @@ impl State {
                 .push(m.clone());
         }
 
-        // Events: a fresh config means a fresh session — drop old events.
-        self.events.clear();
-
         // Timestamp context from session.
         self.timestamp_mode = self.session.timestamp_mode.parse().unwrap_or_default();
         self.first_log_at = self.session.first_log_at.clone();
@@ -372,11 +343,6 @@ impl State {
         }
     }
 
-    /// Push a detected event.
-    pub fn push_event(&mut self, ev: EventPayload) {
-        self.events.push(ev);
-    }
-
     /// Markers for a pane, sorted by line_idx (stable for navigation).
     pub fn markers_for(&self, pane_id: &str) -> Vec<Marker> {
         let mut ms = self.markers.get(pane_id).cloned().unwrap_or_default();
@@ -399,9 +365,6 @@ impl State {
         self.selected.clear();
         self.at_bottom.clear();
         self.markers.clear();
-        self.events.clear();
-        self.event_rules.clear();
-        self.events_enabled = false;
         self.active_tab = 0;
         self.active_pane = 0;
         self.sync_ts = None;
@@ -584,10 +547,10 @@ impl State {
             return Vec::new();
         };
         let markers = self.markers.entry(pane.clone()).or_default();
-        // Toggle: remove if exists (user marker only), else add.
+        // Toggle: remove if one exists at this line, else add.
         let exists = markers
             .iter()
-            .position(|m| m.pane_id == pane && m.line_idx == line_idx && !m.is_event());
+            .position(|m| m.pane_id == pane && m.line_idx == line_idx);
         if let Some(pos) = exists {
             markers.remove(pos);
         } else {
@@ -597,8 +560,6 @@ impl State {
                 end_idx: line_idx,
                 num_ts,
                 description: description.to_string(),
-                kind: "user".to_string(),
-                severity: String::new(),
                 created_at: chrono::Local::now().to_rfc3339(),
             });
         }
@@ -613,10 +574,8 @@ impl State {
         all
     }
 
-    /// Navigate to the prev/next marker in the active pane.
-    /// `include_events`: whether to consider event markers.
-    /// Returns the line_idx of the target marker, or None.
-    pub fn nav_marker(&self, forward: bool, include_events: bool) -> Option<u64> {
+    /// Navigate to the previous or next marker in the active pane.
+    pub fn nav_marker(&self, forward: bool) -> Option<u64> {
         let pane = self.active_pane_id()?;
         let scroll = self.scroll_of(&pane);
         let markers = self.markers_for(&pane);
@@ -628,13 +587,11 @@ impl State {
         let target = if forward {
             markers
                 .iter()
-                .filter(|m| include_events || !m.is_event())
                 .find(|m| m.num_ts > current_ts.unwrap_or(f64::MIN))
                 .map(|m| m.line_idx)
         } else {
             markers
                 .iter()
-                .filter(|m| include_events || !m.is_event())
                 .rev()
                 .find(|m| m.num_ts < current_ts.unwrap_or(f64::MAX))
                 .map(|m| m.line_idx)
@@ -864,20 +821,6 @@ mod tests {
         assert_eq!(dut[0].line_idx, 1);
         assert_eq!(dut[1].line_idx, 2);
         assert_eq!(s.markers_for("HOST").len(), 1);
-    }
-
-    #[test]
-    fn events_enabled_flag_reflects_rules() {
-        let mut s = State::default();
-        let mut cfg = cfg_with(vec![("T", vec!["DUT"])]);
-        cfg.event_rules
-            .insert("DUT".into(), vec![EventRuleSummary::default()]);
-        s.apply_config(&cfg);
-        assert!(s.events_enabled);
-
-        let mut s2 = State::default();
-        s2.apply_config(&cfg_with(vec![("T", vec!["DUT"])]));
-        assert!(!s2.events_enabled);
     }
 
     #[test]

@@ -313,12 +313,8 @@ export function applyLineDom(div, line, paneId, idx, filterRx) {
     div.classList.toggle("has-marker", marker !== null);
     if (marker !== null) {
         div.dataset.markerTooltip = marker.description || "";
-        div.dataset.kind = marker.kind || "user";
-        div.dataset.severity = marker.severity || "";
     } else {
         delete div.dataset.markerTooltip;
-        delete div.dataset.kind;
-        delete div.dataset.severity;
     }
     if (!matchesFilter(line, filterRx)) {
         div.style.display = "none";
@@ -490,10 +486,8 @@ function _markerAt(paneId, idx, line = null) {
     const markers = state.markers[paneId];
     if (!markers) return null;
     for (const m of markers) {
-        const isEvent = (m.kind || "user") === "event";
-        const lineKey = isEvent && Number.isFinite(line?.serverLineIdx) ? line.serverLineIdx : idx;
         const end = m.endIdx ?? m.lineIdx;
-        if (lineKey >= m.lineIdx && lineKey <= end) return m;
+        if (idx >= m.lineIdx && idx <= end) return m;
     }
     return null;
 }

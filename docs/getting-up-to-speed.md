@@ -59,7 +59,7 @@ embed-log run /dev/ttyUSB0 /dev/ttyUSB1 --save-config embed-log.yml
 
 ## 3. Move to a repeatable YAML capture
 
-Use a config for custom tabs, two-pane layouts, different source baud rates, parsers, events, merges, plugins, UDP, and packet capture.
+Use a config for custom tabs, two-pane layouts, different source baud rates, parsers, merges, plugins, UDP, and packet capture.
 
 ```bash
 cp config-samples/single_uart_single_tab.yml embed-log.yml
@@ -95,7 +95,7 @@ Both UIs use the same server/session pipeline.
 
 ### Browser UI
 
-The browser is the full viewer: tabs/panes, filters, UART TX, markers, events, static HTML export, and browser plugins.
+The browser is the full viewer: tabs/panes, filters, UART TX, markers, static HTML export, and browser plugins.
 
 ### Terminal UI
 
@@ -109,7 +109,7 @@ Useful keys:
 - `:` or `i`: send UART text from a writable pane;
 - `/`: regex filter the active pane; empty filter clears it;
 - `m`: toggle a marker; `[` and `]`: navigate markers;
-- `e`: events tab; `x`: export session HTML;
+- `x`: export session HTML;
 - `?`: built-in keybinding help.
 
 The TUI does not execute browser JavaScript plugins. See [Terminal UI](tui.md).
@@ -122,7 +122,6 @@ Every run creates a session directory containing structured data and human-share
 logs/<session-id>/
 ├── manifest.json
 ├── combined.jsonl
-├── events.jsonl
 ├── markers.json
 ├── session.html
 └── per-source log files
@@ -155,7 +154,7 @@ The control WebSocket provides source-aware log subscription, injection, UART TX
 ws://127.0.0.1:18080/api/v1/control
 ```
 
-The Python SDK can inject test output, issue UART commands, subscribe to entries, and run regex watchers. Example:
+The Python SDK can inject test output, issue UART commands, subscribe to source-filtered entries, and create markers. Example:
 
 ```python
 from embed_log_sdk import EmbedLogClient
@@ -187,7 +186,7 @@ embed-log doctor --config embed-log.yml
 1. Start with quick-run while bringing up hardware.
 2. Save YAML once source names/layout/parser choices stabilize.
 3. Keep logs in a project-relative directory or CI artifact path.
-4. Mark failures/events while live.
+4. Mark failures while live.
 5. Capture pytest and host output through configured file or UDP sources.
 6. Share `session.html` or a bounded JSONL export for diagnosis.
 7. Archive or remove old session directories using project retention tooling.

@@ -38,8 +38,7 @@ The standalone `embed-log-tui` binary is a client only. It does not load YAML co
 - absolute/relative timestamp toggle
 - selection and clipboard copy
 - per-pane regex filtering (`/`)
-- user/event markers and marker navigation
-- events timeline tab when event rules are configured
+- user markers and marker navigation
 - clear active pane
 - export the current session as self-contained HTML (`x`)
 - UART TX input for writable UART sources
@@ -72,13 +71,11 @@ Press `?` inside the TUI to show the built-in help overlay.
 | `/` | Filter active pane with a regex; empty filter clears |
 | `m` | Toggle marker on current line |
 | `[`, `]` | Previous/next marker |
-| `M` | Include/exclude event markers in marker navigation |
 | `t` | Toggle absolute/relative timestamps |
 | `u` | Toggle unwrap mode |
 | `x` | Export the current session as self-contained HTML |
 | `C` | Clear active pane in the UI |
 | `:`, `i` | Open TX input for writable UART panes |
-| `e` | Open Events tab when event rules are configured |
 | `?` | Show/close help overlay |
 
 ## Related CLI commands
@@ -89,6 +86,5 @@ Inspect recorded sessions from the terminal:
 embed-log sessions list --dir logs
 embed-log sessions combined <SESSION_ID> --dir logs --lines 100
 embed-log sessions tail-combined <SESSION_ID> --dir logs --follow
-embed-log sessions events <SESSION_ID> --dir logs --severity fatal
 embed-log sessions search --dir logs --contains panic
 ```

@@ -9,8 +9,7 @@
 //!   `lines.js::_lineTagClass`).
 //! - Filter: per-pane regex skips non-matching lines from the visible window
 //!   while keeping raw indices stable.
-//! - Marker gutter: a colored left marker for lines with markers (user or
-//!   event, severity-colored for event markers).
+//! - Marker gutter: a colored left marker for user-marked lines.
 //!
 //! The browser parses ANSI escapes in the `data` field; the TUI instead uses
 //! the structured `message` + `color` fields and applies its own styling —
@@ -85,22 +84,10 @@ fn classify_tag(tag: &str) -> Option<Color> {
 /// The marker gutter symbol for a line (colored left border).
 pub fn marker_for_line(markers: &[Marker], line_idx: u64) -> Option<(char, Color)> {
     // First matching marker wins (markers are sorted by line_idx upstream).
-    let m = markers
+    markers
         .iter()
         .find(|m| m.line_idx <= line_idx && line_idx <= m.end_idx.max(m.line_idx))?;
-    if m.is_event() {
-        // Severity color for event markers; default red if missing.
-        let c = match m.severity.as_str() {
-            "fatal" => Color::LightRed,
-            "error" => Color::Red,
-            "warn" => Color::Yellow,
-            "info" => Color::Blue,
-            _ => Color::Red,
-        };
-        Some(('▎', c))
-    } else {
-        Some(('▎', Color::Cyan))
-    }
+    Some(('▎', Color::Cyan))
 }
 
 /// A single formatted log line ready to render.
@@ -332,28 +319,12 @@ mod tests {
             pane_id: "DUT".into(),
             line_idx: 5,
             end_idx: 5,
-            kind: "user".into(),
             ..Default::default()
         }];
         let (ch, color) = marker_for_line(&markers, 5).unwrap();
         assert_eq!(ch, '▎');
         assert_eq!(color, Color::Cyan);
         assert!(marker_for_line(&markers, 6).is_none());
-    }
-
-    #[test]
-    fn marker_gutter_for_event_marker_severity_colored() {
-        let markers = vec![Marker {
-            pane_id: "DUT".into(),
-            line_idx: 3,
-            end_idx: 3,
-            kind: "event".into(),
-            severity: "error".into(),
-            ..Default::default()
-        }];
-        let (ch, color) = marker_for_line(&markers, 3).unwrap();
-        assert_eq!(ch, '▎');
-        assert_eq!(color, Color::Red);
     }
 
     #[test]

@@ -39,8 +39,8 @@ Quick runs write the same session artifacts as YAML-based runs. By default they 
 embed-log run /dev/ttyUSB0 --log-dir ./captures
 ```
 
-Each session includes source logs, `combined.jsonl`, a manifest, markers/events, and a self-contained `session.html` export when the run exits.
+Each session includes source logs, `combined.jsonl`, a manifest, user markers, and a self-contained `session.html` export when the run exits.
 
 ## When to use YAML
 
-Use a saved YAML configuration for per-source parsers, different baud rates, event rules, plugins, merges, and custom layouts. Start from a file under `config-samples/` when useful.
+Use a saved YAML configuration for per-source parsers, different baud rates, plugins, merges, and custom layouts. Start from a file under `config-samples/` when useful.

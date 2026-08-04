@@ -4,7 +4,6 @@ import { createTabWithPanes } from './tabcreate.js';
 import { configurePanePlugins, resetPanePlugins } from './pluginRuntime.js';
 
 import { switchTab } from './tabs.js';
-import { initEventsTab, addEvent, destroyEventsTab, renderTimeline } from './events.js';
 
 let ws = null;
 let wsRetryDelay = 1000;
@@ -35,12 +34,6 @@ function resetLayoutForNewSession() {
     state.selected = {};
     Object.keys(PANE_LABELS).forEach(key => delete PANE_LABELS[key]);
     resetPanePlugins();
-
-    // Tear down events timeline — recreated if the new config has rules.
-    destroyEventsTab();
-    state.events = [];
-    state.eventsEnabled = false;
-    state.eventRules = {};
 }
 
 function wsSetStatus(cls, text) {
@@ -134,16 +127,6 @@ async function _handleConfigMessage(msg) {
     Object.keys(PANE_LABELS).forEach(key => delete PANE_LABELS[key]);
     Object.assign(PANE_LABELS, paneLabels);
 
-    // Event detection — initialize before tab creation so the Events button
-    // is appended on the first renderTabBar() pass. Pane labels are already
-    // assigned so source filters use user-facing names.
-    const eventRules = msg.event_rules && typeof msg.event_rules === "object" ? msg.event_rules : {};
-    state.eventRules = eventRules;
-    state.eventsEnabled = Object.values(eventRules).some(rules => Array.isArray(rules) && rules.length > 0);
-    if (state.eventsEnabled) {
-        state.events = [];
-        initEventsTab();
-    }
     if (TABS.length === 0 && msg.tabs && msg.tabs.length > 0) {
         msg.tabs.forEach(tab =>
             createTabWithPanes(tab.label, tab.panes, { switchTo: false, paneLabels: tab.pane_labels || paneLabels })
@@ -226,8 +209,6 @@ function wsConnect() {
             currentSessionId = msg.session?.id || currentSessionId;
             state.syncTs = null;
             state.syncTabSwitch = false;
-            state.events = [];
-            renderTimeline();
             clearAllPaneContents();
             setTimestampContext({
                 mode: msg.session?.timestamp_mode || "absolute",
@@ -262,16 +243,6 @@ function wsConnect() {
             }
             refreshStatsUi();
             window.__embedLogSchedulePersist?.();
-            return;
-        }
-
-        if (typeof msg.type === "string" && msg.type.startsWith("event_rule.")) {
-            window.dispatchEvent(new CustomEvent("embed-log-event-rule", { detail: msg }));
-            return;
-        }
-
-        if (msg.type === "event") {
-            addEvent(msg);
             return;
         }
 

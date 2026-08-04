@@ -4,9 +4,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use chrono::{DateTime, Utc};
+use regex::Regex;
 use serde_json::{json, Value};
-
-use crate::config::EventRule;
 
 pub const MAX_WATCH_TTL_MS: u64 = 24 * 60 * 60 * 1_000;
 pub const MAX_WATCHES: usize = 1_024;
@@ -17,6 +16,7 @@ pub struct TemporaryWatch {
     pub source_id: String,
     pub kind: String,
     pub pattern: String,
+    pub regex: Regex,
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
     pub once: bool,
@@ -57,108 +57,60 @@ impl TemporaryWatch {
     }
 }
 
-pub fn remove_runtime_rule(
-    rules: &Arc<RwLock<HashMap<String, Vec<EventRule>>>>,
-    source_id: &str,
-    watch_id: &str,
-) {
-    if let Ok(mut rules) = rules.write() {
-        if let Some(source_rules) = rules.get_mut(source_id) {
-            source_rules.retain(|rule| rule.name != watch_id);
-            if source_rules.is_empty() {
-                rules.remove(source_id);
-            }
-        }
-    }
-}
-
-/// Mark an active watch expired and deactivate its event rule.
-pub fn expire_watch(
-    watches: &Arc<RwLock<HashMap<String, TemporaryWatch>>>,
-    rules: &Arc<RwLock<HashMap<String, Vec<EventRule>>>>,
-    watch_id: &str,
-) {
-    let source = if let Ok(mut watches) = watches.write() {
-        watches.get_mut(watch_id).and_then(|watch| {
+pub fn expire_watch(watches: &Arc<RwLock<HashMap<String, TemporaryWatch>>>, watch_id: &str) {
+    if let Ok(mut watches) = watches.write() {
+        if let Some(watch) = watches.get_mut(watch_id) {
             if watch.status == WatchStatus::Active {
                 watch.status = WatchStatus::Expired;
-                Some(watch.source_id.clone())
-            } else {
-                None
             }
-        })
-    } else {
-        None
-    };
-    if let Some(source) = source {
-        remove_runtime_rule(rules, &source, watch_id);
+        }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WatchMatchResult {
-    NotWatch,
-    Ignored,
-    Retained,
-}
-
-/// Retain a match before any waiter needs to connect. TX and expired matches
-/// are ignored and do not produce persisted watch events.
-pub fn retain_watch_match(
+/// Match a committed log record against active watches for its source. Matches
+/// are retained in process memory before a waiter needs to connect. TX records
+/// never satisfy a watch.
+pub fn retain_matching_watches(
     watches: &Arc<RwLock<HashMap<String, TemporaryWatch>>>,
-    rules: &Arc<RwLock<HashMap<String, Vec<EventRule>>>>,
-    watch_id: &str,
+    source_id: &str,
     is_tx: bool,
-    event_payload: &Value,
-    session_id: &str,
-) -> WatchMatchResult {
-    let (source, once) = if let Ok(mut watches) = watches.write() {
-        let Some(watch) = watches.get_mut(watch_id) else {
-            return WatchMatchResult::NotWatch;
-        };
-        if watch.status != WatchStatus::Active {
-            return WatchMatchResult::Ignored;
-        }
-        if Utc::now() >= watch.expires_at {
-            watch.status = WatchStatus::Expired;
-            let source = watch.source_id.clone();
-            drop(watches);
-            remove_runtime_rule(rules, &source, watch_id);
-            return WatchMatchResult::Ignored;
-        }
-        if is_tx {
-            return WatchMatchResult::Ignored;
-        }
-        let mut retained = event_payload.clone();
-        if let Some(object) = retained.as_object_mut() {
-            object.insert("session_id".to_string(), json!(session_id));
-            object.entry("sequence".to_string()).or_insert(Value::Null);
-        }
-        watch.matched = Some(retained);
-        watch.status = WatchStatus::Matched;
-        (watch.source_id.clone(), watch.once)
-    } else {
-        return WatchMatchResult::Ignored;
-    };
-    if once {
-        remove_runtime_rule(rules, &source, watch_id);
+    message: &str,
+    record: &Value,
+) {
+    if is_tx {
+        return;
     }
-    WatchMatchResult::Retained
+    let Ok(mut watches) = watches.write() else {
+        return;
+    };
+    let now = Utc::now();
+    for watch in watches.values_mut() {
+        if watch.source_id != source_id || watch.status != WatchStatus::Active {
+            continue;
+        }
+        if now >= watch.expires_at {
+            watch.status = WatchStatus::Expired;
+            continue;
+        }
+        let Some(captures) = watch.regex.captures(message) else {
+            continue;
+        };
+        let captures = captures
+            .iter()
+            .map(|capture| capture.map_or_else(String::new, |value| value.as_str().to_string()))
+            .collect::<Vec<_>>();
+        let mut matched = record.clone();
+        if let Some(object) = matched.as_object_mut() {
+            object.insert("captures".to_string(), json!(captures));
+        }
+        watch.matched = Some(matched);
+        watch.status = WatchStatus::Matched;
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use regex::Regex;
-
-    fn rule(id: &str) -> EventRule {
-        EventRule {
-            name: id.to_string(),
-            pattern: "ready".to_string(),
-            severity: "info".to_string(),
-            regex: Regex::new("ready").unwrap(),
-        }
-    }
 
     fn active_watch(id: &str) -> TemporaryWatch {
         TemporaryWatch {
@@ -166,8 +118,9 @@ mod tests {
             source_id: "DUT".to_string(),
             kind: "contains".to_string(),
             pattern: "ready".to_string(),
+            regex: Regex::new("ready").unwrap(),
             created_at: Utc::now(),
-            expires_at: Utc::now() + chrono::Duration::seconds(10),
+            expires_at: Utc::now() + chrono::Duration::seconds(30),
             once: true,
             status: WatchStatus::Active,
             matched: None,
@@ -175,53 +128,51 @@ mod tests {
     }
 
     #[test]
-    fn match_is_retained_and_once_rule_is_removed() {
+    fn match_is_retained_without_event_persistence() {
         let watches = Arc::new(RwLock::new(HashMap::from([(
             "watch-1".to_string(),
             active_watch("watch-1"),
         )])));
-        let rules = Arc::new(RwLock::new(HashMap::from([(
-            "DUT".to_string(),
-            vec![rule("watch-1")],
-        )])));
-        assert_eq!(
-            retain_watch_match(
-                &watches,
-                &rules,
-                "watch-1",
-                false,
-                &json!({"message":"ready","line_idx":2}),
-                "session-a",
-            ),
-            WatchMatchResult::Retained
-        );
-        let watch = watches.read().unwrap()["watch-1"].clone();
+        let record = json!({
+            "type":"rx",
+            "source_id":"DUT",
+            "message":"system ready",
+            "sequence":42,
+            "session_id":"session-a"
+        });
+
+        retain_matching_watches(&watches, "DUT", false, "system ready", &record);
+
+        let watches = watches.read().unwrap();
+        let watch = watches.get("watch-1").unwrap();
         assert_eq!(watch.status, WatchStatus::Matched);
-        assert_eq!(watch.matched.unwrap()["session_id"], "session-a");
-        assert!(rules.read().unwrap().get("DUT").is_none());
+        assert_eq!(watch.matched.as_ref().unwrap()["sequence"], 42);
+        assert_eq!(watch.matched.as_ref().unwrap()["session_id"], "session-a");
     }
 
     #[test]
-    fn tx_does_not_consume_watch() {
+    fn tx_does_not_satisfy_watch() {
         let watches = Arc::new(RwLock::new(HashMap::from([(
             "watch-1".to_string(),
             active_watch("watch-1"),
         )])));
-        let rules = Arc::new(RwLock::new(HashMap::new()));
-        assert_eq!(
-            retain_watch_match(
-                &watches,
-                &rules,
-                "watch-1",
-                true,
-                &json!({"message":"ready"}),
-                "session-a",
-            ),
-            WatchMatchResult::Ignored
-        );
+        retain_matching_watches(&watches, "DUT", true, "ready", &json!({"message":"ready"}));
         assert_eq!(
             watches.read().unwrap()["watch-1"].status,
             WatchStatus::Active
+        );
+    }
+
+    #[test]
+    fn expiration_updates_active_watch() {
+        let watches = Arc::new(RwLock::new(HashMap::from([(
+            "watch-1".to_string(),
+            active_watch("watch-1"),
+        )])));
+        expire_watch(&watches, "watch-1");
+        assert_eq!(
+            watches.read().unwrap()["watch-1"].status,
+            WatchStatus::Expired
         );
     }
 }

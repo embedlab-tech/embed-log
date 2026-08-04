@@ -54,12 +54,6 @@ pub fn handle_key(
 
     let visible = pane_visible_rows(terminal_height);
 
-    // Events tab has its own key handling (cursor, zoom, sync, detail).
-    if state.events_tab_active() {
-        handle_events_key(state, client, key, visible);
-        return KeyAction::Continue;
-    }
-
     match key.code {
         // ── Help / TX open ──
         KeyCode::Char('?') => state.show_help = true,
@@ -79,10 +73,6 @@ pub fn handle_key(
         // ── Tab navigation ──
         KeyCode::Tab => cycle_tab(state, true),
         KeyCode::BackTab => cycle_tab(state, false),
-        KeyCode::Char('e') if state.events_enabled && !state.unwrap => {
-            state.active_tab = state.tabs.len();
-            state.active_pane = 0;
-        }
         // ── Pane focus (within a 2-pane tab) ──
         KeyCode::Char('h') | KeyCode::Left if !key.modifiers.contains(KeyModifiers::SHIFT) => {
             if !state.unwrap {
@@ -223,7 +213,7 @@ pub fn handle_key(
         }
         // Marker navigation: [ prev, ] next.
         KeyCode::Char('[') => {
-            if let Some(target) = state.nav_marker(false, state.include_event_markers) {
+            if let Some(target) = state.nav_marker(false) {
                 if let Some(pane) = state.active_pane_id() {
                     let target = target as usize;
                     let center = target.saturating_sub(visible / 2);
@@ -232,7 +222,7 @@ pub fn handle_key(
             }
         }
         KeyCode::Char(']') => {
-            if let Some(target) = state.nav_marker(true, state.include_event_markers) {
+            if let Some(target) = state.nav_marker(true) {
                 if let Some(pane) = state.active_pane_id() {
                     let target = target as usize;
                     let center = target.saturating_sub(visible / 2);
@@ -240,11 +230,6 @@ pub fn handle_key(
                 }
             }
         }
-        // Toggle include event markers in navigation.
-        KeyCode::Char('M') => {
-            state.include_event_markers = !state.include_event_markers;
-        }
-
         // ── Toggles ──
         KeyCode::Char('u') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
             state.unwrap = !state.unwrap;
@@ -355,74 +340,6 @@ fn cycle_tab(state: &mut State, forward: bool) {
         state.active_tab = (state.active_tab + len - 1) % len;
     }
     state.active_pane = 0;
-}
-
-/// Handle keys in the Events tab.
-fn handle_events_key(
-    state: &mut State,
-    _client: &mut ClientHandle,
-    key: &InputKey,
-    visible: usize,
-) {
-    let events_len = crate::events::EventsView::visible_events(state, &state.events_view).len();
-
-    match key.code {
-        // Cursor movement.
-        KeyCode::Char('j') | KeyCode::Down => {
-            state.events_view.move_cursor(1, events_len);
-        }
-        KeyCode::Char('k') | KeyCode::Up => {
-            state.events_view.move_cursor(-1, events_len);
-        }
-        KeyCode::PageDown => {
-            state.events_view.move_cursor(10, events_len);
-        }
-        KeyCode::PageUp => {
-            state.events_view.move_cursor(-10, events_len);
-        }
-
-        // Zoom.
-        KeyCode::Char('+') | KeyCode::Char('=') => {
-            let data = crate::events::EventsView::data_range(state, &state.events_view);
-            let current = crate::events::EventsView::effective_range(state, &state.events_view);
-            state.events_view.zoom_ranges(data, current, 1.7);
-        }
-        KeyCode::Char('-') => {
-            let data = crate::events::EventsView::data_range(state, &state.events_view);
-            let current = crate::events::EventsView::effective_range(state, &state.events_view);
-            state.events_view.zoom_ranges(data, current, 1.0 / 1.7);
-        }
-        KeyCode::Char('0') => {
-            state.events_view.reset_zoom();
-        }
-
-        // Detail popup toggle.
-        KeyCode::Char('K') => {
-            state.events_view.show_detail = !state.events_view.show_detail;
-        }
-        KeyCode::Esc => {
-            state.events_view.show_detail = false;
-        }
-
-        // Enter: sync log panes to the event's timestamp + switch to source tab.
-        KeyCode::Enter => {
-            let events = crate::events::EventsView::visible_events(state, &state.events_view);
-            if let Some(ev) = events.get(state.events_view.cursor) {
-                let ts = ev.timestamp_num;
-                let source = ev.source_id.clone();
-                // Switch to the tab containing the source.
-                let tab_idx = state.tabs.iter().position(|t| t.pane_ids.contains(&source));
-                if let Some(idx) = tab_idx {
-                    state.active_tab = idx;
-                    state.active_pane = 0;
-                }
-                // Sync panes to the event timestamp.
-                state.sync_panes_to_ts(ts, visible);
-            }
-        }
-
-        _ => {}
-    }
 }
 
 #[cfg(test)]

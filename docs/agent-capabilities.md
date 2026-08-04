@@ -1,6 +1,6 @@
 # Agent capabilities reference
 
-This reference describes Embed-log capabilities agents can use now. For the broader roadmap, see [Automation and agent plan](automation-agent-plan.md).
+This reference describes Embed-log capabilities agents can use now.
 
 ## Discover the installed CLI
 
@@ -48,7 +48,7 @@ embed-log tx --instance bench-a --source DUT_UART \
 
 Embed-log subscribes before writing, ignores TX records for matching, and returns the matching RX record plus bounded live context. Use `--expect-regex` only when substring matching is insufficient. `--raw`, `--file`, and `--stdin` send exact bytes; `--line` safely applies the UART line ending. An `EXPECT_TIMEOUT` response includes bounded evidence and exits unsuccessfully.
 
-For events triggered outside UART TX, add a temporary retained watch:
+For conditions triggered outside UART TX, add a temporary retained watch:
 
 ```bash
 watch_id=$(embed-log watch add --instance bench-a --source DUT_UART \
@@ -67,11 +67,9 @@ Start with an overview:
 embed-log sessions summary latest --config embed-log.yml
 ```
 
-Then inspect persisted events and search only relevant evidence:
+Then search only relevant evidence:
 
 ```bash
-embed-log sessions events latest --config embed-log.yml --format compact
-
 embed-log sessions search --config embed-log.yml \
   --session latest --source DUT_UART \
   --regex 'panic|fatal|watchdog' \
@@ -95,7 +93,7 @@ Compact text defaults to `T+00:12.453 719 DUT_UART#428 boot complete`, where `71
 
 Prefer `compact` for reasoning and `mini-jsonl` for structured processing. Read full JSONL only when exact fields are required.
 
-## Subscribe to live logs and events
+## Subscribe to live logs
 
 Connect to the control WebSocket:
 
@@ -103,89 +101,24 @@ Connect to the control WebSocket:
 ws://127.0.0.1:18080/api/v1/control
 ```
 
-Subscribe to sources and backend-detected events:
+Subscribe only to the sources relevant to the investigation:
 
 ```json
 {
   "id": "sub-1",
   "type": "subscribe",
-  "sources": ["DUT_UART", "PYTEST"],
-  "events": true
+  "sources": ["DUT_UART", "PYTEST"]
 }
 ```
 
-The server sends `log.entry` and `event` messages. An event contains its rule ID, source, severity, timestamps, line index, message, and regex captures.
-
-## Create runtime event rules
-
-Create a rule without editing YAML:
-
-```json
-{
-  "id": "rule-1",
-  "type": "event_rule.create",
-  "source_id": "DUT_UART",
-  "name": "agent-watchdog-reset",
-  "pattern": "watchdog reset after \\d+s",
-  "severity": "error"
-}
-```
-
-Future matches use the standard path:
-
-```text
-broadcast event → events.jsonl → event marker → Events view
-```
-
-Runtime rules remain active for the current Embed-log process/session.
-
-## Manage rules
-
-List active static and runtime rules:
-
-```json
-{ "id": "rules-1", "type": "event_rule.list" }
-```
-
-Each result includes `source_id`, `name`, `pattern`, `severity`, and `origin` (`static` or `runtime`).
-
-Export active rules as companion YAML:
-
-```json
-{ "id": "rules-2", "type": "event_rule.export" }
-```
-
-Delete a runtime rule:
-
-```json
-{
-  "id": "rules-3",
-  "type": "event_rule.delete",
-  "source_id": "DUT_UART",
-  "name": "agent-watchdog-reset"
-}
-```
-
-Persist it for future runs:
-
-```json
-{
-  "id": "rules-4",
-  "type": "event_rule.promote",
-  "source_id": "DUT_UART",
-  "name": "agent-watchdog-reset"
-}
-```
-
-Promotion writes `<config-stem>.events.yml`. The runtime rule stays active now; the saved static rule loads on the next run.
+The server sends structured `log.entry` messages. Use temporary watches when a process-local condition must be retained without keeping a subscription open.
 
 ## Agent guardrails
 
 - Call `/api/v1/status` before assuming source IDs.
 - Start with `sessions summary`.
 - Keep live subscriptions and context windows bounded.
-- Give temporary rules purpose-specific names and delete them after investigation.
-- Promote only rules worth retaining.
+- Remove temporary watches after investigation.
 - Use UART TX when relevant to a live investigation, but do not invent firmware commands; do not delete session data, export sensitive logs, or edit project configuration without explicit approval.
 
 The focused live and recorded skills are available from the repository and through `embed-log skill live|recorded`; use this document as the extended capability reference.

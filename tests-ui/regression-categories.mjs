@@ -18,16 +18,13 @@ const categories = {
     'regression-tests/layout-sync.spec.js',
     'regression-tests/scope-selection.spec.js',
   ],
-  events: [
-    'regression-tests/events.spec.js',
-  ],
   sessions: [
     'regression-tests/export-replay.spec.js',
     'regression-tests/relative-time-replay.spec.js',
   ],
 };
 
-const categoryOrder = ['smoke', 'data', 'interaction', 'events', 'sessions'];
+const categoryOrder = ['smoke', 'data', 'interaction', 'sessions'];
 const usage = `usage: node regression-categories.mjs <category|all|list> [-- extra playwright args]\n\ncategories:\n${categoryOrder.map(name => `  ${name}`).join('\n')}`;
 
 const rawArgs = process.argv.slice(2);

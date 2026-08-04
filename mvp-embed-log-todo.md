@@ -193,14 +193,14 @@ Internally:
 1. Arm the expectation before TX.
 2. Send through the already-open UART.
 3. Wait for a matching RX record.
-4. Return the event and bounded context.
+4. Return the matching RX record and bounded context.
 5. Record TX origin in the session.
 
 Substring matching should be the default. Use `--expect-regex` for advanced matching.
 
 ## 7. Watches
 
-**Implemented:** explicit add/wait/remove commands, literal and regex rules, one-shot TTL deactivation, retained pre-wait matches, standard event persistence, timeout/expiry JSON, and process-level file-tail coverage.
+**Implemented:** explicit add/wait/remove commands, literal and regex matchers, one-shot TTL deactivation, retained pre-wait matches, timeout/expiry JSON, and process-level file-tail coverage. Watch state is process-local and is not persisted.
 
 Watches handle experiments triggered outside UART TX:
 
@@ -223,11 +223,11 @@ embed-log watch remove --instance bench-a <WATCH_ID>
 
 Requirements:
 
-- Implement watches using the existing runtime event-rule pipeline.
+- Match committed non-TX log records directly.
 - Retain match state so a match occurring before `watch wait` is not lost.
 - Default to one match and a short lifetime.
 - Do not stream ordinary logs to the waiting CLI.
-- Return session, event, source, line, sequence, timestamp, message, and captures.
+- Return session, source, line, sequence, timestamp, message, and regex captures.
 - Keep watches temporary; do not persist them into project configuration by default.
 
 `TTL` is the amount of time a watch remains active before automatic expiration.
@@ -263,7 +263,7 @@ embed-log sessions read \
 embed-log sessions around \
   --instance bench-a \
   <SESSION_ID> \
-  --event <EVENT_ID> \
+  --sequence <SEQUENCE> \
   --before 10 \
   --after 20 \
   --json
@@ -273,7 +273,7 @@ Never return unlimited logs by default.
 
 ## 9. Global sequence and cursors
 
-**Implemented:** one serialized cross-source commit order, sequence-bearing combined/live/event/TX/watch records, rotation reset, bounded cursor reads, compact timestamp selection, full JSON escape hatch, and deterministic sequence/event context.
+**Implemented:** one serialized cross-source commit order, sequence-bearing combined/live/TX/watch records, rotation reset, bounded cursor reads, compact timestamp selection, full JSON escape hatch, and deterministic sequence context.
 
 Add a session-wide monotonic `sequence` to every combined and streamed record while retaining source-local `line_idx`:
 
@@ -292,7 +292,7 @@ Use it for:
 
 - `sessions read --after <cursor>`;
 - exact cross-source ordering;
-- event context;
+- exact sequence context;
 - reconnect and replay;
 - stream-gap recovery.
 
@@ -677,7 +677,7 @@ Keep the LLM benchmark nightly or manual. Deterministic Rust, CLI, PTY, parser, 
 4. Add titled session rotation and browser/TUI continuity.
 5. Add CLI UART TX and atomic `--expect`.
 6. Add durable temporary watches.
-7. Add global sequence, bounded read, and event context. **Done.**
+7. Add global sequence, bounded read, and sequence context. **Done.**
 8. Add machine-readable schema discovery and normalize JSON failure output/errors. **Done.**
 9. Move textual CoAP parsing into the backend (**done**); retain legacy version 1 plugins until separate compatibility cleanup.
 10. Add the Linux MVP integration harness and model benchmark.

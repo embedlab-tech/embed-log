@@ -263,8 +263,6 @@ test('runtime settings panel exposes working font-size controls', async ({ page 
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
     await waitForSourceTestLine(page, 'SENSOR_A');
 
-    // Pick a non-event log line index to mark, so the tooltip assertion is not
-    // racing with event-marker tooltips from the deterministic event rules.
     const markerCandidate = await waitForLineContaining(page, 'SENSOR_A', 'kind=filter-alpha');
     const markerLineIdx = Number.parseInt(await markerCandidate.getAttribute('data-idx'), 10);
     expect(markerLineIdx).toBeGreaterThanOrEqual(0);
@@ -294,7 +292,7 @@ test('runtime settings panel exposes working font-size controls', async ({ page 
     await expect(lineLocator).toHaveClass(/has-marker/);
 
     // Check that the marker tooltip data is attached. The global tooltip can race
-    // with event-marker hover updates while live logs keep streaming, so assert
+    // while live logs keep streaming, so assert
     // the marked row's tooltip payload directly.
     await expect(lineLocator).toHaveAttribute('data-marker-tooltip', 'Test marker description');
 

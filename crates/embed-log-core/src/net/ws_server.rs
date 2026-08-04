@@ -15,10 +15,7 @@ use tower_http::services::ServeDir;
 use tracing::{info, warn};
 
 use crate::frontend_assets::FrontendAssets;
-use crate::net::control_ws::{
-    control_ws_handler, handle_event_rule_create, handle_event_rule_delete,
-    handle_event_rule_export, handle_event_rule_list, handle_event_rule_promote, SourceInfo,
-};
+use crate::net::control_ws::{control_ws_handler, SourceInfo};
 use crate::session::SessionManager;
 use crate::sources::TxCommand;
 
@@ -106,8 +103,6 @@ pub struct ServerState {
     pub broadcast_tx: broadcast::Sender<String>,
     /// Replay buffer for late-connecting clients (log entries).
     pub replay: Arc<Mutex<VecDeque<String>>>,
-    /// Replay buffer for events, sent to late-connecting clients.
-    pub events_replay: Arc<Mutex<VecDeque<String>>>,
     /// Callback to trigger HTML export.
     pub on_export: Option<ExportCallback>,
     /// Callback to rotate to a new session.
@@ -128,12 +123,6 @@ pub struct ServerState {
     pub source_metadata: Arc<HashMap<String, SourceInfo>>,
     /// Per-source line counters for stable `line_idx` in log entries.
     pub line_counters: Arc<HashMap<String, Arc<std::sync::atomic::AtomicU64>>>,
-    /// Rules loaded from the companion event YAML file at server startup.
-    pub static_event_rules: Arc<HashMap<String, Vec<crate::config::EventRule>>>,
-    /// Preferred companion YAML path for persisting promoted runtime rules.
-    pub event_rules_path: PathBuf,
-    /// Event rules added for the lifetime of this server/session.
-    pub runtime_event_rules: Arc<RwLock<HashMap<String, Vec<crate::config::EventRule>>>>,
     /// Temporary process-local watches and their retained match state.
     pub watches: Arc<RwLock<HashMap<String, crate::net::watch::TemporaryWatch>>>,
     /// Monotonic watch identifier allocator for this process.
@@ -286,14 +275,6 @@ async fn handle_ws_client(mut socket: WebSocket, state: ServerState) {
         }
     }
 
-    // 2b. Send events replay buffer so late-connecting clients catch up.
-    let events_replay_msgs = drain_replay(&state.events_replay);
-    for msg in events_replay_msgs {
-        if socket.send(Message::Text(msg.into())).await.is_err() {
-            return;
-        }
-    }
-
     // 3. Subscribe to the broadcast channel.
     let mut rx = state.broadcast_tx.subscribe();
 
@@ -372,29 +353,6 @@ async fn handle_client_command(text: &str, state: &ServerState) -> Option<String
         "save_markers" => Some(handle_save_markers(&cmd, state).to_string()),
         "clear_logs" => Some(handle_clear_logs(&cmd, state).to_string()),
         "send_raw" => Some(handle_send_raw(&cmd, state).await.to_string()),
-        "event_rule.create" => Some(handle_event_rule_create(
-            &cmd,
-            state,
-            cmd.get("id").and_then(|value| value.as_str()),
-        )),
-        "event_rule.list" => Some(handle_event_rule_list(
-            state,
-            cmd.get("id").and_then(|value| value.as_str()),
-        )),
-        "event_rule.export" => Some(handle_event_rule_export(
-            state,
-            cmd.get("id").and_then(|value| value.as_str()),
-        )),
-        "event_rule.promote" => Some(handle_event_rule_promote(
-            &cmd,
-            state,
-            cmd.get("id").and_then(|value| value.as_str()),
-        )),
-        "event_rule.delete" => Some(handle_event_rule_delete(
-            &cmd,
-            state,
-            cmd.get("id").and_then(|value| value.as_str()),
-        )),
         _ => None,
     }
 }
@@ -912,7 +870,6 @@ mod tests {
             config_msg: Arc::new(Mutex::new(json!({ "type": "config" }).to_string())),
             broadcast_tx,
             replay: Arc::new(Mutex::new(VecDeque::new())),
-            events_replay: Arc::new(Mutex::new(VecDeque::new())),
             on_export: Some(Arc::new(|| Ok("/tmp/session.html".to_string()))),
             on_rotate: None,
             session_manager: Some(manager),
@@ -923,9 +880,6 @@ mod tests {
             source_tx_senders: Arc::new(HashMap::new()),
             source_metadata: Arc::new(HashMap::new()),
             line_counters: Arc::new(HashMap::new()),
-            static_event_rules: Arc::new(HashMap::new()),
-            event_rules_path: std::env::temp_dir().join("embed-log.events.yml"),
-            runtime_event_rules: Arc::new(std::sync::RwLock::new(HashMap::new())),
             watches: Arc::new(std::sync::RwLock::new(HashMap::new())),
             watch_counter: Arc::new(AtomicU64::new(1)),
             control_api: true,
@@ -1166,53 +1120,5 @@ mod tests {
             };
         }
         assert_eq!(count.load(Ordering::Relaxed), 0);
-    }
-
-    #[test]
-    fn events_replay_drain_returns_messages_in_order() {
-        let buf = Arc::new(Mutex::new(VecDeque::new()));
-        {
-            let mut b = buf.lock().unwrap();
-            b.push_back(r#"{"type":"rx","data":"boot complete","line_idx":0}"#.to_string());
-            b.push_back(r#"{"type":"event","event_id":"boot","severity":"info"}"#.to_string());
-            b.push_back(r#"{"type":"rx","data":"FATAL ERROR","line_idx":1}"#.to_string());
-        }
-
-        let msgs = drain_replay(&buf);
-        assert_eq!(msgs.len(), 3);
-        assert_eq!(
-            msgs[0],
-            r#"{"type":"rx","data":"boot complete","line_idx":0}"#
-        );
-        assert_eq!(
-            msgs[1],
-            r#"{"type":"event","event_id":"boot","severity":"info"}"#
-        );
-        assert_eq!(
-            msgs[2],
-            r#"{"type":"rx","data":"FATAL ERROR","line_idx":1}"#
-        );
-    }
-
-    #[test]
-    fn events_replay_drain_empty_returns_empty() {
-        let buf = Arc::new(Mutex::new(VecDeque::new()));
-        let msgs = drain_replay(&buf);
-        assert!(msgs.is_empty());
-    }
-
-    #[test]
-    fn events_replay_drain_does_not_clear_buffer() {
-        let buf = Arc::new(Mutex::new(VecDeque::new()));
-        {
-            let mut b = buf.lock().unwrap();
-            b.push_back(r#"{"type":"event","event_id":"e1"}"#.to_string());
-        }
-
-        let first = drain_replay(&buf);
-        let second = drain_replay(&buf);
-        assert_eq!(first.len(), 1);
-        assert_eq!(second.len(), 1, "buffer should be intact after drain");
-        assert_eq!(first[0], second[0]);
     }
 }

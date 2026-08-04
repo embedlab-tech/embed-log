@@ -141,7 +141,6 @@ fn handle_message(state: &mut State, msg: ServerMessage) {
             line.is_tx = true;
             state.append_line(&p.source_id, line);
         }
-        ServerMessage::Event(e) => state.push_event(e),
         ServerMessage::SessionInfo(s) => state.apply_session_info(&s.session),
         ServerMessage::MarkersUpdate(m) => state.apply_markers(&m.markers),
         ServerMessage::SessionHtmlStatus(status) => {

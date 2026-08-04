@@ -1,6 +1,6 @@
 # SDK/control API implementation summary
 
-This work replaced the old per-source SDK port model with a single structured control WebSocket and a Python SDK/watch workflow around it.
+This work replaced the old per-source SDK port model with a single structured control WebSocket and Python SDK.
 
 ## Final state
 
@@ -8,8 +8,8 @@ This work replaced the old per-source SDK port model with a single structured co
 - Clients route all automation by configured source name instead of opening separate inject/forward ports.
 - UART TX writes real bytes to writable UART sources and records TX log entries.
 - UART command suggestions load from companion YAML files and appear in runtime/session metadata.
-- Markers can be created from the control API, inspected from the CLI, and used by watcher automation.
-- Python SDK supports inject, TX, subscription, markers, config-driven initialization, and watcher workflows.
+- Markers can be created from the control API and inspected from the CLI.
+- Python SDK supports inject, TX, source-filtered subscriptions, markers, and config-driven initialization.
 - End-to-end tests exercise the Rust backend plus Python SDK without real hardware.
 - Docs/configs now describe the new model and mark legacy inject/forward ports as deprecated.
 
@@ -46,7 +46,7 @@ Added the new single automation endpoint.
   - `unsubscribe`
   - `log.inject`
   - `tx.write`
-- Subscriptions emit structured `log.entry` events with source, origin, timestamp, line index, color, and TX metadata.
+- Subscriptions emit structured `log.entry` messages with source, origin, timestamp, line index, color, and TX metadata.
 - Empty subscriptions mean no log delivery.
 - `tx.write` waits for backend write acknowledgement before returning `tx.result`.
 - Added control WebSocket tests for command handling, subscription filtering, inject, TX success/failure, and structured entries.
@@ -55,11 +55,11 @@ Added the new single automation endpoint.
 
 The control WebSocket also supports process-local one-shot watches:
 
-- `watch.create` adds a literal or regex runtime event rule with a bounded TTL;
+- `watch.create` adds a process-local literal or regex matcher with a bounded TTL;
 - `watch.get` returns `active`, retained `matched`, or `expired` state;
 - `watch.delete` removes the state and deactivates its rule.
 
-Matches use normal event persistence/broadcast/marker handling. Temporary watch rules are excluded from event-rule list/export and cannot be promoted into project configuration. CLI users should prefer `embed-log watch add|wait|remove` rather than issuing these protocol messages directly.
+Matches are retained in process memory until removed or until shutdown and are never written to session artifacts. CLI users should prefer `embed-log watch add|wait|remove` rather than issuing these protocol messages directly.
 
 ## Phase 4 — Marker API
 
@@ -91,20 +91,6 @@ Created the Python SDK under `sdk/python`.
 - Parses embed-log YAML for early source validation and command metadata.
 - Added unit tests for config parsing, client protocol behavior, interleaving, errors, and timeouts.
 
-## Phase 7 — Python watcher
-
-Implemented Python watcher automation on top of the SDK.
-
-- Added `embed_log_sdk.watcher`.
-- Watch rules match regex patterns against subscribed log entries.
-- Watcher subscribes to the union of configured source rules.
-- Writes JSONL evidence with source, line index, timestamp, origin, message, and regex groups.
-- Optional `marker: true` creates UI markers through `marker.create`.
-- Added watcher examples:
-  - `examples/watcher.yml`
-  - `examples/watcher_run.py`
-- Added watcher tests for evidence output, source subscriptions, marker creation, and deterministic timeout behavior.
-
 ## Phase 8 — End-to-end tests
 
 Added E2E coverage for the Rust backend plus Python SDK.
@@ -116,8 +102,7 @@ Added E2E coverage for the Rust backend plus Python SDK.
   - injected logs reach subscription and log files
   - UART `tx_write()` writes exact bytes and records TX log entries
   - source subscription filtering
-  - watcher JSONL evidence output
-  - watcher marker creation in `markers.json`
+  - marker creation in `markers.json`
   - `markers_update` broadcast
   - command suggestions in runtime/session metadata
 - Tests run without real hardware.
@@ -126,7 +111,7 @@ Added E2E coverage for the Rust backend plus Python SDK.
 
 Updated documentation and config shape for the new model.
 
-- Documented the control WebSocket model, source-name routing, SDK usage, watcher usage, and command suggestions.
+- Documented the control WebSocket model, source-name routing, SDK usage, temporary watches, and command suggestions.
 - Added `server.control_api` config with default `true`.
 - Wired `server.control_api` into server route registration.
 - Removed active legacy inject/forward fields from generated/demo configs.

@@ -4,7 +4,7 @@ This document describes the current Rust implementation.
 
 ## Global record ordering
 
-All source writers share one commit lock. Within that serialized section Embed-log selects the active session, assigns its next global `sequence`, appends `combined.jsonl`, persists matching events, updates replay, and publishes the live record. Combined-file, replay, and live log-record order therefore agree even when sources emit concurrently. Titled rotation takes the same lock while swapping paths/session state and resets global sequence to 1 and source-local line counters to 0.
+All source writers share one commit lock. Within that serialized section Embed-log selects the active session, assigns its next global `sequence`, appends `combined.jsonl`, updates replay, matches temporary watches, and publishes the live record. Combined-file, replay, and live log-record order therefore agree even when sources emit concurrently. Titled rotation takes the same lock while swapping paths/session state and resets global sequence to 1 and source-local line counters to 0.
 
 ## High-level shape
 

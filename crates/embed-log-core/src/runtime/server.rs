@@ -116,33 +116,9 @@ impl LogServer {
             &source_writability,
         );
 
-        // ── 3c. Load event rules from companion YAML ──
-        let source_names: Vec<String> = sources
-            .iter()
-            .map(|src| src.name.clone())
-            .chain(self.config.merges.iter().map(|m| m.name.clone()))
-            .collect();
-        let event_matchers =
-            crate::config::load_event_matchers(self.config_path.as_deref(), &source_names);
-        let runtime_event_rules = Arc::new(RwLock::new(HashMap::new()));
+        // Temporary watches are process-local and independent of persisted sessions.
         let watches = Arc::new(RwLock::new(HashMap::new()));
         let watch_counter = Arc::new(AtomicU64::new(1));
-        let static_event_rules = Arc::new(
-            event_matchers
-                .iter()
-                .map(|(source, matcher)| (source.clone(), matcher.rules().to_vec()))
-                .collect::<HashMap<_, _>>(),
-        );
-        let event_rules_path = self
-            .config_path
-            .as_ref()
-            .map(|path| {
-                path.parent().unwrap_or(Path::new(".")).join(format!(
-                    "{}.events.yml",
-                    path.file_stem().unwrap_or_default().to_string_lossy()
-                ))
-            })
-            .unwrap_or_else(|| PathBuf::from("embed-log.events.yml"));
 
         // Build source metadata for the control API.
         let mut source_metadata: HashMap<String, SourceInfo> = sources
@@ -263,7 +239,6 @@ impl LogServer {
         // ── 8. Create broadcast channel ──
         let (broadcast_tx, _rx) = broadcast::channel::<String>(4096);
         let replay = Arc::new(Mutex::new(VecDeque::with_capacity(REPLAY_BUFFER_SIZE)));
-        let events_replay = Arc::new(Mutex::new(VecDeque::with_capacity(REPLAY_BUFFER_SIZE)));
         // One ordering point for sequence allocation, persistence, replay, and
         // live publication across all concurrent source writers.
         let commit_lock = Arc::new(Mutex::new(()));
@@ -290,18 +265,14 @@ impl LogServer {
         for merge in &self.config.merges {
             let (merge_tx, merge_rx) = mpsc::channel::<LogEntry>(self.config.server.queue_size);
 
-            let writer_event_matcher = event_matchers.get(&merge.name).cloned();
             let writer_runtime = WriterRuntime {
                 broadcast_tx: broadcast_tx.clone(),
                 replay: replay.clone(),
-                events_replay: events_replay.clone(),
                 first_log_at: first_log_at.clone(),
                 session_manager: session_mgr.clone(),
                 stats: stats.source(&merge.name),
                 ts_mode: self.config.server.timestamp_mode,
                 line_counter: line_counters.get(&merge.name).cloned(),
-                event_matcher: writer_event_matcher,
-                runtime_event_rules: runtime_event_rules.clone(),
                 watches: watches.clone(),
                 commit_lock: commit_lock.clone(),
                 source_meta: SourceRuntimeMeta {
@@ -380,18 +351,14 @@ impl LogServer {
 
             // Spawn writer task.
             let writer_name = src.name.clone();
-            let writer_event_matcher = event_matchers.get(&src.name).cloned();
             let writer_runtime = WriterRuntime {
                 broadcast_tx: broadcast_tx.clone(),
                 replay: replay.clone(),
-                events_replay: events_replay.clone(),
                 first_log_at: first_log_at.clone(),
                 session_manager: session_mgr.clone(),
                 stats: stats.source(&src.name),
                 ts_mode: self.config.server.timestamp_mode,
                 line_counter: line_counters.get(&src.name).cloned(),
-                event_matcher: writer_event_matcher,
-                runtime_event_rules: runtime_event_rules.clone(),
                 watches: watches.clone(),
                 commit_lock: commit_lock.clone(),
                 source_meta: SourceRuntimeMeta {
@@ -415,32 +382,8 @@ impl LogServer {
 
         // ── 10. Build config message ──
         let session_info = session_mgr.lock().unwrap().build_session_info();
-        let event_rules_meta: serde_json::Value = event_matchers
-            .iter()
-            .map(|(source_name, matcher)| {
-                let rules: Vec<serde_json::Value> = matcher
-                    .rules()
-                    .iter()
-                    .map(|r| {
-                        json!({
-                            "name": r.name,
-                            "severity": r.severity,
-                        })
-                    })
-                    .collect();
-                (source_name.clone(), serde_json::Value::Array(rules))
-            })
-            .collect::<serde_json::Map<_, _>>()
-            .into();
-        let event_rules_meta_clone = event_rules_meta.clone();
-        let config_msg = self.build_config_message(
-            &pane_labels,
-            &pane_kinds,
-            &plugins,
-            session_info,
-            markers,
-            event_rules_meta_clone,
-        );
+        let config_msg =
+            self.build_config_message(&pane_labels, &pane_kinds, &plugins, session_info, markers);
         let shared_config_msg = Arc::new(Mutex::new(config_msg.to_string()));
 
         // ── 11. Create export callback ──
@@ -452,7 +395,6 @@ impl LogServer {
             source_files: shared_source_files.clone(),
             html_path: shared_html_path.clone(),
             plugins: plugins.clone(),
-            event_rules: event_rules_meta.clone(),
             session_mgr: session_mgr.clone(),
             first_log_at: first_log_at.clone(),
         };
@@ -483,7 +425,6 @@ impl LogServer {
             config_msg: shared_config_msg.clone(),
             default_light_theme: self.config.server.default_light_theme.clone(),
             default_dark_theme: self.config.server.default_dark_theme.clone(),
-            event_rules: event_rules_meta.clone(),
             export_on_rotate: self.export_on_shutdown,
         };
         let on_rotate: RotateCallback = Arc::new(move |title| rotate_session(&rotation_ctx, title));
@@ -494,7 +435,6 @@ impl LogServer {
             config_msg: shared_config_msg,
             broadcast_tx: broadcast_tx.clone(),
             replay: replay.clone(),
-            events_replay,
             on_export: Some(on_export.clone()),
             on_rotate: Some(on_rotate),
             session_manager: Some(session_mgr.clone()),
@@ -505,9 +445,6 @@ impl LogServer {
             source_tx_senders: Arc::new(source_tx_senders),
             source_metadata: Arc::new(source_metadata),
             line_counters: Arc::new(line_counters),
-            static_event_rules,
-            event_rules_path,
-            runtime_event_rules,
             watches,
             watch_counter,
             control_api: self.config.server.control_api,
@@ -735,7 +672,6 @@ impl LogServer {
         plugins: &LoadedPlugins,
         session_info: serde_json::Value,
         markers: Vec<serde_json::Value>,
-        event_rules_meta: serde_json::Value,
     ) -> serde_json::Value {
         let tabs_json: Vec<serde_json::Value> = self
             .config
@@ -772,7 +708,6 @@ impl LogServer {
             pane_plugins: plugins.pane_plugins.clone(),
             plugin_scripts: plugins.scripts.clone(),
             markers,
-            event_rules: event_rules_meta,
         })
     }
 }
@@ -790,7 +725,6 @@ struct WsConfigParts<'a> {
     pane_plugins: serde_json::Value,
     plugin_scripts: serde_json::Value,
     markers: Vec<serde_json::Value>,
-    event_rules: serde_json::Value,
 }
 
 fn build_ws_config_message(parts: WsConfigParts<'_>) -> serde_json::Value {
@@ -838,7 +772,6 @@ fn build_ws_config_message(parts: WsConfigParts<'_>) -> serde_json::Value {
         "pane_plugins": parts.pane_plugins,
         "plugin_scripts": parts.plugin_scripts,
         "markers": parts.markers,
-        "event_rules": parts.event_rules,
     })
 }
 
@@ -851,7 +784,6 @@ struct ExportContext {
     source_files: Arc<Mutex<HashMap<String, String>>>,
     html_path: Arc<Mutex<PathBuf>>,
     plugins: LoadedPlugins,
-    event_rules: serde_json::Value,
     session_mgr: Arc<Mutex<SessionManager>>,
     first_log_at: Arc<Mutex<Option<DateTime<Local>>>>,
 }
@@ -862,13 +794,12 @@ fn export_session(ctx: &ExportContext) -> Result<String, String> {
     let fla = ctx.first_log_at.lock().unwrap().map(|dt| dt.to_rfc3339());
     let export_html = ctx.html_path.lock().unwrap().clone();
     let export_sources = ctx.source_files.lock().unwrap().clone();
-    let (export_markers, export_events, marker_paths) = ctx
+    let (export_markers, marker_paths) = ctx
         .session_mgr
         .lock()
         .map(|mgr| {
             (
                 mgr.load_markers(),
-                mgr.load_events(),
                 vec![mgr.session_dir().join("markers.json")],
             )
         })
@@ -895,8 +826,7 @@ fn export_session(ctx: &ExportContext) -> Result<String, String> {
         ctx.plugins.pane_plugins.clone(),
         ctx.plugins.scripts.clone(),
     )
-    .with_markers(export_markers)
-    .with_events(export_events, ctx.event_rules.clone());
+    .with_markers(export_markers);
 
     match exporter.export() {
         Ok(path) => {
@@ -940,7 +870,6 @@ struct RotationContext {
     config_msg: Arc<Mutex<String>>,
     default_light_theme: Option<String>,
     default_dark_theme: Option<String>,
-    event_rules: serde_json::Value,
     export_on_rotate: bool,
 }
 
@@ -955,16 +884,12 @@ fn rotate_session(
         .commit_lock
         .lock()
         .map_err(|_| "combined commit lock failed".to_string())?;
-    let (old_session, old_markers, old_events) = {
+    let (old_session, old_markers) = {
         let manager = ctx
             .session_mgr
             .lock()
             .map_err(|_| "session manager lock failed".to_string())?;
-        (
-            manager.build_session_info(),
-            manager.load_markers(),
-            manager.load_events(),
-        )
+        (manager.build_session_info(), manager.load_markers())
     };
     let old_source_files = ctx.source_files.lock().unwrap().clone();
     let old_html_path = ctx.html_path.lock().unwrap().clone();
@@ -1045,7 +970,6 @@ fn rotate_session(
         pane_plugins: ctx.plugins.pane_plugins.clone(),
         plugin_scripts: ctx.plugins.scripts.clone(),
         markers: Vec::new(),
-        event_rules: ctx.event_rules.clone(),
     });
     *ctx.config_msg
         .lock()
@@ -1070,7 +994,6 @@ fn rotate_session(
             let old_export_frontend = ctx.frontend.clone();
             let old_export_ts_mode = ctx.timestamp_mode.clone();
             let old_export_plugins = ctx.plugins.clone();
-            let old_export_event_rules = ctx.event_rules.clone();
             std::thread::spawn(move || {
                 let exporter = SessionExporter::new(
                     old_html_path.clone(),
@@ -1086,8 +1009,7 @@ fn rotate_session(
                     old_export_plugins.pane_plugins,
                     old_export_plugins.scripts,
                 )
-                .with_markers(old_markers)
-                .with_events(old_events, old_export_event_rules);
+                .with_markers(old_markers);
 
                 match exporter.export() {
                     Ok(path) => {
@@ -1239,14 +1161,11 @@ struct SourceRuntimeMeta {
 struct WriterRuntime {
     broadcast_tx: broadcast::Sender<String>,
     replay: Arc<Mutex<VecDeque<String>>>,
-    events_replay: Arc<Mutex<VecDeque<String>>>,
     first_log_at: Arc<Mutex<Option<DateTime<Local>>>>,
     session_manager: Arc<Mutex<SessionManager>>,
     stats: Option<Arc<SourceRuntimeStats>>,
     ts_mode: TimestampMode,
     line_counter: Option<Arc<AtomicU64>>,
-    event_matcher: Option<crate::config::PatternMatcher>,
-    runtime_event_rules: Arc<RwLock<HashMap<String, Vec<crate::config::EventRule>>>>,
     watches: Arc<RwLock<HashMap<String, crate::net::watch::TemporaryWatch>>>,
     commit_lock: Arc<Mutex<()>>,
     source_meta: SourceRuntimeMeta,
@@ -1310,49 +1229,6 @@ fn build_combined_log_entry(
         obj.insert("tab_labels".to_string(), json!(source_meta.tab_labels));
     }
     combined
-}
-
-/// Create an event marker and broadcast a markers_update.
-///
-/// Replaces any existing event marker at the same (paneId, lineIdx),
-/// but preserves user markers (kind != "event").
-#[allow(clippy::too_many_arguments)]
-fn save_event_marker(
-    session_manager: &Arc<Mutex<SessionManager>>,
-    broadcast_tx: &broadcast::Sender<String>,
-    source_name: &str,
-    line_idx: u64,
-    num_ts: f64,
-    rule_name: &str,
-    severity: &str,
-    message: &str,
-) {
-    if let Ok(mgr) = session_manager.lock() {
-        let now = chrono::Local::now();
-        let event_marker = serde_json::json!({
-            "paneId": source_name,
-            "lineIdx": line_idx,
-            "endIdx": line_idx,
-            "numTs": num_ts,
-            "description": format!("{}: {}", rule_name, message),
-            "kind": "event",
-            "severity": severity,
-            "createdAt": now.to_rfc3339(),
-        });
-
-        // Replace only prior event markers at this line; preserve user markers.
-        match mgr.replace_marker(source_name, line_idx, event_marker, true) {
-            Ok(markers) => {
-                let markers_update = serde_json::json!({
-                    "type": "markers_update",
-                    "markers": markers,
-                    "session": mgr.build_session_info(),
-                });
-                let _ = broadcast_tx.send(markers_update.to_string());
-            }
-            Err(e) => error!("[{source_name}] failed to save event marker: {e}"),
-        }
-    }
 }
 
 /// Writer task: receives log entries, writes to file, broadcasts to WS clients.
@@ -1541,81 +1417,13 @@ async fn run_writer(
 
         let payload_str = payload.to_string();
 
-        // ── Event detection ──
-        // Check message against compiled event rules for this source.
-        let mut event_matches = runtime
-            .event_matcher
-            .as_ref()
-            .map(|matcher| matcher.check(&message))
-            .unwrap_or_default();
-        if let Ok(rules) = runtime.runtime_event_rules.read() {
-            if let Some(rules) = rules.get(&source_name) {
-                event_matches
-                    .extend(crate::config::PatternMatcher::new(rules.clone()).check(&message));
-            }
-        }
-        for event_match in event_matches {
-            let event_payload = json!({
-                "type": "event",
-                "event_id": event_match.rule_name,
-                "source_id": source_name,
-                "severity": event_match.severity,
-                "timestamp": display_ts,
-                "timestamp_iso": ts_iso,
-                "timestamp_num": abs_num,
-                "rel_num": rel_num,
-                "line_idx": line_idx,
-                "message": message,
-                "origin": origin,
-                "captures": event_match.captures,
-                "sequence": sequence,
-                "session_id": active_session_id,
-            });
-            match crate::net::watch::retain_watch_match(
-                &runtime.watches,
-                &runtime.runtime_event_rules,
-                &event_match.rule_name,
-                is_tx,
-                &event_payload,
-                &active_session_id,
-            ) {
-                crate::net::watch::WatchMatchResult::Ignored => continue,
-                crate::net::watch::WatchMatchResult::NotWatch
-                | crate::net::watch::WatchMatchResult::Retained => {}
-            }
-
-            // Broadcast the event to all WS clients.
-            let _ = runtime.broadcast_tx.send(event_payload.to_string());
-
-            // Persist event to events.jsonl.
-            if let Ok(mgr) = runtime.session_manager.lock() {
-                if let Err(e) = mgr.append_event(&event_payload) {
-                    error!("[{source_name}] failed to append event: {e}");
-                }
-            }
-
-            // Push to events replay buffer.
-            {
-                let mut buf = runtime.events_replay.lock().unwrap();
-                if buf.len() >= REPLAY_BUFFER_SIZE {
-                    buf.pop_front();
-                }
-                buf.push_back(event_payload.to_string());
-            }
-
-            // Create an event marker (replaces previous event markers at this line,
-            // preserves user markers).
-            save_event_marker(
-                &runtime.session_manager,
-                &runtime.broadcast_tx,
-                &source_name,
-                line_idx,
-                abs_num,
-                &event_match.rule_name,
-                &event_match.severity,
-                &message,
-            );
-        }
+        crate::net::watch::retain_matching_watches(
+            &runtime.watches,
+            &source_name,
+            is_tx,
+            &message,
+            &payload,
+        );
 
         // Store in replay buffer
         {
@@ -1836,14 +1644,11 @@ mod tests {
         let runtime = WriterRuntime {
             broadcast_tx,
             replay,
-            events_replay: Arc::new(Mutex::new(VecDeque::new())),
             first_log_at: first_log_at.clone(),
             session_manager: manager,
             stats: None,
             ts_mode: TimestampMode::Absolute,
             line_counter: None,
-            event_matcher: None,
-            runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
             watches: Arc::new(RwLock::new(HashMap::new())),
             commit_lock: Arc::new(Mutex::new(())),
             source_meta: test_source_meta("session-1"),
@@ -1902,14 +1707,11 @@ mod tests {
         let runtime = WriterRuntime {
             broadcast_tx,
             replay: Arc::new(Mutex::new(VecDeque::new())),
-            events_replay: Arc::new(Mutex::new(VecDeque::new())),
             first_log_at: Arc::new(Mutex::new(None)),
             session_manager: manager,
             stats: None,
             ts_mode: TimestampMode::Absolute,
             line_counter: None,
-            event_matcher: None,
-            runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
             watches: Arc::new(RwLock::new(HashMap::new())),
             commit_lock: Arc::new(Mutex::new(())),
             source_meta: test_source_meta("session-1"),
@@ -1957,9 +1759,7 @@ mod tests {
         )));
         let (broadcast_tx, mut broadcast_rx) = broadcast::channel(256);
         let replay = Arc::new(Mutex::new(VecDeque::new()));
-        let events_replay = Arc::new(Mutex::new(VecDeque::new()));
         let first_log_at = Arc::new(Mutex::new(None));
-        let runtime_rules = Arc::new(RwLock::new(HashMap::new()));
         let watches = Arc::new(RwLock::new(HashMap::new()));
         let commit_lock = Arc::new(Mutex::new(()));
         let (dut_tx, dut_rx) = mpsc::channel(64);
@@ -1967,14 +1767,11 @@ mod tests {
         let make_runtime = |source_id: &str, line_counter: Arc<AtomicU64>| WriterRuntime {
             broadcast_tx: broadcast_tx.clone(),
             replay: replay.clone(),
-            events_replay: events_replay.clone(),
             first_log_at: first_log_at.clone(),
             session_manager: manager.clone(),
             stats: None,
             ts_mode: TimestampMode::Absolute,
             line_counter: Some(line_counter),
-            event_matcher: None,
-            runtime_event_rules: runtime_rules.clone(),
             watches: watches.clone(),
             commit_lock: commit_lock.clone(),
             source_meta: SourceRuntimeMeta {
@@ -2042,335 +1839,6 @@ mod tests {
         std::fs::remove_dir_all(root).ok();
     }
 
-    #[tokio::test]
-    async fn event_match_broadcasts_event_and_creates_marker() {
-        let root = temp_dir("event-match");
-        std::fs::create_dir_all(&root).unwrap();
-        let session_dir = root.join("session-1");
-        std::fs::create_dir_all(&session_dir).unwrap();
-        let log_path = session_dir.join("main__dut__session-1.log");
-
-        let path = Arc::new(Mutex::new(log_path.clone()));
-        let (entry_tx, entry_rx) = mpsc::channel(4);
-        let (broadcast_tx, mut broadcast_rx) = broadcast::channel(32);
-        let replay = Arc::new(Mutex::new(VecDeque::new()));
-        let first_log_at = Arc::new(Mutex::new(None));
-        let manager = Arc::new(Mutex::new(test_manager(
-            "session-1",
-            session_dir.clone(),
-            log_path.clone(),
-        )));
-
-        // Build a PatternMatcher with a rule matching "ERROR".
-        let matcher = crate::config::PatternMatcher::new(vec![crate::config::EventRule {
-            name: "fatal_error".to_string(),
-            pattern: "ERROR".to_string(),
-            severity: "error".to_string(),
-            regex: regex::Regex::new("ERROR").unwrap(),
-        }]);
-
-        let runtime = WriterRuntime {
-            broadcast_tx: broadcast_tx.clone(),
-            replay,
-            events_replay: Arc::new(Mutex::new(VecDeque::new())),
-            first_log_at: first_log_at.clone(),
-            session_manager: manager,
-            stats: None,
-            ts_mode: TimestampMode::Absolute,
-            line_counter: None,
-            event_matcher: Some(matcher),
-            runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
-            watches: Arc::new(RwLock::new(HashMap::new())),
-            commit_lock: Arc::new(Mutex::new(())),
-            source_meta: test_source_meta("session-1"),
-        };
-        let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
-
-        // Send a matching log entry.
-        entry_tx
-            .send(LogEntry::new(
-                Local::now(),
-                "dut".to_string(),
-                "FATAL ERROR: overflow".to_string(),
-            ))
-            .await
-            .unwrap();
-
-        // Wait for the event on broadcast.
-        let mut found_event = false;
-        let mut found_marker = false;
-        for _ in 0..50 {
-            match broadcast_rx.try_recv() {
-                Ok(msg) => {
-                    let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-                    if parsed["type"] == "event" {
-                        assert_eq!(parsed["event_id"], "fatal_error");
-                        assert_eq!(parsed["source_id"], "dut");
-                        assert_eq!(parsed["severity"], "error");
-                        assert_eq!(parsed["message"], "FATAL ERROR: overflow");
-                        assert_eq!(parsed["captures"][0], "ERROR");
-                        assert!(parsed["line_idx"].as_u64().is_some());
-                        assert_eq!(parsed["sequence"], 1);
-                        assert_eq!(parsed["session_id"], "session-1");
-                        assert!(parsed["timestamp_num"].as_f64().is_some());
-                        found_event = true;
-                    }
-                    if parsed["type"] == "markers_update" {
-                        let markers = parsed["markers"].as_array().unwrap();
-                        let event_marker = markers
-                            .iter()
-                            .find(|m| m["kind"] == "event" && m["severity"] == "error");
-                        assert!(event_marker.is_some(), "no event marker found");
-                        assert_eq!(
-                            event_marker.unwrap()["description"],
-                            "fatal_error: FATAL ERROR: overflow"
-                        );
-                        found_marker = true;
-                    }
-                }
-                Err(tokio::sync::broadcast::error::TryRecvError::Empty) => {
-                    sleep(Duration::from_millis(10)).await;
-                }
-                Err(_) => break,
-            }
-            if found_event && found_marker {
-                break;
-            }
-        }
-
-        assert!(found_event, "expected event broadcast");
-        assert!(found_marker, "expected marker_update broadcast");
-
-        // Verify marker persisted in markers.json.
-        let markers_path = session_dir.join("markers.json");
-        let markers_text = std::fs::read_to_string(&markers_path).unwrap();
-        assert!(markers_text.contains(r#""kind": "event""#));
-        assert!(markers_text.contains(r#""severity": "error""#));
-
-        drop(entry_tx);
-        handle.await.unwrap();
-        std::fs::remove_dir_all(root).ok();
-    }
-
-    #[tokio::test]
-    async fn event_match_multiple_rules() {
-        let root = temp_dir("event-multi");
-        std::fs::create_dir_all(&root).unwrap();
-        let session_dir = root.join("session-1");
-        std::fs::create_dir_all(&session_dir).unwrap();
-        let log_path = session_dir.join("main__dut__session-1.log");
-
-        let path = Arc::new(Mutex::new(log_path.clone()));
-        let (entry_tx, entry_rx) = mpsc::channel(4);
-        let (broadcast_tx, mut broadcast_rx) = broadcast::channel(32);
-        let replay = Arc::new(Mutex::new(VecDeque::new()));
-        let first_log_at = Arc::new(Mutex::new(None));
-        let manager = Arc::new(Mutex::new(test_manager(
-            "session-1",
-            session_dir.clone(),
-            log_path.clone(),
-        )));
-
-        let rule1 = crate::config::EventRule {
-            name: "error".to_string(),
-            pattern: "ERROR".to_string(),
-            severity: "error".to_string(),
-            regex: regex::Regex::new("ERROR").unwrap(),
-        };
-        let rule2 = crate::config::EventRule {
-            name: "warn".to_string(),
-            pattern: "WARN".to_string(),
-            severity: "warn".to_string(),
-            regex: regex::Regex::new("WARN").unwrap(),
-        };
-        let matcher = crate::config::PatternMatcher::new(vec![rule1, rule2]);
-
-        let runtime = WriterRuntime {
-            broadcast_tx: broadcast_tx.clone(),
-            replay,
-            events_replay: Arc::new(Mutex::new(VecDeque::new())),
-            first_log_at: first_log_at.clone(),
-            session_manager: manager,
-            stats: None,
-            ts_mode: TimestampMode::Absolute,
-            line_counter: None,
-            event_matcher: Some(matcher),
-            runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
-            watches: Arc::new(RwLock::new(HashMap::new())),
-            commit_lock: Arc::new(Mutex::new(())),
-            source_meta: test_source_meta("session-1"),
-        };
-        let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
-
-        // Send a log entry matching BOTH rules.
-        entry_tx
-            .send(LogEntry::new(
-                Local::now(),
-                "dut".to_string(),
-                "ERROR: something, WARN: caution".to_string(),
-            ))
-            .await
-            .unwrap();
-
-        let mut event_count = 0;
-        for _ in 0..50 {
-            match broadcast_rx.try_recv() {
-                Ok(msg) => {
-                    let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-                    if parsed["type"] == "event" {
-                        event_count += 1;
-                    }
-                }
-                Err(tokio::sync::broadcast::error::TryRecvError::Empty) => {
-                    sleep(Duration::from_millis(10)).await;
-                }
-                Err(_) => break,
-            }
-            if event_count >= 2 {
-                break;
-            }
-        }
-
-        assert_eq!(event_count, 2, "expected 2 events for 2 matching rules");
-
-        drop(entry_tx);
-        handle.await.unwrap();
-        std::fs::remove_dir_all(root).ok();
-    }
-
-    #[tokio::test]
-    async fn non_matching_line_produces_no_event() {
-        let root = temp_dir("event-no-match");
-        std::fs::create_dir_all(&root).unwrap();
-        let session_dir = root.join("session-1");
-        std::fs::create_dir_all(&session_dir).unwrap();
-        let log_path = session_dir.join("main__dut__session-1.log");
-
-        let path = Arc::new(Mutex::new(log_path.clone()));
-        let (entry_tx, entry_rx) = mpsc::channel(4);
-        let (broadcast_tx, mut broadcast_rx) = broadcast::channel(32);
-        let replay = Arc::new(Mutex::new(VecDeque::new()));
-        let first_log_at = Arc::new(Mutex::new(None));
-        let manager = Arc::new(Mutex::new(test_manager(
-            "session-1",
-            session_dir.clone(),
-            log_path.clone(),
-        )));
-
-        let rule = crate::config::EventRule {
-            name: "fatal".to_string(),
-            pattern: "FATAL".to_string(),
-            severity: "fatal".to_string(),
-            regex: regex::Regex::new("FATAL").unwrap(),
-        };
-        let matcher = crate::config::PatternMatcher::new(vec![rule]);
-
-        let runtime = WriterRuntime {
-            broadcast_tx: broadcast_tx.clone(),
-            replay,
-            events_replay: Arc::new(Mutex::new(VecDeque::new())),
-            first_log_at: first_log_at.clone(),
-            session_manager: manager,
-            stats: None,
-            ts_mode: TimestampMode::Absolute,
-            line_counter: None,
-            event_matcher: Some(matcher),
-            runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
-            watches: Arc::new(RwLock::new(HashMap::new())),
-            commit_lock: Arc::new(Mutex::new(())),
-            source_meta: test_source_meta("session-1"),
-        };
-        let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
-
-        // Send a non-matching line.
-        entry_tx
-            .send(LogEntry::new(
-                Local::now(),
-                "dut".to_string(),
-                "boot complete".to_string(),
-            ))
-            .await
-            .unwrap();
-
-        // Small delay to let the writer process.
-        sleep(Duration::from_millis(50)).await;
-
-        // Check that no event was broadcast.
-        let events_received: Vec<String> =
-            std::iter::from_fn(|| broadcast_rx.try_recv().ok()).collect();
-
-        let has_event = events_received.iter().any(|m| {
-            serde_json::from_str::<serde_json::Value>(m)
-                .map(|v| v["type"] == "event")
-                .unwrap_or(false)
-        });
-        assert!(!has_event, "non-matching line should not produce event");
-
-        drop(entry_tx);
-        handle.await.unwrap();
-        std::fs::remove_dir_all(root).ok();
-    }
-
-    #[tokio::test]
-    async fn source_without_rules_produces_no_events() {
-        let root = temp_dir("event-no-rules");
-        std::fs::create_dir_all(&root).unwrap();
-        let session_dir = root.join("session-1");
-        std::fs::create_dir_all(&session_dir).unwrap();
-        let log_path = session_dir.join("main__dut__session-1.log");
-
-        let path = Arc::new(Mutex::new(log_path.clone()));
-        let (entry_tx, entry_rx) = mpsc::channel(4);
-        let (broadcast_tx, mut broadcast_rx) = broadcast::channel(32);
-        let replay = Arc::new(Mutex::new(VecDeque::new()));
-        let first_log_at = Arc::new(Mutex::new(None));
-        let manager = Arc::new(Mutex::new(test_manager(
-            "session-1",
-            session_dir.clone(),
-            log_path.clone(),
-        )));
-
-        // Empty event_matchers — no rules for any source.
-        let runtime = WriterRuntime {
-            broadcast_tx: broadcast_tx.clone(),
-            replay,
-            events_replay: Arc::new(Mutex::new(VecDeque::new())),
-            first_log_at: first_log_at.clone(),
-            session_manager: manager,
-            stats: None,
-            ts_mode: TimestampMode::Absolute,
-            line_counter: None,
-            event_matcher: None,
-            runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
-            watches: Arc::new(RwLock::new(HashMap::new())),
-            commit_lock: Arc::new(Mutex::new(())),
-            source_meta: test_source_meta("session-1"),
-        };
-        let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
-
-        entry_tx
-            .send(LogEntry::new(
-                Local::now(),
-                "dut".to_string(),
-                "ERROR: this would match if rules existed".to_string(),
-            ))
-            .await
-            .unwrap();
-
-        sleep(Duration::from_millis(50)).await;
-
-        let has_event = std::iter::from_fn(|| broadcast_rx.try_recv().ok()).any(|m| {
-            serde_json::from_str::<serde_json::Value>(&m)
-                .map(|v| v["type"] == "event")
-                .unwrap_or(false)
-        });
-        assert!(!has_event, "source without rules should not produce events");
-
-        drop(entry_tx);
-        handle.await.unwrap();
-        std::fs::remove_dir_all(root).ok();
-    }
-
     fn empty_plugins() -> LoadedPlugins {
         LoadedPlugins {
             definitions: json!({}),
@@ -2432,7 +1900,6 @@ mod tests {
             config_msg: config_msg.clone(),
             default_light_theme: None,
             default_dark_theme: None,
-            event_rules: json!({}),
             export_on_rotate: false,
         };
 
@@ -2491,7 +1958,6 @@ mod tests {
             )]))),
             html_path: Arc::new(Mutex::new(html.clone())),
             plugins: empty_plugins(),
-            event_rules: json!({}),
             session_mgr: Arc::new(Mutex::new(mgr)),
             first_log_at: Arc::new(Mutex::new(None)),
         };
