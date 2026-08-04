@@ -151,7 +151,8 @@ fn watches_retain_matches_expire_timeout_and_remove() {
     assert_eq!(waited_json["match"]["source_id"], "TRACE");
     assert!(waited_json["match"]["line_idx"].as_u64().is_some());
     assert!(waited_json["match"]["timestamp_iso"].as_str().is_some());
-    assert!(waited_json["match"]["sequence"].is_null());
+    assert!(waited_json["match"]["sequence"].as_u64().is_some());
+    assert_eq!(waited_json["next_cursor"], waited_json["match"]["sequence"]);
     assert_eq!(waited_json["match"]["captures"][0], "device ready");
 
     // Waiting again returns the same retained match instead of losing it.

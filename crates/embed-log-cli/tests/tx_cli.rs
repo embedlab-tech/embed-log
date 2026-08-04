@@ -206,6 +206,13 @@ fn tx_line_raw_expect_timeout_and_persistence() {
         expected_json["expectation"]["entry"]["message"],
         "boot complete"
     );
+    assert!(expected_json["expectation"]["entry"]["sequence"]
+        .as_u64()
+        .is_some());
+    assert_eq!(
+        expected_json["next_cursor"],
+        expected_json["expectation"]["entry"]["sequence"]
+    );
     assert!(expected_json["context"].as_array().unwrap().len() <= 3);
 
     let raw = invoke(

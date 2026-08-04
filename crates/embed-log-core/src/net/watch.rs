@@ -132,9 +132,7 @@ pub fn retain_watch_match(
         let mut retained = event_payload.clone();
         if let Some(object) = retained.as_object_mut() {
             object.insert("session_id".to_string(), json!(session_id));
-            // Global sequence is added by the next MVP milestone. Keep the
-            // output shape stable without pretending line_idx is global.
-            object.insert("sequence".to_string(), Value::Null);
+            object.entry("sequence".to_string()).or_insert(Value::Null);
         }
         watch.matched = Some(retained);
         watch.status = WatchStatus::Matched;

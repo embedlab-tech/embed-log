@@ -134,6 +134,64 @@ pub(crate) enum SessionsCommand {
         #[arg(long, value_enum, default_value_t = OutputFormat::Jsonl)]
         format: OutputFormat,
     },
+    /// Read a bounded page from the session-global combined sequence.
+    Read {
+        session_id: String,
+        #[command(flatten)]
+        log_dir: LogDirArgs,
+        /// Return only records from this source while keeping a global cursor.
+        #[arg(long)]
+        source: Option<String>,
+        /// Return records with a global sequence greater than this cursor.
+        #[arg(long, conflicts_with = "last")]
+        after: Option<u64>,
+        /// Return the final N matching records instead of forward pagination.
+        #[arg(long, conflicts_with_all = ["after", "limit"])]
+        last: Option<usize>,
+        /// Maximum records returned by forward pagination.
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+        /// Timestamp shown in compact records.
+        #[arg(long, value_enum, default_value_t = TimeDisplay::Relative)]
+        time: TimeDisplay,
+        /// Compact records or complete stored JSON objects.
+        #[arg(long, value_enum, default_value_t = ReadFormat::Compact)]
+        format: ReadFormat,
+        /// Emit a structured envelope; full-json always emits JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Read bounded cross-source context around a sequence or unique event.
+    Around {
+        session_id: String,
+        #[command(flatten)]
+        log_dir: LogDirArgs,
+        /// Target session-global sequence.
+        #[arg(long, conflicts_with = "event", required_unless_present = "event")]
+        sequence: Option<u64>,
+        /// Target a unique event_id from events.jsonl.
+        #[arg(
+            long,
+            conflicts_with = "sequence",
+            required_unless_present = "sequence"
+        )]
+        event: Option<String>,
+        /// Number of combined records before the target.
+        #[arg(long, default_value_t = 10)]
+        before: usize,
+        /// Number of combined records after the target.
+        #[arg(long, default_value_t = 20)]
+        after: usize,
+        /// Timestamp shown in compact records.
+        #[arg(long, value_enum, default_value_t = TimeDisplay::Relative)]
+        time: TimeDisplay,
+        /// Compact records or complete stored JSON objects.
+        #[arg(long, value_enum, default_value_t = ReadFormat::Compact)]
+        format: ReadFormat,
+        /// Emit a structured envelope; full-json always emits JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Print recorded event-detection hits from events.jsonl.
     Events {
         session_id: String,
@@ -249,6 +307,19 @@ pub(crate) enum OutputFormat {
     MiniJsonl,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum TimeDisplay {
+    None,
+    Relative,
+    Absolute,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum ReadFormat {
+    Compact,
+    FullJson,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct SessionRecord {
     pub id: String,
@@ -291,6 +362,58 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
         } => {
             let dir = resolve_sessions_dir(&log_dir)?;
             show_session_combined(&dir, &session_id, follow, lines, format)
+        }
+        SessionsCommand::Read {
+            session_id,
+            log_dir,
+            source,
+            after,
+            last,
+            limit,
+            time,
+            format,
+            json,
+        } => {
+            let dir = resolve_sessions_dir(&log_dir)?;
+            read_session(
+                &dir,
+                &session_id,
+                ReadOptions {
+                    source,
+                    after,
+                    last,
+                    limit,
+                    time,
+                    format,
+                    json,
+                },
+            )
+        }
+        SessionsCommand::Around {
+            session_id,
+            log_dir,
+            sequence,
+            event,
+            before,
+            after,
+            time,
+            format,
+            json,
+        } => {
+            let dir = resolve_sessions_dir(&log_dir)?;
+            around_session(
+                &dir,
+                &session_id,
+                AroundOptions {
+                    sequence,
+                    event,
+                    before,
+                    after,
+                    time,
+                    format,
+                    json,
+                },
+            )
         }
         SessionsCommand::Events {
             session_id,
@@ -716,6 +839,446 @@ impl EventsFilters {
             }
         }
         true
+    }
+}
+
+const MAX_BOUNDED_RECORDS: usize = 1_000;
+
+struct ReadOptions {
+    source: Option<String>,
+    after: Option<u64>,
+    last: Option<usize>,
+    limit: usize,
+    time: TimeDisplay,
+    format: ReadFormat,
+    json: bool,
+}
+
+struct AroundOptions {
+    sequence: Option<u64>,
+    event: Option<String>,
+    before: usize,
+    after: usize,
+    time: TimeDisplay,
+    format: ReadFormat,
+    json: bool,
+}
+
+fn read_session(dir: &Path, session_id: &str, options: ReadOptions) -> Result<()> {
+    use std::io::{BufRead, BufReader};
+
+    let cap = options.last.unwrap_or(options.limit);
+    anyhow::ensure!(cap > 0, "--limit/--last must be greater than zero");
+    anyhow::ensure!(
+        cap <= MAX_BOUNDED_RECORDS,
+        "--limit/--last must not exceed {MAX_BOUNDED_RECORDS}"
+    );
+    let session = resolve_session(dir, session_id)?;
+    let path = manifest_combined_file(&session)?;
+    let file = std::fs::File::open(&path)
+        .with_context(|| format!("open combined file {}", path.display()))?;
+    let mut selected = VecDeque::new();
+    let mut matching_count = 0usize;
+    let mut invalid_records = 0usize;
+    let mut previous_sequence = None;
+    let mut max_sequence = 0u64;
+    let mut available_sources = std::collections::BTreeSet::new();
+    let mut forward_truncated = false;
+
+    for line_result in BufReader::new(file).lines() {
+        let line = line_result.with_context(|| format!("read {}", path.display()))?;
+        let record: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(record) => record,
+            Err(_) => {
+                invalid_records += 1;
+                continue;
+            }
+        };
+        let sequence = validated_sequence(&record, previous_sequence, &session.id)?;
+        previous_sequence = Some(sequence);
+        max_sequence = sequence;
+        if let Some(source) = record.get("source_id").and_then(|value| value.as_str()) {
+            available_sources.insert(source.to_string());
+        }
+        if options.after.is_some_and(|after| sequence <= after) {
+            continue;
+        }
+        if options.source.as_deref().is_some_and(|source| {
+            record.get("source_id").and_then(|value| value.as_str()) != Some(source)
+        }) {
+            continue;
+        }
+        matching_count += 1;
+        if options.last.is_some() {
+            if selected.len() == cap {
+                selected.pop_front();
+            }
+            selected.push_back(record);
+        } else if selected.len() < cap {
+            selected.push_back(record);
+        } else {
+            forward_truncated = true;
+            break;
+        }
+    }
+    if let Some(source) = options.source.as_deref() {
+        anyhow::ensure!(
+            available_sources.contains(source),
+            "unknown source {source:?}; valid sources: {}",
+            available_sources.into_iter().collect::<Vec<_>>().join(", ")
+        );
+    }
+    if let Some(after) = options.after {
+        anyhow::ensure!(
+            after <= max_sequence,
+            "cursor {after} is beyond the final sequence {max_sequence} in session {:?}",
+            session.id
+        );
+    }
+    let records = selected.into_iter().collect::<Vec<_>>();
+    let truncated = options
+        .last
+        .map_or(forward_truncated, |_| matching_count > records.len());
+    let next_cursor = if forward_truncated {
+        records
+            .last()
+            .and_then(|record| record.get("sequence"))
+            .and_then(|value| value.as_u64())
+            .unwrap_or(options.after.unwrap_or(0))
+    } else {
+        max_sequence
+    };
+    render_bounded_records(
+        &session,
+        records,
+        options.time,
+        options.format,
+        options.json,
+        truncated,
+        next_cursor,
+        invalid_records,
+        None,
+    )
+}
+
+fn around_session(dir: &Path, session_id: &str, options: AroundOptions) -> Result<()> {
+    use std::io::{BufRead, BufReader};
+
+    let context_size = options
+        .before
+        .checked_add(options.after)
+        .and_then(|size| size.checked_add(1))
+        .context("context size overflow")?;
+    anyhow::ensure!(
+        context_size <= MAX_BOUNDED_RECORDS,
+        "--before + --after + target must not exceed {MAX_BOUNDED_RECORDS} records"
+    );
+    let session = resolve_session(dir, session_id)?;
+    let (target_sequence, target_event) = match (options.sequence, options.event.as_deref()) {
+        (Some(sequence), None) => (sequence, None),
+        (None, Some(event_id)) => resolve_unique_event_sequence(&session, event_id)?,
+        _ => anyhow::bail!("provide exactly one of --sequence or --event"),
+    };
+    let path = manifest_combined_file(&session)?;
+    let file = std::fs::File::open(&path)
+        .with_context(|| format!("open combined file {}", path.display()))?;
+    let mut before = VecDeque::with_capacity(options.before);
+    let mut records = Vec::with_capacity(options.before + options.after + 1);
+    let mut found = false;
+    let mut after_count = 0usize;
+    let mut invalid_records = 0usize;
+    let mut previous_sequence = None;
+
+    for line_result in BufReader::new(file).lines() {
+        let line = line_result.with_context(|| format!("read {}", path.display()))?;
+        let record: serde_json::Value = match serde_json::from_str(&line) {
+            Ok(record) => record,
+            Err(_) => {
+                invalid_records += 1;
+                continue;
+            }
+        };
+        let sequence = validated_sequence(&record, previous_sequence, &session.id)?;
+        previous_sequence = Some(sequence);
+        if !found {
+            if sequence == target_sequence {
+                records.extend(before.drain(..));
+                records.push(record);
+                found = true;
+            } else {
+                if before.len() == options.before && options.before > 0 {
+                    before.pop_front();
+                }
+                if options.before > 0 {
+                    before.push_back(record);
+                }
+            }
+        } else if after_count < options.after {
+            records.push(record);
+            after_count += 1;
+            if after_count == options.after {
+                break;
+            }
+        }
+    }
+    anyhow::ensure!(
+        found,
+        "sequence {target_sequence} does not exist in session {:?}",
+        session.id
+    );
+    let next_cursor = records
+        .last()
+        .and_then(|record| record.get("sequence"))
+        .and_then(|value| value.as_u64())
+        .unwrap_or(target_sequence);
+    render_bounded_records(
+        &session,
+        records,
+        options.time,
+        options.format,
+        options.json,
+        false,
+        next_cursor,
+        invalid_records,
+        Some(serde_json::json!({
+            "sequence": target_sequence,
+            "event": target_event,
+        })),
+    )
+}
+
+fn validated_sequence(
+    record: &serde_json::Value,
+    previous: Option<u64>,
+    session_id: &str,
+) -> Result<u64> {
+    let sequence = record
+        .get("sequence")
+        .and_then(|value| value.as_u64())
+        .with_context(|| {
+            format!(
+                "session {session_id:?} contains records without global sequence; capture a new session with the current Embed-log version"
+            )
+        })?;
+    if let Some(previous) = previous {
+        let expected = previous
+            .checked_add(1)
+            .context("stored sequence exhausted")?;
+        anyhow::ensure!(
+            sequence == expected,
+            "session {session_id:?} has a sequence gap or reorder: {previous} followed by {sequence}"
+        );
+    } else {
+        anyhow::ensure!(
+            sequence == 1,
+            "session {session_id:?} must begin at sequence 1, found {sequence}"
+        );
+    }
+    Ok(sequence)
+}
+
+fn resolve_unique_event_sequence(
+    session: &SessionRecord,
+    event_id: &str,
+) -> Result<(u64, Option<serde_json::Value>)> {
+    use std::io::{BufRead, BufReader};
+
+    let path = events_file_path(session);
+    let file = std::fs::File::open(&path)
+        .with_context(|| format!("open events file {}", path.display()))?;
+    let mut match_count = 0usize;
+    let mut first_match = None;
+    let mut sample_sequences = Vec::new();
+    for line_result in BufReader::new(file).lines() {
+        let line = line_result.with_context(|| format!("read {}", path.display()))?;
+        let Ok(event) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        if event.get("event_id").and_then(|value| value.as_str()) == Some(event_id) {
+            match_count += 1;
+            if sample_sequences.len() < 20 {
+                if let Some(sequence) = event.get("sequence").and_then(|value| value.as_u64()) {
+                    sample_sequences.push(sequence);
+                }
+            }
+            if first_match.is_none() {
+                first_match = Some(event);
+            }
+        }
+    }
+    match match_count {
+        0 => anyhow::bail!(
+            "event {event_id:?} was not found in session {:?}",
+            session.id
+        ),
+        1 => {
+            let event = first_match.unwrap();
+            let sequence = event
+                .get("sequence")
+                .and_then(|value| value.as_u64())
+                .with_context(|| format!("event {event_id:?} has no global sequence"))?;
+            Ok((sequence, Some(event)))
+        }
+        count => {
+            let sequences = sample_sequences
+                .iter()
+                .map(u64::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            let suffix = if count > sample_sequences.len() {
+                ", ..."
+            } else {
+                ""
+            };
+            anyhow::bail!(
+                "event_id {event_id:?} has {count} occurrences at sequences [{sequences}{suffix}]; repeat with --sequence"
+            )
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_bounded_records(
+    session: &SessionRecord,
+    records: Vec<serde_json::Value>,
+    time: TimeDisplay,
+    format: ReadFormat,
+    json_output: bool,
+    truncated: bool,
+    next_cursor: u64,
+    invalid_records: usize,
+    target: Option<serde_json::Value>,
+) -> Result<()> {
+    let full_json = format == ReadFormat::FullJson;
+    if json_output || full_json {
+        let mut output = serde_json::json!({
+            "ok": true,
+            "session_id": session.id,
+            "records": if full_json {
+                serde_json::Value::Array(records)
+            } else {
+                serde_json::Value::Array(records.iter().map(|record| compact_tuple(record, time)).collect())
+            },
+            "truncated": truncated,
+            "next_cursor": next_cursor,
+            "invalid_records": invalid_records,
+        });
+        if !full_json {
+            output["fields"] = serde_json::json!(compact_fields(time));
+        }
+        if let Some(target) = target {
+            output["target"] = target;
+        }
+        println!("{}", serde_json::to_string(&output)?);
+    } else {
+        for record in &records {
+            println!("{}", compact_text(record, time));
+        }
+        eprintln!(
+            "sessions: next cursor {next_cursor}; truncated={truncated}; invalid_records={invalid_records}"
+        );
+    }
+    Ok(())
+}
+
+fn compact_fields(time: TimeDisplay) -> Vec<&'static str> {
+    let mut fields = Vec::new();
+    match time {
+        TimeDisplay::None => {}
+        TimeDisplay::Relative => fields.push("relative_time"),
+        TimeDisplay::Absolute => fields.push("timestamp_iso"),
+    }
+    fields.extend(["sequence", "source_id", "line_idx", "message"]);
+    fields
+}
+
+fn compact_tuple(record: &serde_json::Value, time: TimeDisplay) -> serde_json::Value {
+    let mut values = Vec::new();
+    if let Some(value) = compact_time(record, time) {
+        values.push(serde_json::json!(value));
+    }
+    values.push(
+        record
+            .get("sequence")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+    );
+    values.push(
+        record
+            .get("source_id")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+    );
+    values.push(
+        record
+            .get("line_idx")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+    );
+    values.push(serde_json::json!(compact_message(record)));
+    serde_json::Value::Array(values)
+}
+
+fn compact_text(record: &serde_json::Value, time: TimeDisplay) -> String {
+    let sequence = record
+        .get("sequence")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let source = record
+        .get("source_id")
+        .and_then(|value| value.as_str())
+        .unwrap_or("?");
+    let line = record
+        .get("line_idx")
+        .and_then(|value| value.as_u64())
+        .map_or_else(|| "#?".to_string(), |line| format!("#{line}"));
+    let prefix = compact_time(record, time).map_or_else(String::new, |time| format!("{time} "));
+    format!(
+        "{prefix}{sequence} {source}{line} {}",
+        compact_message(record)
+    )
+}
+
+fn compact_message(record: &serde_json::Value) -> String {
+    let clock = clock_time(record);
+    denoise_message(
+        record
+            .get("message")
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+        &clock,
+    )
+}
+
+fn compact_time(record: &serde_json::Value, time: TimeDisplay) -> Option<String> {
+    match time {
+        TimeDisplay::None => None,
+        TimeDisplay::Relative => Some(agent_relative_time(record)),
+        TimeDisplay::Absolute => Some(
+            record
+                .get("timestamp_iso")
+                .and_then(|value| value.as_str())
+                .unwrap_or("")
+                .to_string(),
+        ),
+    }
+}
+
+fn agent_relative_time(record: &serde_json::Value) -> String {
+    let total_ms = record
+        .get("relNum")
+        .and_then(|value| value.as_f64())
+        .unwrap_or(0.0)
+        .max(0.0) as u64;
+    let millis = total_ms % 1_000;
+    let total_seconds = total_ms / 1_000;
+    let seconds = total_seconds % 60;
+    let minutes = (total_seconds / 60) % 60;
+    let hours = total_seconds / 3_600;
+    if hours > 0 {
+        format!("T+{hours:02}:{minutes:02}:{seconds:02}.{millis:03}")
+    } else {
+        format!("T+{minutes:02}:{seconds:02}.{millis:03}")
     }
 }
 
@@ -2210,6 +2773,52 @@ mod tests {
         assert!(parse_duration_shorthand("10x").is_err());
         assert!(parse_duration_shorthand("m").is_err());
         assert!(parse_duration_shorthand("").is_err());
+    }
+
+    #[test]
+    fn bounded_compact_records_toggle_time_and_keep_global_and_local_positions() {
+        let entry = serde_json::json!({
+            "sequence": 719,
+            "source_id": "DUT_UART",
+            "line_idx": 428,
+            "timestamp_iso": "2026-08-04T10:30:12.453+02:00",
+            "relNum": 12_453.0,
+            "message": "boot complete",
+        });
+        assert_eq!(
+            compact_text(&entry, TimeDisplay::Relative),
+            "T+00:12.453 719 DUT_UART#428 boot complete"
+        );
+        assert_eq!(
+            compact_text(&entry, TimeDisplay::None),
+            "719 DUT_UART#428 boot complete"
+        );
+        assert_eq!(
+            compact_text(&entry, TimeDisplay::Absolute),
+            "2026-08-04T10:30:12.453+02:00 719 DUT_UART#428 boot complete"
+        );
+        assert_eq!(
+            compact_tuple(&entry, TimeDisplay::Relative),
+            serde_json::json!(["T+00:12.453", 719, "DUT_UART", 428, "boot complete"])
+        );
+        assert_eq!(
+            compact_fields(TimeDisplay::None),
+            vec!["sequence", "source_id", "line_idx", "message"]
+        );
+        assert_eq!(
+            agent_relative_time(&serde_json::json!({"relNum":3_723_004.0})),
+            "T+01:02:03.004"
+        );
+    }
+
+    #[test]
+    fn global_sequence_validation_rejects_legacy_and_reordered_records() {
+        assert!(validated_sequence(&serde_json::json!({"message":"legacy"}), None, "s").is_err());
+        assert_eq!(
+            validated_sequence(&serde_json::json!({"sequence":1}), None, "s").unwrap(),
+            1
+        );
+        assert!(validated_sequence(&serde_json::json!({"sequence":1}), Some(1), "s").is_err());
     }
 
     #[test]

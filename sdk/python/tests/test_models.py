@@ -10,6 +10,8 @@ def test_log_entry_from_dict():
         "message": "boot complete",
         "timestamp_iso": "2026-06-14T12:00:00.123Z",
         "line_idx": 42,
+        "sequence": 719,
+        "session_id": "session-a",
         "color": None,
         "is_tx": False,
     }
@@ -19,6 +21,8 @@ def test_log_entry_from_dict():
     assert entry.message == "boot complete"
     assert entry.timestamp_iso == "2026-06-14T12:00:00.123Z"
     assert entry.line_idx == 42
+    assert entry.sequence == 719
+    assert entry.session_id == "session-a"
     assert entry.color is None
     assert entry.is_tx is False
 

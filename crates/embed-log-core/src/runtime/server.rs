@@ -264,6 +264,9 @@ impl LogServer {
         let (broadcast_tx, _rx) = broadcast::channel::<String>(4096);
         let replay = Arc::new(Mutex::new(VecDeque::with_capacity(REPLAY_BUFFER_SIZE)));
         let events_replay = Arc::new(Mutex::new(VecDeque::with_capacity(REPLAY_BUFFER_SIZE)));
+        // One ordering point for sequence allocation, persistence, replay, and
+        // live publication across all concurrent source writers.
+        let commit_lock = Arc::new(Mutex::new(()));
         let stats = Arc::new(RuntimeStats::new(
             sources
                 .iter()
@@ -300,6 +303,7 @@ impl LogServer {
                 event_matcher: writer_event_matcher,
                 runtime_event_rules: runtime_event_rules.clone(),
                 watches: watches.clone(),
+                commit_lock: commit_lock.clone(),
                 source_meta: SourceRuntimeMeta {
                     source_id: merge.name.clone(),
                     source_label: merge_label(merge),
@@ -389,6 +393,7 @@ impl LogServer {
                 event_matcher: writer_event_matcher,
                 runtime_event_rules: runtime_event_rules.clone(),
                 watches: watches.clone(),
+                commit_lock: commit_lock.clone(),
                 source_meta: SourceRuntimeMeta {
                     source_id: src.name.clone(),
                     source_label: src.label.clone(),
@@ -464,6 +469,8 @@ impl LogServer {
             session_mgr: session_mgr.clone(),
             first_log_at: first_log_at.clone(),
             replay: replay.clone(),
+            commit_lock: commit_lock.clone(),
+            line_counters: line_counters.clone(),
             frontend: self.frontend_dir.clone(),
             tabs: tabs_json.clone(),
             pane_labels: pane_labels.clone(),
@@ -919,6 +926,8 @@ struct RotationContext {
     session_mgr: Arc<Mutex<SessionManager>>,
     first_log_at: Arc<Mutex<Option<DateTime<Local>>>>,
     replay: Arc<Mutex<VecDeque<String>>>,
+    commit_lock: Arc<Mutex<()>>,
+    line_counters: HashMap<String, Arc<AtomicU64>>,
     frontend: PathBuf,
     tabs: Vec<serde_json::Value>,
     pane_labels: HashMap<String, String>,
@@ -942,6 +951,10 @@ fn rotate_session(
     title: Option<String>,
 ) -> Result<(serde_json::Value, serde_json::Value), String> {
     let title = normalize_session_title(title)?;
+    let commit_guard = ctx
+        .commit_lock
+        .lock()
+        .map_err(|_| "combined commit lock failed".to_string())?;
     let (old_session, old_markers, old_events) = {
         let manager = ctx
             .session_mgr
@@ -1009,6 +1022,9 @@ fn rotate_session(
     }
     *ctx.html_path.lock().unwrap() = new_session_dir.join("session.html");
     *ctx.first_log_at.lock().unwrap() = None;
+    for counter in ctx.line_counters.values() {
+        counter.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
     ctx.replay.lock().unwrap().clear();
 
     let new_session = new_manager.build_session_info();
@@ -1034,6 +1050,7 @@ fn rotate_session(
     *ctx.config_msg
         .lock()
         .map_err(|_| "config message lock failed".to_string())? = new_config_msg.to_string();
+    drop(commit_guard);
 
     // Export the old foreground session's HTML off the hot path. Daemons keep
     // raw artifacts only unless an explicit export is requested.
@@ -1231,6 +1248,7 @@ struct WriterRuntime {
     event_matcher: Option<crate::config::PatternMatcher>,
     runtime_event_rules: Arc<RwLock<HashMap<String, Vec<crate::config::EventRule>>>>,
     watches: Arc<RwLock<HashMap<String, crate::net::watch::TemporaryWatch>>>,
+    commit_lock: Arc<Mutex<()>>,
     source_meta: SourceRuntimeMeta,
 }
 
@@ -1356,6 +1374,13 @@ async fn run_writer(
     use std::io::Write;
 
     while let Some(entry) = entry_rx.recv().await {
+        let _commit_guard = match runtime.commit_lock.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                error!("[{source_name}] combined commit lock poisoned");
+                break;
+            }
+        };
         let desired_log_path = log_path.lock().unwrap().clone();
         if desired_log_path != current_log_path {
             let _ = file.flush();
@@ -1495,11 +1520,23 @@ async fn run_writer(
             }
         }
 
-        let combined_entry = build_combined_log_entry(&payload, &runtime.source_meta);
-        if let Ok(manager) = runtime.session_manager.lock() {
-            if let Err(e) = manager.append_combined_entry(&combined_entry) {
-                error!("[{source_name}] failed to append combined entry: {e}");
+        let mut combined_entry = build_combined_log_entry(&payload, &runtime.source_meta);
+        let (sequence, active_session_id) = match runtime.session_manager.lock() {
+            Ok(mut manager) => match manager.append_combined_entry(&mut combined_entry) {
+                Ok(sequence) => (sequence, manager.session_id().to_string()),
+                Err(error) => {
+                    error!("[{source_name}] failed to append combined entry: {error}");
+                    continue;
+                }
+            },
+            Err(_) => {
+                error!("[{source_name}] session manager lock poisoned");
+                continue;
             }
+        };
+        if let Some(object) = payload.as_object_mut() {
+            object.insert("sequence".to_string(), json!(sequence));
+            object.insert("session_id".to_string(), json!(active_session_id));
         }
 
         let payload_str = payload.to_string();
@@ -1531,12 +1568,9 @@ async fn run_writer(
                 "message": message,
                 "origin": origin,
                 "captures": event_match.captures,
+                "sequence": sequence,
+                "session_id": active_session_id,
             });
-            let active_session_id = runtime
-                .session_manager
-                .lock()
-                .map(|manager| manager.session_id().to_string())
-                .unwrap_or_else(|_| runtime.source_meta.session_id.clone());
             match crate::net::watch::retain_watch_match(
                 &runtime.watches,
                 &runtime.runtime_event_rules,
@@ -1811,6 +1845,7 @@ mod tests {
             event_matcher: None,
             runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
             watches: Arc::new(RwLock::new(HashMap::new())),
+            commit_lock: Arc::new(Mutex::new(())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer(
@@ -1876,6 +1911,7 @@ mod tests {
             event_matcher: None,
             runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
             watches: Arc::new(RwLock::new(HashMap::new())),
+            commit_lock: Arc::new(Mutex::new(())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
@@ -1899,9 +1935,110 @@ mod tests {
         assert_eq!(parsed["session_id"], "session-1");
         assert_eq!(parsed["app_name"], "embed-log");
         assert_eq!(parsed["message"], "boot complete");
+        assert_eq!(parsed["sequence"], 1);
 
         drop(entry_tx);
         handle.await.unwrap();
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[tokio::test]
+    async fn concurrent_writers_commit_combined_and_broadcast_in_sequence_order() {
+        let root = temp_dir("concurrent-sequence");
+        let session_dir = root.join("session-1");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        let dut_log = session_dir.join("dut.log");
+        let host_log = session_dir.join("host.log");
+        let combined_path = session_dir.join("combined.jsonl");
+        let manager = Arc::new(Mutex::new(test_manager(
+            "session-1",
+            session_dir.clone(),
+            dut_log.clone(),
+        )));
+        let (broadcast_tx, mut broadcast_rx) = broadcast::channel(256);
+        let replay = Arc::new(Mutex::new(VecDeque::new()));
+        let events_replay = Arc::new(Mutex::new(VecDeque::new()));
+        let first_log_at = Arc::new(Mutex::new(None));
+        let runtime_rules = Arc::new(RwLock::new(HashMap::new()));
+        let watches = Arc::new(RwLock::new(HashMap::new()));
+        let commit_lock = Arc::new(Mutex::new(()));
+        let (dut_tx, dut_rx) = mpsc::channel(64);
+        let (host_tx, host_rx) = mpsc::channel(64);
+        let make_runtime = |source_id: &str, line_counter: Arc<AtomicU64>| WriterRuntime {
+            broadcast_tx: broadcast_tx.clone(),
+            replay: replay.clone(),
+            events_replay: events_replay.clone(),
+            first_log_at: first_log_at.clone(),
+            session_manager: manager.clone(),
+            stats: None,
+            ts_mode: TimestampMode::Absolute,
+            line_counter: Some(line_counter),
+            event_matcher: None,
+            runtime_event_rules: runtime_rules.clone(),
+            watches: watches.clone(),
+            commit_lock: commit_lock.clone(),
+            source_meta: SourceRuntimeMeta {
+                source_id: source_id.to_string(),
+                source_label: source_id.to_string(),
+                source_kind: "file".to_string(),
+                tab_labels: vec!["Main".to_string()],
+                session_id: "session-1".to_string(),
+                app_name: "embed-log".to_string(),
+                job_id: None,
+            },
+        };
+        let dut_handle = tokio::spawn(run_writer(
+            "DUT".to_string(),
+            Arc::new(Mutex::new(dut_log)),
+            dut_rx,
+            make_runtime("DUT", Arc::new(AtomicU64::new(0))),
+        ));
+        let host_handle = tokio::spawn(run_writer(
+            "HOST".to_string(),
+            Arc::new(Mutex::new(host_log)),
+            host_rx,
+            make_runtime("HOST", Arc::new(AtomicU64::new(0))),
+        ));
+        let dut_sender = tokio::spawn(async move {
+            for index in 0..50 {
+                dut_tx
+                    .send(LogEntry::new(Local::now(), "DUT", format!("dut-{index}")))
+                    .await
+                    .unwrap();
+            }
+        });
+        let host_sender = tokio::spawn(async move {
+            for index in 0..50 {
+                host_tx
+                    .send(LogEntry::new(Local::now(), "HOST", format!("host-{index}")))
+                    .await
+                    .unwrap();
+            }
+        });
+        dut_sender.await.unwrap();
+        host_sender.await.unwrap();
+        dut_handle.await.unwrap();
+        host_handle.await.unwrap();
+
+        let combined = std::fs::read_to_string(&combined_path).unwrap();
+        let sequences = combined
+            .lines()
+            .map(|line| {
+                serde_json::from_str::<serde_json::Value>(line).unwrap()["sequence"]
+                    .as_u64()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(sequences, (1..=100).collect::<Vec<_>>());
+
+        let mut broadcast_sequences = Vec::new();
+        while let Ok(message) = broadcast_rx.try_recv() {
+            let value: serde_json::Value = serde_json::from_str(&message).unwrap();
+            if let Some(sequence) = value.get("sequence").and_then(|value| value.as_u64()) {
+                broadcast_sequences.push(sequence);
+            }
+        }
+        assert_eq!(broadcast_sequences, (1..=100).collect::<Vec<_>>());
         std::fs::remove_dir_all(root).ok();
     }
 
@@ -1944,6 +2081,7 @@ mod tests {
             event_matcher: Some(matcher),
             runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
             watches: Arc::new(RwLock::new(HashMap::new())),
+            commit_lock: Arc::new(Mutex::new(())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
@@ -1972,6 +2110,8 @@ mod tests {
                         assert_eq!(parsed["message"], "FATAL ERROR: overflow");
                         assert_eq!(parsed["captures"][0], "ERROR");
                         assert!(parsed["line_idx"].as_u64().is_some());
+                        assert_eq!(parsed["sequence"], 1);
+                        assert_eq!(parsed["session_id"], "session-1");
                         assert!(parsed["timestamp_num"].as_f64().is_some());
                         found_event = true;
                     }
@@ -2057,6 +2197,7 @@ mod tests {
             event_matcher: Some(matcher),
             runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
             watches: Arc::new(RwLock::new(HashMap::new())),
+            commit_lock: Arc::new(Mutex::new(())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
@@ -2136,6 +2277,7 @@ mod tests {
             event_matcher: Some(matcher),
             runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
             watches: Arc::new(RwLock::new(HashMap::new())),
+            commit_lock: Arc::new(Mutex::new(())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
@@ -2201,6 +2343,7 @@ mod tests {
             event_matcher: None,
             runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
             watches: Arc::new(RwLock::new(HashMap::new())),
+            commit_lock: Arc::new(Mutex::new(())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
@@ -2258,6 +2401,7 @@ mod tests {
 
         let replay = Arc::new(Mutex::new(VecDeque::from(["stale".to_string()])));
         let config_msg = Arc::new(Mutex::new("old-config".to_string()));
+        let line_counter = Arc::new(AtomicU64::new(42));
 
         let mut pane_labels = HashMap::new();
         pane_labels.insert("dut".to_string(), "DUT".to_string());
@@ -2274,6 +2418,8 @@ mod tests {
             session_mgr,
             first_log_at: Arc::new(Mutex::new(Some(Local::now()))),
             replay: replay.clone(),
+            commit_lock: Arc::new(Mutex::new(())),
+            line_counters: HashMap::from([("dut".to_string(), line_counter.clone())]),
             frontend: root.join("frontend"),
             tabs: vec![json!({ "label": "Main", "panes": ["dut"] })],
             pane_labels,
@@ -2311,6 +2457,7 @@ mod tests {
             new_writer.display().to_string()
         );
         assert!(replay.lock().unwrap().is_empty(), "replay buffer cleared");
+        assert_eq!(line_counter.load(std::sync::atomic::Ordering::Relaxed), 0);
         assert_ne!(*config_msg.lock().unwrap(), "old-config");
         let manifest: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(new_dir.join("manifest.json")).unwrap())

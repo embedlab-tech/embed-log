@@ -291,7 +291,7 @@ function wsConnect() {
         if (msg.type !== "rx" && msg.type !== "tx") return;
 
         const { type, data, timestamp, timestamp_iso, timestamp_num, source_id,
-                absTs, absNum, relTs, relNum, line_idx } = msg;
+                absTs, absNum, relTs, relNum, line_idx, sequence, session_id } = msg;
         if (!source_id) return;
 
         // Unknown source_id — server has no --tab for it; ignore with a warning.
@@ -312,6 +312,8 @@ function wsConnect() {
                 relTs: relTs,
                 relNum: relNum,
                 lineIdx: line_idx,
+                ...(Number.isFinite(sequence) ? { sequence } : {}),
+                ...(session_id ? { sessionId: session_id } : {}),
             },
         });
     });

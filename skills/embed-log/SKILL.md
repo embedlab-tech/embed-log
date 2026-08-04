@@ -64,8 +64,9 @@ A match is not lost if it arrives before `watch wait`. Prefer `--contains`, keep
 3. **Search for the specific thing.** `embed-log sessions search` with `--regex`/`--contains`
    plus `--format compact` (or `mini-jsonl` for structured output) to get a small, readable
    answer instead of raw JSON.
-4. **Only pull more context if needed.** `-C N` (or `-B`/`-A`) around a match, or
-   `sessions combined <id> --lines N --format compact` for the tail of a specific source.
+4. **Only pull more context if needed.** For newly captured sessions, use
+   `sessions read <id> --after <cursor> --limit N --time none --json`, then
+   `sessions around <id> --sequence N --before B --after A`. Use search context for legacy sessions.
 
 ## Command reference
 
@@ -86,6 +87,10 @@ embed-log sessions search --dir logs --regex 'timeout' --since 1h               
 embed-log sessions search --dir logs --regex panic -C 10 --format compact            # +/- 10 lines of context
 embed-log sessions search --dir logs --contains panic --count                        # just the count
 
+# Bounded cursor reads for newly captured sessions
+embed-log sessions read latest --after 100 --limit 50 --time none --json
+embed-log sessions around latest --sequence 119 --before 5 --after 10 --time relative --json
+
 # Event-detection hits (only useful if the project's events.yml has rules configured)
 embed-log sessions events latest --severity fatal --format compact
 
@@ -102,7 +107,9 @@ embed-log sessions export <SESSION_ID> --format jsonl-deduped --output session.j
 embed-log doctor
 ```
 
-`--format` (on `search`/`combined`/`events`): `jsonl` (default, full record, byte-exact) |
+For `sessions read`/`around`, compact text is `T+00:12.453 719 DUT_UART#428 message`: relative time, global cursor, full source ID, source-local line, and message. `--time none` omits time; `--time absolute` uses RFC3339. `--json` returns tuple records plus one `fields` schema; `--format full-json` is the complete-record escape hatch.
+
+`--format` (on legacy `search`/`combined`/`events`): `jsonl` (default, full record, byte-exact) |
 `compact` (`1:23.644 C#1234 message`, best for reading — ~81% smaller than jsonl) | `mini-jsonl`
 (short-keyed JSON, best for further programmatic filtering — ~77% smaller). `compact`/`mini-jsonl`
 are, by default: **denoised** (ANSI escape codes, a message's duplicate leading timestamp, padded

@@ -181,6 +181,12 @@ pub struct LogPayload {
     /// Stable per-source line counter.
     #[serde(default)]
     pub line_idx: u64,
+    /// Session-global combined ordering cursor.
+    #[serde(default)]
+    pub sequence: u64,
+    /// Logical session containing this record.
+    #[serde(default)]
+    pub session_id: String,
     /// `"SERIAL"`, `"ui"` (TX), `"TX::<origin>"`, or injected origin.
     #[serde(default)]
     pub origin: String,
@@ -225,6 +231,10 @@ pub struct EventPayload {
     pub rel_num: f64,
     #[serde(default)]
     pub line_idx: u64,
+    #[serde(default)]
+    pub sequence: u64,
+    #[serde(default)]
+    pub session_id: String,
     #[serde(default)]
     pub message: String,
     #[serde(default)]

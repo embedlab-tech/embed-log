@@ -29,6 +29,7 @@ pub struct SessionManager {
     html_status: String,
     html_updated_at: Option<String>,
     html_error: Option<String>,
+    next_sequence: u64,
 }
 
 impl SessionManager {
@@ -74,6 +75,7 @@ impl SessionManager {
             html_status: "pending".to_string(),
             html_updated_at: None,
             html_error: None,
+            next_sequence: 1,
         }
     }
 
@@ -186,8 +188,18 @@ impl SessionManager {
         }
     }
 
-    /// Append one combined log entry as a JSON line to combined.jsonl.
-    pub fn append_combined_entry(&self, entry: &serde_json::Value) -> Result<()> {
+    /// Assign the next session-global sequence and append one combined record.
+    /// Callers serialize this with live replay/broadcast publication.
+    pub fn append_combined_entry(&mut self, entry: &mut serde_json::Value) -> Result<u64> {
+        let sequence = self.next_sequence;
+        let next_sequence = self
+            .next_sequence
+            .checked_add(1)
+            .context("session sequence exhausted")?;
+        if let Some(object) = entry.as_object_mut() {
+            object.insert("sequence".to_string(), json!(sequence));
+            object.insert("session_id".to_string(), json!(self.session_id));
+        }
         let path = PathBuf::from(&self.combined_file);
         let mut file = std::fs::OpenOptions::new()
             .create(true)
@@ -198,7 +210,8 @@ impl SessionManager {
         use std::io::Write;
         writeln!(file, "{line}")
             .with_context(|| format!("append combined entry to {}", path.display()))?;
-        Ok(())
+        self.next_sequence = next_sequence;
+        Ok(sequence)
     }
 
     /// Append one event as a JSON line to events.jsonl.
@@ -537,16 +550,22 @@ mod tests {
     #[test]
     fn append_combined_entry_writes_jsonl() {
         let dir = temp_session_dir("combined");
-        let mgr = manager(dir.clone());
-        let payload = json!({ "source_id": "dut", "message": "boot", "source_kind": "udp" });
-        mgr.append_combined_entry(&payload).unwrap();
+        let mut mgr = manager(dir.clone());
+        let mut payload = json!({ "source_id": "dut", "message": "boot", "source_kind": "udp" });
+        assert_eq!(mgr.append_combined_entry(&mut payload).unwrap(), 1);
+        let mut second = json!({ "source_id": "host", "message": "next" });
+        assert_eq!(mgr.append_combined_entry(&mut second).unwrap(), 2);
         let path = dir.join("combined.jsonl");
         let text = std::fs::read_to_string(&path).unwrap();
         let lines: Vec<_> = text.lines().collect();
-        assert_eq!(lines.len(), 1);
+        assert_eq!(lines.len(), 2);
         let parsed: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
         assert_eq!(parsed["source_id"], "dut");
         assert_eq!(parsed["message"], "boot");
+        assert_eq!(parsed["sequence"], 1);
+        assert_eq!(parsed["session_id"], mgr.session_id());
+        let second: serde_json::Value = serde_json::from_str(lines[1]).unwrap();
+        assert_eq!(second["sequence"], 2);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

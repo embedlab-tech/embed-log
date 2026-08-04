@@ -204,6 +204,23 @@ fn daemon_start_status_duplicate_and_graceful_stop() {
             .contains("after titled rotation"),
         "existing source task did not route data into the titled session"
     );
+    let combined = PathBuf::from(manifest["combined_file"].as_str().unwrap());
+    let first: serde_json::Value = serde_json::from_str(
+        fs::read_to_string(combined)
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        first["sequence"], 1,
+        "global sequence must reset on rotation"
+    );
+    assert_eq!(
+        first["line_idx"], 0,
+        "source line index must reset on rotation"
+    );
 
     let auto_selected = invoke(&runtime, &["status", "--json"]);
     assert!(auto_selected.status.success());

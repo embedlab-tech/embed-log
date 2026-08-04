@@ -112,7 +112,7 @@ embed-log tx --instance bench-a --source DUT_UART \
   --timeout 30s --context 20 --json
 ```
 
-Substring matching is the default; `--expect-regex` enables a regular expression. TX entries never satisfy an expectation. A timeout exits unsuccessfully and, with `--json`, emits an `EXPECT_TIMEOUT` object containing the successful byte count and bounded context observed after the command was armed. A control-stream gap fails instead of claiming a potentially unsafe result. TX requires `--instance`, `EMBED_LOG_INSTANCE`, or `--url http://host:port`; it never infers the sole daemon.
+Substring matching is the default; `--expect-regex` enables a regular expression. TX entries never satisfy an expectation. A timeout exits unsuccessfully and, with `--json`, emits an `EXPECT_TIMEOUT` object containing the successful byte count and bounded context observed after the command was armed. A control-stream gap fails instead of claiming a potentially unsafe result. Successful expectations expose the match sequence as `next_cursor`. TX requires `--instance`, `EMBED_LOG_INSTANCE`, or `--url http://host:port`; it never infers the sole daemon.
 
 ### Temporary watches
 
@@ -131,7 +131,7 @@ embed-log watch remove "$watch_id" --instance bench-a --json
 
 `watch add` accepts exactly one of literal `--contains` or `--regex`. Watches are server-side, temporary, one-shot conditions backed by the runtime event-rule pipeline. They do not stream ordinary logs to the waiting CLI. A match is retained, so `watch wait` still succeeds if the event occurred before it connected. Matches use the normal event path and are persisted in `events.jsonl` with source, line, timestamps, message, origin, and captures.
 
-`--ttl` controls how long the server actively matches; it defaults to 30 seconds and is capped at 24 hours. Matched or expired state remains queryable until `watch remove` or process shutdown. `watch wait --timeout` only limits that CLI invocation and does not alter server TTL. JSON failures use `WATCH_EXPIRED`, `WATCH_WAIT_TIMEOUT`, or `WATCH_NOT_FOUND`. All watch mutations require `--instance`, `EMBED_LOG_INSTANCE`, or `--url`; they never infer the sole daemon. The `sequence` field is currently `null` and will become session-global in the cursor milestone.
+`--ttl` controls how long the server actively matches; it defaults to 30 seconds and is capped at 24 hours. Matched or expired state remains queryable until `watch remove` or process shutdown. `watch wait --timeout` only limits that CLI invocation and does not alter server TTL. JSON failures use `WATCH_EXPIRED`, `WATCH_WAIT_TIMEOUT`, or `WATCH_NOT_FOUND`. All watch mutations require `--instance`, `EMBED_LOG_INSTANCE`, or `--url`; they never infer the sole daemon. Matched watch output includes the triggering record's session-global `sequence` and exposes it as `next_cursor` for bounded follow-up reads.
 
 ### Create an experiment session
 
@@ -270,7 +270,46 @@ Formats:
   rendering for reading a handful of matched lines — `jsonl-deduped` is a lossless, whole-session
   export.
 
-### Output format: `--format`
+### Global sequence, bounded reads, and context
+
+Every record captured by the current version receives a session-global `sequence` in the same serialized order used by `combined.jsonl`, replay, and live publication. `line_idx` remains source-local. A compact line therefore identifies both positions:
+
+```text
+T+00:12.453 719 DUT_UART#428 boot complete
+```
+
+Read only a bounded page:
+
+```bash
+embed-log sessions read latest --dir logs --limit 100
+embed-log sessions read latest --dir logs --after 100 --limit 50 --json
+embed-log sessions read latest --dir logs --source DUT_UART --last 20 --time none --json
+```
+
+Forward reads default to 100 records and all limits are capped at 1000. `--after` is the global cursor even when `--source` filters the returned records. JSON compact output hoists its schema once:
+
+```json
+{"ok":true,"session_id":"...","fields":["relative_time","sequence","source_id","line_idx","message"],"records":[["T+00:12.453",719,"DUT_UART",428,"boot complete"]],"truncated":false,"next_cursor":719,"invalid_records":0}
+```
+
+Timestamp display is independent of output representation:
+
+- `--time relative` (default): `T+00:12.453`;
+- `--time none`: omit time for the smallest output;
+- `--time absolute`: include RFC3339 wall-clock time.
+
+Use `--format full-json` when complete stored records, including all timestamp and parser metadata, are required. It always emits a JSON envelope. Sessions captured before global sequencing fail with an actionable compatibility error instead of inventing cursors.
+
+Fetch deterministic cross-source context by sequence or by a unique persisted event ID:
+
+```bash
+embed-log sessions around latest --sequence 719 --before 10 --after 20 --json
+embed-log sessions around latest --event watch-3 --before 10 --after 20 --time none
+```
+
+If an event ID has multiple occurrences, `around --event` lists a bounded sequence sample and requires an explicit `--sequence`. The total around window is capped at 1000 records. Sequence and source-local line counters reset to 1 and 0 respectively on titled rotation. TX expectations, persisted events, watch matches, browser records, and TUI records carry the same sequence.
+
+### Legacy search/combined output format: `--format`
 
 `sessions search`, `sessions combined`, and `sessions events` all take `--format`, useful for keeping agent/script output small:
 

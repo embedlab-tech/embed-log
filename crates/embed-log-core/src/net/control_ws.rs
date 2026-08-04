@@ -220,6 +220,14 @@ fn build_log_entry(parsed: &serde_json::Value, source_id: &str) -> serde_json::V
         .to_string();
 
     let line_idx = parsed.get("line_idx").and_then(|v| v.as_u64()).unwrap_or(0);
+    let sequence = parsed
+        .get("sequence")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let session_id = parsed
+        .get("session_id")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
 
     let color = parsed
         .get("color")
@@ -233,6 +241,8 @@ fn build_log_entry(parsed: &serde_json::Value, source_id: &str) -> serde_json::V
         "message": message,
         "timestamp_iso": timestamp_iso,
         "line_idx": line_idx,
+        "sequence": sequence,
+        "session_id": session_id,
         "color": color,
         "is_tx": is_tx,
     })
@@ -1927,6 +1937,8 @@ mod tests {
             "timestamp_iso": "2026-06-14T12:00:00.123Z",
             "source_id": "DUT_UART",
             "line_idx": 42,
+            "sequence": 719,
+            "session_id": "session-a",
         });
 
         let entry = build_log_entry(&payload, "DUT_UART");
@@ -1936,6 +1948,8 @@ mod tests {
         assert_eq!(entry["message"], "boot complete");
         assert_eq!(entry["timestamp_iso"], "2026-06-14T12:00:00.123Z");
         assert_eq!(entry["line_idx"], 42);
+        assert_eq!(entry["sequence"], 719);
+        assert_eq!(entry["session_id"], "session-a");
         assert_eq!(entry["color"], "green");
         assert_eq!(entry["is_tx"], false);
 

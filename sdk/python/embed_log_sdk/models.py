@@ -38,6 +38,9 @@ class LogEntry:
     message: str
     timestamp_iso: str
     line_idx: int
+    # Session-global cursor; absent only when connected to a legacy backend.
+    sequence: Optional[int] = None
+    session_id: str = ""
     color: Optional[str] = None
     is_tx: bool = False
 
@@ -49,6 +52,8 @@ class LogEntry:
             message=data.get("message", ""),
             timestamp_iso=data.get("timestamp_iso", ""),
             line_idx=data.get("line_idx", 0),
+            sequence=data.get("sequence"),
+            session_id=data.get("session_id", ""),
             color=data.get("color"),
             is_tx=data.get("is_tx", False),
         )
@@ -69,6 +74,8 @@ class Event:
     timestamp_iso: str = ""
     timestamp: str = ""
     origin: str = ""
+    sequence: Optional[int] = None
+    session_id: str = ""
 
     @classmethod
     def from_dict(cls, data: dict) -> "Event":
@@ -87,6 +94,8 @@ class Event:
             timestamp_iso=data.get("timestamp_iso", ""),
             timestamp=data.get("timestamp", ""),
             origin=data.get("origin", ""),
+            sequence=data.get("sequence"),
+            session_id=data.get("session_id", ""),
         )
 
 

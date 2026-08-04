@@ -302,6 +302,7 @@ fn success_output(
         "source_id": options.source,
         "bytes_written": bytes_written,
         "expectation": expectation,
+        "next_cursor": state.matched.as_ref().and_then(|entry| entry.get("sequence")).cloned(),
         "context": state.context_json(),
         "truncated": state.truncated(),
     })
@@ -329,6 +330,7 @@ fn expectation_timeout(
                 "source_id": options.source,
                 "bytes_written": bytes_written,
                 "expectation": {"kind":kind,"pattern":pattern,"matched":false},
+                "next_cursor": state.context.back().and_then(|entry| entry.get("sequence")).cloned(),
                 "context": state.context_json(),
                 "truncated": state.truncated(),
             }))?

@@ -218,6 +218,7 @@ async fn wait(
                     "watch_id":watch_id,
                     "status":"matched",
                     "match":watch.get("match").cloned().unwrap_or(Value::Null),
+                    "next_cursor":watch.pointer("/match/sequence").cloned(),
                 });
                 if output_json {
                     println!("{}", serde_json::to_string(&output)?);

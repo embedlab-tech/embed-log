@@ -269,6 +269,8 @@ Never return unlimited logs by default.
 
 ## 9. Global sequence and cursors
 
+**Implemented:** one serialized cross-source commit order, sequence-bearing combined/live/event/TX/watch records, rotation reset, bounded cursor reads, compact timestamp selection, full JSON escape hatch, and deterministic sequence/event context.
+
 Add a session-wide monotonic `sequence` to every combined and streamed record while retaining source-local `line_idx`:
 
 ```json
@@ -290,7 +292,7 @@ Use it for:
 - reconnect and replay;
 - stream-gap recovery.
 
-Eventually support subscribe-with-replay so persisted replay transitions atomically into live delivery.
+Future extension: support subscribe-with-replay so persisted replay transitions atomically into live delivery.
 
 ## 10. Structured output contract
 
@@ -667,7 +669,7 @@ Keep the LLM benchmark nightly or manual. Deterministic Rust, CLI, PTY, parser, 
 4. Add titled session rotation and browser/TUI continuity.
 5. Add CLI UART TX and atomic `--expect`.
 6. Add durable temporary watches.
-7. Add global sequence, bounded read, and event context.
+7. Add global sequence, bounded read, and event context. **Done.**
 8. Normalize JSON output and errors.
 9. Move frontend CoAP parsing into the backend and remove generic plugins.
 10. Add the Linux MVP integration harness and model benchmark.
