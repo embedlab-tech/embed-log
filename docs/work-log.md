@@ -1637,3 +1637,19 @@ Future entries must include this per-file added/removed-line summary.
 | `tests-ui/regression-tests/pane-plugin-coap.spec.js` | 0 | 249 | Deletes obsolete frontend decoder/settings/export scenarios. |
 | `tests-ui/regression-tests/session-workflows.spec.js` | 0 | 133 | Deletes removed browser session-management scenarios. |
 | `tests-ui/tests/rust-server.spec.js` | 4 | 0 | Verifies management controls stay absent. |
+
+## 2026-08-04 11:13:09 UTC / 2026-08-04 13:13:09 CEST (Warsaw)
+
+- **Commit:** `590e318` — `Define essential Embed-log agent skill`
+- **Task:** Consolidate the completed MVP automation contract into one concise canonical agent skill covering discovery, safety, explicit daemon lifecycle, titled rotations, bounded sequence analysis, UART expectations, retained watches, normalized errors, textual CoAP, and evidence reporting.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 11:13:09 UTC / 2026-08-04 13:13:09 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked -p embed-log-cli --bin embed-log` — passed (77 tests); strict CLI all-target Clippy — passed; release schema index assertion verified every command referenced by the skill and the advertised `hex-coap` parser. No executable/package contents changed in this documentation-only milestone; the immediately preceding packaged release checks remain applicable.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`590e318`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 4 | 2 | Describes the skill as the complete safe CLI workflow rather than session search only. |
+| `skills/embed-log/SKILL.md` | 185 | 123 | Rewrites the canonical skill around discovery, safety, experiments, bounded evidence, TX/watch, errors, CoAP, and completion discipline. |
