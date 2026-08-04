@@ -52,6 +52,17 @@ See the [quick-start guide](docs/quickstart.md) for all fast-run options, sessio
 
 ## Background daemon
 
+Agents and wrapper tools can discover the installed binary's commands, arguments, limits, targeting rules, outputs, and currently stable errors without parsing `--help`:
+
+```bash
+embed-log schema
+embed-log schema sessions.read --json  # --json is optional; schema defaults to compact JSON
+embed-log schema tx --pretty
+embed-log schema errors
+```
+
+The compact JSON index is runtime-independent and cacheable by `schema_version` plus `embed_log_version`; query one command for details instead of loading the whole CLI contract.
+
 Keep configured sources, including UART ownership, alive between experiments:
 
 ```bash

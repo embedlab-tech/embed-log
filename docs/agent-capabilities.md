@@ -2,7 +2,22 @@
 
 This reference describes Embed-log capabilities agents can use now. For the broader roadmap, see [Automation and agent plan](automation-agent-plan.md).
 
+## Discover the installed CLI
+
+Do not parse human `--help` output. Start with the compact, runtime-independent capability index, then inspect only the command needed:
+
+```bash
+embed-log schema
+embed-log schema sessions.read
+embed-log schema tx
+embed-log schema errors
+```
+
+Descriptors include actual arguments plus mutation, targeting, limits, output, and stable-error semantics. Cache them by `schema_version` and `embed_log_version`. The error catalog currently identifies its coverage as partial rather than advertising planned codes as implemented.
+
 ## Discover a running server
+
+Static schema does not replace runtime discovery. Query the selected daemon for its current session and sources:
 
 ```bash
 curl -fsS http://127.0.0.1:18080/api/v1/status

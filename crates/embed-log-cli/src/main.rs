@@ -11,11 +11,12 @@ mod util;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 
 use commands::daemon::{cmd_start_daemon, cmd_status, cmd_stop};
 use commands::misc;
 use commands::run::{cmd_run, cmd_run_quick, RunOverrides};
+use commands::schema::cmd_schema;
 use commands::sessions::{cmd_sessions, SessionsCommand};
 use commands::tx::{cmd_tx, parse_duration, TxInput, TxOptions};
 use commands::watch::{cmd_watch, WatchCommand};
@@ -118,6 +119,19 @@ enum Command {
         /// Internal foreground mode used by the daemon launcher.
         #[arg(long, hide = true)]
         daemon_child: bool,
+    },
+
+    /// Discover commands, options, limits, outputs, and stable errors as JSON.
+    Schema {
+        /// Command or topic to describe, for example `sessions.read`, `sessions read`, `errors`, or `config`.
+        #[arg(value_name = "SELECTOR", num_args = 0..=2)]
+        selector: Vec<String>,
+        /// Explicitly request JSON output; schema is JSON by default.
+        #[arg(long)]
+        json: bool,
+        /// Indent the JSON document for human inspection.
+        #[arg(long)]
+        pretty: bool,
     },
 
     /// Show readiness and source status for a running daemon or URL.
@@ -311,6 +325,11 @@ async fn main() -> Result<()> {
                 .await
             }
         }
+        Some(Command::Schema {
+            selector,
+            json: _,
+            pretty,
+        }) => cmd_schema(Cli::command(), &selector, pretty),
         Some(Command::Status {
             instance,
             url,
@@ -600,6 +619,20 @@ mod tests {
             "two",
         ])
         .is_err());
+    }
+
+    #[test]
+    fn schema_command_accepts_index_topics_and_command_paths() {
+        for args in [
+            ["embed-log", "schema"].as_slice(),
+            ["embed-log", "schema", "tx", "--json"].as_slice(),
+            ["embed-log", "schema", "sessions.read", "--pretty"].as_slice(),
+            ["embed-log", "schema", "sessions", "around"].as_slice(),
+            ["embed-log", "schema", "errors"].as_slice(),
+            ["embed-log", "schema", "config"].as_slice(),
+        ] {
+            Cli::parse_from(args);
+        }
     }
 
     #[test]

@@ -127,6 +127,7 @@ Keep this primary surface:
 
 ```text
 embed-log run
+embed-log schema
 embed-log status
 embed-log stop
 embed-log doctor
@@ -148,6 +149,8 @@ embed-log watch add
 embed-log watch wait
 embed-log watch remove
 ```
+
+`embed-log schema` is implemented as compact progressive discovery: the bare command lists capabilities/defaults/limits, while targeted selectors expose actual Clap arguments augmented with mutation, targeting, output, and stable-error semantics. Static schema and dynamic `status --json` remain separate.
 
 Fold useful information from `sessions info` into `sessions summary`.
 
@@ -670,6 +673,6 @@ Keep the LLM benchmark nightly or manual. Deterministic Rust, CLI, PTY, parser, 
 5. Add CLI UART TX and atomic `--expect`.
 6. Add durable temporary watches.
 7. Add global sequence, bounded read, and event context. **Done.**
-8. Normalize JSON output and errors.
+8. Add machine-readable schema discovery (**done**), then normalize remaining JSON output and errors.
 9. Move frontend CoAP parsing into the backend and remove generic plugins.
 10. Add the Linux MVP integration harness and model benchmark.

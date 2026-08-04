@@ -6,6 +6,26 @@ The CLI binary is named `embed-log`.
 embed-log --help
 ```
 
+## Machine-readable capability discovery
+
+`schema` is the agent/wrapper discovery interface. It does not require a config or running daemon and writes exactly one JSON document:
+
+```bash
+embed-log schema                         # compact capability index
+embed-log schema sessions.read           # one command's actual Clap arguments plus semantics
+embed-log schema sessions around         # split and dotted paths are equivalent
+embed-log schema tx --json               # optional familiar spelling; JSON is already the default
+embed-log schema tx --pretty             # indented JSON for human inspection
+embed-log schema errors                  # currently stable machine error codes
+embed-log schema config                  # compact config capabilities
+```
+
+The index advertises `schema_version`, `embed_log_version`, commands, interfaces, source/parser types, defaults, and hard limits. A command descriptor adds usage, options, types, enums, defaults, conflicts, known numeric constraints, mutation status, execution mode, targeting requirements, output behavior, stable errors, and semantic notes. Arguments are read from the built Clap command graph so hidden/internal commands are excluded and public option changes are reflected automatically.
+
+Discovery is progressive and token-bounded: call bare `schema` first, then request only the relevant command. Static output contains no daemon state or machine-specific paths and can be cached by the pair `(schema_version, embed_log_version)`. Continue using `status --json` for current instances, sessions, sources, and write capabilities.
+
+`schema errors` deliberately reports `"coverage":"partial"`: TX/watch codes listed there are stable, while remaining ad hoc CLI errors will be converted during the JSON normalization milestone. `schema config` is a compact capability descriptor, not yet a formal JSON Schema document.
+
 Global options:
 
 | Option | Meaning |

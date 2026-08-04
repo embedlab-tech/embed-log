@@ -9,6 +9,10 @@ description: Query embed-log session logs (UART/UDP device logs, pytest test run
 line, all sources interleaved chronologically) plus an `events.jsonl` of detected
 severity/pattern hits. Full reference: `docs/cli.md` in the embed-log repo.
 
+## Discover capabilities instead of parsing help
+
+When the installed version is unknown, call `embed-log schema` once and cache the compact result by `schema_version` plus `embed_log_version`. Use a targeted query such as `embed-log schema sessions.read`, `embed-log schema tx`, or `embed-log schema errors` only when those details are needed. Use `status --json` separately for runtime sources and sessions. Never infer mutating targets from discovery output.
+
 ## Golden rule: never grep/cat the raw log files
 
 Raw session directories contain a `combined.jsonl` (all sources merged, still full/uncompact
@@ -53,24 +57,29 @@ A match is not lost if it arrives before `watch wait`. Prefer `--contains`, keep
 
 ## Recommended workflow
 
-1. **Find the session.** `embed-log sessions list --limit 10` (newest first), or if you
+1. **Discover if needed.** If this binary version is not already known, run `embed-log schema`, followed by one targeted command descriptor only when necessary. Do not parse `--help`.
+2. **Find the session.** `embed-log sessions list --limit 10` (newest first), or if you
    already know it's the most recent run, skip straight to using `latest` as the session id
    anywhere one is accepted (`info`, `export`, `combined`, `events`, `summary`, and
    `search --session latest`).
-2. **Get the shape of it first.** `embed-log sessions summary <SESSION_ID or latest>` —
+3. **Get the shape of it first.** `embed-log sessions summary <SESSION_ID or latest>` —
    per-source line counts, first/last timestamps, event severity counts, session duration,
    and the last 5 lines. This is a single small, bounded call — always do this before
    searching, it tells you which sources exist and roughly what happened.
-3. **Search for the specific thing.** `embed-log sessions search` with `--regex`/`--contains`
+4. **Search for the specific thing.** `embed-log sessions search` with `--regex`/`--contains`
    plus `--format compact` (or `mini-jsonl` for structured output) to get a small, readable
    answer instead of raw JSON.
-4. **Only pull more context if needed.** For newly captured sessions, use
+5. **Only pull more context if needed.** For newly captured sessions, use
    `sessions read <id> --after <cursor> --limit N --time none --json`, then
    `sessions around <id> --sequence N --before B --after A`. Use search context for legacy sessions.
 
 ## Command reference
 
 ```bash
+# Discover this binary without parsing human help
+embed-log schema
+embed-log schema sessions.read
+
 # List sessions (newest first)
 embed-log sessions list --limit 10 [--dir <path> | --config <path>]
 

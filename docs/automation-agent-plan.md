@@ -2,6 +2,21 @@
 
 This plan makes Embed-log efficient and safe for agents, scripts, and UI-driven debugging. It builds on the existing session, event, control-WebSocket, and Python SDK foundations; it does not introduce a parallel watcher/event system.
 
+## CLI-first design principle
+
+**Agents speak CLI.** Models are heavily trained on `gh`/`kubectl`/`docker`-style noun–verb commands and structured JSON output. A well-shaped CLI plus a small skill file is therefore the highest-leverage capability surface for Embed-log: it works unchanged for agents, humans, shell scripts, wrappers, and CI, and can be richer than an MCP-only integration.
+
+The CLI is the canonical automation contract. `embed-log schema` provides versioned, progressive mechanical discovery without parsing human `--help`; the skill provides operational judgment, safety rules, and token-efficient workflows; `status --json` provides dynamic daemon/source state. MCP, SDKs, and higher-level tools such as `gwl log` should adapt this contract rather than become separate implementations of capture behavior.
+
+Consequences:
+
+- prefer familiar noun–verb commands such as `sessions read` and `watch wait`;
+- provide bounded, deterministic `--json` results for agent-critical operations;
+- keep the bare schema index small, then expose command details on demand;
+- separate static binary capabilities (`schema`) from runtime availability (`status`);
+- keep stable error codes and output contracts suitable for unattended CI;
+- preserve the same CLI for direct human use instead of creating an agent-only product surface.
+
 ## Goals
 
 - Let an agent find relevant evidence without reading whole logs.
