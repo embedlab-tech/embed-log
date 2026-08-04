@@ -1420,3 +1420,34 @@ Future entries must include this per-file added/removed-line summary.
 | `docs/cli.md` | 5 | 5 | Documents explicit targeting, verified reuse, visible registry handling, and no disconnect export. |
 | `mvp-embed-log-todo.md` | 8 | 6 | Updates the implementation contract to the reviewed explicit policy. |
 | `tests-ui/tests/rust-server.spec.js` | 12 | 0 | Adds browser E2E proof that final-client disconnect does not export HTML. |
+
+## 2026-08-04 08:18:31 UTC / 2026-08-04 10:18:31 CEST (Warsaw)
+
+- **Commit:** `8b40c24` — `Add atomic UART transmit command`
+- **Task:** Add explicit top-level UART TX with line/raw/file/stdin input, arm-before-write substring or regex expectations, bounded live evidence, timeout JSON, exact write acknowledgements, and Linux PTY process coverage.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 08:18:31 UTC / 2026-08-04 10:18:31 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; final `cargo test --locked --workspace` — passed (67 CLI unit tests, 3 daemon process tests, 1 TX/PTY process test, 207 core tests, and 73 TUI tests); `cargo clippy --locked --workspace --all-targets -- -D warnings` — passed; `PYTHONPATH=sdk/python python3 -m pytest sdk/python/tests -q` — passed (53 tests, 2 skipped); `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (5 tests); `cargo build --locked --release` and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged binary PTY check verified daemon startup, `tx --line probe --expect 'packaged ready'`, bounded JSON, actual byte count, and explicit stop.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`8b40c24`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `Cargo.lock` | 2 | 0 | Records the CLI's existing workspace WebSocket dependencies. |
+| `README.md` | 3 | 1 | Adds the atomic TX/expect daemon workflow. |
+| `crates/embed-log-cli/Cargo.toml` | 2 | 0 | Adds futures and Tokio Tungstenite client dependencies. |
+| `crates/embed-log-cli/src/commands/daemon.rs` | 0 | 2 | Removes a racy post-release port assertion found during parallel validation. |
+| `crates/embed-log-cli/src/commands/mod.rs` | 1 | 0 | Registers the TX command module. |
+| `crates/embed-log-cli/src/commands/tx.rs` | 522 | 0 | Implements explicit WebSocket TX, exact inputs, atomic expectations, bounded context, timeout evidence, and protocol guards. |
+| `crates/embed-log-cli/src/main.rs` | 123 | 0 | Defines and dispatches the top-level `tx` CLI with exclusive input and expectation options. |
+| `crates/embed-log-cli/tests/tx_cli.rs` | 320 | 0 | Exercises line/raw/file/stdin TX, matching, timeout, target/writability rejection, wire bytes, and persistence through a PTY daemon. |
+| `crates/embed-log-core/src/net/control_ws.rs` | 38 | 9 | Accepts exact byte arrays, explicit line normalization, and reports actual acknowledged wire bytes. |
+| `crates/embed-log-core/src/net/ws_server.rs` | 1 | 0 | Preserves browser UART line-normalization behavior explicitly. |
+| `crates/embed-log-core/src/sources/traits.rs` | 4 | 2 | Extends TX commands with line-ending policy and byte-count acknowledgements. |
+| `crates/embed-log-core/src/sources/uart.rs` | 8 | 2 | Writes exact or normalized payloads and acknowledges the actual byte count. |
+| `docs/agent-capabilities.md` | 12 | 0 | Documents authorized atomic UART experiments and bounded evidence. |
+| `docs/cli.md` | 20 | 0 | Documents all TX inputs, matching, timeout, gap, output, and targeting semantics. |
+| `mvp-embed-log-todo.md` | 3 | 1 | Marks the UART experiment milestone implemented and clarifies line behavior. |
+| `sdk/python/tests/test_e2e.py` | 2 | 2 | Expects the actual normalized wire-byte count from TX acknowledgement. |
+| `skills/embed-log/SKILL.md` | 12 | 0 | Teaches agents the guarded, token-bounded TX/expect workflow. |
