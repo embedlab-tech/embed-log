@@ -6,6 +6,15 @@ The CLI binary is named `embed-log`.
 embed-log --help
 ```
 
+## Embedded agent skill
+
+```bash
+embed-log skill
+embed-log skill --json
+```
+
+`skill` prints the exact canonical `skills/embed-log/SKILL.md` embedded at build time, so an agent can load guidance matching the installed binary without locating this repository or installing a plugin. Raw Markdown is the token-efficient default. `--json` returns `schema_version`, `embed_log_version`, `format`, and escaped `content` in one document. The command needs no config, daemon, network access, or machine-specific paths.
+
 ## Machine-readable capability discovery
 
 `schema` is the agent/wrapper discovery interface. It does not require a config or running daemon and writes exactly one JSON document:

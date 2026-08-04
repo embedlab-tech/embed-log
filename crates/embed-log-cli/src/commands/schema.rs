@@ -77,6 +77,7 @@ fn capability_index(root: &Command) -> Value {
             "tx_context_records_max": 1000,
             "watch_ttl_max": "24h"
         },
+        "agent_skill": "embed-log skill",
         "discovery": {
             "command": "embed-log schema <command>",
             "examples": [
@@ -494,6 +495,14 @@ fn semantics(path: &str) -> Semantics {
             output: json_or_text,
             errors: &[],
             notes: &[],
+        },
+        "skill" => Semantics {
+            mutates: false,
+            execution: "local",
+            targeting: local,
+            output: json!({"modes":["markdown","json"],"stdout_documents":1,"runtime_state":false}),
+            errors: &[],
+            notes: &["raw Markdown is the token-efficient default; JSON adds version metadata and escaped content"],
         },
         "schema" => Semantics {
             mutates: false,

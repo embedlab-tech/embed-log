@@ -20,6 +20,7 @@ use commands::misc;
 use commands::run::{cmd_run, cmd_run_quick, RunOverrides};
 use commands::schema::cmd_schema;
 use commands::sessions::{cmd_sessions, SessionsCommand};
+use commands::skill::cmd_skill;
 use commands::tx::{cmd_tx, parse_duration, TxInput, TxOptions};
 use commands::watch::{cmd_watch, WatchCommand};
 
@@ -134,6 +135,13 @@ enum Command {
         /// Indent the JSON document for human inspection.
         #[arg(long)]
         pretty: bool,
+    },
+
+    /// Print the version-matched agent skill embedded in this binary.
+    Skill {
+        /// Wrap the Markdown skill and version metadata in one JSON document.
+        #[arg(long)]
+        json: bool,
     },
 
     /// Show readiness and source status for a running daemon or URL.
@@ -314,6 +322,7 @@ impl Cli {
     fn machine_output(&self) -> bool {
         match self.command.as_ref() {
             Some(Command::Schema { .. }) => true,
+            Some(Command::Skill { json }) => *json,
             Some(Command::Run { json, .. })
             | Some(Command::Status { json, .. })
             | Some(Command::Tx { json, .. })
@@ -396,6 +405,7 @@ async fn dispatch(cli: Cli) -> Result<()> {
             json: _,
             pretty,
         }) => cmd_schema(Cli::command(), &selector, pretty),
+        Some(Command::Skill { json }) => cmd_skill(json),
         Some(Command::Status {
             instance,
             url,
@@ -685,6 +695,12 @@ mod tests {
             "two",
         ])
         .is_err());
+    }
+
+    #[test]
+    fn skill_command_accepts_raw_and_json_output() {
+        Cli::parse_from(["embed-log", "skill"]);
+        Cli::parse_from(["embed-log", "skill", "--json"]);
     }
 
     #[test]

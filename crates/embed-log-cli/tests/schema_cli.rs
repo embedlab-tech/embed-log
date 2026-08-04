@@ -42,6 +42,8 @@ fn schema_discovers_capabilities_and_targeted_commands_without_runtime_state() {
         .iter()
         .any(|parser| parser == "hex-coap"));
     let commands = index["commands"].as_array().unwrap();
+    assert!(commands.iter().any(|command| command == "skill"));
+    assert_eq!(index["agent_skill"], "embed-log skill");
     assert!(commands.iter().any(|command| command == "sessions.read"));
     assert!(commands.iter().any(|command| command == "watch.wait"));
     assert!(!commands.iter().any(|command| command == "help"));

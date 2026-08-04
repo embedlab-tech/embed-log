@@ -89,11 +89,14 @@ Compact text defaults to `T+00:12.453 719 DUT_UART#428 boot complete`; choose `-
 
 ## Claude Code plugin
 
-This repo bundles a [Claude Code](https://claude.com/claude-code) skill that teaches an AI
-agent the complete safe CLI workflow: schema/runtime discovery, explicit daemon targeting,
-titled experiment rotation, bounded cursor analysis, atomic UART TX, retained watches, normalized
-errors, and backend textual CoAP parsing—without grepping raw log files or opening owned UARTs.
-Install it once, in any Claude Code session:
+The release binary embeds the canonical agent skill for zero-setup, version-matched discovery:
+
+```bash
+embed-log skill          # raw Markdown, best for direct model context
+embed-log skill --json   # version metadata plus Markdown content
+```
+
+The same skill is bundled as a [Claude Code](https://claude.com/claude-code) plugin. It teaches the complete safe CLI workflow: schema/runtime discovery, explicit daemon targeting, titled experiment rotation, bounded cursor analysis, atomic UART TX, retained watches, normalized errors, and backend textual CoAP parsing—without grepping raw log files or opening owned UARTs. Install it once, in any Claude Code session:
 
 ```
 /plugin marketplace add embedlab-tech/embed-log

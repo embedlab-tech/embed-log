@@ -4,7 +4,13 @@ This reference describes Embed-log capabilities agents can use now. For the broa
 
 ## Discover the installed CLI
 
-Do not parse human `--help` output. Start with the compact, runtime-independent capability index, then inspect only the command needed:
+When no Embed-log integration is installed, load the concise version-matched guidance directly from the binary:
+
+```bash
+embed-log skill
+```
+
+Do not parse human `--help` output. After loading/caching the skill, use the compact runtime-independent capability index, then inspect only the command needed:
 
 ```bash
 embed-log schema

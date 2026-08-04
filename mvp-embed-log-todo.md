@@ -127,6 +127,7 @@ Keep this primary surface:
 
 ```text
 embed-log run
+embed-log skill
 embed-log schema
 embed-log status
 embed-log stop
@@ -150,7 +151,7 @@ embed-log watch wait
 embed-log watch remove
 ```
 
-`embed-log schema` is implemented as compact progressive discovery: the bare command lists capabilities/defaults/limits, while targeted selectors expose actual Clap arguments augmented with mutation, targeting, output, and stable-error semantics. Static schema and dynamic `status --json` remain separate.
+`embed-log skill` prints the concise version-matched canonical guidance embedded in the binary. `embed-log schema` is implemented as compact progressive discovery: the bare command lists capabilities/defaults/limits, while targeted selectors expose actual Clap arguments augmented with mutation, targeting, output, and stable-error semantics. Static schema and dynamic `status --json` remain separate.
 
 Fold useful information from `sessions info` into `sessions summary`.
 

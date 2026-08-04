@@ -6,7 +6,7 @@ This plan makes Embed-log efficient and safe for agents, scripts, and UI-driven 
 
 **Agents speak CLI.** Models are heavily trained on `gh`/`kubectl`/`docker`-style noun–verb commands and structured JSON output. A well-shaped CLI plus a small skill file is therefore the highest-leverage capability surface for Embed-log: it works unchanged for agents, humans, shell scripts, wrappers, and CI, and can be richer than an MCP-only integration.
 
-The CLI is the canonical automation contract. `embed-log schema` provides versioned, progressive mechanical discovery without parsing human `--help`; the skill provides operational judgment, safety rules, and token-efficient workflows; `status --json` provides dynamic daemon/source state. MCP, SDKs, and higher-level tools such as `gwl log` should adapt this contract rather than become separate implementations of capture behavior.
+The CLI is the canonical automation contract. `embed-log skill` provides version-matched operational judgment and safety rules directly from the binary; `embed-log schema` provides progressive mechanical discovery without parsing human `--help`; `status --json` provides dynamic daemon/source state. MCP, SDKs, and higher-level tools such as `gwl log` should adapt this contract rather than become separate implementations of capture behavior.
 
 Consequences:
 
