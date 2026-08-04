@@ -98,7 +98,11 @@ enum Command {
         ws_port: Option<u16>,
 
         /// Start as a background daemon.
-        #[arg(long, conflicts_with = "tui")]
+        #[arg(
+            long,
+            conflicts_with = "tui",
+            requires_all = ["instance", "ws_port", "config"]
+        )]
         daemon: bool,
 
         /// Name used to discover and control this daemon.
@@ -228,7 +232,7 @@ async fn main() -> Result<()> {
                     anyhow::bail!("--daemon currently requires --config; CLI-only daemon sources are a later milestone");
                 }
                 cmd_start_daemon(
-                    instance.as_deref().unwrap_or("default"),
+                    instance.as_deref().expect("clap requires --instance"),
                     config.as_ref(),
                     &frontend_dir,
                     &overrides,

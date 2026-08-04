@@ -28,7 +28,7 @@ embed-log run --config embed-log.yml --no-browser
 embed-log run --config embed-log.yml --tui
 
 # Agent: background daemon
-embed-log run --config embed-log.yml --daemon --instance bench-a
+embed-log run --config embed-log.yml --daemon --instance bench-a --port 18080
 ```
 
 ### `--daemon` semantics
@@ -60,13 +60,13 @@ embed-log run --port 18080
 
 This is not a UDP source port. The same server port hosts browser HTTP, the browser WebSocket, the control WebSocket, and the status API. UDP log sources always require explicit ports and have no shared default.
 
-When no port is specified for a daemon, find a free port starting at `18080`.
+Daemon startup requires an explicit `--port` and never scans for another port. Repeating the same instance/endpoint/config request reuses the verified existing daemon; conflicts fail visibly.
 
 ## 3. Named daemon instances
 
 ```bash
-embed-log run --daemon --instance bench-a --config bench-a.yml
-embed-log run --daemon --instance bench-b --config bench-b.yml
+embed-log run --daemon --instance bench-a --config bench-a.yml --port 18080
+embed-log run --daemon --instance bench-b --config bench-b.yml --port 18081
 ```
 
 Target a daemon with:
@@ -75,12 +75,14 @@ Target a daemon with:
 embed-log status --instance bench-a
 ```
 
-Instance resolution order:
+Read-only status resolution order:
 
 1. `--instance <name>`;
 2. `EMBED_LOG_INSTANCE`;
 3. automatically select the only running daemon;
 4. if multiple daemons are running, fail and list their names.
+
+Mutating commands require `--instance`, `EMBED_LOG_INSTANCE`, or an explicit URL where supported; they never infer the only daemon.
 
 Also support an explicit endpoint for remote or unregistered servers:
 
@@ -354,7 +356,7 @@ embed-log sessions open <SESSION_ID>
 embed-log sessions export <SESSION_ID>
 ```
 
-`sessions open` should regenerate missing or stale HTML. Remove automatic HTML export merely because the last browser client disconnected.
+`sessions open` should regenerate missing or stale HTML. Browser disconnects do not trigger automatic HTML export.
 
 ## 12. Sources and backend parsers
 

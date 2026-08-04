@@ -49,6 +49,18 @@ test.describe('Rust backend browser e2e', () => {
     await waitForLineContaining(page, 'SENSORS', 'seq=7');
   });
 
+  test('disconnecting the final browser does not export HTML', async ({ page }) => {
+    await page.goto('/');
+    await waitForWs(page);
+    const session = await page.evaluate(async () => (await fetch('/api/session/current')).json());
+    expect(session.html_status).toBe('pending');
+    await page.close();
+    await new Promise(resolve => setTimeout(resolve, 2500));
+    const manifest = JSON.parse(fs.readFileSync(session.manifest, 'utf8'));
+    expect(manifest.html_status).toBe('pending');
+    expect(fs.existsSync(`${session.dir}/session.html`)).toBe(false);
+  });
+
   test('session export produces replayable HTML', async ({ page, browser }, testInfo) => {
     await page.goto('/');
     await waitForWs(page);

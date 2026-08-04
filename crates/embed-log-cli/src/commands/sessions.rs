@@ -13,7 +13,7 @@ use embed_log_core::naming::slugify;
 use embed_log_core::postprocess::{dedupe_entry, denoise_message, elapsed_time};
 use embed_log_core::session::SessionExporter;
 
-use crate::commands::daemon::{http_post_json, resolve_endpoint};
+use crate::commands::daemon::{http_post_json, resolve_mutating_endpoint};
 use crate::util::open_url_in_default_browser;
 
 /// Shared `--dir`/`--config` args for resolving which logs directory a
@@ -425,7 +425,7 @@ fn create_titled_session(
     json: bool,
 ) -> Result<()> {
     validate_session_title(title)?;
-    let (_, endpoint) = resolve_endpoint(instance, url)?;
+    let (_, endpoint) = resolve_mutating_endpoint(instance, url)?;
     let response = http_post_json(
         &endpoint,
         "/api/session/rotate",

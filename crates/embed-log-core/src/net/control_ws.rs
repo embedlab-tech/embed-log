@@ -1151,9 +1151,8 @@ mod tests {
     use crate::session::SessionManager;
     use crate::sources::TxCommand;
     use std::collections::HashMap;
-    use std::sync::atomic::{AtomicU64, AtomicUsize};
+    use std::sync::atomic::AtomicUsize;
     use std::sync::{Arc, Mutex};
-    use std::time::Duration;
     use tokio::sync::{broadcast, mpsc};
 
     fn temp_session_dir(name: &str) -> std::path::PathBuf {
@@ -1202,8 +1201,6 @@ mod tests {
             session_manager: None,
             logs_root: std::path::PathBuf::from("/tmp"),
             ws_client_count: Arc::new(AtomicUsize::new(0)),
-            no_client_export_generation: Arc::new(AtomicU64::new(0)),
-            no_client_export_delay: Duration::from_secs(3600),
             stats: Arc::new(crate::net::ws_server::RuntimeStats::empty()),
             source_txs: Arc::new(source_txs),
             source_tx_senders: Arc::new(HashMap::new()),
@@ -1784,8 +1781,6 @@ mod tests {
             session_manager: Some(Arc::new(Mutex::new(mgr))),
             logs_root: dir.clone(),
             ws_client_count: Arc::new(AtomicUsize::new(0)),
-            no_client_export_generation: Arc::new(AtomicU64::new(0)),
-            no_client_export_delay: Duration::from_secs(3600),
             stats: Arc::new(crate::net::ws_server::RuntimeStats::empty()),
             source_txs: Arc::new(source_txs),
             source_tx_senders: Arc::new(HashMap::new()),
@@ -2041,8 +2036,6 @@ mod tests {
             session_manager: Some(session_mgr),
             logs_root: dir.clone(),
             ws_client_count: Arc::new(AtomicUsize::new(0)),
-            no_client_export_generation: Arc::new(AtomicU64::new(0)),
-            no_client_export_delay: Duration::from_secs(3600),
             stats: Arc::new(crate::net::ws_server::RuntimeStats::empty()),
             source_txs: Arc::new(source_txs),
             source_tx_senders: Arc::new(HashMap::new()),

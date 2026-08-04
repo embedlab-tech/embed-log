@@ -1,6 +1,7 @@
 //! Background daemon lifecycle and named-instance discovery.
 
 use std::fs::{self, File};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
@@ -25,7 +26,11 @@ pub(crate) struct InstanceRecord {
     pub instance: String,
     pub pid: u32,
     pub endpoint: String,
+    #[serde(default)]
+    pub bind_host: String,
     pub config_path: String,
+    #[serde(default)]
+    pub config_fingerprint: String,
     pub logs_dir: String,
     pub diagnostic_log: String,
     pub executable: String,
@@ -50,29 +55,54 @@ pub(crate) fn cmd_start_daemon(
 
     fs::create_dir_all(registry_dir()?).context("create daemon registry directory")?;
     cleanup_stale_records()?;
-    if let Some(record) = read_record(instance)? {
-        anyhow::bail!(
-            "instance {instance:?} is already running with PID {} at {}; stop it first",
-            record.pid,
-            record.endpoint
-        );
-    }
 
     let host = overrides
         .host
         .clone()
         .unwrap_or_else(|| config.server.host.clone());
-    let port = match overrides.ws_port {
-        Some(port) => {
-            if !port_is_available(&host, port) {
-                anyhow::bail!("HTTP/WebSocket port {host}:{port} is already in use");
-            }
-            port
-        }
-        None => find_available_port(&host, config.server.ws_port)?,
-    };
+    let port = overrides
+        .ws_port
+        .context("--port is required with --daemon; Embed-log never selects another port")?;
     let connect_host = connect_host(&host);
     let endpoint = format!("http://{connect_host}:{port}");
+    let config_fingerprint = fingerprint_file(&config_path)?;
+
+    if let Some(record) = read_record(instance)? {
+        if record.endpoint == endpoint
+            && record.bind_host == host
+            && record.config_path == config_path.display().to_string()
+            && record.config_fingerprint == config_fingerprint
+            && record.logs_dir == logs_dir.display().to_string()
+        {
+            let backend = http_get_json(&record.endpoint, "/api/v1/status").with_context(|| {
+                format!("registered instance {instance:?} exists but is not ready")
+            })?;
+            return print_daemon_result(&record, &backend, true, json);
+        }
+        anyhow::bail!(
+            "instance {instance:?} is already running with PID {} at {} using config {}; requested endpoint {} and config {}",
+            record.pid,
+            record.endpoint,
+            record.config_path,
+            endpoint,
+            config_path.display()
+        );
+    }
+    if let Some(record) = list_records()?
+        .into_iter()
+        .find(|record| record.endpoint == endpoint)
+    {
+        anyhow::bail!(
+            "endpoint {endpoint} is already owned by instance {:?} (PID {}); use that instance or choose another explicit --port",
+            record.instance,
+            record.pid
+        );
+    }
+    if !port_is_available(&host, port) {
+        anyhow::bail!(
+            "HTTP/WebSocket port {host}:{port} is already in use by an unregistered process"
+        );
+    }
     let diagnostic_log = registry_dir()?.join(format!("{instance}.log"));
     let log_file = File::create(&diagnostic_log)
         .with_context(|| format!("create daemon log {}", diagnostic_log.display()))?;
@@ -123,7 +153,9 @@ pub(crate) fn cmd_start_daemon(
         instance: instance.to_string(),
         pid,
         endpoint,
+        bind_host: host,
         config_path: config_path.display().to_string(),
+        config_fingerprint,
         logs_dir: logs_dir.display().to_string(),
         diagnostic_log: diagnostic_log.display().to_string(),
         executable: executable.display().to_string(),
@@ -131,13 +163,30 @@ pub(crate) fn cmd_start_daemon(
     };
     write_record(&record)?;
 
+    let backend = http_get_json(&record.endpoint, "/api/v1/status")?;
+    print_daemon_result(&record, &backend, false, json)
+}
+
+fn print_daemon_result(
+    record: &InstanceRecord,
+    backend: &serde_json::Value,
+    reused: bool,
+    json: bool,
+) -> Result<()> {
     if json {
         println!(
             "{}",
             serde_json::to_string(&serde_json::json!({
                 "ok": true,
+                "reused": reused,
                 "instance": record,
+                "backend": backend,
             }))?
+        );
+    } else if reused {
+        println!(
+            "reused daemon {} at {} (PID {})",
+            record.instance, record.endpoint, record.pid
         );
     } else {
         println!(
@@ -185,7 +234,7 @@ pub(crate) fn cmd_status(instance: Option<&str>, url: Option<&str>, json: bool) 
 
 pub(crate) fn cmd_stop(instance: Option<&str>, json: bool) -> Result<()> {
     cleanup_stale_records()?;
-    let record = resolve_instance(instance)?;
+    let record = resolve_mutating_instance(instance)?;
     if !process_matches_record(&record) {
         remove_record(&record.instance)?;
         anyhow::bail!(
@@ -237,10 +286,35 @@ pub(crate) fn resolve_endpoint(
     Ok((Some(record), endpoint))
 }
 
-fn resolve_instance(explicit: Option<&str>) -> Result<InstanceRecord> {
-    let selected = explicit
+pub(crate) fn resolve_mutating_endpoint(
+    instance: Option<&str>,
+    url: Option<&str>,
+) -> Result<(Option<InstanceRecord>, String)> {
+    cleanup_stale_records()?;
+    if let Some(url) = url {
+        return Ok((None, url.trim_end_matches('/').to_string()));
+    }
+    let record = resolve_mutating_instance(instance)?;
+    let endpoint = record.endpoint.clone();
+    Ok((Some(record), endpoint))
+}
+
+fn selected_instance(explicit: Option<&str>) -> Option<String> {
+    explicit
         .map(str::to_string)
-        .or_else(|| std::env::var("EMBED_LOG_INSTANCE").ok());
+        .or_else(|| std::env::var("EMBED_LOG_INSTANCE").ok())
+}
+
+fn resolve_mutating_instance(explicit: Option<&str>) -> Result<InstanceRecord> {
+    let name = selected_instance(explicit).context(
+        "an explicit target is required; pass --instance, set EMBED_LOG_INSTANCE, or use --url where supported",
+    )?;
+    validate_instance_name(&name)?;
+    read_record(&name)?.ok_or_else(|| anyhow::anyhow!("instance {name:?} is not running"))
+}
+
+fn resolve_instance(explicit: Option<&str>) -> Result<InstanceRecord> {
+    let selected = selected_instance(explicit);
     if let Some(name) = selected {
         validate_instance_name(&name)?;
         return read_record(&name)?.ok_or_else(|| {
@@ -331,11 +405,11 @@ fn list_records() -> Result<Vec<InstanceRecord>> {
         if path.extension().and_then(|value| value.to_str()) != Some("json") {
             continue;
         }
-        if let Ok(bytes) = fs::read(&path) {
-            if let Ok(record) = serde_json::from_slice::<InstanceRecord>(&bytes) {
-                records.push(record);
-            }
-        }
+        let bytes =
+            fs::read(&path).with_context(|| format!("read daemon registry {}", path.display()))?;
+        let record = serde_json::from_slice::<InstanceRecord>(&bytes)
+            .with_context(|| format!("parse daemon registry {}", path.display()))?;
+        records.push(record);
     }
     records.sort_by(|left, right| left.instance.cmp(&right.instance));
     Ok(records)
@@ -345,6 +419,10 @@ fn cleanup_stale_records() -> Result<()> {
     for record in list_records()? {
         if !process_matches_record(&record) {
             remove_record(&record.instance)?;
+            eprintln!(
+                "removed stale daemon record for instance {:?} (PID {})",
+                record.instance, record.pid
+            );
         }
     }
     Ok(())
@@ -388,13 +466,11 @@ fn signal_interrupt(pid: u32) -> Result<()> {
     }
 }
 
-fn find_available_port(host: &str, start: u16) -> Result<u16> {
-    for port in start..=u16::MAX {
-        if port_is_available(host, port) {
-            return Ok(port);
-        }
-    }
-    anyhow::bail!("no available TCP port at or above {start}")
+fn fingerprint_file(path: &Path) -> Result<String> {
+    let bytes = fs::read(path).with_context(|| format!("read config {}", path.display()))?;
+    let mut hasher = DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    Ok(format!("{:016x}", hasher.finish()))
 }
 
 fn port_is_available(host: &str, port: u16) -> bool {

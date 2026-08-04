@@ -2,7 +2,6 @@ use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{Path as AxumPath, State, WebSocketUpgrade};
@@ -119,10 +118,6 @@ pub struct ServerState {
     pub logs_root: PathBuf,
     /// Live WebSocket client count.
     pub ws_client_count: Arc<AtomicUsize>,
-    /// Generation used to cancel pending no-client exports when a new client connects.
-    pub no_client_export_generation: Arc<AtomicU64>,
-    /// Delay before exporting after the final WebSocket client disconnects.
-    pub no_client_export_delay: Duration,
     /// Runtime queue/source counters.
     pub stats: Arc<RuntimeStats>,
     /// Per-source input channels for synthetic TX/inject entries (LogEntry pipeline).
@@ -268,15 +263,8 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<ServerState>) -> i
 
 async fn handle_ws_client(mut socket: WebSocket, state: ServerState) {
     state.ws_client_count.fetch_add(1, Ordering::Relaxed);
-    state
-        .no_client_export_generation
-        .fetch_add(1, Ordering::Relaxed);
     let _client_count_guard = WsClientCountGuard {
         count: state.ws_client_count.clone(),
-        generation: state.no_client_export_generation.clone(),
-        delay: state.no_client_export_delay,
-        on_export: state.on_export.clone(),
-        broadcast_tx: state.broadcast_tx.clone(),
     };
 
     // 1. Send the config message immediately.
@@ -349,53 +337,11 @@ async fn handle_ws_client(mut socket: WebSocket, state: ServerState) {
 
 struct WsClientCountGuard {
     count: Arc<AtomicUsize>,
-    generation: Arc<AtomicU64>,
-    delay: Duration,
-    on_export: Option<ExportCallback>,
-    broadcast_tx: broadcast::Sender<String>,
 }
 
 impl Drop for WsClientCountGuard {
     fn drop(&mut self) {
-        let previous = self.count.fetch_sub(1, Ordering::Relaxed);
-        if previous != 1 {
-            return;
-        }
-
-        let generation = self.generation.fetch_add(1, Ordering::Relaxed) + 1;
-        let generation_counter = self.generation.clone();
-        let count = self.count.clone();
-        let delay = self.delay;
-        let on_export = self.on_export.clone();
-        let broadcast_tx = self.broadcast_tx.clone();
-
-        tokio::spawn(async move {
-            tokio::time::sleep(delay).await;
-            if count.load(Ordering::Relaxed) != 0
-                || generation_counter.load(Ordering::Relaxed) != generation
-            {
-                return;
-            }
-
-            let Some(export_fn) = on_export else {
-                return;
-            };
-            let payload = match export_fn() {
-                Ok(path) => serde_json::json!({
-                    "type": "session_html_status",
-                    "html_status": "ready",
-                    "html_path": path,
-                    "reason": "no_clients",
-                }),
-                Err(error) => serde_json::json!({
-                    "type": "session_html_status",
-                    "html_status": "error",
-                    "html_error": error,
-                    "reason": "no_clients",
-                }),
-            };
-            let _ = broadcast_tx.send(payload.to_string());
-        });
+        self.count.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
@@ -967,8 +913,6 @@ mod tests {
             session_manager: Some(manager),
             logs_root: dir,
             ws_client_count: Arc::new(AtomicUsize::new(0)),
-            no_client_export_generation: Arc::new(AtomicU64::new(0)),
-            no_client_export_delay: Duration::from_secs(3600),
             stats: Arc::new(RuntimeStats::empty()),
             source_txs: Arc::new(HashMap::new()),
             source_tx_senders: Arc::new(HashMap::new()),
@@ -1206,60 +1150,15 @@ mod tests {
         assert_eq!(snapshot["dut"]["bytes"], 42);
     }
 
-    #[tokio::test]
-    async fn final_client_disconnect_schedules_no_client_export() {
+    #[test]
+    fn final_client_disconnect_only_updates_client_count() {
         let count = Arc::new(AtomicUsize::new(1));
-        let generation = Arc::new(AtomicU64::new(0));
-        let exports = Arc::new(AtomicUsize::new(0));
-        let (broadcast_tx, mut rx) = broadcast::channel(4);
-        let exports_for_callback = exports.clone();
-
         {
             let _guard = WsClientCountGuard {
                 count: count.clone(),
-                generation: generation.clone(),
-                delay: Duration::from_millis(1),
-                on_export: Some(Arc::new(move || {
-                    exports_for_callback.fetch_add(1, Ordering::Relaxed);
-                    Ok("/tmp/session.html".to_string())
-                })),
-                broadcast_tx,
             };
         }
-
-        tokio::time::sleep(Duration::from_millis(20)).await;
-        assert_eq!(exports.load(Ordering::Relaxed), 1);
-        let payload: serde_json::Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
-        assert_eq!(payload["type"], "session_html_status");
-        assert_eq!(payload["reason"], "no_clients");
-    }
-
-    #[tokio::test]
-    async fn reconnect_generation_cancels_pending_no_client_export() {
-        let count = Arc::new(AtomicUsize::new(1));
-        let generation = Arc::new(AtomicU64::new(0));
-        let exports = Arc::new(AtomicUsize::new(0));
-        let (broadcast_tx, _rx) = broadcast::channel(4);
-        let exports_for_callback = exports.clone();
-
-        {
-            let _guard = WsClientCountGuard {
-                count: count.clone(),
-                generation: generation.clone(),
-                delay: Duration::from_millis(20),
-                on_export: Some(Arc::new(move || {
-                    exports_for_callback.fetch_add(1, Ordering::Relaxed);
-                    Ok("/tmp/session.html".to_string())
-                })),
-                broadcast_tx,
-            };
-        }
-
-        count.fetch_add(1, Ordering::Relaxed);
-        generation.fetch_add(1, Ordering::Relaxed);
-
-        tokio::time::sleep(Duration::from_millis(40)).await;
-        assert_eq!(exports.load(Ordering::Relaxed), 0);
+        assert_eq!(count.load(Ordering::Relaxed), 0);
     }
 
     #[test]

@@ -55,13 +55,13 @@ See the [quick-start guide](docs/quickstart.md) for all fast-run options, sessio
 Keep configured sources, including UART ownership, alive between experiments:
 
 ```bash
-embed-log run --daemon --instance bench-a --config embed-log.yml --json
+embed-log run --daemon --instance bench-a --config embed-log.yml --port 18080 --json
 embed-log status --instance bench-a --json
 embed-log sessions new --instance bench-a --title reconnect-attempt-3 --json
 embed-log stop --instance bench-a --json
 ```
 
-Each titled session rotation keeps source tasks and UART ownership alive while the browser and TUI switch to the new experiment. A daemon chooses the first free port at or above the configured server port unless `--port` is explicit. Use `EMBED_LOG_INSTANCE=bench-a`, or omit `--instance` when exactly one daemon is running. Daemon shutdown skips automatic HTML export by default; foreground modes retain it.
+Each titled session rotation keeps source tasks and UART ownership alive while the browser and TUI switch to the new experiment. Daemon startup requires explicit `--config`, `--instance`, and `--port`; it never changes the requested port. Repeating the same request reuses the verified running instance. Mutating commands require `--instance`, `EMBED_LOG_INSTANCE`, or an explicit URL. Daemon shutdown skips automatic HTML export by default; foreground modes retain it.
 
 ## Claude Code plugin
 

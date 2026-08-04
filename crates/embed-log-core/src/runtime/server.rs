@@ -4,7 +4,6 @@ use std::sync::{
     atomic::{AtomicU64, AtomicUsize},
     Arc, Mutex, RwLock,
 };
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local};
@@ -490,8 +489,6 @@ impl LogServer {
             session_manager: Some(session_mgr.clone()),
             logs_root: self.logs_root.clone(),
             ws_client_count: Arc::new(AtomicUsize::new(0)),
-            no_client_export_generation: Arc::new(AtomicU64::new(0)),
-            no_client_export_delay: Duration::from_secs(2),
             stats: stats.clone(),
             source_txs: Arc::new(source_txs),
             source_tx_senders: Arc::new(source_tx_senders),
@@ -507,15 +504,21 @@ impl LogServer {
         let port = self.config.server.ws_port;
         let frontend_dir = self.frontend_dir.clone();
 
-        let server_handle = tokio::spawn(async move {
-            if let Err(e) = start_server(&host, port, Some(frontend_dir), state).await {
-                error!("HTTP/WS server error: {e}");
-            }
-        });
-        join_handles.push(server_handle);
+        let mut server_handle =
+            tokio::spawn(async move { start_server(&host, port, Some(frontend_dir), state).await });
 
-        // ── 13. Wait for shutdown ──
-        tokio::signal::ctrl_c().await?;
+        // ── 13. Wait for shutdown or propagate an HTTP bind/server failure. ──
+        tokio::select! {
+            signal = tokio::signal::ctrl_c() => signal?,
+            result = &mut server_handle => {
+                return match result {
+                    Ok(Ok(())) => Err(anyhow::anyhow!("HTTP/WebSocket server stopped unexpectedly")),
+                    Ok(Err(error)) => Err(error.context("HTTP/WebSocket server failed")),
+                    Err(error) => Err(anyhow::anyhow!("HTTP/WebSocket server task failed: {error}")),
+                };
+            }
+        }
+        server_handle.abort();
         info!("shutting down…");
 
         if self.export_on_shutdown {

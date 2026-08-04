@@ -147,6 +147,13 @@ fn daemon_start_status_duplicate_and_graceful_stop() {
     let original_session = status_json["backend"]["session_id"].as_str().unwrap();
     let daemon_pid = started_json["instance"]["pid"].as_u64().unwrap();
 
+    let implicit_rotation = invoke(
+        &runtime,
+        &["sessions", "new", "--title", "implicit mutation", "--json"],
+    );
+    assert!(!implicit_rotation.status.success());
+    assert!(String::from_utf8_lossy(&implicit_rotation.stderr).contains("explicit target"));
+
     let rotated = invoke(
         &runtime,
         &[
@@ -218,8 +225,23 @@ fn daemon_start_status_duplicate_and_graceful_stop() {
     assert_eq!(direct_json["backend"]["ok"], true);
 
     let duplicate = start(&runtime, &config, "bench-a", &["--port", &port]);
-    assert!(!duplicate.status.success());
-    assert!(String::from_utf8_lossy(&duplicate.stderr).contains("already running"));
+    assert!(duplicate.status.success());
+    let reused_json: serde_json::Value = serde_json::from_slice(&duplicate.stdout).unwrap();
+    assert_eq!(reused_json["reused"], true);
+    assert_eq!(reused_json["instance"]["pid"], daemon_pid);
+
+    fs::write(
+        &config,
+        format!("{}\n# changed\n", fs::read_to_string(&config).unwrap()),
+    )
+    .unwrap();
+    let changed_config = start(&runtime, &config, "bench-a", &["--port", &port]);
+    assert!(!changed_config.status.success());
+    assert!(String::from_utf8_lossy(&changed_config.stderr).contains("already running"));
+
+    let implicit_stop = invoke(&runtime, &["stop", "--json"]);
+    assert!(!implicit_stop.status.success());
+    assert!(String::from_utf8_lossy(&implicit_stop.stderr).contains("explicit target"));
 
     let stopped = invoke(&runtime, &["stop", "--instance", "bench-a", "--json"]);
     assert!(
@@ -246,21 +268,81 @@ fn daemon_start_status_duplicate_and_graceful_stop() {
 }
 
 #[test]
-fn multiple_instances_use_distinct_ports_and_require_selection() {
+fn occupied_port_is_never_reassigned_and_foreground_bind_failure_exits() {
+    let root = temp_root("occupied");
+    let runtime = root.join("runtime");
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port().to_string();
+    let config = write_config(&root, "occupied", free_port());
+    fs::create_dir_all(&runtime).unwrap();
+    fs::write(runtime.join("broken.json"), "not json").unwrap();
+    let malformed = invoke(&runtime, &["status", "--json"]);
+    assert!(!malformed.status.success());
+    assert!(String::from_utf8_lossy(&malformed.stderr).contains("parse daemon registry"));
+    fs::remove_file(runtime.join("broken.json")).unwrap();
+
+    let daemon = start(&runtime, &config, "bench-a", &["--port", &port]);
+    assert!(!daemon.status.success());
+    let daemon_error = String::from_utf8_lossy(&daemon.stderr);
+    assert!(
+        daemon_error.contains("unregistered process"),
+        "{daemon_error}"
+    );
+    assert!(!runtime.join("bench-a.json").exists());
+
+    let foreground = invoke(
+        &runtime,
+        &[
+            "run",
+            "--config",
+            config.to_str().unwrap(),
+            "--port",
+            &port,
+            "--no-open-browser",
+            "--frontend-dir",
+            "/definitely/not/a/frontend",
+        ],
+    );
+    assert!(!foreground.status.success());
+    let foreground_error = String::from_utf8_lossy(&foreground.stderr);
+    assert!(
+        foreground_error.contains("HTTP/WebSocket server failed"),
+        "{foreground_error}"
+    );
+
+    drop(listener);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn multiple_instances_require_explicit_ports_and_selection() {
     let root = temp_root("multiple");
     let runtime = root.join("runtime");
-    let start_port = free_port();
-    let config_a = write_config(&root, "a", start_port);
-    let config_b = write_config(&root, "b", start_port);
+    let port_a = free_port();
+    let port_b = free_port();
+    let config_a = write_config(&root, "a", port_a);
+    let config_b = write_config(&root, "b", port_b);
 
-    let first = start(&runtime, &config_a, "bench-a", &[]);
+    let missing_port = start(&runtime, &config_a, "missing-port", &[]);
+    assert!(!missing_port.status.success());
+    assert!(String::from_utf8_lossy(&missing_port.stderr).contains("--port"));
+
+    let port_a_text = port_a.to_string();
+    let first = start(&runtime, &config_a, "bench-a", &["--port", &port_a_text]);
     assert!(
         first.status.success(),
         "{}",
         String::from_utf8_lossy(&first.stderr)
     );
     let mut guard = DaemonGuard::new(&runtime, "bench-a");
-    let second = start(&runtime, &config_b, "bench-b", &[]);
+    let same_endpoint = start(&runtime, &config_b, "bench-c", &["--port", &port_a_text]);
+    assert!(!same_endpoint.status.success());
+    assert!(
+        String::from_utf8_lossy(&same_endpoint.stderr).contains("owned by instance \"bench-a\"")
+    );
+
+    let port_b_text = port_b.to_string();
+    let second = start(&runtime, &config_b, "bench-b", &["--port", &port_b_text]);
     assert!(
         second.status.success(),
         "{}",

@@ -78,10 +78,10 @@ embed-log run --config embed-log.yml --host 0.0.0.0 --port 9090 --log-dir /tmp/e
 Start a named config-based daemon and wait for its status API to become ready:
 
 ```bash
-embed-log run --daemon --instance bench-a --config embed-log.yml --json
+embed-log run --daemon --instance bench-a --config embed-log.yml --port 18080 --json
 ```
 
-Without an explicit `--port`, daemon startup selects the first free TCP port at or above `server.listen` and records the effective endpoint. Instance records contain the PID, endpoint, config path, logs directory, diagnostic log, executable, and start time. They live under `$XDG_RUNTIME_DIR/embed-log`, with a user-state fallback; tests may override this with `EMBED_LOG_RUNTIME_DIR`.
+Daemon startup requires explicit `--config`, `--instance`, and `--port`. It never scans for or selects another port. Repeating the same instance, endpoint, and unchanged config is idempotent and returns `reused: true`; endpoint/config conflicts fail. Instance records contain the PID, endpoint, config path and fingerprint, logs directory, diagnostic log, executable, and start time. They live under `$XDG_RUNTIME_DIR/embed-log`, with a user-state fallback; tests may override this with `EMBED_LOG_RUNTIME_DIR`.
 
 Inspect or stop it:
 
@@ -90,9 +90,9 @@ embed-log status --instance bench-a --json
 embed-log stop --instance bench-a --json
 ```
 
-Instance resolution is `--instance`, then `EMBED_LOG_INSTANCE`, then the only running instance. Multiple instances without a selection fail and list valid names. Query an unregistered or remote server directly with `embed-log status --url http://127.0.0.1:18080 --json`.
+Read-only `status` resolves `--instance`, then `EMBED_LOG_INSTANCE`, then the only running instance. Mutating commands such as `stop` and `sessions new` require `--instance`, `EMBED_LOG_INSTANCE`, or an explicit URL where supported. Query an unregistered or remote server directly with `embed-log status --url http://127.0.0.1:18080 --json`.
 
-`stop` verifies that the recorded PID still refers to the same executable before signaling it, waits for clean shutdown, and removes the registry record. Daemon shutdown does not automatically export HTML. CLI-only source definitions are not yet accepted with `--daemon`.
+`stop` verifies that the recorded PID still refers to the same executable before signaling it, waits for clean shutdown, and removes the registry record. Stale-record removal is reported on stderr, while malformed registry files fail visibly instead of being ignored. Daemon shutdown does not automatically export HTML. CLI-only source definitions are not yet accepted with `--daemon`.
 
 ### Create an experiment session
 
@@ -107,7 +107,7 @@ embed-log sessions new \
 
 The original title is stored in `manifest.json` and returned by the session APIs. The directory/session ID includes a filesystem-safe slug, for example `2026-08-03_14-22-10_edhoc-reconnect-attempt-3`. Titles must be non-empty, contain a letter or number, and be at most 120 characters. Use `--url http://host:port` instead of `--instance` for an unregistered server.
 
-Rotation broadcasts `session_rotated`; connected browser and TUI clients clear their old panes and continue on the new session. Foreground rotation exports the completed session HTML. Daemon rotation leaves raw artifacts only unless export is explicitly requested.
+Rotation broadcasts `session_rotated`; connected browser and TUI clients clear their old panes and continue on the new session. Foreground rotation exports the completed session HTML. Daemon rotation leaves raw artifacts only unless export is explicitly requested. Disconnecting the final browser never triggers an export.
 
 ## Validate config
 
