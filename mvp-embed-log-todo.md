@@ -393,16 +393,17 @@ Current verification performed during planning:
 
 ### CoAP backend migration
 
-The current frontend `hex-coap` plugin handles arbitrary textual hex lines and is richer than the backend `slip-coap` parser. Before deleting frontend plugins:
+Backend textual `hex-coap` is now implemented for version 2 sources. It keeps the log prefix and replaces the hexadecimal bytes from the first valid CoAP header with the shared decoder's human-readable type, code, message ID, token, options, and payload length. Invalid/non-CoAP lines pass through unchanged. This ordinary decoded log record works identically in CLI, browser, TUI, persistence, and watches without requiring frontend metadata.
+
+Completed:
 
 1. Port textual hex scanning to Rust as `hex-coap`.
-2. Share one Rust CoAP decoder between `slip-coap` and `hex-coap`.
-3. Preserve original messages.
-4. Persist structured CoAP metadata.
-5. Render that metadata directly in the browser and TUI.
-6. Add request, response, option, block, malformed-frame, and frontend-parity tests.
+2. Reuse the Rust CoAP decoder used by `slip-coap`.
+3. Cover compact/separated hex, prefixed frames, partial lines, pass-through, config validation, and a daemon/file-source process path.
 
-Example metadata:
+The legacy frontend plugin remains only for version 1 compatibility. Generic plugin cleanup and optional richer structured metadata are separate follow-ups, not requirements for source-attached `hex-coap` decoding.
+
+Possible future metadata:
 
 ```json
 {
@@ -674,5 +675,5 @@ Keep the LLM benchmark nightly or manual. Deterministic Rust, CLI, PTY, parser, 
 6. Add durable temporary watches.
 7. Add global sequence, bounded read, and event context. **Done.**
 8. Add machine-readable schema discovery and normalize JSON failure output/errors. **Done.**
-9. Move frontend CoAP parsing into the backend and remove generic plugins.
+9. Move textual CoAP parsing into the backend (**done**); retain legacy version 1 plugins until separate compatibility cleanup.
 10. Add the Linux MVP integration harness and model benchmark.

@@ -36,6 +36,11 @@ fn schema_discovers_capabilities_and_targeted_commands_without_runtime_state() {
     assert_eq!(index["kind"], "embed-log.capabilities");
     assert_eq!(index["defaults"]["endpoint"], "127.0.0.1:18080");
     assert_eq!(index["limits"]["read_records_max"], 1000);
+    assert!(index["parser_types"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|parser| parser == "hex-coap"));
     let commands = index["commands"].as_array().unwrap();
     assert!(commands.iter().any(|command| command == "sessions.read"));
     assert!(commands.iter().any(|command| command == "watch.wait"));

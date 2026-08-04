@@ -200,7 +200,7 @@ Important files:
 | `persist.js` | Browser session persistence. |
 | `settings.js`, `themes.js`, `fontsize.js` | User settings, themes, font size. |
 | `pluginRuntime.js` | Plugin registry/loading/settings. |
-| `plugin-hex-coap.js` | Built-in CoAP hex plugin. |
+| `plugin-hex-coap.js` | Legacy config-v1 CoAP hex plugin; config-v2 sources use backend `parser.type: hex-coap`. |
 | `tsparse.js` | Timestamp parsing for imports/static logs. |
 | `import.js` | Import `.log` files into panes. |
 

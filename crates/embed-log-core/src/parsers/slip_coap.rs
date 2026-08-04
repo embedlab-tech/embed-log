@@ -94,7 +94,7 @@ fn hex_compact(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-mod coap {
+pub(super) mod coap {
     struct Option_ {
         number: u32,
         value: Vec<u8>,
@@ -132,6 +132,10 @@ mod coap {
         }
 
         let code = bytes[1];
+        let class = code >> 5;
+        if !(code == 0 || (1..=7).contains(&code) || matches!(class, 2 | 4 | 5)) {
+            return None;
+        }
         let mid = u16::from_be_bytes([bytes[2], bytes[3]]);
         let mut index = 4 + token_len;
         let token = &bytes[4..index];
@@ -188,7 +192,7 @@ mod coap {
         };
 
         Some(format!(
-            " t:{mtype_str:<3} c:{code_str:<5} i:{mid:04x} {{{:0<16}}} {opt_str} :: data:{payload_len}",
+            " t:{mtype_str} c:{code_str} i:{mid:04x} {{{}}} {opt_str} :: data len {payload_len}",
             hex_compact(token),
         ))
     }
@@ -214,7 +218,31 @@ mod coap {
                 _ => format!("{}.{:02}", code >> 5, code & 0x1f),
             }
         } else {
-            format!("{}.{:02}", code >> 5, code & 0x1f)
+            match code {
+                65 => "2.01 Created".to_string(),
+                66 => "2.02 Deleted".to_string(),
+                67 => "2.03 Valid".to_string(),
+                68 => "2.04 Changed".to_string(),
+                69 => "2.05 Content".to_string(),
+                95 => "2.31 Continue".to_string(),
+                128 => "4.00 Bad Request".to_string(),
+                129 => "4.01 Unauthorized".to_string(),
+                130 => "4.02 Bad Option".to_string(),
+                131 => "4.03 Forbidden".to_string(),
+                132 => "4.04 Not Found".to_string(),
+                133 => "4.05 Method Not Allowed".to_string(),
+                134 => "4.06 Not Acceptable".to_string(),
+                140 => "4.12 Precondition Failed".to_string(),
+                141 => "4.13 Request Entity Too Large".to_string(),
+                143 => "4.15 Unsupported Content-Format".to_string(),
+                160 => "5.00 Internal Server Error".to_string(),
+                161 => "5.01 Not Implemented".to_string(),
+                162 => "5.02 Bad Gateway".to_string(),
+                163 => "5.03 Service Unavailable".to_string(),
+                164 => "5.04 Gateway Timeout".to_string(),
+                165 => "5.05 Proxying Not Supported".to_string(),
+                _ => format!("{}.{:02}", code >> 5, code & 0x1f),
+            }
         }
     }
 
@@ -254,20 +282,49 @@ mod coap {
         matches!(number, 3 | 8 | 11 | 15 | 20 | 35 | 39)
     }
 
-    /// uint-valued options: rendered as bare hex (no `0x` prefix), matching
-    /// `hex(val)[2:]` in the legacy sniffer.
+    /// Unsigned integer options rendered in readable decimal form, with
+    /// specialized content-format and block-wise rendering below.
     fn is_uint_option(number: u32) -> bool {
         matches!(number, 6 | 7 | 12 | 14 | 17 | 23 | 27 | 28 | 60 | 258)
     }
 
     fn option_value_text(number: u32, value: &[u8]) -> String {
         if is_string_option(number) {
-            String::from_utf8_lossy(value).into_owned()
-        } else if is_uint_option(number) {
-            format!("{:x}", uint_from_bytes(value))
-        } else {
-            hex_compact(value)
+            return String::from_utf8_lossy(value).into_owned();
         }
+        let numeric = uint_from_bytes(value);
+        if matches!(number, 23 | 27) {
+            let szx = numeric & 0x7;
+            let more = (numeric >> 3) & 0x1;
+            let block = numeric >> 4;
+            return format!(
+                "NUM={block} M={more} SZX={szx} ({}B block)",
+                1u32 << (szx + 4)
+            );
+        }
+        if matches!(number, 12 | 17) {
+            let name = match numeric {
+                0 => Some("text/plain"),
+                40 => Some("application/link-format"),
+                41 => Some("application/xml"),
+                42 => Some("application/octet-stream"),
+                47 => Some("application/exi"),
+                50 => Some("application/json"),
+                60 => Some("application/cbor"),
+                _ => None,
+            };
+            return name.map_or_else(|| numeric.to_string(), |name| format!("{numeric} ({name})"));
+        }
+        if is_uint_option(number) {
+            return numeric.to_string();
+        }
+        if number == 5 && value.is_empty() {
+            return "(empty)".to_string();
+        }
+        if matches!(number, 252 | 292) {
+            return format!("0x{}", hex_compact(value));
+        }
+        hex_compact(value)
     }
 }
 
@@ -305,7 +362,7 @@ mod tests {
         assert!(lines[0].contains("c:GET"));
         assert!(lines[0].contains("i:1234"));
         assert!(lines[0].contains("Uri-Path: test"));
-        assert!(lines[0].contains("data:0"));
+        assert!(lines[0].contains("data len 0"));
     }
 
     #[test]

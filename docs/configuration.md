@@ -124,6 +124,21 @@ sources:
 
 `slip-coap` is valid only for UART sources.
 
+### Textual hexadecimal CoAP
+
+Use `hex-coap` when a UART, UDP, or file source emits newline-delimited logs containing a CoAP packet as compact or separated hexadecimal text:
+
+```yaml
+sources:
+  RADIO:
+    type: uart
+    path: /dev/ttyUSB1
+    parser:
+      type: hex-coap
+```
+
+For a line such as `radio rx: 40 01 12 34 b3 66 6f 6f 03 62 61 72`, the parser retains `radio rx: ` and replaces the hexadecimal packet from the first valid CoAP header with a readable decode containing type, method/status, message ID, token, options, and payload length. Lines without a valid CoAP packet pass through unchanged.
+
 ### Zephyr dictionary logging
 
 ```yaml
@@ -150,7 +165,7 @@ sources:
 
 The source creates the file if missing, starts at its current end, and emits appended lines.
 
-Supported backend parser types currently are `text`, `slip-coap`, and `zephyr-dict`. Backend textual `hex-coap` is planned; existing version 1 plugin configurations remain readable until that migration is complete.
+Supported backend parser types are `text`, `hex-coap`, `slip-coap`, and `zephyr-dict`.
 
 ## UI layout
 

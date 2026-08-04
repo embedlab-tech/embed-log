@@ -484,9 +484,12 @@ fn validate_config(config: &mut AppConfig, config_path: &Path) -> Result<(), Con
 
         // Validate parser type
         let parser_type = &src.parser.parser_type;
-        if !matches!(parser_type.as_str(), "text" | "slip-coap" | "zephyr-dict") {
+        if !matches!(
+            parser_type.as_str(),
+            "text" | "hex-coap" | "slip-coap" | "zephyr-dict"
+        ) {
             return Err(ConfigError::validation(format!(
-                "{}.parser.type unsupported: {parser_type:?} (use 'text', 'slip-coap', or 'zephyr-dict')",
+                "{}.parser.type unsupported: {parser_type:?} (use 'text', 'hex-coap', 'slip-coap', or 'zephyr-dict')",
                 ctx()
             )));
         }
@@ -957,6 +960,24 @@ tabs:
         std::fs::write(&path, yaml).unwrap();
         let err = load_config(&path).unwrap_err().to_string();
         assert!(err.contains("at least 2 source names"), "{err}");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn hex_coap_parser_is_valid_for_textual_sources() {
+        let yaml = r#"
+version: 2
+sources:
+  COAP:
+    type: file
+    path: capture.log
+    parser:
+      type: hex-coap
+"#;
+        let path = std::env::temp_dir().join("hex-coap-valid-test.yml");
+        std::fs::write(&path, yaml).unwrap();
+        let cfg = load_config(&path).unwrap();
+        assert_eq!(cfg.sources[0].parser.parser_type, "hex-coap");
         std::fs::remove_file(&path).ok();
     }
 

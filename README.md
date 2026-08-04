@@ -85,7 +85,7 @@ embed-log sessions read latest --after 100 --limit 50 --time relative --json
 embed-log sessions around latest --sequence 119 --before 5 --after 10 --time none
 ```
 
-Compact text defaults to `T+00:12.453 719 DUT_UART#428 boot complete`; choose `--time none` for minimum tokens or `--time absolute` for external correlation. Daemon startup requires explicit `--config`, `--instance`, and `--port`; it never changes the requested port. Repeating the same request reuses the verified running instance. Mutating commands require `--instance`, `EMBED_LOG_INSTANCE`, or an explicit URL. Daemon shutdown skips automatic HTML export by default; foreground modes retain it.
+Compact text defaults to `T+00:12.453 719 DUT_UART#428 boot complete`; choose `--time none` for minimum tokens or `--time absolute` for external correlation. A source configured with `parser: { type: hex-coap }` keeps any line prefix and replaces the first valid compact/separated hexadecimal CoAP packet with a human-readable decode before persistence and streaming. Daemon startup requires explicit `--config`, `--instance`, and `--port`; it never changes the requested port. Repeating the same request reuses the verified running instance. Mutating commands require `--instance`, `EMBED_LOG_INSTANCE`, or an explicit URL. Daemon shutdown skips automatic HTML export by default; foreground modes retain it.
 
 ## Claude Code plugin
 
