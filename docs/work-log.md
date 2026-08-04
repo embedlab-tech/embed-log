@@ -1723,3 +1723,79 @@ Future entries must include this per-file added/removed-line summary.
 | `skills/embed-log-live/SKILL.md` | 81 | 0 | Adds concise live daemon, reproduction, bounded evidence, TX, and watch guidance. |
 | `skills/embed-log-recorded/SKILL.md` | 68 | 0 | Adds concise bounded saved-session analysis guidance. |
 | `skills/embed-log/SKILL.md` | 0 | 146 | Removes the former broad combined skill. |
+
+## 2026-08-04 14:32:53 UTC / 2026-08-04 16:32:53 CEST (Warsaw)
+
+- **Commit:** `33bf36b` — `Remove durable event detection`
+- **Task:** Remove durable event rules, persistence, timelines, severity UI, event-specific CLI/SDK surfaces, and obsolete plans while preserving daemon lifecycle, source-filtered live subscriptions, UART TX/expectations, user markers, sequence-based session analysis, and process-local retained watches.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 14:32:53 UTC / 2026-08-04 16:32:53 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` — passed; `cargo test --locked --workspace` — passed (79 CLI unit, 12 CLI integration, 183 core, and 59 TUI tests); `cd sdk/python && python3 -m pytest tests/test_client.py tests/test_config.py tests/test_e2e.py tests/test_models.py` — 34 passed; `npm run test:unit --prefix tests-ui` — 19 passed; categorized browser smoke/data/interaction regressions — 41 passed and 3 skipped; the sessions category still has three unrelated tests invoking the already-removed `merge` command; full Python collection had one hardware UART fixture failure because no device RX sequence was produced (34 software tests passed, 1 hardware test failed, 1 skipped); `cargo build --locked --workspace --release` — passed; atomically installed both release binaries, verified installed version 1.2.1 at commit `33bf36b`, schema includes `watch`/`sessions.around` but not `sessions.events`, removed command returns `CLI_USAGE`, and installed/release SHA-256 hashes match.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`33bf36b`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 1 | 9 | Removes the deleted Python watcher workflow and clarifies log-entry subscriptions. |
+| `agent_benchmark_plan.md` | 0 | 750 | Deletes the obsolete event-centric benchmark plan. |
+| `agents_improvement_plan.md` | 0 | 564 | Deletes the obsolete event-first agent roadmap. |
+| `crates/embed-log-cli/src/commands/schema.rs` | 1 | 1 | Removes the durable-event command surface from capability descriptors. |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 12 | 365 | Removes persisted-event loading, filtering, summaries, and event-based context lookup. |
+| `crates/embed-log-cli/src/commands/watch.rs` | 1 | 1 | Describes watches as standalone temporary matchers. |
+| `crates/embed-log-cli/src/main.rs` | 0 | 9 | Removes the sessions events subcommand. |
+| `crates/embed-log-cli/tests/sequence_cursor.rs` | 0 | 22 | Removes persisted-event sequence-context coverage. |
+| `crates/embed-log-cli/tests/watch_cli.rs` | 4 | 5 | Verifies retained watches without creating events.jsonl. |
+| `crates/embed-log-core/src/config/events.rs` | 0 | 662 | Deletes event-rule configuration and matching. |
+| `crates/embed-log-core/src/config/mod.rs` | 0 | 2 | Removes event configuration exports. |
+| `crates/embed-log-core/src/config/models.rs` | 0 | 13 | Removes event rules from loaded configuration. |
+| `crates/embed-log-core/src/net/control_ws.rs` | 13 | 759 | Removes event subscriptions and rule CRUD while retaining source subscriptions and watches. |
+| `crates/embed-log-core/src/net/watch.rs` | 68 | 117 | Matches and retains temporary watches directly against committed non-TX records. |
+| `crates/embed-log-core/src/net/ws_server.rs` | 1 | 95 | Removes event-rule and event-replay server state. |
+| `crates/embed-log-core/src/runtime/server.rs` | 15 | 549 | Removes event matching, persistence, markers, replay, and runtime rule registries. |
+| `crates/embed-log-core/src/session/exporter.rs` | 1 | 31 | Removes event data and assets from static session exports. |
+| `crates/embed-log-core/src/session/manager.rs` | 5 | 126 | Stops creating or advertising event artifacts and keeps user markers only. |
+| `crates/embed-log-tui/src/app.rs` | 0 | 1 | Stops handling durable event messages. |
+| `crates/embed-log-tui/src/client.rs` | 1 | 1 | Updates replay documentation after event removal. |
+| `crates/embed-log-tui/src/draw.rs` | 4 | 67 | Removes the Events tab, status, help, and rendering paths. |
+| `crates/embed-log-tui/src/events.rs` | 0 | 580 | Deletes the event timeline implementation. |
+| `crates/embed-log-tui/src/keys.rs` | 2 | 85 | Removes Events-tab controls and event-marker navigation mode. |
+| `crates/embed-log-tui/src/lib.rs` | 1 | 2 | Removes the events module. |
+| `crates/embed-log-tui/src/lines.rs` | 3 | 32 | Keeps one user-marker gutter style and removes severity styling. |
+| `crates/embed-log-tui/src/protocol.rs` | 9 | 101 | Removes event payloads/rules while tolerating legacy marker extras. |
+| `crates/embed-log-tui/src/state.rs` | 7 | 64 | Removes event collections/view state and simplifies user-marker navigation. |
+| `docs/agent-capabilities.md` | 8 | 75 | Documents source-filtered subscriptions and process-local retained watches. |
+| `docs/architecture.md` | 1 | 1 | Describes direct temporary-watch matching in the serialized commit path. |
+| `docs/automation-agent-plan.md` | 0 | 216 | Deletes the obsolete durable-event automation plan. |
+| `docs/cli.md` | 6 | 17 | Removes event commands/artifacts and documents sequence-only context. |
+| `docs/getting-up-to-speed.md` | 5 | 6 | Removes event UI, artifact, and watcher guidance. |
+| `docs/index.md` | 0 | 1 | Removes the deleted event-centric plan link. |
+| `docs/non-session-roadmap.md` | 1 | 1 | Removes events from UI parity scope. |
+| `docs/quickstart.md` | 2 | 2 | Describes sessions and configuration without durable events. |
+| `docs/tui.md` | 1 | 5 | Removes Events-tab and event-marker documentation. |
+| `event-detection-plan.md` | 0 | 460 | Deletes the event-detection implementation plan. |
+| `frontend/events.js` | 0 | 1021 | Deletes the browser event timeline and rule UI. |
+| `frontend/export.js` | 2 | 15 | Removes event assets and data from static exports. |
+| `frontend/lines.js` | 1 | 7 | Removes event kind/severity marker attributes. |
+| `frontend/main.js` | 0 | 1 | Stops importing the Events UI. |
+| `frontend/selection.js` | 6 | 74 | Keeps marker behavior user-only and removes event-rule creation. |
+| `frontend/state.js` | 0 | 7 | Removes event state and filters. |
+| `frontend/tabs.js` | 1 | 14 | Removes Events-tab creation and activation. |
+| `frontend/viewer.css` | 0 | 216 | Deletes Events-tab, timeline, severity, and rule-panel styles. |
+| `frontend/ws.js` | 0 | 29 | Removes event config, replay, and live message handling. |
+| `mvp-embed-log-todo.md` | 8 | 8 | Updates MVP guidance for direct watches and sequence-only context. |
+| `sdk-control-api-summary.md` | 8 | 23 | Documents process-local watches and removes Python watcher claims. |
+| `sdk/python/embed_log_sdk/__init__.py` | 1 | 2 | Removes the durable Event model export. |
+| `sdk/python/embed_log_sdk/client.py` | 9 | 83 | Removes event subscriptions/iteration while retaining source-filtered entries. |
+| `sdk/python/embed_log_sdk/models.py` | 1 | 41 | Deletes the durable Event model. |
+| `sdk/python/embed_log_sdk/watcher.py` | 0 | 143 | Deletes the superseded client-side watcher implementation. |
+| `sdk/python/examples/watcher.yml` | 0 | 21 | Deletes the watcher configuration example. |
+| `sdk/python/examples/watcher_run.py` | 0 | 47 | Deletes the watcher runner example. |
+| `sdk/python/tests/test_e2e.py` | 0 | 108 | Removes client-side watcher evidence and marker scenarios. |
+| `sdk/python/tests/test_events.py` | 0 | 178 | Deletes SDK durable-event tests. |
+| `sdk/python/tests/test_watcher.py` | 0 | 222 | Deletes client-side watcher tests. |
+| `tests-ui/config-regression.events.yml` | 0 | 28 | Deletes event regression rules. |
+| `tests-ui/package.json` | 0 | 1 | Removes the Events regression script. |
+| `tests-ui/regression-categories.mjs` | 1 | 4 | Removes the Events regression category. |
+| `tests-ui/regression-tests/demo-smoke.spec.js` | 1 | 3 | Removes event-marker assumptions from marker tests. |
+| `tests-ui/regression-tests/events.spec.js` | 0 | 450 | Deletes browser durable-event regression coverage. |
