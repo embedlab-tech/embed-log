@@ -1799,3 +1799,36 @@ Future entries must include this per-file added/removed-line summary.
 | `tests-ui/regression-categories.mjs` | 1 | 4 | Removes the Events regression category. |
 | `tests-ui/regression-tests/demo-smoke.spec.js` | 1 | 3 | Removes event-marker assumptions from marker tests. |
 | `tests-ui/regression-tests/events.spec.js` | 0 | 450 | Deletes browser durable-event regression coverage. |
+
+## 2026-08-04 15:00:27 UTC / 2026-08-04 17:00:27 CEST (Warsaw)
+
+- **Commit:** `df855ee` — `Make merged views presentation-only`
+- **Task:** Convert configured merges from materialized duplicate writer streams into presentation-only virtual sources while preserving original source identity/global sequence across live browser/TUI views, control subscriptions, recorded CLI reads, and HTML exports; hide legacy materialized merge records by default with explicit compatibility flags.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 15:00:27 UTC / 2026-08-04 17:00:27 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` — passed; `cargo test --locked --workspace` — passed (80 CLI unit tests, 14 CLI integration tests including two virtual/legacy merge process tests, 183 core tests, and 60 TUI tests); `npm run test:unit --prefix tests-ui` — 19 passed; `npm run test:regression:smoke --prefix tests-ui` — 12 passed; `cd sdk/python && python3 -m pytest tests/test_client.py tests/test_config.py tests/test_e2e.py tests/test_models.py` — 34 passed; `cargo build --locked --workspace --release` — passed; atomically installed CLI/TUI release binaries, verified installed version 1.2.1 at commit `df855ee`, matching installed/release SHA-256, and schema exposure of `--include-materialized-merges`.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`df855ee`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 284 | 40 | Expands virtual source filters, excludes legacy merge copies by default, adds compatibility flags, and reconstructs exports from original records. |
+| `crates/embed-log-cli/tests/virtual_merge_cli.rs` | 302 | 0 | Verifies no merge file/records are created, virtual reads retain physical identities, exports reconstruct panes, and legacy filtering is opt-in. |
+| `crates/embed-log-core/src/config/models.rs` | 3 | 3 | Defines merges as presentation-only virtual sources. |
+| `crates/embed-log-core/src/net/control_ws.rs` | 55 | 3 | Expands virtual subscriptions into physical members and advertises virtual metadata. |
+| `crates/embed-log-core/src/net/ws_server.rs` | 6 | 0 | Stores virtual-source mappings and exposes members through status. |
+| `crates/embed-log-core/src/runtime/server.rs` | 78 | 193 | Removes merge writers/relays/files and carries virtual definitions through config, rotation, and export. |
+| `crates/embed-log-core/src/session/exporter.rs` | 114 | 0 | Reconstructs virtual panes from canonical combined records with original source IDs and sequences. |
+| `crates/embed-log-core/src/session/log_parse.rs` | 5 | 0 | Carries source and sequence identity into exported records. |
+| `crates/embed-log-core/src/session/manager.rs` | 12 | 0 | Persists merge definitions in session metadata. |
+| `crates/embed-log-tui/src/app.rs` | 2 | 10 | Routes physical payloads through virtual-pane projection. |
+| `crates/embed-log-tui/src/protocol.rs` | 18 | 1 | Parses merge definitions and clarifies physical source identity. |
+| `crates/embed-log-tui/src/state.rs` | 71 | 1 | Projects member records into virtual panes while preserving source, sequence, and line index. |
+| `docs/agent-capabilities.md` | 1 | 1 | Documents virtual-source expansion and legacy filtering. |
+| `docs/architecture.md` | 1 | 6 | Replaces materialized merge pipeline documentation with the virtual model. |
+| `docs/cli.md` | 2 | 2 | Documents dynamic source expansion and compatibility output. |
+| `docs/configuration.md` | 2 | 2 | Documents non-persisted presentation-only merges. |
+| `frontend/ws.js` | 18 | 7 | Projects live/replayed physical messages into browser virtual panes. |
+| `sdk/python/embed_log_sdk/models.py` | 1 | 1 | Recognizes merge as a presentation-only discovered source type. |
+| `skills/embed-log-recorded/SKILL.md` | 1 | 0 | Guides agents to use virtual source filters without duplicate legacy records. |
