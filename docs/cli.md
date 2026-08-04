@@ -94,6 +94,26 @@ Read-only `status` resolves `--instance`, then `EMBED_LOG_INSTANCE`, then the on
 
 `stop` verifies that the recorded PID still refers to the same executable before signaling it, waits for clean shutdown, and removes the registry record. Stale-record removal is reported on stderr, while malformed registry files fail visibly instead of being ignored. Daemon shutdown does not automatically export HTML. CLI-only source definitions are not yet accepted with `--daemon`.
 
+### UART TX and atomic expectations
+
+Write a line through a UART already owned by the daemon:
+
+```bash
+embed-log tx --instance bench-a --source DUT_UART --line status --json
+```
+
+`--line` strips existing CR/LF terminators and writes one trailing carriage return. Use `--raw TEXT`, `--file PATH`, or `--stdin` to send exact bytes without line-ending normalization. Exactly one input mode is required.
+
+Arm an RX expectation before writing and return bounded live context:
+
+```bash
+embed-log tx --instance bench-a --source DUT_UART \
+  --line reset --expect "boot complete" \
+  --timeout 30s --context 20 --json
+```
+
+Substring matching is the default; `--expect-regex` enables a regular expression. TX entries never satisfy an expectation. A timeout exits unsuccessfully and, with `--json`, emits an `EXPECT_TIMEOUT` object containing the successful byte count and bounded context observed after the command was armed. A control-stream gap fails instead of claiming a potentially unsafe result. TX requires `--instance`, `EMBED_LOG_INSTANCE`, or `--url http://host:port`; it never infers the sole daemon.
+
 ### Create an experiment session
 
 Rotate a running server without restarting source tasks or releasing UARTs:

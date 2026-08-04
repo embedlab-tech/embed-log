@@ -58,10 +58,12 @@ Keep configured sources, including UART ownership, alive between experiments:
 embed-log run --daemon --instance bench-a --config embed-log.yml --port 18080 --json
 embed-log status --instance bench-a --json
 embed-log sessions new --instance bench-a --title reconnect-attempt-3 --json
+embed-log tx --instance bench-a --source DUT_UART --line reset \
+  --expect "boot complete" --timeout 30s --context 20 --json
 embed-log stop --instance bench-a --json
 ```
 
-Each titled session rotation keeps source tasks and UART ownership alive while the browser and TUI switch to the new experiment. Daemon startup requires explicit `--config`, `--instance`, and `--port`; it never changes the requested port. Repeating the same request reuses the verified running instance. Mutating commands require `--instance`, `EMBED_LOG_INSTANCE`, or an explicit URL. Daemon shutdown skips automatic HTML export by default; foreground modes retain it.
+Each titled session rotation keeps source tasks and UART ownership alive while the browser and TUI switch to the new experiment. `tx --expect` subscribes before writing, then returns only the matching RX entry and bounded live context. Daemon startup requires explicit `--config`, `--instance`, and `--port`; it never changes the requested port. Repeating the same request reuses the verified running instance. Mutating commands require `--instance`, `EMBED_LOG_INSTANCE`, or an explicit URL. Daemon shutdown skips automatic HTML export by default; foreground modes retain it.
 
 ## Claude Code plugin
 

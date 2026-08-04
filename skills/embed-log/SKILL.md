@@ -28,6 +28,18 @@ an error; stdout output is unaffected. If unsure which directory a project uses,
 `embed-log doctor` — it prints `resolved config: <path>` (the config `run` would actually
 load) and, if set, `config env: EMBED_LOG_CONFIG_YML_PATH=...`.
 
+## Live UART experiments
+
+Only send UART data when the user has explicitly authorized device interaction. Embed-log owns configured UARTs, so use its atomic TX command instead of opening the serial path separately:
+
+```bash
+embed-log tx --instance bench-a --source DUT_UART \
+  --line reset --expect "boot complete" \
+  --timeout 30s --context 20 --json
+```
+
+Prefer substring `--expect`; use `--expect-regex` only when needed. The command arms its subscription before TX and returns bounded context. On `EXPECT_TIMEOUT`, inspect the returned evidence rather than immediately dumping the full session. Use `--raw`, `--file`, or `--stdin` only when exact bytes are required.
+
 ## Recommended workflow
 
 1. **Find the session.** `embed-log sessions list --limit 10` (newest first), or if you

@@ -546,18 +546,45 @@ async fn handle_tx_write(
         }
     };
 
-    let data = match cmd.get("data").and_then(|v| v.as_str()) {
-        Some(s) => s,
-        None => {
+    let text_data = cmd.get("data").and_then(|value| value.as_str());
+    let byte_data = cmd.get("data_bytes").and_then(|value| value.as_array());
+    let data = match (text_data, byte_data) {
+        (Some(data), None) => data.as_bytes().to_vec(),
+        (None, Some(bytes)) => {
+            let mut data = Vec::with_capacity(bytes.len());
+            for value in bytes {
+                let Some(byte) = value.as_u64().filter(|byte| *byte <= u8::MAX as u64) else {
+                    return serde_json::json!({
+                        "type": "error",
+                        "error": "'data_bytes' must contain only integers from 0 through 255",
+                    })
+                    .to_string();
+                };
+                data.push(byte as u8);
+            }
+            data
+        }
+        (Some(_), Some(_)) => {
             return serde_json::json!({
                 "type": "error",
-                "error": "missing 'data'",
+                "error": "provide exactly one of 'data' or 'data_bytes'",
+            })
+            .to_string();
+        }
+        (None, None) => {
+            return serde_json::json!({
+                "type": "error",
+                "error": "missing 'data' or 'data_bytes'",
             })
             .to_string();
         }
     };
 
     let origin = cmd.get("origin").and_then(|v| v.as_str()).unwrap_or("sdk");
+    let line_ending = cmd
+        .get("line_ending")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true);
 
     if data.is_empty() {
         return make_result_error("tx", msg_id, source_id, "empty data");
@@ -565,11 +592,12 @@ async fn handle_tx_write(
 
     // Try TX sender (writable sources like UART).
     if let Some(tx_sender) = state.source_tx_senders.get(source_id) {
-        let (ack_tx, ack_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+        let (ack_tx, ack_rx) = tokio::sync::oneshot::channel::<Result<usize, String>>();
 
         let cmd = TxCommand {
-            data: data.as_bytes().to_vec(),
+            data,
             origin: origin.to_string(),
+            line_ending,
             ack: Some(ack_tx),
         };
 
@@ -577,11 +605,11 @@ async fn handle_tx_write(
             Ok(()) => {
                 // Wait for the UART source to acknowledge the write.
                 match ack_rx.await {
-                    Ok(Ok(())) => {
+                    Ok(Ok(bytes_written)) => {
                         let data = serde_json::json!({
                             "ok": true,
                             "source_id": source_id,
-                            "bytes": data.len(),
+                            "bytes": bytes_written,
                         });
                         make_response("tx.result", msg_id, data)
                     }
@@ -1522,9 +1550,10 @@ mod tests {
             let mut cmd = tx_rx.recv().await.unwrap();
             assert_eq!(cmd.data, b"version\r\n");
             assert_eq!(cmd.origin, "pytest");
+            assert!(cmd.line_ending);
             // Send ack success
             if let Some(ack) = cmd.ack.take() {
-                let _ = ack.send(Ok(()));
+                let _ = ack.send(Ok(cmd.data.len()));
             }
         });
 

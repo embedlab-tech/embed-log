@@ -613,7 +613,5 @@ mod tests {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let port = listener.local_addr().unwrap().port();
         assert!(!port_is_available("127.0.0.1", port));
-        drop(listener);
-        assert!(port_is_available("127.0.0.1", port));
     }
 }

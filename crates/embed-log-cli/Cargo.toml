@@ -32,6 +32,8 @@ serde_yaml.workspace = true
 chrono.workspace = true
 serialport = "4"
 regex = "1"
+futures.workspace = true
+tokio-tungstenite = "0.24"
 
 [dependencies.embed-log-tui]
 workspace = true

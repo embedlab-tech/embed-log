@@ -12,6 +12,18 @@ The status response identifies the active session, exact source IDs, source type
 
 Agents must discover source IDs rather than guessing them.
 
+## Send UART commands with bounded expectations
+
+When UART TX is explicitly authorized, use the atomic command rather than opening the serial device separately:
+
+```bash
+embed-log tx --instance bench-a --source DUT_UART \
+  --line reset --expect "boot complete" \
+  --timeout 30s --context 20 --json
+```
+
+Embed-log subscribes before writing, ignores TX records for matching, and returns the matching RX record plus bounded live context. Use `--expect-regex` only when substring matching is insufficient. `--raw`, `--file`, and `--stdin` send exact bytes; `--line` safely applies the UART line ending. An `EXPECT_TIMEOUT` response includes bounded evidence and exits unsuccessfully.
+
 ## Inspect recorded sessions efficiently
 
 Start with an overview:

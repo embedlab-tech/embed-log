@@ -17,6 +17,7 @@ use commands::daemon::{cmd_start_daemon, cmd_status, cmd_stop};
 use commands::misc;
 use commands::run::{cmd_run, cmd_run_quick, RunOverrides};
 use commands::sessions::{cmd_sessions, SessionsCommand};
+use commands::tx::{cmd_tx, parse_duration, TxInput, TxOptions};
 
 #[derive(Parser)]
 #[command(
@@ -126,6 +127,46 @@ enum Command {
         /// Explicit unregistered HTTP endpoint.
         #[arg(long)]
         url: Option<String>,
+        /// Machine-readable JSON output.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Write to a daemon-owned UART, optionally waiting for an RX match.
+    Tx {
+        /// Registered daemon name. Defaults to EMBED_LOG_INSTANCE; never inferred.
+        #[arg(long, conflicts_with = "url")]
+        instance: Option<String>,
+        /// Explicit unregistered HTTP endpoint.
+        #[arg(long)]
+        url: Option<String>,
+        /// Writable source name.
+        #[arg(long)]
+        source: String,
+        /// Send a line, normalizing its ending to one carriage return.
+        #[arg(long, conflicts_with_all = ["raw", "file", "stdin"], required_unless_present_any = ["raw", "file", "stdin"])]
+        line: Option<String>,
+        /// Send this UTF-8 text exactly, without line-ending normalization.
+        #[arg(long, allow_hyphen_values = true, conflicts_with_all = ["line", "file", "stdin"], required_unless_present_any = ["line", "file", "stdin"])]
+        raw: Option<String>,
+        /// Send the file's bytes exactly.
+        #[arg(long, value_name = "PATH", conflicts_with_all = ["line", "raw", "stdin"], required_unless_present_any = ["line", "raw", "stdin"])]
+        file: Option<PathBuf>,
+        /// Read exact bytes from stdin.
+        #[arg(long, conflicts_with_all = ["line", "raw", "file"], required_unless_present_any = ["line", "raw", "file"])]
+        stdin: bool,
+        /// Wait for an RX message containing this text.
+        #[arg(long, conflicts_with = "expect_regex")]
+        expect: Option<String>,
+        /// Wait for an RX message matching this regular expression.
+        #[arg(long)]
+        expect_regex: Option<String>,
+        /// Maximum wait for the expectation.
+        #[arg(long, default_value = "30s", value_parser = parse_duration)]
+        timeout: std::time::Duration,
+        /// Maximum live entries returned as bounded context.
+        #[arg(long, default_value_t = 20)]
+        context: usize,
         /// Machine-readable JSON output.
         #[arg(long)]
         json: bool,
@@ -268,6 +309,40 @@ async fn main() -> Result<()> {
             url,
             json,
         }) => cmd_status(instance.as_deref(), url.as_deref(), json),
+        Some(Command::Tx {
+            instance,
+            url,
+            source,
+            line,
+            raw,
+            file,
+            stdin,
+            expect,
+            expect_regex,
+            timeout,
+            context,
+            json,
+        }) => {
+            let input = match (line, raw, file, stdin) {
+                (Some(value), None, None, false) => TxInput::Line(value),
+                (None, Some(value), None, false) => TxInput::Raw(value),
+                (None, None, Some(path), false) => TxInput::File(path),
+                (None, None, None, true) => TxInput::Stdin,
+                _ => unreachable!("clap enforces exactly one TX input"),
+            };
+            cmd_tx(TxOptions {
+                instance,
+                url,
+                source,
+                input,
+                expect,
+                expect_regex,
+                timeout,
+                context,
+                json,
+            })
+            .await
+        }
         Some(Command::Stop { instance, json }) => cmd_stop(instance.as_deref(), json),
         Some(Command::Version { config, json }) => misc::cmd_version(config.as_deref(), json),
         Some(Command::Doctor {
@@ -440,6 +515,54 @@ mod tests {
         ] {
             Cli::parse_from(args);
         }
+    }
+
+    #[test]
+    fn tx_requires_exactly_one_input_and_parses_expectation_options() {
+        let cli = Cli::parse_from([
+            "embed-log",
+            "tx",
+            "--instance",
+            "bench-a",
+            "--source",
+            "DUT_UART",
+            "--line",
+            "reset",
+            "--expect",
+            "boot complete",
+            "--timeout",
+            "250ms",
+            "--context",
+            "4",
+            "--json",
+        ]);
+        match cli.command {
+            Some(Command::Tx {
+                line,
+                timeout,
+                context,
+                json,
+                ..
+            }) => {
+                assert_eq!(line.as_deref(), Some("reset"));
+                assert_eq!(timeout, std::time::Duration::from_millis(250));
+                assert_eq!(context, 4);
+                assert!(json);
+            }
+            _ => panic!("expected tx command"),
+        }
+        assert!(Cli::try_parse_from(["embed-log", "tx", "--source", "DUT"]).is_err());
+        assert!(Cli::try_parse_from([
+            "embed-log",
+            "tx",
+            "--source",
+            "DUT",
+            "--line",
+            "one",
+            "--raw",
+            "two",
+        ])
+        .is_err());
     }
 
     #[test]

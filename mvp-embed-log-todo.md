@@ -153,6 +153,8 @@ Fold useful information from `sessions info` into `sessions summary`.
 
 ## 6. UART experiments
 
+**Implemented:** top-level TX, exact raw/file/stdin input, explicit target selection, atomic substring/regex expectations, bounded live context, timeout evidence, stream-gap failure, and PTY process coverage.
+
 UART TX must remain because Embed-log owns the serial port.
 
 Simple TX:
@@ -165,7 +167,7 @@ embed-log tx \
   --json
 ```
 
-`--line` should append the configured line ending, avoiding shell `\r\n` quoting problems. Support raw, file, and stdin input where required.
+`--line` appends the UART shell line ending (currently one carriage return), avoiding shell `\r\n` quoting problems. Raw, file, and stdin input send exact bytes.
 
 ### Atomic TX and expectation
 

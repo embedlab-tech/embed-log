@@ -514,6 +514,7 @@ async fn handle_send_raw(cmd: &serde_json::Value, state: &ServerState) -> serde_
         let cmd = TxCommand {
             data: data.as_bytes().to_vec(),
             origin: origin.to_string(),
+            line_ending: true,
             ack: None,
         };
         match tx_sender.send(cmd).await {

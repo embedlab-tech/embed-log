@@ -238,12 +238,12 @@ class TestE2eSdkConnect:
         with EmbedLogClient(e2e_server.ws_url(), origin="e2e") as client:
             client.subscribe(["DUT_UART"])
             written = client.tx_write("DUT_UART", "version\r\n")
-            assert written == 9
+            assert written == 8
 
             # Read from the master side of the PTY
             deadline = time.time() + 3.0
             data = b""
-            while time.time() < deadline and len(data) < 9:
+            while time.time() < deadline and len(data) < 8:
                 r, _, _ = select.select([master_fd], [], [], 0.5)
                 if r:
                     chunk = os.read(master_fd, 32)
