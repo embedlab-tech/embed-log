@@ -1693,3 +1693,33 @@ Future entries must include this per-file added/removed-line summary.
 | `docs/automation-agent-plan.md` | 1 | 1 | Records the three-layer discovery model. |
 | `docs/cli.md` | 9 | 0 | Documents command contract. |
 | `mvp-embed-log-todo.md` | 2 | 1 | Adds skill to the MVP CLI surface. |
+
+## 2026-08-04 12:42:45 UTC / 2026-08-04 14:42:45 CEST (Warsaw)
+
+- **Commit:** `5024473` — `Split live and recorded agent skills`
+- **Task:** Replace the broad Embed-log agent skill with compact live-debugging and recorded-session skills, expose both through the CLI/schema, source daemon endpoints from YAML by default, remove separate UART TX authorization guidance, and install the rebuilt binary.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 12:42:45 UTC / 2026-08-04 14:42:45 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo clippy --locked --workspace --all-targets -- -D warnings` — passed; `cargo test --locked --workspace` — passed (79 CLI unit tests, 12 CLI process tests, 218 core tests, and 73 TUI tests); `cargo build --locked --release -p embed-log-cli` — passed; installed `target/release/embed-log` to `~/.local/bin/embed-log`, verified version 1.2.1, both embedded skill selectors/schema v2, and byte identity with `cmp`.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`5024473`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.claude-plugin/marketplace.json` | 1 | 1 | Describes the focused live and retrospective skill pair. |
+| `.claude-plugin/plugin.json` | 1 | 1 | Updates plugin activation language for both investigation modes. |
+| `README.md` | 9 | 8 | Documents selected skills, YAML-derived daemon endpoints, and generic firmware TX values. |
+| `crates/embed-log-cli/src/commands/daemon.rs` | 1 | 3 | Uses the configured server port when no runtime override is supplied. |
+| `crates/embed-log-cli/src/commands/schema.rs` | 9 | 3 | Advertises both skill selectors and the revised daemon endpoint contract in schema v2. |
+| `crates/embed-log-cli/src/commands/skill.rs` | 44 | 10 | Embeds and emits the selected live or recorded skill. |
+| `crates/embed-log-cli/src/main.rs` | 11 | 11 | Requires a skill mode while making daemon port overrides optional. |
+| `crates/embed-log-cli/tests/daemon_lifecycle.rs` | 12 | 21 | Verifies YAML ports, explicit overrides, collision handling, and multi-instance selection. |
+| `crates/embed-log-cli/tests/schema_cli.rs` | 6 | 2 | Verifies schema v2 skill discovery. |
+| `crates/embed-log-cli/tests/skill_cli.rs` | 39 | 24 | Verifies exact raw/JSON output for both skills and rejects missing/unknown modes. |
+| `docs/agent-capabilities.md` | 8 | 5 | Documents focused skill loading and task-relevant UART TX without separate confirmation. |
+| `docs/automation-agent-plan.md` | 4 | 4 | Aligns the automation model with split skills and live-investigation TX autonomy. |
+| `docs/cli.md` | 6 | 5 | Documents skill selectors and YAML-first daemon endpoint resolution. |
+| `skills/embed-log-live/SKILL.md` | 81 | 0 | Adds concise live daemon, reproduction, bounded evidence, TX, and watch guidance. |
+| `skills/embed-log-recorded/SKILL.md` | 68 | 0 | Adds concise bounded saved-session analysis guidance. |
+| `skills/embed-log/SKILL.md` | 0 | 146 | Removes the former broad combined skill. |
