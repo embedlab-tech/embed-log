@@ -284,6 +284,9 @@ async fn handle_control_command(
         "event_rule.export" => Some(handle_event_rule_export(state, msg_id)),
         "event_rule.promote" => Some(handle_event_rule_promote(&cmd, state, msg_id)),
         "event_rule.delete" => Some(handle_event_rule_delete(&cmd, state, msg_id)),
+        "watch.create" => Some(handle_watch_create(&cmd, state, msg_id)),
+        "watch.get" => Some(handle_watch_get(&cmd, state, msg_id)),
+        "watch.delete" => Some(handle_watch_delete(&cmd, state, msg_id)),
         _ => {
             let mut resp = serde_json::json!({
                 "type": "error",
@@ -636,6 +639,211 @@ async fn handle_tx_write(
     }
 }
 
+/// Create a temporary one-shot watch backed by the runtime event-rule pipeline.
+pub(crate) fn handle_watch_create(
+    cmd: &serde_json::Value,
+    state: &super::ServerState,
+    msg_id: Option<&str>,
+) -> String {
+    let source_id = match cmd
+        .get("source_id")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) if state.source_metadata.contains_key(value) => value,
+        Some(value) => return make_result_error("watch", msg_id, value, "unknown source"),
+        None => return make_result_error("watch", msg_id, "", "missing 'source_id'"),
+    };
+    let contains = cmd
+        .get("contains")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty());
+    let regex_pattern = cmd
+        .get("regex")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty());
+    let (kind, pattern, compiled) = match (contains, regex_pattern) {
+        (Some(pattern), None) => (
+            "contains",
+            pattern,
+            regex::Regex::new(&regex::escape(pattern)).expect("escaped regex is valid"),
+        ),
+        (None, Some(pattern)) => match regex::Regex::new(pattern) {
+            Ok(regex) => ("regex", pattern, regex),
+            Err(error) => {
+                return make_result_error(
+                    "watch",
+                    msg_id,
+                    source_id,
+                    &format!("invalid regex: {error}"),
+                )
+            }
+        },
+        (Some(_), Some(_)) => {
+            return make_result_error(
+                "watch",
+                msg_id,
+                source_id,
+                "provide exactly one of 'contains' or 'regex'",
+            )
+        }
+        (None, None) => {
+            return make_result_error("watch", msg_id, source_id, "missing 'contains' or 'regex'")
+        }
+    };
+    let ttl_ms = cmd
+        .get("ttl_ms")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(30_000);
+    if ttl_ms == 0 || ttl_ms > crate::net::watch::MAX_WATCH_TTL_MS {
+        return make_result_error(
+            "watch",
+            msg_id,
+            source_id,
+            "ttl_ms must be between 1 and 86400000",
+        );
+    }
+    let mut watches = match state.watches.write() {
+        Ok(watches) => watches,
+        Err(_) => {
+            return make_result_error("watch", msg_id, source_id, "watch registry is unavailable")
+        }
+    };
+    if watches.len() >= crate::net::watch::MAX_WATCHES {
+        return make_result_error(
+            "watch",
+            msg_id,
+            source_id,
+            "watch registry is full; remove completed or expired watches",
+        );
+    }
+    let number = state
+        .watch_counter
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let watch_id = format!("watch-{number}");
+    let created_at = chrono::Utc::now();
+    let expires_at = created_at + chrono::Duration::milliseconds(ttl_ms as i64);
+    let watch = crate::net::watch::TemporaryWatch {
+        id: watch_id.clone(),
+        source_id: source_id.to_string(),
+        kind: kind.to_string(),
+        pattern: pattern.to_string(),
+        created_at,
+        expires_at,
+        once: true,
+        status: crate::net::watch::WatchStatus::Active,
+        matched: None,
+    };
+    watches.insert(watch_id.clone(), watch.clone());
+    drop(watches);
+
+    let mut rules = match state.runtime_event_rules.write() {
+        Ok(rules) => rules,
+        Err(_) => {
+            if let Ok(mut watches) = state.watches.write() {
+                watches.remove(&watch_id);
+            }
+            return make_result_error(
+                "watch",
+                msg_id,
+                source_id,
+                "runtime rule registry is unavailable",
+            );
+        }
+    };
+    rules
+        .entry(source_id.to_string())
+        .or_default()
+        .push(crate::config::EventRule {
+            name: watch_id.clone(),
+            pattern: pattern.to_string(),
+            severity: "info".to_string(),
+            regex: compiled,
+        });
+    drop(rules);
+
+    let watches = state.watches.clone();
+    let rules = state.runtime_event_rules.clone();
+    let expiring_id = watch_id.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(ttl_ms)).await;
+        crate::net::watch::expire_watch(&watches, &rules, &expiring_id);
+    });
+
+    make_response(
+        "watch.create.result",
+        msg_id,
+        serde_json::json!({"ok":true,"watch":watch.to_json()}),
+    )
+}
+
+pub(crate) fn handle_watch_get(
+    cmd: &serde_json::Value,
+    state: &super::ServerState,
+    msg_id: Option<&str>,
+) -> String {
+    let watch_id = match cmd
+        .get("watch_id")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => value,
+        None => return make_result_error("watch", msg_id, "", "missing 'watch_id'"),
+    };
+    let should_expire = state
+        .watches
+        .read()
+        .ok()
+        .and_then(|watches| watches.get(watch_id).cloned())
+        .is_some_and(|watch| {
+            watch.status == crate::net::watch::WatchStatus::Active
+                && chrono::Utc::now() >= watch.expires_at
+        });
+    if should_expire {
+        crate::net::watch::expire_watch(&state.watches, &state.runtime_event_rules, watch_id);
+    }
+    let watches = match state.watches.read() {
+        Ok(watches) => watches,
+        Err(_) => return make_result_error("watch", msg_id, "", "watch registry is unavailable"),
+    };
+    match watches.get(watch_id) {
+        Some(watch) => make_response(
+            "watch.get.result",
+            msg_id,
+            serde_json::json!({"ok":true,"watch":watch.to_json()}),
+        ),
+        None => make_result_error("watch", msg_id, "", "watch not found"),
+    }
+}
+
+pub(crate) fn handle_watch_delete(
+    cmd: &serde_json::Value,
+    state: &super::ServerState,
+    msg_id: Option<&str>,
+) -> String {
+    let watch_id = match cmd
+        .get("watch_id")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => value,
+        None => return make_result_error("watch", msg_id, "", "missing 'watch_id'"),
+    };
+    let watch = match state.watches.write() {
+        Ok(mut watches) => watches.remove(watch_id),
+        Err(_) => return make_result_error("watch", msg_id, "", "watch registry is unavailable"),
+    };
+    let Some(watch) = watch else {
+        return make_result_error("watch", msg_id, "", "watch not found");
+    };
+    crate::net::watch::remove_runtime_rule(&state.runtime_event_rules, &watch.source_id, watch_id);
+    make_response(
+        "watch.delete.result",
+        msg_id,
+        serde_json::json!({"ok":true,"watch_id":watch_id,"source_id":watch.source_id}),
+    )
+}
+
 /// Handle `event_rule.create` — add a rule for the current server/session.
 pub(crate) fn handle_event_rule_create(
     cmd: &serde_json::Value,
@@ -745,8 +953,17 @@ pub(crate) fn handle_event_rule_list(state: &super::ServerState, msg_id: Option<
     let static_rules = state.static_event_rules.iter().flat_map(|(source_id, source_rules)| {
         source_rules.iter().map(move |rule| serde_json::json!({ "source_id": source_id, "name": rule.name, "pattern": rule.pattern, "severity": rule.severity, "origin": "static" }))
     });
+    let watch_ids = state
+        .watches
+        .read()
+        .map(|watches| watches.keys().cloned().collect::<HashSet<_>>())
+        .unwrap_or_default();
     let runtime_rules = rules.iter().flat_map(|(source_id, source_rules)| {
-        source_rules.iter().map(move |rule| serde_json::json!({ "source_id": source_id, "name": rule.name, "pattern": rule.pattern, "severity": rule.severity, "origin": "runtime" }))
+        let watch_ids = &watch_ids;
+        source_rules
+            .iter()
+            .filter(move |rule| !watch_ids.contains(&rule.name))
+            .map(move |rule| serde_json::json!({ "source_id": source_id, "name": rule.name, "pattern": rule.pattern, "severity": rule.severity, "origin": "runtime" }))
     });
     let rules = static_rules.chain(runtime_rules).collect::<Vec<_>>();
     make_response(
@@ -774,11 +991,16 @@ pub(crate) fn handle_event_rule_export(state: &super::ServerState, msg_id: Optio
             .or_default()
             .extend(rules.iter());
     }
+    let watch_ids = state
+        .watches
+        .read()
+        .map(|watches| watches.keys().cloned().collect::<HashSet<_>>())
+        .unwrap_or_default();
     for (source, rules) in runtime.iter() {
         sources
             .entry(source.clone())
             .or_default()
-            .extend(rules.iter());
+            .extend(rules.iter().filter(|rule| !watch_ids.contains(&rule.name)));
     }
     let mut root = serde_yaml::Mapping::new();
     for (source, rules) in sources {
@@ -845,6 +1067,17 @@ pub(crate) fn handle_event_rule_promote(
             )
         }
     };
+    if state
+        .watches
+        .read()
+        .is_ok_and(|watches| watches.contains_key(name))
+    {
+        return make_response(
+            "event_rule.promote.result",
+            msg_id,
+            serde_json::json!({"ok":false,"error":"temporary watches cannot be promoted"}),
+        );
+    }
     let runtime = match state.runtime_event_rules.read() {
         Ok(rules) => rules,
         Err(_) => {
@@ -968,6 +1201,18 @@ pub(crate) fn handle_event_rule_delete(
         Some(value) => value,
         None => return make_result_error("event_rule", msg_id, source_id, "missing 'name'"),
     };
+    if state
+        .watches
+        .read()
+        .is_ok_and(|watches| watches.contains_key(name))
+    {
+        return make_result_error(
+            "event_rule",
+            msg_id,
+            source_id,
+            "temporary watches must be removed with watch.delete",
+        );
+    }
     let mut rules = match state.runtime_event_rules.write() {
         Ok(rules) => rules,
         Err(_) => {
@@ -1179,7 +1424,7 @@ mod tests {
     use crate::session::SessionManager;
     use crate::sources::TxCommand;
     use std::collections::HashMap;
-    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::{AtomicU64, AtomicUsize};
     use std::sync::{Arc, Mutex};
     use tokio::sync::{broadcast, mpsc};
 
@@ -1237,8 +1482,80 @@ mod tests {
             static_event_rules: Arc::new(HashMap::new()),
             event_rules_path: std::env::temp_dir().join("embed-log.events.yml"),
             runtime_event_rules: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            watches: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            watch_counter: Arc::new(AtomicU64::new(1)),
             control_api: true,
         }
+    }
+
+    #[tokio::test]
+    async fn temporary_watch_create_get_expire_and_delete() {
+        let state = test_control_state();
+        let mut subscribed = ControlSubscription::new();
+        let create = handle_control_command(
+            r#"{"id":"w1","type":"watch.create","source_id":"DUT_UART","contains":"ready.*literal","ttl_ms":50}"#,
+            &state,
+            &mut subscribed,
+        )
+        .await
+        .unwrap();
+        let create: serde_json::Value = serde_json::from_str(&create).unwrap();
+        assert_eq!(create["type"], "watch.create.result");
+        assert_eq!(create["watch"]["id"], "watch-1");
+        assert_eq!(create["watch"]["status"], "active");
+        {
+            let rules = state.runtime_event_rules.read().unwrap();
+            let rule = &rules["DUT_UART"][0];
+            assert!(rule.regex.is_match("ready.*literal"));
+            assert!(!rule.regex.is_match("ready anything literal"));
+        }
+        let list = handle_control_command(
+            r#"{"id":"wl","type":"event_rule.list"}"#,
+            &state,
+            &mut subscribed,
+        )
+        .await
+        .unwrap();
+        let list: serde_json::Value = serde_json::from_str(&list).unwrap();
+        assert!(list["rules"].as_array().unwrap().is_empty());
+        let promote = handle_control_command(
+            r#"{"id":"wp","type":"event_rule.promote","source_id":"DUT_UART","name":"watch-1"}"#,
+            &state,
+            &mut subscribed,
+        )
+        .await
+        .unwrap();
+        let promote: serde_json::Value = serde_json::from_str(&promote).unwrap();
+        assert_eq!(promote["ok"], false);
+        assert_eq!(promote["error"], "temporary watches cannot be promoted");
+
+        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+        let get = handle_control_command(
+            r#"{"id":"w2","type":"watch.get","watch_id":"watch-1"}"#,
+            &state,
+            &mut subscribed,
+        )
+        .await
+        .unwrap();
+        let get: serde_json::Value = serde_json::from_str(&get).unwrap();
+        assert_eq!(get["watch"]["status"], "expired");
+        assert!(state
+            .runtime_event_rules
+            .read()
+            .unwrap()
+            .get("DUT_UART")
+            .is_none());
+
+        let delete = handle_control_command(
+            r#"{"id":"w3","type":"watch.delete","watch_id":"watch-1"}"#,
+            &state,
+            &mut subscribed,
+        )
+        .await
+        .unwrap();
+        let delete: serde_json::Value = serde_json::from_str(&delete).unwrap();
+        assert_eq!(delete["ok"], true);
+        assert!(state.watches.read().unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -1818,6 +2135,8 @@ mod tests {
             static_event_rules: Arc::new(HashMap::new()),
             event_rules_path: std::env::temp_dir().join("embed-log.events.yml"),
             runtime_event_rules: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            watches: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            watch_counter: Arc::new(AtomicU64::new(1)),
             control_api: true,
         };
         (state, dir)
@@ -2073,6 +2392,8 @@ mod tests {
             static_event_rules: Arc::new(HashMap::new()),
             event_rules_path: std::env::temp_dir().join("embed-log.events.yml"),
             runtime_event_rules: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            watches: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            watch_counter: Arc::new(AtomicU64::new(1)),
             control_api: true,
         };
 

@@ -114,6 +114,25 @@ embed-log tx --instance bench-a --source DUT_UART \
 
 Substring matching is the default; `--expect-regex` enables a regular expression. TX entries never satisfy an expectation. A timeout exits unsuccessfully and, with `--json`, emits an `EXPECT_TIMEOUT` object containing the successful byte count and bounded context observed after the command was armed. A control-stream gap fails instead of claiming a potentially unsafe result. TX requires `--instance`, `EMBED_LOG_INSTANCE`, or `--url http://host:port`; it never infers the sole daemon.
 
+### Temporary watches
+
+Use a watch when the trigger is external to UART TX:
+
+```bash
+watch_id=$(embed-log watch add --instance bench-a \
+  --source DUT_UART --contains "session established" \
+  --ttl 30s --json | jq -r '.watch.id')
+
+embed-log watch wait "$watch_id" \
+  --instance bench-a --timeout 30s --json
+
+embed-log watch remove "$watch_id" --instance bench-a --json
+```
+
+`watch add` accepts exactly one of literal `--contains` or `--regex`. Watches are server-side, temporary, one-shot conditions backed by the runtime event-rule pipeline. They do not stream ordinary logs to the waiting CLI. A match is retained, so `watch wait` still succeeds if the event occurred before it connected. Matches use the normal event path and are persisted in `events.jsonl` with source, line, timestamps, message, origin, and captures.
+
+`--ttl` controls how long the server actively matches; it defaults to 30 seconds and is capped at 24 hours. Matched or expired state remains queryable until `watch remove` or process shutdown. `watch wait --timeout` only limits that CLI invocation and does not alter server TTL. JSON failures use `WATCH_EXPIRED`, `WATCH_WAIT_TIMEOUT`, or `WATCH_NOT_FOUND`. All watch mutations require `--instance`, `EMBED_LOG_INSTANCE`, or `--url`; they never infer the sole daemon. The `sequence` field is currently `null` and will become session-global in the cursor milestone.
+
 ### Create an experiment session
 
 Rotate a running server without restarting source tasks or releasing UARTs:

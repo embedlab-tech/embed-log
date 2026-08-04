@@ -40,6 +40,17 @@ embed-log tx --instance bench-a --source DUT_UART \
 
 Prefer substring `--expect`; use `--expect-regex` only when needed. The command arms its subscription before TX and returns bounded context. On `EXPECT_TIMEOUT`, inspect the returned evidence rather than immediately dumping the full session. Use `--raw`, `--file`, or `--stdin` only when exact bytes are required.
 
+For externally triggered behavior, use a retained server-side watch instead of streaming logs:
+
+```bash
+watch_id=$(embed-log watch add --instance bench-a --source DUT_UART \
+  --contains "session established" --ttl 30s --json | jq -r '.watch.id')
+embed-log watch wait "$watch_id" --instance bench-a --timeout 30s --json
+embed-log watch remove "$watch_id" --instance bench-a --json
+```
+
+A match is not lost if it arrives before `watch wait`. Prefer `--contains`, keep TTLs short, and remove matched or expired watches.
+
 ## Recommended workflow
 
 1. **Find the session.** `embed-log sessions list --limit 10` (newest first), or if you

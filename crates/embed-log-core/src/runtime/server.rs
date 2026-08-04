@@ -125,6 +125,8 @@ impl LogServer {
         let event_matchers =
             crate::config::load_event_matchers(self.config_path.as_deref(), &source_names);
         let runtime_event_rules = Arc::new(RwLock::new(HashMap::new()));
+        let watches = Arc::new(RwLock::new(HashMap::new()));
+        let watch_counter = Arc::new(AtomicU64::new(1));
         let static_event_rules = Arc::new(
             event_matchers
                 .iter()
@@ -297,6 +299,7 @@ impl LogServer {
                 line_counter: line_counters.get(&merge.name).cloned(),
                 event_matcher: writer_event_matcher,
                 runtime_event_rules: runtime_event_rules.clone(),
+                watches: watches.clone(),
                 source_meta: SourceRuntimeMeta {
                     source_id: merge.name.clone(),
                     source_label: merge_label(merge),
@@ -385,6 +388,7 @@ impl LogServer {
                 line_counter: line_counters.get(&src.name).cloned(),
                 event_matcher: writer_event_matcher,
                 runtime_event_rules: runtime_event_rules.clone(),
+                watches: watches.clone(),
                 source_meta: SourceRuntimeMeta {
                     source_id: src.name.clone(),
                     source_label: src.label.clone(),
@@ -497,6 +501,8 @@ impl LogServer {
             static_event_rules,
             event_rules_path,
             runtime_event_rules,
+            watches,
+            watch_counter,
             control_api: self.config.server.control_api,
         };
 
@@ -1224,6 +1230,7 @@ struct WriterRuntime {
     line_counter: Option<Arc<AtomicU64>>,
     event_matcher: Option<crate::config::PatternMatcher>,
     runtime_event_rules: Arc<RwLock<HashMap<String, Vec<crate::config::EventRule>>>>,
+    watches: Arc<RwLock<HashMap<String, crate::net::watch::TemporaryWatch>>>,
     source_meta: SourceRuntimeMeta,
 }
 
@@ -1525,6 +1532,23 @@ async fn run_writer(
                 "origin": origin,
                 "captures": event_match.captures,
             });
+            let active_session_id = runtime
+                .session_manager
+                .lock()
+                .map(|manager| manager.session_id().to_string())
+                .unwrap_or_else(|_| runtime.source_meta.session_id.clone());
+            match crate::net::watch::retain_watch_match(
+                &runtime.watches,
+                &runtime.runtime_event_rules,
+                &event_match.rule_name,
+                is_tx,
+                &event_payload,
+                &active_session_id,
+            ) {
+                crate::net::watch::WatchMatchResult::Ignored => continue,
+                crate::net::watch::WatchMatchResult::NotWatch
+                | crate::net::watch::WatchMatchResult::Retained => {}
+            }
 
             // Broadcast the event to all WS clients.
             let _ = runtime.broadcast_tx.send(event_payload.to_string());
@@ -1786,6 +1810,7 @@ mod tests {
             line_counter: None,
             event_matcher: None,
             runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
+            watches: Arc::new(RwLock::new(HashMap::new())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer(
@@ -1850,6 +1875,7 @@ mod tests {
             line_counter: None,
             event_matcher: None,
             runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
+            watches: Arc::new(RwLock::new(HashMap::new())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
@@ -1917,6 +1943,7 @@ mod tests {
             line_counter: None,
             event_matcher: Some(matcher),
             runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
+            watches: Arc::new(RwLock::new(HashMap::new())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
@@ -2029,6 +2056,7 @@ mod tests {
             line_counter: None,
             event_matcher: Some(matcher),
             runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
+            watches: Arc::new(RwLock::new(HashMap::new())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
@@ -2107,6 +2135,7 @@ mod tests {
             line_counter: None,
             event_matcher: Some(matcher),
             runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
+            watches: Arc::new(RwLock::new(HashMap::new())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
@@ -2171,6 +2200,7 @@ mod tests {
             line_counter: None,
             event_matcher: None,
             runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
+            watches: Arc::new(RwLock::new(HashMap::new())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));

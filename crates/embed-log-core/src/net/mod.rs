@@ -1,4 +1,5 @@
 pub mod control_ws;
+pub mod watch;
 pub mod ws_server;
 
 pub use control_ws::SourceInfo;

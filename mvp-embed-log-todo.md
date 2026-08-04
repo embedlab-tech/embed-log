@@ -196,6 +196,8 @@ Substring matching should be the default. Use `--expect-regex` for advanced matc
 
 ## 7. Watches
 
+**Implemented:** explicit add/wait/remove commands, literal and regex rules, one-shot TTL deactivation, retained pre-wait matches, standard event persistence, timeout/expiry JSON, and process-level file-tail coverage.
+
 Watches handle experiments triggered outside UART TX:
 
 ```bash
@@ -203,7 +205,6 @@ embed-log watch add \
   --instance bench-a \
   --source DUT_UART \
   --contains "session established" \
-  --once \
   --ttl 30s \
   --json
 

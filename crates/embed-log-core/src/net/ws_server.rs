@@ -134,6 +134,10 @@ pub struct ServerState {
     pub event_rules_path: PathBuf,
     /// Event rules added for the lifetime of this server/session.
     pub runtime_event_rules: Arc<RwLock<HashMap<String, Vec<crate::config::EventRule>>>>,
+    /// Temporary process-local watches and their retained match state.
+    pub watches: Arc<RwLock<HashMap<String, crate::net::watch::TemporaryWatch>>>,
+    /// Monotonic watch identifier allocator for this process.
+    pub watch_counter: Arc<AtomicU64>,
     /// Whether the /api/v1/control WebSocket endpoint is enabled.
     pub control_api: bool,
 }
@@ -922,6 +926,8 @@ mod tests {
             static_event_rules: Arc::new(HashMap::new()),
             event_rules_path: std::env::temp_dir().join("embed-log.events.yml"),
             runtime_event_rules: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            watches: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            watch_counter: Arc::new(AtomicU64::new(1)),
             control_api: true,
         };
         (state, rx)

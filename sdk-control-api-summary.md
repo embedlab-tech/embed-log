@@ -51,6 +51,16 @@ Added the new single automation endpoint.
 - `tx.write` waits for backend write acknowledgement before returning `tx.result`.
 - Added control WebSocket tests for command handling, subscription filtering, inject, TX success/failure, and structured entries.
 
+## MVP — Retained temporary watches
+
+The control WebSocket also supports process-local one-shot watches:
+
+- `watch.create` adds a literal or regex runtime event rule with a bounded TTL;
+- `watch.get` returns `active`, retained `matched`, or `expired` state;
+- `watch.delete` removes the state and deactivates its rule.
+
+Matches use normal event persistence/broadcast/marker handling. Temporary watch rules are excluded from event-rule list/export and cannot be promoted into project configuration. CLI users should prefer `embed-log watch add|wait|remove` rather than issuing these protocol messages directly.
+
 ## Phase 4 — Marker API
 
 Implemented marker creation through the control API.

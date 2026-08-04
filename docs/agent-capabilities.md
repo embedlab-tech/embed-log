@@ -24,6 +24,17 @@ embed-log tx --instance bench-a --source DUT_UART \
 
 Embed-log subscribes before writing, ignores TX records for matching, and returns the matching RX record plus bounded live context. Use `--expect-regex` only when substring matching is insufficient. `--raw`, `--file`, and `--stdin` send exact bytes; `--line` safely applies the UART line ending. An `EXPECT_TIMEOUT` response includes bounded evidence and exits unsuccessfully.
 
+For events triggered outside UART TX, add a temporary retained watch:
+
+```bash
+watch_id=$(embed-log watch add --instance bench-a --source DUT_UART \
+  --contains "session established" --ttl 30s --json | jq -r '.watch.id')
+embed-log watch wait "$watch_id" --instance bench-a --timeout 30s --json
+embed-log watch remove "$watch_id" --instance bench-a --json
+```
+
+The match is retained even if it occurs before `watch wait` starts. Watches are one-shot and temporary; remove completed or expired watches. Prefer literal `--contains` over `--regex` when possible.
+
 ## Inspect recorded sessions efficiently
 
 Start with an overview:

@@ -18,6 +18,7 @@ use commands::misc;
 use commands::run::{cmd_run, cmd_run_quick, RunOverrides};
 use commands::sessions::{cmd_sessions, SessionsCommand};
 use commands::tx::{cmd_tx, parse_duration, TxInput, TxOptions};
+use commands::watch::{cmd_watch, WatchCommand};
 
 #[derive(Parser)]
 #[command(
@@ -170,6 +171,12 @@ enum Command {
         /// Machine-readable JSON output.
         #[arg(long)]
         json: bool,
+    },
+
+    /// Manage temporary server-side log watches.
+    Watch {
+        #[command(subcommand)]
+        command: WatchCommand,
     },
 
     /// Gracefully stop a registered daemon.
@@ -343,6 +350,7 @@ async fn main() -> Result<()> {
             })
             .await
         }
+        Some(Command::Watch { command }) => cmd_watch(command).await,
         Some(Command::Stop { instance, json }) => cmd_stop(instance.as_deref(), json),
         Some(Command::Version { config, json }) => misc::cmd_version(config.as_deref(), json),
         Some(Command::Doctor {
