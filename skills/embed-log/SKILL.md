@@ -1,148 +1,210 @@
 ---
-description: Query embed-log session logs (UART/UDP device logs, pytest test runs, event detections) via the embed-log CLI instead of grepping raw log files. Use whenever the user asks to find something in embed-log logs/sessions, debug a test failure recorded by embed-log, or inspect device/test output captured by embed-log.
+description: Operate Embed-log safely through its discoverable CLI: inspect bounded session evidence, target persistent daemons, rotate experiments, send atomic UART commands, and wait on retained watches. Use instead of grepping log directories or opening UARTs directly.
 ---
 
-# embed-log CLI
+# Embed-log agent skill
 
-`embed-log` records UART/UDP device logs plus pytest/test-framework output into per-run
-"sessions" under a logs directory, as a `combined.jsonl` stream (one structured record per
-line, all sources interleaved chronologically) plus an `events.jsonl` of detected
-severity/pattern hits. Full reference: `docs/cli.md` in the embed-log repo.
+Embed-log is a persistent multi-source firmware logger. It owns configured UARTs, captures UART/UDP/file logs, stores cross-source sessions, and exposes the same records to the CLI, browser, and TUI.
 
-## Discover capabilities instead of parsing help
+Use the CLI as the canonical automation interface. Do not implement a parallel serial logger, scrape the browser, or parse human `--help` output.
 
-When the installed version is unknown, call `embed-log schema` once and cache the compact result by `schema_version` plus `embed_log_version`. Use a targeted query such as `embed-log schema sessions.read`, `embed-log schema tx`, or `embed-log schema errors` only when those details are needed. Use `status --json` separately for runtime sources and sessions. Never infer mutating targets from discovery output. Failed JSON invocations return one `{ok:false,error:{code,message,details}}` document on stdout with a nonzero exit status; branch on `error.code`, not message text.
+## Safety rules
 
-## Golden rule: never grep/cat the raw log files
+- Never send UART data, rotate/start/stop a daemon, or change configuration without user intent.
+- Never open a configured UART directly; Embed-log owns and locks it. Use `embed-log tx`.
+- Never infer a target for a mutation. Supply `--instance`, `EMBED_LOG_INSTANCE`, or an explicitly supported `--url`.
+- Never `cat`, recursively grep, or load `session.html`/whole `combined.jsonl` into context. Use bounded session commands.
+- Prefer literal matches over regex. Use exact bytes (`--raw`, `--file`, `--stdin`) only when required.
+- Capture everything, but return only bounded evidence relevant to the task.
 
-Raw session directories contain a `combined.jsonl` (all sources merged, still full/uncompact
-JSON), per-source `.log` files, and a `session.html` (a large embedded viewer — do not read
-this file, it can be tens of MB of minified JSON). `grep -r` across a logs directory matches
-inside all of these, including `session.html`, which is slow, noisy, and easy to blow out an
-agent's context window on. Use the `embed-log sessions` subcommands below instead — they are
-structured, bounded, and orders of magnitude smaller.
+## 1. Discover before guessing
 
-## Which logs directory?
-
-`sessions` subcommands resolve which directory to inspect in this order: explicit `--dir`,
-else `--config <path>` (or `EMBED_LOG_CONFIG_YML_PATH`, or `./embed-log.yml`) read for its
-`logs.dir`, else `./logs`. Whenever the directory wasn't given explicitly via `--dir`, one
-note is printed to **stderr** saying which directory was picked — this is informational, not
-an error; stdout output is unaffected. If unsure which directory a project uses, run
-`embed-log doctor` — it prints `resolved config: <path>` (the config `run` would actually
-load) and, if set, `config env: EMBED_LOG_CONFIG_YML_PATH=...`.
-
-## Live UART experiments
-
-Only send UART data when the user has explicitly authorized device interaction. Embed-log owns configured UARTs, so use its atomic TX command instead of opening the serial path separately:
+For an unfamiliar installed version, call the compact static capability index once:
 
 ```bash
-embed-log tx --instance bench-a --source DUT_UART \
-  --line reset --expect "boot complete" \
-  --timeout 30s --context 20 --json
-```
-
-Prefer substring `--expect`; use `--expect-regex` only when needed. The command arms its subscription before TX and returns bounded context. On `EXPECT_TIMEOUT`, inspect the returned evidence rather than immediately dumping the full session. Use `--raw`, `--file`, or `--stdin` only when exact bytes are required.
-
-For externally triggered behavior, use a retained server-side watch instead of streaming logs:
-
-```bash
-watch_id=$(embed-log watch add --instance bench-a --source DUT_UART \
-  --contains "session established" --ttl 30s --json | jq -r '.watch.id')
-embed-log watch wait "$watch_id" --instance bench-a --timeout 30s --json
-embed-log watch remove "$watch_id" --instance bench-a --json
-```
-
-A match is not lost if it arrives before `watch wait`. Prefer `--contains`, keep TTLs short, and remove matched or expired watches.
-
-## Recommended workflow
-
-1. **Discover if needed.** If this binary version is not already known, run `embed-log schema`, followed by one targeted command descriptor only when necessary. Do not parse `--help`.
-2. **Find the session.** `embed-log sessions list --limit 10` (newest first), or if you
-   already know it's the most recent run, skip straight to using `latest` as the session id
-   anywhere one is accepted (`info`, `export`, `combined`, `events`, `summary`, and
-   `search --session latest`).
-3. **Get the shape of it first.** `embed-log sessions summary <SESSION_ID or latest>` —
-   per-source line counts, first/last timestamps, event severity counts, session duration,
-   and the last 5 lines. This is a single small, bounded call — always do this before
-   searching, it tells you which sources exist and roughly what happened.
-4. **Search for the specific thing.** `embed-log sessions search` with `--regex`/`--contains`
-   plus `--format compact` (or `mini-jsonl` for structured output) to get a small, readable
-   answer instead of raw JSON.
-5. **Only pull more context if needed.** For newly captured sessions, use
-   `sessions read <id> --after <cursor> --limit N --time none --json`, then
-   `sessions around <id> --sequence N --before B --after A`. Use search context for legacy sessions.
-
-## Command reference
-
-```bash
-# Discover this binary without parsing human help
 embed-log schema
-embed-log schema sessions.read
-
-# List sessions (newest first)
-embed-log sessions list --limit 10 [--dir <path> | --config <path>]
-
-# Token-efficient overview of one session — do this before searching
-embed-log sessions summary latest
-embed-log sessions summary <SESSION_ID> --json
-
-# Search combined logs — the main tool
-embed-log sessions search --session latest --regex 'timeout|panic|fatal' --format compact
-embed-log sessions search --dir logs --source PYTEST --contains "FAILED" --format compact
-embed-log sessions search --dir logs --job nightly-42 --kind udp --contains timeout
-embed-log sessions search --session latest --source DUT --last 50 --format compact   # newest N matches
-embed-log sessions search --dir logs --regex 'timeout' --since 1h                    # relative time window
-embed-log sessions search --dir logs --regex panic -C 10 --format compact            # +/- 10 lines of context
-embed-log sessions search --dir logs --contains panic --count                        # just the count
-
-# Bounded cursor reads for newly captured sessions
-embed-log sessions read latest --after 100 --limit 50 --time none --json
-embed-log sessions around latest --sequence 119 --before 5 --after 10 --time relative --json
-
-# Event-detection hits (only useful if the project's events.yml has rules configured)
-embed-log sessions events latest --severity fatal --format compact
-
-# Session manifest / raw tail / export
-embed-log sessions info latest
-embed-log sessions combined latest --lines 50 --format compact
-embed-log sessions export <SESSION_ID> --format raw --output merged.txt
-
-# Hand a whole session to another tool/agent for offline analysis — lossless,
-# ~48% smaller than combined.jsonl (dedupes repeated/constant fields, no content changes)
-embed-log sessions export <SESSION_ID> --format jsonl-deduped --output session.jsonl
-
-# Where is the config/logs dir actually resolving to?
-embed-log doctor
 ```
 
-For `sessions read`/`around`, compact text is `T+00:12.453 719 DUT_UART#428 message`: relative time, global cursor, full source ID, source-local line, and message. `--time none` omits time; `--time absolute` uses RFC3339. `--json` returns tuple records plus one `fields` schema; `--format full-json` is the complete-record escape hatch.
-
-`--format` (on legacy `search`/`combined`/`events`): `jsonl` (default, full record, byte-exact) |
-`compact` (`1:23.644 C#1234 message`, best for reading — ~81% smaller than jsonl) | `mini-jsonl`
-(short-keyed JSON, best for further programmatic filtering — ~77% smaller). `compact`/`mini-jsonl`
-are, by default: **denoised** (ANSI escape codes, a message's duplicate leading timestamp, padded
-log-level brackets, and redundant device uptime counters are stripped) and **compacted**
-(timestamp shown is elapsed time since session start, not wall-clock — `sessions summary <id>`
-has the absolute anchor; source names are shortcoded — initials of `_`/`-`-separated words, e.g.
-`COUNTER`→`C`, `MCU_LINK_RX`→`MLR`, falling back to a longer prefix on a rare collision, so
-they're mnemonic rather than arbitrary). The first use of each timestamp convention/shortcode in a
-command's output gets a one-line explanation on **stderr** (never stdout — safe to parse output
-without filtering anything out), e.g. `sessions: source code C = COUNTER`. `jsonl` is the
-untouched escape hatch if you need exact bytes, original timestamps, or full source names. If a
-search spans multiple sessions, scope it with `--session <id>` for unambiguous elapsed times
-(otherwise each entry's elapsed time is relative to its own session, which can span different
-absolute times).
-
-`--since` takes `<N>s|m|h|d` (e.g. `10m`, `1h`, `2d`); conflicts with `--from`. `--last N`
-conflicts with `--limit` (first-N vs last-N). Context flags (`-C`/`-B`/`-A`) conflict with
-`--count` and with `--last`.
-
-## Example: "find the run where X happened"
+Cache it by `schema_version` and `embed_log_version`. Query only the command needed:
 
 ```bash
-embed-log sessions list --limit 20
-embed-log sessions search --dir logs --regex '(?i)edhoc.*timeout|timeout.*edhoc' --format compact
-# -> one compact line naming the session, source, and timestamp; use that session id for
-#    summary/combined/-C follow-ups instead of opening the session's raw files.
+embed-log schema status
+embed-log schema sessions.read
+embed-log schema tx
+embed-log schema watch.wait
+embed-log schema errors
+embed-log schema config
 ```
+
+Do not parse `--help`. `schema` describes binary capabilities; it does not report runtime state.
+
+Discover a running daemon, current session, exact source IDs, and UART write capability separately:
+
+```bash
+embed-log status --instance bench-a --json
+```
+
+Read-only `status` may infer the sole daemon. Mutations never may.
+
+## 2. Persistent experiment lifecycle
+
+Start a named daemon only when requested. Daemon startup requires all three explicit values and never scans for another port:
+
+```bash
+embed-log run --daemon \
+  --instance bench-a \
+  --config embed-log.yml \
+  --port 18080 \
+  --json
+```
+
+Reuse is safe only when the registered live process matches the instance, endpoint, config, and logs directory. Otherwise startup fails visibly.
+
+Rotate to a titled logical experiment without releasing UARTs or changing daemon PID:
+
+```bash
+embed-log sessions new \
+  --instance bench-a \
+  --title "reconnect attempt 3" \
+  --json
+```
+
+Rotation resets session-global `sequence` to 1 and each source-local `line_idx` to 0. Browser/TUI clients follow the externally initiated rotation automatically.
+
+Stop explicitly:
+
+```bash
+embed-log stop --instance bench-a --json
+```
+
+## 3. Inspect sessions with bounded evidence
+
+Resolve logs using explicit `--dir`, then `--config`, then the configured/default logs directory. Run `embed-log doctor` if resolution is unclear.
+
+Recommended investigation:
+
+```text
+summary → bounded read/search → exact sequence context → conclusion
+```
+
+Start small:
+
+```bash
+embed-log sessions list --limit 10
+embed-log sessions summary latest --json
+```
+
+For new sessions, prefer the global cursor:
+
+```bash
+embed-log sessions read latest \
+  --after 0 --limit 100 --time none --json
+```
+
+Compact JSON declares tuple fields once. Use `next_cursor` for the next page while `truncated` is true. A response is capped at 1000 records; capture is not capped.
+
+- `sequence` is the authoritative session-global order/cursor.
+- `source_id + line_idx` is the source-local identity.
+- `--after N` is exclusive and applied globally before source filtering.
+- `--time none` minimizes tokens.
+- `--time relative` (default) preserves firmware timing.
+- `--time absolute` supports external correlation.
+- Use `--format full-json` only for exact stored metadata.
+
+Get deterministic cross-source context around evidence:
+
+```bash
+embed-log sessions around latest \
+  --sequence 719 --before 10 --after 20 \
+  --time relative --json
+```
+
+A unique persisted event can be targeted with `--event ID`. The target plus before/after context is capped at 1000 records.
+
+For legacy sessions or targeted text discovery:
+
+```bash
+embed-log sessions search \
+  --session latest --source DUT_UART \
+  --regex 'panic|fatal|watchdog' \
+  --format compact --context 20
+```
+
+Use `sessions events` when configured event rules already detected relevant signatures.
+
+Compact text has this identity shape:
+
+```text
+T+00:12.453 719 DUT_UART#428 boot complete
+```
+
+## 4. Atomic UART interaction
+
+When TX is authorized, arm the expectation and write atomically:
+
+```bash
+embed-log tx --instance bench-a \
+  --source DUT_UART \
+  --line reset \
+  --expect "boot complete" \
+  --timeout 30s \
+  --context 20 \
+  --json
+```
+
+The subscription is armed before the write, TX records cannot satisfy the expectation, and returned context is bounded. On `EXPECT_TIMEOUT`, inspect `error.details.context` and `next_cursor`; do not dump the whole session. Prefer `--expect`; use `--expect-regex` only when necessary.
+
+## 5. Retained watches for external actions
+
+Use a temporary watch when the triggering action occurs outside `tx`:
+
+```bash
+watch_id=$(embed-log watch add --instance bench-a \
+  --source DUT_UART \
+  --contains "session established" \
+  --ttl 30s --json | jq -r '.watch.id')
+
+embed-log watch wait "$watch_id" \
+  --instance bench-a --timeout 30s --json
+
+embed-log watch remove "$watch_id" \
+  --instance bench-a --json
+```
+
+Watches are one-shot, process-local, and retain a match that arrives before `watch wait`. Waiting does not stream ordinary logs. Keep TTLs short and remove matched/expired watches.
+
+## 6. Machine errors
+
+Every invocation requesting JSON emits one failure document on stdout and exits nonzero:
+
+```json
+{"ok":false,"error":{"code":"EXPECT_TIMEOUT","message":"...","details":{}}}
+```
+
+Branch on `error.code`, never message text. `COMMAND_FAILED` is the stable fallback. Use `embed-log schema errors` for the installed catalog.
+
+## 7. Textual CoAP sources
+
+When a source emits newline-delimited hexadecimal CoAP, configure the backend parser rather than decoding in the browser:
+
+```yaml
+sources:
+  RADIO:
+    type: uart
+    path: /dev/ttyUSB1
+    parser:
+      type: hex-coap
+```
+
+The parser keeps the log prefix and replaces bytes from the first valid CoAP header with readable type, code, message ID, token, options, and payload length before persistence, watches, and streaming. Non-CoAP lines pass through unchanged.
+
+## Completion discipline
+
+Conclude with:
+
+- selected instance and session;
+- exact source IDs used;
+- relevant sequence range or event/watch ID;
+- concise evidence;
+- whether output was truncated and the final cursor;
+- any timeout, stream gap, parser, or source-health uncertainty.
