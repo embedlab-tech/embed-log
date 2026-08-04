@@ -1653,3 +1653,18 @@ Future entries must include this per-file added/removed-line summary.
 | --- | ---: | ---: | --- |
 | `README.md` | 4 | 2 | Describes the skill as the complete safe CLI workflow rather than session search only. |
 | `skills/embed-log/SKILL.md` | 185 | 123 | Rewrites the canonical skill around discovery, safety, experiments, bounded evidence, TX/watch, errors, CoAP, and completion discipline. |
+
+## 2026-08-04 11:18:00 UTC / 2026-08-04 13:18:00 CEST (Warsaw)
+
+- **Commit:** `2b3a74b` — `Condense Embed-log agent skill`
+- **Task:** Reduce the canonical agent skill to essential operational and safety data while preserving discovery, explicit lifecycle, bounded cursor analysis, UART TX, watches, errors, CoAP, and reporting contracts.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 11:18:00 UTC / 2026-08-04 13:18:00 CEST (+0200) (Warsaw)
+- **Validation:** `git diff --check` — passed; CLI unit suite — 77 passed; release schema assertion verified every referenced command and `hex-coap`. Skill size decreased from 6,904 bytes / 957 words / 210 lines to 4,612 bytes / 628 words / 146 lines.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`2b3a74b`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `skills/embed-log/SKILL.md` | 56 | 120 | Removes repetition and legacy detail while retaining the essential safe workflow. |
