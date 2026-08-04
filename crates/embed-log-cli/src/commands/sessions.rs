@@ -133,6 +133,9 @@ pub(crate) enum SessionsCommand {
         /// Output format: jsonl (default), compact, or mini-jsonl.
         #[arg(long, value_enum, default_value_t = OutputFormat::Jsonl)]
         format: OutputFormat,
+        /// Include redundant materialized merge records from legacy sessions.
+        #[arg(long)]
+        include_materialized_merges: bool,
     },
     /// Read a bounded page from the session-global combined sequence.
     Read {
@@ -160,6 +163,9 @@ pub(crate) enum SessionsCommand {
         /// Emit a structured envelope; full-json always emits JSON.
         #[arg(long)]
         json: bool,
+        /// Include redundant materialized merge records from legacy sessions.
+        #[arg(long)]
+        include_materialized_merges: bool,
     },
     /// Read bounded cross-source context around a sequence.
     Around {
@@ -184,6 +190,9 @@ pub(crate) enum SessionsCommand {
         /// Emit a structured envelope; full-json always emits JSON.
         #[arg(long)]
         json: bool,
+        /// Include redundant materialized merge records from legacy sessions.
+        #[arg(long)]
+        include_materialized_merges: bool,
     },
     /// Show a token-efficient overview of one session (recommended first call for agents).
     Summary {
@@ -192,6 +201,9 @@ pub(crate) enum SessionsCommand {
         log_dir: LogDirArgs,
         #[arg(long)]
         json: bool,
+        /// Include redundant materialized merge records from legacy sessions.
+        #[arg(long)]
+        include_materialized_merges: bool,
     },
     /// Search combined JSONL across sessions with structured filters.
     #[command(
@@ -248,6 +260,9 @@ pub(crate) enum SessionsCommand {
         /// Print N lines of context after each match. Conflicts with --count and --last.
         #[arg(short = 'A', long = "after-context")]
         after_context: Option<usize>,
+        /// Include redundant materialized merge records from legacy sessions.
+        #[arg(long)]
+        include_materialized_merges: bool,
     },
 }
 
@@ -343,9 +358,17 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             follow,
             lines,
             format,
+            include_materialized_merges,
         } => {
             let dir = resolve_sessions_dir(&log_dir)?;
-            show_session_combined(&dir, &session_id, follow, lines, format)
+            show_session_combined(
+                &dir,
+                &session_id,
+                follow,
+                lines,
+                format,
+                include_materialized_merges,
+            )
         }
         SessionsCommand::Read {
             session_id,
@@ -357,6 +380,7 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             time,
             format,
             json,
+            include_materialized_merges,
         } => {
             let dir = resolve_sessions_dir(&log_dir)?;
             read_session(
@@ -370,6 +394,7 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
                     time,
                     format,
                     json,
+                    include_materialized_merges,
                 },
             )
         }
@@ -382,6 +407,7 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             time,
             format,
             json,
+            include_materialized_merges,
         } => {
             let dir = resolve_sessions_dir(&log_dir)?;
             around_session(
@@ -394,6 +420,7 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
                     time,
                     format,
                     json,
+                    include_materialized_merges,
                 },
             )
         }
@@ -401,9 +428,10 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             session_id,
             log_dir,
             json,
+            include_materialized_merges,
         } => {
             let dir = resolve_sessions_dir(&log_dir)?;
-            show_session_summary(&dir, &session_id, json)
+            show_session_summary(&dir, &session_id, json, include_materialized_merges)
         }
         SessionsCommand::Search {
             log_dir,
@@ -423,6 +451,7 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             context,
             before_context,
             after_context,
+            include_materialized_merges,
         } => {
             if from.is_some() && since.is_some() {
                 anyhow::bail!("cannot combine --from with --since; pick one");
@@ -448,7 +477,17 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
                 None => from,
             };
             let filters = SearchFilters::compile(
-                sessions, job, sources, kind, from, to, contains, regex, limit, count,
+                sessions,
+                job,
+                sources,
+                kind,
+                from,
+                to,
+                contains,
+                regex,
+                limit,
+                count,
+                include_materialized_merges,
             )?;
             if has_context {
                 let before = before_context.or(context).unwrap_or(0);
@@ -754,6 +793,39 @@ pub(crate) fn count_markers_in_session(session_dir: &Path) -> usize {
 
 const MAX_BOUNDED_RECORDS: usize = 1_000;
 
+fn is_materialized_merge(record: &serde_json::Value) -> bool {
+    record.get("source_kind").and_then(|value| value.as_str()) == Some("merge")
+}
+
+fn manifest_merge_members(session: &SessionRecord, merge_name: &str) -> Option<Vec<String>> {
+    session
+        .manifest
+        .get("merges")
+        .and_then(|value| value.as_array())
+        .and_then(|merges| {
+            merges.iter().find_map(|merge| {
+                if merge.get("name").and_then(|value| value.as_str()) != Some(merge_name) {
+                    return None;
+                }
+                Some(
+                    merge
+                        .get("of")
+                        .and_then(|value| value.as_array())
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|value| value.as_str().map(str::to_string))
+                        .collect(),
+                )
+            })
+        })
+}
+
+fn requested_source_ids(session: &SessionRecord, source: Option<&str>) -> Option<Vec<String>> {
+    source.map(|source| {
+        manifest_merge_members(session, source).unwrap_or_else(|| vec![source.to_string()])
+    })
+}
+
 struct ReadOptions {
     source: Option<String>,
     after: Option<u64>,
@@ -762,6 +834,7 @@ struct ReadOptions {
     time: TimeDisplay,
     format: ReadFormat,
     json: bool,
+    include_materialized_merges: bool,
 }
 
 struct AroundOptions {
@@ -771,6 +844,7 @@ struct AroundOptions {
     time: TimeDisplay,
     format: ReadFormat,
     json: bool,
+    include_materialized_merges: bool,
 }
 
 fn read_session(dir: &Path, session_id: &str, options: ReadOptions) -> Result<()> {
@@ -783,6 +857,19 @@ fn read_session(dir: &Path, session_id: &str, options: ReadOptions) -> Result<()
         "--limit/--last must not exceed {MAX_BOUNDED_RECORDS}"
     );
     let session = resolve_session(dir, session_id)?;
+    if let Some(source) = options.source.as_deref() {
+        let is_legacy_merge = session
+            .manifest
+            .get("pane_kinds")
+            .and_then(|value| value.get(source))
+            .and_then(|value| value.as_str())
+            == Some("merge")
+            && manifest_merge_members(&session, source).is_none();
+        anyhow::ensure!(
+            !is_legacy_merge || options.include_materialized_merges,
+            "legacy session does not store members for virtual source {source:?}; select its physical sources or pass --include-materialized-merges to read the old redundant records"
+        );
+    }
     let path = manifest_combined_file(&session)?;
     let file = std::fs::File::open(&path)
         .with_context(|| format!("open combined file {}", path.display()))?;
@@ -793,6 +880,18 @@ fn read_session(dir: &Path, session_id: &str, options: ReadOptions) -> Result<()
     let mut max_sequence = 0u64;
     let mut available_sources = std::collections::BTreeSet::new();
     let mut forward_truncated = false;
+    let requested_sources = requested_source_ids(&session, options.source.as_deref());
+    if let Some(merges) = session
+        .manifest
+        .get("merges")
+        .and_then(|value| value.as_array())
+    {
+        for merge in merges {
+            if let Some(name) = merge.get("name").and_then(|value| value.as_str()) {
+                available_sources.insert(name.to_string());
+            }
+        }
+    }
 
     for line_result in BufReader::new(file).lines() {
         let line = line_result.with_context(|| format!("read {}", path.display()))?;
@@ -812,8 +911,16 @@ fn read_session(dir: &Path, session_id: &str, options: ReadOptions) -> Result<()
         if options.after.is_some_and(|after| sequence <= after) {
             continue;
         }
-        if options.source.as_deref().is_some_and(|source| {
-            record.get("source_id").and_then(|value| value.as_str()) != Some(source)
+        if !options.include_materialized_merges && is_materialized_merge(&record) {
+            continue;
+        }
+        if requested_sources.as_ref().is_some_and(|sources| {
+            record
+                .get("source_id")
+                .and_then(|value| value.as_str())
+                .map_or(true, |source| {
+                    !sources.iter().any(|candidate| candidate == source)
+                })
         }) {
             continue;
         }
@@ -905,6 +1012,9 @@ fn around_session(dir: &Path, session_id: &str, options: AroundOptions) -> Resul
         };
         let sequence = validated_sequence(&record, previous_sequence, &session.id)?;
         previous_sequence = Some(sequence);
+        if !options.include_materialized_merges && is_materialized_merge(&record) {
+            continue;
+        }
         if !found {
             if sequence == target_sequence {
                 records.extend(before.drain(..));
@@ -1304,6 +1414,7 @@ struct SearchFilters {
     regex: Option<Regex>,
     limit: Option<usize>,
     count: bool,
+    include_materialized_merges: bool,
 }
 
 impl SearchFilters {
@@ -1319,6 +1430,7 @@ impl SearchFilters {
         regex: Option<String>,
         limit: Option<usize>,
         count: bool,
+        include_materialized_merges: bool,
     ) -> Result<Self> {
         Ok(Self {
             sessions,
@@ -1331,6 +1443,7 @@ impl SearchFilters {
             regex: regex.map(|pat| Regex::new(&pat)).transpose()?,
             limit,
             count,
+            include_materialized_merges,
         })
     }
 
@@ -1352,14 +1465,22 @@ impl SearchFilters {
         true
     }
 
-    fn matches_entry(&self, entry: &serde_json::Value) -> bool {
+    fn matches_entry(&self, session: &SessionRecord, entry: &serde_json::Value) -> bool {
+        if !self.include_materialized_merges && is_materialized_merge(entry) {
+            return false;
+        }
         if !self.sources.is_empty() {
             let source_id = entry.get("source_id").and_then(|v| v.as_str());
-            if !self
-                .sources
-                .iter()
-                .any(|source| Some(source.as_str()) == source_id)
-            {
+            let matches_source = self.sources.iter().any(|requested| {
+                manifest_merge_members(session, requested).map_or_else(
+                    || Some(requested.as_str()) == source_id,
+                    |members| {
+                        source_id
+                            .is_some_and(|source| members.iter().any(|member| member == source))
+                    },
+                )
+            });
+            if !matches_source {
                 return false;
             }
         }
@@ -1500,7 +1621,7 @@ fn search_sessions(dir: &Path, mut filters: SearchFilters, format: OutputFormat)
                 Ok(value) => value,
                 Err(_) => continue,
             };
-            if !filters.matches_entry(&entry) {
+            if !filters.matches_entry(session, &entry) {
                 continue;
             }
             matches += 1;
@@ -1558,9 +1679,20 @@ fn search_sessions_with_context(
             .map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
             .collect();
 
-        for (idx, entry_opt) in parsed.iter().enumerate() {
-            let Some(entry) = entry_opt else { continue };
-            if !filters.matches_entry(entry) {
+        let visible_indices: Vec<usize> = parsed
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, entry)| {
+                entry.as_ref().and_then(|entry| {
+                    (filters.include_materialized_merges || !is_materialized_merge(entry))
+                        .then_some(idx)
+                })
+            })
+            .collect();
+
+        for (visible_idx, &idx) in visible_indices.iter().enumerate() {
+            let entry = parsed[idx].as_ref().expect("visible entries are parsed");
+            if !filters.matches_entry(session, entry) {
                 continue;
             }
             match_num += 1;
@@ -1573,13 +1705,13 @@ fn search_sessions_with_context(
                 session.id,
                 idx + 1
             );
-            let (start, end) = context_window(idx, before, after, lines.len());
-            for (i, line) in lines.iter().enumerate().take(end + 1).skip(start) {
-                let Some(ctx_entry) = &parsed[i] else {
-                    continue;
-                };
-                let rendered = render_entry(ctx_entry, line, format, &mut codes);
-                if i == idx {
+            let (start, end) = context_window(visible_idx, before, after, visible_indices.len());
+            for &raw_idx in &visible_indices[start..=end] {
+                let ctx_entry = parsed[raw_idx]
+                    .as_ref()
+                    .expect("visible entries are parsed");
+                let rendered = render_entry(ctx_entry, lines[raw_idx], format, &mut codes);
+                if raw_idx == idx {
                     println!("{rendered}   << MATCH");
                 } else {
                     println!("{rendered}");
@@ -1637,7 +1769,7 @@ fn search_sessions_last_n(
                 Ok(value) => value,
                 Err(_) => continue,
             };
-            if !filters.matches_entry(&entry) {
+            if !filters.matches_entry(session, &entry) {
                 continue;
             }
             push_bounded(
@@ -1687,6 +1819,7 @@ fn show_session_combined(
     follow: bool,
     lines: Option<usize>,
     format: OutputFormat,
+    include_materialized_merges: bool,
 ) -> Result<()> {
     use std::io::{Read, Seek, SeekFrom, Write};
     use std::time::Duration;
@@ -1696,7 +1829,15 @@ fn show_session_combined(
     let mut codes = ShortcodeTable::default();
     note_elapsed_time_format(format);
     let text = std::fs::read_to_string(&path).unwrap_or_default();
-    let all: Vec<&str> = text.lines().collect();
+    let all: Vec<&str> = text
+        .lines()
+        .filter(|line| {
+            include_materialized_merges
+                || serde_json::from_str::<serde_json::Value>(line)
+                    .map(|entry| !is_materialized_merge(&entry))
+                    .unwrap_or(true)
+        })
+        .collect();
     let selected = match lines {
         Some(count) => &all[all.len().saturating_sub(count)..],
         None => &all[..],
@@ -1723,16 +1864,18 @@ fn show_session_combined(
             file.seek(SeekFrom::Start(pos))?;
             let mut buf = String::new();
             file.read_to_string(&mut buf)?;
-            if format == OutputFormat::Jsonl {
-                print!("{buf}");
-            } else {
-                pending.push_str(&buf);
-                while let Some(newline_at) = pending.find('\n') {
-                    let raw_line: String = pending.drain(..=newline_at).collect();
-                    let raw_line = raw_line.trim_end_matches('\n');
-                    if !raw_line.is_empty() {
-                        println!("{}", render_combined_line(raw_line, format, &mut codes));
-                    }
+            pending.push_str(&buf);
+            while let Some(newline_at) = pending.find('\n') {
+                let raw_line: String = pending.drain(..=newline_at).collect();
+                let raw_line = raw_line.trim_end_matches('\n');
+                if raw_line.is_empty() {
+                    continue;
+                }
+                let materialized_merge = serde_json::from_str::<serde_json::Value>(raw_line)
+                    .map(|entry| is_materialized_merge(&entry))
+                    .unwrap_or(false);
+                if include_materialized_merges || !materialized_merge {
+                    println!("{}", render_combined_line(raw_line, format, &mut codes));
                 }
             }
             std::io::stdout().flush()?;
@@ -1740,6 +1883,34 @@ fn show_session_combined(
         }
         std::thread::sleep(Duration::from_millis(250));
     }
+}
+
+fn manifest_virtual_merge_names(session: &SessionRecord) -> std::collections::HashSet<String> {
+    session
+        .manifest
+        .get("merges")
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|merge| {
+            merge
+                .get("name")
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        })
+        .collect()
+}
+
+fn manifest_merge_names(session: &SessionRecord) -> std::collections::HashSet<String> {
+    session
+        .manifest
+        .get("pane_kinds")
+        .and_then(|value| value.as_object())
+        .into_iter()
+        .flatten()
+        .filter(|(_, kind)| kind.as_str() == Some("merge"))
+        .map(|(name, _)| name.clone())
+        .collect()
 }
 
 fn manifest_source_files(session: &SessionRecord) -> Result<HashMap<String, String>> {
@@ -1756,7 +1927,13 @@ fn manifest_source_files(session: &SessionRecord) -> Result<HashMap<String, Stri
 }
 
 pub(crate) fn export_session_html(session: &SessionRecord, output: PathBuf) -> Result<()> {
-    let source_files = manifest_source_files(session)?;
+    // New manifests can reconstruct virtual panes from members. Older manifests
+    // lack merge definitions, so retain their materialized source file in HTML.
+    let merge_names = manifest_virtual_merge_names(session);
+    let source_files = manifest_source_files(session)?
+        .into_iter()
+        .filter(|(name, _)| !merge_names.contains(name))
+        .collect();
     let tabs = session
         .manifest
         .get("tabs")
@@ -1804,6 +1981,11 @@ pub(crate) fn export_session_html(session: &SessionRecord, output: PathBuf) -> R
         .get("plugin_scripts")
         .cloned()
         .unwrap_or_else(|| serde_json::json!({}));
+    let merges = session
+        .manifest
+        .get("merges")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
 
     let exporter = SessionExporter::new(
         output.clone(),
@@ -1814,6 +1996,8 @@ pub(crate) fn export_session_html(session: &SessionRecord, output: PathBuf) -> R
         timestamp_mode,
         first_log_at,
     )
+    .with_combined_file(manifest_combined_file(session)?)
+    .with_merges(merges)
     .with_plugins(frontend_plugins, pane_plugins, plugin_scripts)
     .with_markers(markers);
     exporter.export()?;
@@ -1822,9 +2006,13 @@ pub(crate) fn export_session_html(session: &SessionRecord, output: PathBuf) -> R
 }
 
 pub(crate) fn export_session_raw(session: &SessionRecord, output: PathBuf) -> Result<()> {
+    let merge_names = manifest_merge_names(session);
     let source_files = manifest_source_files(session)?;
     let mut merged = String::new();
     for (source, path) in source_files {
+        if merge_names.contains(&source) {
+            continue;
+        }
         let content = std::fs::read_to_string(&path).unwrap_or_default();
         for line in content.lines() {
             merged.push_str(&source);
@@ -1901,6 +2089,9 @@ pub(crate) fn export_session_jsonl_deduped(session: &SessionRecord, output: Path
         .collect();
     source_ids.sort();
     source_ids.dedup();
+    source_ids.retain(|source_id| {
+        pane_kinds.get(source_id).and_then(|kind| kind.as_str()) != Some("merge")
+    });
 
     let mut sources = serde_json::Map::new();
     for source_id in &source_ids {
@@ -1956,6 +2147,9 @@ pub(crate) fn export_session_jsonl_deduped(session: &SessionRecord, output: Path
         let Ok(entry) = serde_json::from_str::<serde_json::Value>(&line) else {
             continue;
         };
+        if is_materialized_merge(&entry) {
+            continue;
+        }
         let mut deduped = dedupe_entry(&entry);
         if let Some(obj) = deduped.as_object_mut() {
             for field in HEADER_COVERED_FIELDS {
@@ -1986,7 +2180,10 @@ struct SessionSummary {
 /// Single pass over `combined.jsonl` computing
 /// everything `sessions summary` reports. Kept separate from printing so the
 /// aggregation logic is unit-testable without capturing stdout.
-fn compute_session_summary(session: &SessionRecord) -> SessionSummary {
+fn compute_session_summary(
+    session: &SessionRecord,
+    include_materialized_merges: bool,
+) -> SessionSummary {
     use std::collections::BTreeMap;
     use std::io::{BufRead, BufReader};
 
@@ -2013,6 +2210,9 @@ fn compute_session_summary(session: &SessionRecord) -> SessionSummary {
                 let Ok(entry) = serde_json::from_str::<serde_json::Value>(&line) else {
                     continue;
                 };
+                if !include_materialized_merges && is_materialized_merge(&entry) {
+                    continue;
+                }
                 let source_id = entry
                     .get("source_id")
                     .and_then(|v| v.as_str())
@@ -2065,9 +2265,14 @@ fn compute_session_summary(session: &SessionRecord) -> SessionSummary {
 /// `sessions summary <SESSION_ID>` — a single token-efficient overview: per-source
 /// line counts/first/last timestamps and the last 5
 /// combined.jsonl lines. Recommended first call for agents inspecting a session.
-fn show_session_summary(dir: &Path, session_id: &str, json: bool) -> Result<()> {
+fn show_session_summary(
+    dir: &Path,
+    session_id: &str,
+    json: bool,
+    include_materialized_merges: bool,
+) -> Result<()> {
     let session = resolve_session(dir, session_id)?;
-    let summary = compute_session_summary(&session);
+    let summary = compute_session_summary(&session, include_materialized_merges);
 
     if json {
         let sources_json: Vec<_> = summary
@@ -2326,6 +2531,7 @@ mod tests {
             Some("panic|fatal".to_string()),
             None,
             false,
+            false,
         )
         .unwrap();
         let session = SessionRecord {
@@ -2340,7 +2546,44 @@ mod tests {
             "message": "panic in worker"
         });
         assert!(filters.matches_session(&session));
-        assert!(filters.matches_entry(&entry));
+        assert!(filters.matches_entry(&session, &entry));
+    }
+
+    #[test]
+    fn virtual_source_filter_expands_members_and_legacy_merge_records_are_hidden() {
+        let session = SessionRecord {
+            id: "s1".to_string(),
+            dir: PathBuf::from("/tmp/s1"),
+            manifest: serde_json::json!({
+                "merges": [{"name":"MCU_LINK","of":["MCU_TX","MCU_RX"]}]
+            }),
+        };
+        let filters = SearchFilters::compile(
+            vec![],
+            None,
+            vec!["MCU_LINK".to_string()],
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            false,
+        )
+        .unwrap();
+        assert!(filters.matches_entry(
+            &session,
+            &serde_json::json!({"source_id":"MCU_RX","source_kind":"uart"})
+        ));
+        assert!(!filters.matches_entry(
+            &session,
+            &serde_json::json!({"source_id":"MCU_LINK","source_kind":"merge"})
+        ));
+        assert_eq!(
+            manifest_merge_members(&session, "MCU_LINK").unwrap(),
+            ["MCU_TX", "MCU_RX"]
+        );
     }
 
     #[test]
@@ -2413,6 +2656,7 @@ mod tests {
             None,
             None,
             None,
+            false,
             false,
         )
         .unwrap();
@@ -2663,7 +2907,7 @@ mod tests {
         )
         .unwrap();
         let session = resolve_session(&root, "2026-07-06_14-31-18").unwrap();
-        let summary = compute_session_summary(&session);
+        let summary = compute_session_summary(&session, false);
         assert_eq!(summary.sources.len(), 2);
         assert_eq!(summary.sources["PYTEST"].count, 1);
         assert_eq!(summary.duration, "00:10:05");

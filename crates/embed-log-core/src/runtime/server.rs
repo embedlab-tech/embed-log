@@ -145,14 +145,10 @@ impl LogServer {
 
         // Build per-source line counters for stable line_idx.
         use std::sync::atomic::AtomicU64;
-        let mut line_counters: HashMap<String, Arc<AtomicU64>> = sources
+        let line_counters: HashMap<String, Arc<AtomicU64>> = sources
             .iter()
             .map(|src| (src.name.clone(), Arc::new(AtomicU64::new(0))))
             .collect();
-        for merge in &self.config.merges {
-            line_counters.insert(merge.name.clone(), Arc::new(AtomicU64::new(0)));
-        }
-
         // ── 4. Compute log file paths ──
         let tab_label = self
             .config
@@ -171,17 +167,6 @@ impl LogServer {
             let log_path = session_dir.join(&log_name);
             source_files.insert(src.name.clone(), log_path.display().to_string());
             log_paths.insert(src.name.clone(), log_path);
-        }
-        for merge in &self.config.merges {
-            let log_name = format!(
-                "{}__{}__{}.log",
-                slugify(tab_label),
-                slugify(&merge.name),
-                slugify(&session_id),
-            );
-            let log_path = session_dir.join(&log_name);
-            source_files.insert(merge.name.clone(), log_path.display().to_string());
-            log_paths.insert(merge.name.clone(), log_path);
         }
         let writer_log_paths: HashMap<String, Arc<Mutex<PathBuf>>> = log_paths
             .iter()
@@ -231,6 +216,7 @@ impl LogServer {
             self.config.server.job_id.clone(),
             self.config.server.timestamp_mode.to_string(),
             None,
+            serde_json::to_value(&self.config.merges).unwrap_or_else(|_| json!([])),
         );
         session_mgr.write_manifest()?;
         let markers = session_mgr.load_markers();
@@ -243,10 +229,7 @@ impl LogServer {
         // live publication across all concurrent source writers.
         let commit_lock = Arc::new(Mutex::new(()));
         let stats = Arc::new(RuntimeStats::new(
-            sources
-                .iter()
-                .map(|src| src.name.clone())
-                .chain(self.config.merges.iter().map(|m| m.name.clone())),
+            sources.iter().map(|src| src.name.clone()),
             self.config.server.queue_size,
         ));
         let mut source_txs: HashMap<String, mpsc::Sender<LogEntry>> = HashMap::new();
@@ -254,54 +237,7 @@ impl LogServer {
 
         let mut join_handles: Vec<JoinHandle<()>> = Vec::new();
 
-        let source_tab_labels = build_source_tab_labels(&self.config.tabs);
-
-        // ── 8b. Set up merge (virtual combined) pseudo-sources ──
-        // Each merge gets its own writer pipeline — identical to a real
-        // source's — fed by relay taps installed below on its constituent
-        // sources' readers. `merge_feeds` maps a constituent source name to
-        // the merge channel(s) it should also forward tagged copies into.
-        let mut merge_feeds: HashMap<String, Vec<mpsc::Sender<LogEntry>>> = HashMap::new();
-        for merge in &self.config.merges {
-            let (merge_tx, merge_rx) = mpsc::channel::<LogEntry>(self.config.server.queue_size);
-
-            let writer_runtime = WriterRuntime {
-                broadcast_tx: broadcast_tx.clone(),
-                replay: replay.clone(),
-                first_log_at: first_log_at.clone(),
-                session_manager: session_mgr.clone(),
-                stats: stats.source(&merge.name),
-                ts_mode: self.config.server.timestamp_mode,
-                line_counter: line_counters.get(&merge.name).cloned(),
-                watches: watches.clone(),
-                commit_lock: commit_lock.clone(),
-                source_meta: SourceRuntimeMeta {
-                    source_id: merge.name.clone(),
-                    source_label: merge_label(merge),
-                    source_kind: "merge".to_string(),
-                    tab_labels: source_tab_labels
-                        .get(&merge.name)
-                        .cloned()
-                        .unwrap_or_default(),
-                    session_id: session_id.clone(),
-                    app_name: self.config.server.app_name.clone(),
-                    job_id: self.config.server.job_id.clone(),
-                },
-            };
-            let log_path = writer_log_paths[&merge.name].clone();
-            let merge_writer_name = merge.name.clone();
-            let writer_handle = tokio::spawn(async move {
-                run_writer(merge_writer_name, log_path, merge_rx, writer_runtime).await;
-            });
-            join_handles.push(writer_handle);
-
-            for src_name in &merge.of {
-                merge_feeds
-                    .entry(src_name.clone())
-                    .or_default()
-                    .push(merge_tx.clone());
-            }
-        }
+        let source_tab_labels = build_source_tab_labels(&self.config.tabs, &self.config.merges);
 
         // ── 9. Start sources + writers ──
         for mut src in sources {
@@ -318,36 +254,15 @@ impl LogServer {
                 src.source.set_tx_receiver(tx_receiver);
             }
 
-            // Spawn source reader — tapped through a relay if one or more
-            // merges reference this source, otherwise wired directly as before.
+            // Spawn the physical source reader directly into its sole writer.
             let reader_name = src.name.clone();
-            match merge_feeds.remove(&src.name) {
-                Some(merge_targets) => {
-                    let (raw_tx, raw_rx) = mpsc::channel::<LogEntry>(self.config.server.queue_size);
-                    let relay_handle = tokio::spawn(relay_to_writer_and_merges(
-                        raw_rx,
-                        entry_tx.clone(),
-                        merge_targets,
-                        src.label.clone(),
-                    ));
-                    join_handles.push(relay_handle);
-                    let reader_handle = tokio::spawn(async move {
-                        if let Err(e) = src.source.run(raw_tx).await {
-                            error!("[{reader_name}] source error: {e}");
-                        }
-                    });
-                    join_handles.push(reader_handle);
+            let reader_entry_tx = entry_tx.clone();
+            let reader_handle = tokio::spawn(async move {
+                if let Err(e) = src.source.run(reader_entry_tx).await {
+                    error!("[{reader_name}] source error: {e}");
                 }
-                None => {
-                    let reader_entry_tx = entry_tx.clone();
-                    let reader_handle = tokio::spawn(async move {
-                        if let Err(e) = src.source.run(reader_entry_tx).await {
-                            error!("[{reader_name}] source error: {e}");
-                        }
-                    });
-                    join_handles.push(reader_handle);
-                }
-            }
+            });
+            join_handles.push(reader_handle);
 
             // Spawn writer task.
             let writer_name = src.name.clone();
@@ -397,6 +312,7 @@ impl LogServer {
             plugins: plugins.clone(),
             session_mgr: session_mgr.clone(),
             first_log_at: first_log_at.clone(),
+            merges: serde_json::to_value(&self.config.merges).unwrap_or_else(|_| json!([])),
         };
         let on_export: ExportCallback = Arc::new(move || export_session(&export_ctx));
 
@@ -426,6 +342,7 @@ impl LogServer {
             default_light_theme: self.config.server.default_light_theme.clone(),
             default_dark_theme: self.config.server.default_dark_theme.clone(),
             export_on_rotate: self.export_on_shutdown,
+            merges: serde_json::to_value(&self.config.merges).unwrap_or_else(|_| json!([])),
         };
         let on_rotate: RotateCallback = Arc::new(move |title| rotate_session(&rotation_ctx, title));
         let shutdown_export = on_export.clone();
@@ -447,6 +364,13 @@ impl LogServer {
             line_counters: Arc::new(line_counters),
             watches,
             watch_counter,
+            virtual_sources: Arc::new(
+                self.config
+                    .merges
+                    .iter()
+                    .map(|merge| (merge.name.clone(), merge.of.clone()))
+                    .collect(),
+            ),
             control_api: self.config.server.control_api,
         };
 
@@ -708,6 +632,7 @@ impl LogServer {
             pane_plugins: plugins.pane_plugins.clone(),
             plugin_scripts: plugins.scripts.clone(),
             markers,
+            merges: serde_json::to_value(&self.config.merges).unwrap_or_else(|_| json!([])),
         })
     }
 }
@@ -725,6 +650,7 @@ struct WsConfigParts<'a> {
     pane_plugins: serde_json::Value,
     plugin_scripts: serde_json::Value,
     markers: Vec<serde_json::Value>,
+    merges: serde_json::Value,
 }
 
 fn build_ws_config_message(parts: WsConfigParts<'_>) -> serde_json::Value {
@@ -772,6 +698,7 @@ fn build_ws_config_message(parts: WsConfigParts<'_>) -> serde_json::Value {
         "pane_plugins": parts.pane_plugins,
         "plugin_scripts": parts.plugin_scripts,
         "markers": parts.markers,
+        "merges": parts.merges,
     })
 }
 
@@ -786,6 +713,7 @@ struct ExportContext {
     plugins: LoadedPlugins,
     session_mgr: Arc<Mutex<SessionManager>>,
     first_log_at: Arc<Mutex<Option<DateTime<Local>>>>,
+    merges: serde_json::Value,
 }
 
 /// Export the current session to HTML. Skips re-export when the existing HTML
@@ -794,13 +722,14 @@ fn export_session(ctx: &ExportContext) -> Result<String, String> {
     let fla = ctx.first_log_at.lock().unwrap().map(|dt| dt.to_rfc3339());
     let export_html = ctx.html_path.lock().unwrap().clone();
     let export_sources = ctx.source_files.lock().unwrap().clone();
-    let (export_markers, marker_paths) = ctx
+    let (export_markers, marker_paths, combined_file) = ctx
         .session_mgr
         .lock()
         .map(|mgr| {
             (
                 mgr.load_markers(),
                 vec![mgr.session_dir().join("markers.json")],
+                mgr.combined_file(),
             )
         })
         .unwrap_or_default();
@@ -821,6 +750,8 @@ fn export_session(ctx: &ExportContext) -> Result<String, String> {
         ctx.ts_mode.clone(),
         fla,
     )
+    .with_combined_file(combined_file)
+    .with_merges(ctx.merges.clone())
     .with_plugins(
         ctx.plugins.definitions.clone(),
         ctx.plugins.pane_plugins.clone(),
@@ -871,6 +802,7 @@ struct RotationContext {
     default_light_theme: Option<String>,
     default_dark_theme: Option<String>,
     export_on_rotate: bool,
+    merges: serde_json::Value,
 }
 
 /// Roll over to a fresh session without restarting source tasks or releasing
@@ -935,6 +867,7 @@ fn rotate_session(
         ctx.job_id.clone(),
         ctx.timestamp_mode.clone(),
         None,
+        ctx.merges.clone(),
     )
     .with_title(title);
     new_manager
@@ -970,6 +903,7 @@ fn rotate_session(
         pane_plugins: ctx.plugins.pane_plugins.clone(),
         plugin_scripts: ctx.plugins.scripts.clone(),
         markers: Vec::new(),
+        merges: ctx.merges.clone(),
     });
     *ctx.config_msg
         .lock()
@@ -994,6 +928,7 @@ fn rotate_session(
             let old_export_frontend = ctx.frontend.clone();
             let old_export_ts_mode = ctx.timestamp_mode.clone();
             let old_export_plugins = ctx.plugins.clone();
+            let old_export_merges = ctx.merges.clone();
             std::thread::spawn(move || {
                 let exporter = SessionExporter::new(
                     old_html_path.clone(),
@@ -1004,6 +939,8 @@ fn rotate_session(
                     old_export_ts_mode,
                     old_first_log_at,
                 )
+                .with_combined_file(old_html_path.parent().unwrap().join("combined.jsonl"))
+                .with_merges(old_export_merges)
                 .with_plugins(
                     old_export_plugins.definitions,
                     old_export_plugins.pane_plugins,
@@ -1175,40 +1112,31 @@ fn merge_label(merge: &crate::config::MergeConfig) -> String {
     merge.label.clone().unwrap_or_else(|| merge.name.clone())
 }
 
-/// Forward each entry from `raw_rx` to `writer_tx` unchanged (so the source's
-/// own pipeline is untouched), and to every sender in `merge_targets` as a
-/// tagged clone: message prefixed with `origin`, and `source` set to `origin`
-/// unless it's already a `TX::<origin>` entry (preserved so merged TX lines
-/// keep their styling).
-async fn relay_to_writer_and_merges(
-    mut raw_rx: mpsc::Receiver<LogEntry>,
-    writer_tx: mpsc::Sender<LogEntry>,
-    merge_targets: Vec<mpsc::Sender<LogEntry>>,
-    origin: String,
-) {
-    while let Some(entry) = raw_rx.recv().await {
-        for merge_tx in &merge_targets {
-            let mut tagged = entry.clone();
-            if !tagged.source.starts_with("TX::") {
-                tagged.source = origin.clone();
-            }
-            tagged.message = format!("{origin}: {}", tagged.message);
-            let _ = merge_tx.send(tagged).await;
-        }
-        if writer_tx.send(entry).await.is_err() {
-            break;
-        }
-    }
-}
-
-fn build_source_tab_labels(tabs: &[crate::config::TabConfig]) -> HashMap<String, Vec<String>> {
+fn build_source_tab_labels(
+    tabs: &[crate::config::TabConfig],
+    merges: &[crate::config::MergeConfig],
+) -> HashMap<String, Vec<String>> {
+    let merge_members: HashMap<&str, &[String]> = merges
+        .iter()
+        .map(|merge| (merge.name.as_str(), merge.of.as_slice()))
+        .collect();
     let mut by_source: HashMap<String, Vec<String>> = HashMap::new();
     for tab in tabs {
         for pane in &tab.panes {
-            by_source
-                .entry(pane.source_name().to_string())
-                .or_default()
-                .push(tab.label.clone());
+            let pane_name = pane.source_name();
+            if let Some(members) = merge_members.get(pane_name) {
+                for member in *members {
+                    by_source
+                        .entry(member.clone())
+                        .or_default()
+                        .push(tab.label.clone());
+                }
+            } else {
+                by_source
+                    .entry(pane_name.to_string())
+                    .or_default()
+                    .push(tab.label.clone());
+            }
         }
     }
     by_source
@@ -1470,62 +1398,6 @@ mod tests {
     use super::*;
     use tokio::time::{sleep, Duration};
 
-    #[tokio::test]
-    async fn relay_forwards_original_and_tags_merge_copy() {
-        let (raw_tx, raw_rx) = mpsc::channel::<LogEntry>(4);
-        let (writer_tx, mut writer_rx) = mpsc::channel::<LogEntry>(4);
-        let (merge_tx, mut merge_rx) = mpsc::channel::<LogEntry>(4);
-
-        tokio::spawn(relay_to_writer_and_merges(
-            raw_rx,
-            writer_tx,
-            vec![merge_tx],
-            "MCU_LINK_TX".to_string(),
-        ));
-
-        raw_tx
-            .send(LogEntry::new(Local::now(), "MCU_LINK_TX", "hello"))
-            .await
-            .unwrap();
-        drop(raw_tx);
-
-        let original = writer_rx.recv().await.unwrap();
-        assert_eq!(original.source, "MCU_LINK_TX");
-        assert_eq!(original.message, "hello");
-
-        let tagged = merge_rx.recv().await.unwrap();
-        assert_eq!(tagged.source, "MCU_LINK_TX");
-        assert_eq!(tagged.message, "MCU_LINK_TX: hello");
-    }
-
-    #[tokio::test]
-    async fn relay_preserves_tx_origin_convention_on_merge_copy() {
-        let (raw_tx, raw_rx) = mpsc::channel::<LogEntry>(4);
-        let (writer_tx, mut writer_rx) = mpsc::channel::<LogEntry>(4);
-        let (merge_tx, mut merge_rx) = mpsc::channel::<LogEntry>(4);
-
-        tokio::spawn(relay_to_writer_and_merges(
-            raw_rx,
-            writer_tx,
-            vec![merge_tx],
-            "MCU_LINK_TX".to_string(),
-        ));
-
-        raw_tx
-            .send(LogEntry::new(Local::now(), "TX::ui", "version\r\n").with_color("yellow"))
-            .await
-            .unwrap();
-        drop(raw_tx);
-
-        let original = writer_rx.recv().await.unwrap();
-        assert_eq!(original.source, "TX::ui");
-
-        let tagged = merge_rx.recv().await.unwrap();
-        assert_eq!(tagged.source, "TX::ui", "TX::<origin> must survive tagging");
-        assert_eq!(tagged.message, "MCU_LINK_TX: version\r\n");
-        assert_eq!(tagged.color.as_deref(), Some("yellow"));
-    }
-
     fn temp_dir(name: &str) -> PathBuf {
         let nanos = Local::now().timestamp_nanos_opt().unwrap_or_default();
         let dir = std::env::temp_dir().join(format!(
@@ -1540,21 +1412,14 @@ mod tests {
         let mut source_files = HashMap::new();
         source_files.insert("dut".to_string(), source_file.display().to_string());
         let combined_file = dir.join("combined.jsonl");
-
-        let mut pane_labels = HashMap::new();
-        pane_labels.insert("dut".to_string(), "DUT".to_string());
-
-        let mut pane_kinds = HashMap::new();
-        pane_kinds.insert("dut".to_string(), "udp".to_string());
-
         SessionManager::new(
             session_id,
             dir,
             &[json!({ "label": "Main", "panes": ["dut"] })],
             source_files,
             combined_file.display().to_string(),
-            pane_labels,
-            pane_kinds,
+            HashMap::from([("dut".to_string(), "DUT".to_string())]),
+            HashMap::from([("dut".to_string(), "udp".to_string())]),
             json!({}),
             json!({}),
             json!({}),
@@ -1565,6 +1430,7 @@ mod tests {
             None,
             "absolute",
             None,
+            json!([]),
         )
     }
 
@@ -1591,6 +1457,23 @@ mod tests {
             sleep(Duration::from_millis(10)).await;
         }
         panic!("{} did not contain {needle:?}", path.display());
+    }
+
+    #[test]
+    fn virtual_merge_tabs_are_attributed_to_physical_members() {
+        let tabs = vec![crate::config::TabConfig {
+            label: "Link".to_string(),
+            panes: vec![crate::config::PaneConfig::Simple("MCU_LINK".to_string())],
+        }];
+        let merges = vec![crate::config::MergeConfig {
+            name: "MCU_LINK".to_string(),
+            label: Some("MCU Link".to_string()),
+            of: vec!["MCU_TX".to_string(), "MCU_RX".to_string()],
+        }];
+        let labels = build_source_tab_labels(&tabs, &merges);
+        assert_eq!(labels["MCU_TX"], ["Link"]);
+        assert_eq!(labels["MCU_RX"], ["Link"]);
+        assert!(!labels.contains_key("MCU_LINK"));
     }
 
     #[test]
@@ -1901,6 +1784,7 @@ mod tests {
             default_light_theme: None,
             default_dark_theme: None,
             export_on_rotate: false,
+            merges: json!([]),
         };
 
         let title = "EDHOC reconnect attempt 3".to_string();
@@ -1960,6 +1844,7 @@ mod tests {
             plugins: empty_plugins(),
             session_mgr: Arc::new(Mutex::new(mgr)),
             first_log_at: Arc::new(Mutex::new(None)),
+            merges: json!([]),
         };
 
         let path = export_session(&ctx).unwrap();

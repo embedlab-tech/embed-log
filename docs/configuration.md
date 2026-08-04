@@ -47,7 +47,7 @@ The server port hosts browser HTTP, browser WebSocket, the status API, and the c
 | `logs` | object | `{ dir: "logs/" }` | Session root; relative to the config file. |
 | `sources` | mapping | `{}` | Source ID to source definition. |
 | `ui` | object | generated | Optional tabs; one tab per source when omitted. |
-| `merges` | array | `[]` | Optional virtual merged streams. |
+| `merges` | array | `[]` | Optional presentation-only virtual merged streams; never persisted as duplicate records. |
 
 Unknown version 2 fields are rejected rather than silently ignored. Runtime choices such as browser, TUI, and daemon mode belong to CLI flags.
 
@@ -198,7 +198,7 @@ ui:
       sources: [LINK]
 ```
 
-A merge must reference at least two distinct existing sources and must not collide with a source ID.
+A merge must reference at least two distinct existing sources and must not collide with a source ID. Merges are presentation-only virtual sources: Embed-log persists and sequences each member record exactly once, stores the merge definition in `manifest.json`, and constructs the merged pane dynamically in the browser, TUI, and HTML export. No merge `.log` file or duplicate `combined.jsonl` record is created.
 
 ## Version 1 migration
 

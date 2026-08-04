@@ -14,6 +14,7 @@ Use bounded `embed-log sessions` commands. A running daemon is not required.
 - Start with summaries or counts and retrieve only relevant evidence.
 - Prefer literal matching; use regex only when necessary.
 - Discover unfamiliar commands through `embed-log schema`, not `--help`.
+- Treat configured merges as virtual source filters: selecting one expands to original member records without changing `source_id` or `sequence`. Legacy materialized merge records are excluded by default; do not enable compatibility output unless explicitly needed.
 
 ## Investigate
 

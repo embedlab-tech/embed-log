@@ -13,6 +13,7 @@ let currentSessionId = null;
 let pendingLogMessages = [];
 let pendingLogFlush = false;
 let configReady = false;
+let virtualMerges = [];
 const LOG_FLUSH_MAX_LINES = 1000;
 
 function resetLayoutForNewSession() {
@@ -124,6 +125,8 @@ async function _handleConfigMessage(msg) {
     const paneLabels = msg.pane_labels && typeof msg.pane_labels === "object" ? msg.pane_labels : {};
     window.__embedLogPaneKinds = msg.pane_kinds && typeof msg.pane_kinds === "object" ? msg.pane_kinds : {};
     window.__embedLogPaneCommands = msg.pane_commands && typeof msg.pane_commands === "object" ? msg.pane_commands : {};
+    virtualMerges = Array.isArray(msg.merges) ? msg.merges : [];
+    window.__embedLogMerges = virtualMerges;
     Object.keys(PANE_LABELS).forEach(key => delete PANE_LABELS[key]);
     Object.assign(PANE_LABELS, paneLabels);
 
@@ -252,17 +255,25 @@ function wsConnect() {
                 absTs, absNum, relTs, relNum, line_idx, sequence, session_id } = msg;
         if (!source_id) return;
 
-        // Unknown source_id — server has no --tab for it; ignore with a warning.
-        if (!PANES.includes(source_id)) {
-            console.warn("embed-log: dropping message for unknown source_id:", source_id);
+        const destinations = [];
+        if (PANES.includes(source_id)) destinations.push({ paneId: source_id, virtual: false });
+        virtualMerges.forEach(merge => {
+            if (PANES.includes(merge?.name) && Array.isArray(merge.of) && merge.of.includes(source_id)) {
+                destinations.push({ paneId: merge.name, virtual: true });
+            }
+        });
+        if (destinations.length === 0) {
+            console.warn("embed-log: dropping message for source not used by any pane:", source_id);
             return;
         }
-        enqueueLogMessage({
-            paneId: source_id,
+        const sourceLabel = PANE_LABELS[source_id] || source_id;
+        destinations.forEach(({ paneId, virtual }) => enqueueLogMessage({
+            paneId,
             ts: timestamp || "",
-            rawText: data || "",
+            rawText: virtual ? `${sourceLabel}: ${data || ""}` : (data || ""),
             isTx: type === "tx",
             meta: {
+                sourceId: source_id,
                 timestampIso: timestamp_iso,
                 numTs: timestamp_num,
                 absTs: absTs,
@@ -273,7 +284,7 @@ function wsConnect() {
                 ...(Number.isFinite(sequence) ? { sequence } : {}),
                 ...(session_id ? { sessionId: session_id } : {}),
             },
-        });
+        }));
     });
 
     ws.addEventListener("close", () => {

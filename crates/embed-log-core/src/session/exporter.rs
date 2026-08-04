@@ -27,6 +27,8 @@ pub struct SessionExporter {
     frontend_plugins: serde_json::Value,
     plugin_scripts: serde_json::Value,
     markers: Vec<serde_json::Value>,
+    merges: Vec<crate::config::MergeConfig>,
+    combined_file: Option<PathBuf>,
 }
 
 impl SessionExporter {
@@ -52,7 +54,22 @@ impl SessionExporter {
             frontend_plugins: json!({}),
             plugin_scripts: json!({}),
             markers: vec![],
+            merges: vec![],
+            combined_file: None,
         }
+    }
+
+    /// Use the canonical combined stream so exported virtual panes preserve
+    /// original source ids and global sequence values.
+    pub fn with_combined_file(mut self, path: PathBuf) -> Self {
+        self.combined_file = Some(path);
+        self
+    }
+
+    /// Set virtual merge definitions used to construct presentation-only panes.
+    pub fn with_merges(mut self, merges: serde_json::Value) -> Self {
+        self.merges = serde_json::from_value(merges).unwrap_or_default();
+        self
     }
 
     /// Set plugin data from the server's loaded plugins.
@@ -95,6 +112,95 @@ impl SessionExporter {
             log_data.insert(source_name.clone(), entries);
         }
 
+        if !self.merges.is_empty() {
+            if let Some(combined_file) = self.combined_file.as_ref().filter(|path| path.exists()) {
+                let mut combined_data: HashMap<String, Vec<LogEntry>> = HashMap::new();
+                for line in std::fs::read_to_string(combined_file)
+                    .unwrap_or_default()
+                    .lines()
+                {
+                    let Ok(record) = serde_json::from_str::<serde_json::Value>(line) else {
+                        continue;
+                    };
+                    if record.get("source_kind").and_then(|value| value.as_str()) == Some("merge") {
+                        continue;
+                    }
+                    let Some(source_id) = record
+                        .get("source_id")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string)
+                    else {
+                        continue;
+                    };
+                    let number = |name: &str| {
+                        record
+                            .get(name)
+                            .and_then(|value| value.as_f64())
+                            .map(|value| value as i64)
+                    };
+                    combined_data
+                        .entry(source_id.clone())
+                        .or_default()
+                        .push(LogEntry {
+                            source_id: Some(source_id),
+                            sequence: record.get("sequence").and_then(|value| value.as_u64()),
+                            ts: record
+                                .get("timestamp")
+                                .or_else(|| record.get("absTs"))
+                                .and_then(|value| value.as_str())
+                                .unwrap_or_default()
+                                .to_string(),
+                            text: record
+                                .get("message")
+                                .and_then(|value| value.as_str())
+                                .unwrap_or_default()
+                                .to_string(),
+                            is_tx: record.get("type").and_then(|value| value.as_str())
+                                == Some("tx")
+                                || record.get("is_tx").and_then(|value| value.as_bool())
+                                    == Some(true),
+                            abs_ts: record
+                                .get("absTs")
+                                .and_then(|value| value.as_str())
+                                .map(str::to_string),
+                            abs_num: number("absNum"),
+                            rel_ts: record
+                                .get("relTs")
+                                .and_then(|value| value.as_str())
+                                .map(str::to_string),
+                            rel_num: number("relNum"),
+                        });
+                }
+                log_data = combined_data;
+            }
+        }
+
+        // Build presentation-only merge panes from original source entries.
+        // These clones exist only in the exported HTML and retain source_id.
+        for merge in &self.merges {
+            let mut entries = Vec::new();
+            for member in &merge.of {
+                let label = self
+                    .source_labels
+                    .get(member)
+                    .map(String::as_str)
+                    .unwrap_or(member);
+                if let Some(member_entries) = log_data.get(member) {
+                    entries.extend(member_entries.iter().cloned().map(|mut entry| {
+                        entry.text = format!("{label}: {}", entry.text);
+                        entry
+                    }));
+                }
+            }
+            entries.sort_by(|left, right| {
+                left.sequence
+                    .cmp(&right.sequence)
+                    .then(left.abs_num.cmp(&right.abs_num))
+                    .then(left.rel_num.cmp(&right.rel_num))
+            });
+            log_data.insert(merge.name.clone(), entries);
+        }
+
         // Enrich timestamp variants (compute rel from abs or vice versa).
         let effective_first_log_at =
             enrich_timestamps(&mut log_data, &self.timestamp_mode, &self.first_log_at);
@@ -132,6 +238,7 @@ impl SessionExporter {
         let pane_plugins_json = serde_json::to_string(&self.pane_plugins)?;
         let plugin_scripts_json = serde_json::to_string(&self.plugin_scripts)?;
         let markers_json = serde_json::to_string(&self.markers)?;
+        let merges_json = serde_json::to_string(&self.merges)?;
 
         // Build static profile.
         let static_profile = json!({
@@ -162,6 +269,7 @@ impl SessionExporter {
              window.__embedLogFrontendPlugins = {frontend_plugins_json};\n\
              window.__embedLogPanePlugins = {pane_plugins_json};\n\
              window.__embedLogPluginScripts = {plugin_scripts_json};\n\
+             window.__embedLogMerges = {merges_json};\n\
              window.__embedLogInitialPanePluginUiState = {{}};\n\
              window.__embedLogInitialThemeState = {{\"mode\":\"light\",\"lightKey\":\"whitesand\",\"darkKey\":\"one-dark\"}};\n\
              window.__embedLogInitialTimestampMode = {tm};\n\
@@ -191,6 +299,12 @@ impl SessionExporter {
                             }
                             if let Some(rel_num) = e.rel_num {
                                 meta["relNum"] = json!(rel_num);
+                            }
+                            if let Some(source_id) = &e.source_id {
+                                meta["sourceId"] = json!(source_id);
+                            }
+                            if let Some(sequence) = e.sequence {
+                                meta["sequence"] = json!(sequence);
                             }
                             let meta_val =
                                 if meta.as_object().map(|o| !o.is_empty()).unwrap_or(false) {

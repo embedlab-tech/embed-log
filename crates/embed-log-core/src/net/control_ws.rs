@@ -269,7 +269,7 @@ async fn handle_control_command(
     match cmd_type {
         "hello" => Some(handle_hello(state, msg_id)),
         "subscribe" => Some(handle_subscribe(&cmd, state, subscribed_sources, msg_id)),
-        "unsubscribe" => Some(handle_unsubscribe(&cmd, subscribed_sources, msg_id)),
+        "unsubscribe" => Some(handle_unsubscribe(&cmd, state, subscribed_sources, msg_id)),
         "log.inject" => Some(handle_log_inject(&cmd, state, msg_id).await),
         "tx.write" => Some(handle_tx_write(&cmd, state, msg_id).await),
         "marker.create" => Some(handle_marker_create(&cmd, state, msg_id).await),
@@ -336,6 +336,8 @@ fn handle_hello(state: &super::ServerState, msg_id: Option<&str>) -> String {
                     "type": info.source_type,
                     "label": info.label,
                     "writable": info.writable,
+                    "virtual": state.virtual_sources.contains_key(name),
+                    "members": state.virtual_sources.get(name),
                 }),
             )
         })
@@ -396,7 +398,11 @@ fn handle_subscribe(
     }
 
     for name in source_names {
-        subscribed_sources.insert(name);
+        if let Some(members) = state.virtual_sources.get(&name) {
+            subscribed_sources.sources.extend(members.iter().cloned());
+        } else {
+            subscribed_sources.insert(name);
+        }
     }
 
     make_response("subscribe.result", msg_id, serde_json::json!({}))
@@ -405,6 +411,7 @@ fn handle_subscribe(
 /// Handle `unsubscribe` — remove sources from the subscription filter.
 fn handle_unsubscribe(
     cmd: &serde_json::Value,
+    state: &super::ServerState,
     subscribed_sources: &mut ControlSubscription,
     msg_id: Option<&str>,
 ) -> String {
@@ -426,7 +433,13 @@ fn handle_unsubscribe(
         .collect();
 
     for name in &source_names {
-        subscribed_sources.remove(name);
+        if let Some(members) = state.virtual_sources.get(name) {
+            for member in members {
+                subscribed_sources.remove(member);
+            }
+        } else {
+            subscribed_sources.remove(name);
+        }
     }
 
     make_response("unsubscribe.result", msg_id, serde_json::json!({}))
@@ -1029,6 +1042,7 @@ mod tests {
             source_tx_senders: Arc::new(HashMap::new()),
             source_metadata: Arc::new(source_metadata),
             line_counters: Arc::new(HashMap::new()),
+            virtual_sources: Arc::new(HashMap::new()),
             watches: Arc::new(std::sync::RwLock::new(HashMap::new())),
             watch_counter: Arc::new(AtomicU64::new(1)),
             control_api: true,
@@ -1133,6 +1147,40 @@ mod tests {
         let resp: serde_json::Value = serde_json::from_str(&response).unwrap();
         assert_eq!(resp["type"], "subscribe.result");
         assert_eq!(sub.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn subscribing_to_virtual_merge_expands_to_original_sources() {
+        let mut state = test_control_state();
+        let mut metadata = (*state.source_metadata).clone();
+        metadata.insert(
+            "ALL".to_string(),
+            SourceInfo {
+                source_type: "merge".to_string(),
+                label: "All".to_string(),
+                writable: false,
+            },
+        );
+        state.source_metadata = Arc::new(metadata);
+        state.virtual_sources = Arc::new(HashMap::from([(
+            "ALL".to_string(),
+            vec!["DUT_UART".to_string(), "PYTEST".to_string()],
+        )]));
+        let mut sub = ControlSubscription::new();
+
+        let response = handle_control_command(
+            r#"{"id":"s1","type":"subscribe","sources":["ALL"]}"#,
+            &state,
+            &mut sub,
+        )
+        .await
+        .unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(resp["type"], "subscribe.result");
+        assert_eq!(sub.len(), 2);
+        assert!(sub.contains("DUT_UART"));
+        assert!(sub.contains("PYTEST"));
+        assert!(!sub.contains("ALL"));
     }
 
     #[tokio::test]
@@ -1513,6 +1561,7 @@ mod tests {
             None,
             "absolute",
             None,
+            serde_json::json!([]),
         );
         mgr.write_manifest().unwrap();
 
@@ -1566,6 +1615,7 @@ mod tests {
             source_tx_senders: Arc::new(HashMap::new()),
             source_metadata: Arc::new(source_metadata),
             line_counters: Arc::new(line_counters),
+            virtual_sources: Arc::new(HashMap::new()),
             watches: Arc::new(std::sync::RwLock::new(HashMap::new())),
             watch_counter: Arc::new(AtomicU64::new(1)),
             control_api: true,
@@ -1782,6 +1832,7 @@ mod tests {
                 None,
                 "absolute",
                 None,
+                serde_json::json!([]),
             );
             mgr.write_manifest().unwrap();
             Arc::new(Mutex::new(mgr))
@@ -1819,6 +1870,7 @@ mod tests {
             source_tx_senders: Arc::new(HashMap::new()),
             source_metadata: Arc::new(source_metadata),
             line_counters: Arc::new(line_counters),
+            virtual_sources: Arc::new(HashMap::new()),
             watches: Arc::new(std::sync::RwLock::new(HashMap::new())),
             watch_counter: Arc::new(AtomicU64::new(1)),
             control_api: true,

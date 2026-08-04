@@ -105,9 +105,9 @@ pub struct TabConfig {
     pub panes: Vec<PaneConfig>,
 }
 
-/// A virtual pseudo-source that interleaves other sources' entries into one
-/// stream, each line tagged with its origin source's label. Referenced from
-/// `tabs[].panes` exactly like a real source name.
+/// A presentation-only virtual source that interleaves original member
+/// records without persisting copies. Referenced from `tabs[].panes` exactly
+/// like a physical source name.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MergeConfig {
     pub name: String,

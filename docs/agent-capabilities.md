@@ -89,7 +89,7 @@ embed-log sessions read latest --after 100 --limit 50 --time none --json
 embed-log sessions around latest --sequence 119 --before 5 --after 10 --time relative --json
 ```
 
-Compact text defaults to `T+00:12.453 719 DUT_UART#428 boot complete`, where `719` is global and `#428` is local to `DUT_UART`. Use `--time none` when order is sufficient, `--time relative` for latency, and `--time absolute` for external correlation. Use `--format full-json` only when complete metadata is required.
+Compact text defaults to `T+00:12.453 719 DUT_UART#428 boot complete`, where `719` is global and `#428` is local to `DUT_UART`. A configured merged source can be selected directly; Embed-log expands it to member records while preserving their original identities and excludes redundant materialized merge records from legacy sessions by default. Use `--time none` when order is sufficient, `--time relative` for latency, and `--time absolute` for external correlation. Use `--format full-json` only when complete metadata is required.
 
 Prefer `compact` for reasoning and `mini-jsonl` for structured processing. Read full JSONL only when exact fields are required.
 

@@ -114,12 +114,7 @@ writer task
 | `udp` | `sources::udp::UdpSource` | Binds UDP on `0.0.0.0:<port>`; text datagrams are treated as newline-terminated. |
 | `file` | `sources::file::FileSource` | Creates file if missing, watches parent directory with `notify`, polls/appends from current end. |
 
-`merges` (config-only, no `sources::` implementation) declares virtual
-pseudo-sources: `runtime::server` taps each constituent source's reader with
-a small relay (`relay_to_writer_and_merges`) that forwards a copy, tagged
-with its origin label, into the merge's own writer pipeline — reusing the
-same `run_writer`/broadcast/replay/session-log machinery as a real source.
-See `docs/configuration.md#merges`.
+`merges` declares presentation-only virtual sources. The runtime persists and broadcasts only the original physical records, stores each merge definition in the session manifest/config message, and lets browser, TUI, static export, control subscriptions, and recorded-session source filters expand the merge into its members. Virtual records never consume global sequence numbers or create source log files. Legacy materialized `source_kind: "merge"` records remain readable only through explicit compatibility flags. See `docs/configuration.md#merges`.
 
 ## Parsers
 

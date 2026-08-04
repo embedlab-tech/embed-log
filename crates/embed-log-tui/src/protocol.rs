@@ -84,9 +84,23 @@ pub struct ConfigMessage {
     /// `plugin_name → JS source` (ignored by TUI; JS can't run here).
     #[serde(default)]
     pub plugin_scripts: Value,
+    /// Presentation-only merged panes.
+    #[serde(default)]
+    pub merges: Vec<MergeDef>,
     /// Existing user markers.
     #[serde(default)]
     pub markers: Vec<Marker>,
+}
+
+/// A virtual pane composed from original member sources.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct MergeDef {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub of: Vec<String>,
 }
 
 /// Light/dark theme defaults from config.
@@ -160,7 +174,7 @@ pub struct LogPayload {
     /// Epoch millis (absolute).
     #[serde(default)]
     pub timestamp_num: f64,
-    /// Source / pane id.
+    /// Original physical source id.
     #[serde(default)]
     pub source_id: String,
     /// Stable per-source line counter.
@@ -391,6 +405,7 @@ mod tests {
             "frontend_plugins":{"custom-line":{"path":"custom-line.js"}},
             "pane_plugins":{"COAP_RAW":[{"name":"custom-line"}]},
             "plugin_scripts":{"custom-line":"/* js */"},
+            "merges":[{"name":"LINK","label":"Link","of":["DUT","UART_DUT"]}],
             "markers":[{"paneId":"DUT","lineIdx":3,"endIdx":3,"numTs":5000.0,"description":"note","kind":"user"}]
         }"#;
         let ServerMessage::Config(c) = serde_json::from_str(json).unwrap() else {
@@ -406,6 +421,8 @@ mod tests {
         assert_eq!(c.tabs.len(), 1);
         assert_eq!(c.tabs[0].label, "Device");
         assert_eq!(c.tabs[0].panes, ["DUT", "HOST"]);
+        assert_eq!(c.merges[0].name, "LINK");
+        assert_eq!(c.merges[0].of, ["DUT", "UART_DUT"]);
         assert_eq!(c.markers.len(), 1);
         assert_eq!(c.markers[0].pane_id, "DUT");
         // pane_plugins entry: detailed variant

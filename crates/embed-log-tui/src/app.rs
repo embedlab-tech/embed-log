@@ -131,16 +131,8 @@ fn handle_server_event(state: &mut State, ev: ServerEvent) {
 fn handle_message(state: &mut State, msg: ServerMessage) {
     match msg {
         ServerMessage::Config(c) => state.apply_config(&c),
-        ServerMessage::Rx(p) => {
-            let mut line = crate::state::StoredLine::from_payload(&p);
-            line.is_tx = false;
-            state.append_line(&p.source_id, line);
-        }
-        ServerMessage::Tx(p) => {
-            let mut line = crate::state::StoredLine::from_payload(&p);
-            line.is_tx = true;
-            state.append_line(&p.source_id, line);
-        }
+        ServerMessage::Rx(p) => state.append_payload(&p, false),
+        ServerMessage::Tx(p) => state.append_payload(&p, true),
         ServerMessage::SessionInfo(s) => state.apply_session_info(&s.session),
         ServerMessage::MarkersUpdate(m) => state.apply_markers(&m.markers),
         ServerMessage::SessionHtmlStatus(status) => {

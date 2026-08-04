@@ -316,7 +316,7 @@ embed-log sessions read latest --dir logs --after 100 --limit 50 --json
 embed-log sessions read latest --dir logs --source DUT_UART --last 20 --time none --json
 ```
 
-Forward reads default to 100 records and all limits are capped at 1000. `--after` is the global cursor even when `--source` filters the returned records. JSON compact output hoists its schema once:
+Forward reads default to 100 records and all limits are capped at 1000. `--after` is the global cursor even when `--source` filters the returned records. Selecting a configured virtual merge dynamically expands to its member sources while returned records retain their original `source_id`, `line_idx`, and `sequence`. JSON compact output hoists its schema once:
 
 ```json
 {"ok":true,"session_id":"...","fields":["relative_time","sequence","source_id","line_idx","message"],"records":[["T+00:12.453",719,"DUT_UART",428,"boot complete"]],"truncated":false,"next_cursor":719,"invalid_records":0}
@@ -336,7 +336,7 @@ Fetch deterministic cross-source context by sequence:
 embed-log sessions around latest --sequence 719 --before 10 --after 20 --json
 ```
 
-The total around window is capped at 1000 records. Sequence and source-local line counters reset to 1 and 0 respectively on titled rotation. TX expectations, watch matches, browser records, and TUI records carry the same sequence.
+The total around window is capped at 1000 records. Sequence and source-local line counters reset to 1 and 0 respectively on titled rotation. Materialized merge records from older sessions are excluded from combined output, bounded reads/context, search, summaries, and exports by default; pass `--include-materialized-merges` to the applicable read command only when the redundant compatibility records are specifically required. TX expectations, watch matches, browser records, and TUI records carry the same sequence.
 
 ### Legacy search/combined output format: `--format`
 

@@ -30,6 +30,10 @@ const MAX_LINES_PER_PANE: usize = 100_000;
 /// keeps the raw `message` for copy/export and `data` for ANSI parity.
 #[derive(Debug, Clone, Default)]
 pub struct StoredLine {
+    /// Original physical source id.
+    pub source_id: String,
+    /// Session-global sequence.
+    pub sequence: u64,
     /// Display timestamp (absolute): `"06-14 09:30:45.123"`.
     pub abs_ts: String,
     /// Epoch millis (absolute).
@@ -56,6 +60,8 @@ impl StoredLine {
     /// Build from a [`LogPayload`].
     pub fn from_payload(p: &LogPayload) -> Self {
         Self {
+            source_id: p.source_id.clone(),
+            sequence: p.sequence,
             abs_ts: p.abs_ts.clone(),
             abs_num: p.abs_num,
             rel_ts: p.rel_ts.clone(),
@@ -136,6 +142,8 @@ pub struct State {
     pub pane_commands: HashMap<String, Vec<String>>,
     /// `pane_id → list of plugin names` (from config).
     pub pane_plugins: HashMap<String, Vec<String>>,
+    /// Physical source id → virtual merge pane ids.
+    pub virtual_merges: HashMap<String, Vec<String>>,
     /// `pane_id → stored lines` (append-only except clear/rebuild).
     pub raw_lines: HashMap<String, Vec<StoredLine>>,
     /// `pane_id → current filter regex` (None = no filter).
@@ -247,6 +255,27 @@ impl State {
         }
     }
 
+    /// Append one physical payload to its direct pane and any virtual merge panes.
+    pub fn append_payload(&mut self, payload: &LogPayload, is_tx: bool) {
+        let mut line = StoredLine::from_payload(payload);
+        line.is_tx = is_tx;
+        if self.panes.iter().any(|pane| pane == &payload.source_id) {
+            self.append_line(&payload.source_id, line.clone());
+        }
+        let virtual_panes = self
+            .virtual_merges
+            .get(&payload.source_id)
+            .cloned()
+            .unwrap_or_default();
+        let source_label = self.pane_label(&payload.source_id).to_string();
+        for pane in virtual_panes {
+            let mut virtual_line = line.clone();
+            virtual_line.message = format!("{source_label}: {}", virtual_line.message);
+            virtual_line.data = format!("{source_label}: {}", virtual_line.data);
+            self.append_line(&pane, virtual_line);
+        }
+    }
+
     /// Clear one pane (or all panes if `pane` is None).
     pub fn clear(&mut self, pane: Option<&str>) {
         match pane {
@@ -270,6 +299,15 @@ impl State {
         self.pane_labels = cfg.pane_labels.clone();
         self.pane_kinds = cfg.pane_kinds.clone();
         self.pane_commands = cfg.pane_commands.clone();
+        self.virtual_merges.clear();
+        for merge in &cfg.merges {
+            for member in &merge.of {
+                self.virtual_merges
+                    .entry(member.clone())
+                    .or_default()
+                    .push(merge.name.clone());
+            }
+        }
         self.pane_plugins = cfg
             .pane_plugins
             .iter()
@@ -713,7 +751,7 @@ fn nearest_line_by_ts(lines: &[StoredLine], num_ts: f64) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{LogPayload, Marker, TabDef};
+    use crate::protocol::{LogPayload, Marker, MergeDef, TabDef};
     use std::collections::HashMap;
 
     fn cfg_with(tabs: Vec<(&str, Vec<&str>)>) -> ConfigMessage {
@@ -750,6 +788,38 @@ mod tests {
             assert!(s.filters.get(p).unwrap().is_none());
         }
         assert_eq!(s.active_tab, 0);
+    }
+
+    #[test]
+    fn physical_payload_is_projected_into_virtual_merge_without_changing_identity() {
+        let mut cfg = cfg_with(vec![("Link", vec!["MCU_LINK"])]);
+        cfg.pane_labels
+            .insert("MCU_RX".to_string(), "MCU RX".to_string());
+        cfg.merges.push(MergeDef {
+            name: "MCU_LINK".to_string(),
+            label: Some("MCU Link".to_string()),
+            of: vec!["MCU_TX".to_string(), "MCU_RX".to_string()],
+        });
+        let mut state = State::default();
+        state.apply_config(&cfg);
+        state.append_payload(
+            &LogPayload {
+                source_id: "MCU_RX".to_string(),
+                sequence: 42,
+                line_idx: 7,
+                message: "reply".to_string(),
+                data: "reply".to_string(),
+                ..Default::default()
+            },
+            false,
+        );
+
+        let line = &state.raw_lines["MCU_LINK"][0];
+        assert_eq!(line.source_id, "MCU_RX");
+        assert_eq!(line.sequence, 42);
+        assert_eq!(line.line_idx, 7);
+        assert_eq!(line.message, "MCU RX: reply");
+        assert!(!state.raw_lines.contains_key("MCU_RX"));
     }
 
     #[test]

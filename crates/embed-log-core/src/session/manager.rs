@@ -30,6 +30,7 @@ pub struct SessionManager {
     html_updated_at: Option<String>,
     html_error: Option<String>,
     next_sequence: u64,
+    merges: serde_json::Value,
 }
 
 impl SessionManager {
@@ -52,6 +53,7 @@ impl SessionManager {
         job_id: Option<String>,
         timestamp_mode: impl Into<String>,
         first_log_at: Option<String>,
+        merges: serde_json::Value,
     ) -> Self {
         Self {
             session_id: session_id.into(),
@@ -76,6 +78,7 @@ impl SessionManager {
             html_updated_at: None,
             html_error: None,
             next_sequence: 1,
+            merges,
         }
     }
 
@@ -283,6 +286,7 @@ impl SessionManager {
             "sources": self.source_files,
             "source_files": self.source_files,
             "combined_file": self.combined_file,
+            "merges": self.merges,
         })
     }
 
@@ -307,6 +311,7 @@ impl SessionManager {
             "plugin_scripts": self.plugin_scripts,
             "source_files": self.source_files,
             "combined_file": self.combined_file,
+            "merges": self.merges,
             "session_html": html_path.display().to_string(),
             "last_export_reason": serde_json::Value::Null,
             "html_status": self.html_status,
@@ -321,6 +326,10 @@ impl SessionManager {
 
     pub fn session_id(&self) -> &str {
         &self.session_id
+    }
+
+    pub fn combined_file(&self) -> PathBuf {
+        PathBuf::from(&self.combined_file)
     }
 
     fn manifest_path(&self) -> PathBuf {
@@ -373,6 +382,7 @@ mod tests {
             Some("job-1".to_string()),
             "absolute",
             None,
+            json!([]),
         )
     }
 
@@ -445,6 +455,7 @@ mod tests {
             "plugin_scripts",
             "source_files",
             "combined_file",
+            "merges",
             "session_html",
             "last_export_reason",
             "html_status",
@@ -479,6 +490,7 @@ mod tests {
             "pane_commands",
             "sources",
             "combined_file",
+            "merges",
         ] {
             assert!(session.get(key).is_some(), "missing session key {key}");
         }

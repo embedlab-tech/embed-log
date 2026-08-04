@@ -9,7 +9,7 @@ class SourceInfo:
     """Metadata about a log source returned by the hello handshake."""
 
     name: str
-    source_type: str  # "uart", "udp", or "file"
+    source_type: str  # "uart", "udp", "file", or presentation-only "merge"
     label: str
     writable: bool
 

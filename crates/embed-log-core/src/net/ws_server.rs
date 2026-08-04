@@ -123,6 +123,8 @@ pub struct ServerState {
     pub source_metadata: Arc<HashMap<String, SourceInfo>>,
     /// Per-source line counters for stable `line_idx` in log entries.
     pub line_counters: Arc<HashMap<String, Arc<std::sync::atomic::AtomicU64>>>,
+    /// Presentation-only virtual source name to physical member source ids.
+    pub virtual_sources: Arc<HashMap<String, Vec<String>>>,
     /// Temporary process-local watches and their retained match state.
     pub watches: Arc<RwLock<HashMap<String, crate::net::watch::TemporaryWatch>>>,
     /// Monotonic watch identifier allocator for this process.
@@ -543,6 +545,8 @@ async fn api_status_handler(State(state): State<ServerState>) -> impl IntoRespon
                     "label": source.label,
                     "writable": source.writable,
                     "available": true,
+                    "virtual": state.virtual_sources.contains_key(name),
+                    "members": state.virtual_sources.get(name),
                     "stats": stats,
                 }),
             )
@@ -860,6 +864,7 @@ mod tests {
             None,
             "absolute",
             None,
+            json!([]),
         )))
     }
 
@@ -880,6 +885,7 @@ mod tests {
             source_tx_senders: Arc::new(HashMap::new()),
             source_metadata: Arc::new(HashMap::new()),
             line_counters: Arc::new(HashMap::new()),
+            virtual_sources: Arc::new(HashMap::new()),
             watches: Arc::new(std::sync::RwLock::new(HashMap::new())),
             watch_counter: Arc::new(AtomicU64::new(1)),
             control_api: true,
