@@ -23,6 +23,7 @@ pub struct SessionManager {
     app_name: String,
     config_path: Option<String>,
     job_id: Option<String>,
+    title: Option<String>,
     timestamp_mode: String,
     first_log_at: Option<String>,
     html_status: String,
@@ -67,12 +68,19 @@ impl SessionManager {
             app_name: app_name.into(),
             config_path,
             job_id,
+            title: None,
             timestamp_mode: timestamp_mode.into(),
             first_log_at,
             html_status: "pending".to_string(),
             html_updated_at: None,
             html_error: None,
         }
+    }
+
+    /// Attach the human experiment title persisted in the manifest and APIs.
+    pub fn with_title(mut self, title: Option<String>) -> Self {
+        self.title = title;
+        self
     }
 
     /// Write the initial manifest.json.
@@ -268,6 +276,7 @@ impl SessionManager {
         json!({
             "id": self.session_id,
             "job_id": self.job_id,
+            "title": self.title,
             "app_name": self.app_name,
             "system_timezone": Local::now().offset().to_string(),
             "dir": self.session_dir.display().to_string(),
@@ -310,6 +319,7 @@ impl SessionManager {
             "started_at": self.started_at,
             "system_timezone": Local::now().offset().to_string(),
             "job_id": self.job_id,
+            "title": self.title,
             "config_path": self.config_path,
             "timestamp_mode": self.timestamp_mode,
             "first_log_at": self.first_log_at,

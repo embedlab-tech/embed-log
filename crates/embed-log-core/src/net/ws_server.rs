@@ -25,8 +25,9 @@ use crate::sources::TxCommand;
 
 /// Callback type for session export requests.
 pub type ExportCallback = Arc<dyn Fn() -> Result<String, String> + Send + Sync>;
-pub type RotateCallback =
-    Arc<dyn Fn() -> Result<(serde_json::Value, serde_json::Value), String> + Send + Sync>;
+pub type RotateCallback = Arc<
+    dyn Fn(Option<String>) -> Result<(serde_json::Value, serde_json::Value), String> + Send + Sync,
+>;
 
 #[derive(Default)]
 pub struct SourceRuntimeStats {
@@ -706,7 +707,15 @@ async fn api_stats_handler(State(state): State<ServerState>) -> impl IntoRespons
     }))
 }
 
-async fn api_rotate_handler(State(state): State<ServerState>) -> impl IntoResponse {
+#[derive(serde::Deserialize)]
+struct RotateRequest {
+    title: Option<String>,
+}
+
+async fn api_rotate_handler(
+    State(state): State<ServerState>,
+    request: Option<axum::Json<RotateRequest>>,
+) -> impl IntoResponse {
     let Some(rotate_fn) = &state.on_rotate else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -719,7 +728,8 @@ async fn api_rotate_handler(State(state): State<ServerState>) -> impl IntoRespon
         );
     };
 
-    match rotate_fn() {
+    let title = request.and_then(|axum::Json(request)| request.title);
+    match rotate_fn(title) {
         Ok((old_session, session)) => {
             let payload = serde_json::json!({
                 "type": "session_rotated",

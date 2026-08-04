@@ -94,6 +94,21 @@ Instance resolution is `--instance`, then `EMBED_LOG_INSTANCE`, then the only ru
 
 `stop` verifies that the recorded PID still refers to the same executable before signaling it, waits for clean shutdown, and removes the registry record. Daemon shutdown does not automatically export HTML. CLI-only source definitions are not yet accepted with `--daemon`.
 
+### Create an experiment session
+
+Rotate a running server without restarting source tasks or releasing UARTs:
+
+```bash
+embed-log sessions new \
+  --instance bench-a \
+  --title "EDHOC reconnect attempt 3" \
+  --json
+```
+
+The original title is stored in `manifest.json` and returned by the session APIs. The directory/session ID includes a filesystem-safe slug, for example `2026-08-03_14-22-10_edhoc-reconnect-attempt-3`. Titles must be non-empty, contain a letter or number, and be at most 120 characters. Use `--url http://host:port` instead of `--instance` for an unregistered server.
+
+Rotation broadcasts `session_rotated`; connected browser and TUI clients clear their old panes and continue on the new session. Foreground rotation exports the completed session HTML. Daemon rotation leaves raw artifacts only unless export is explicitly requested.
+
 ## Validate config
 
 ```bash

@@ -9,9 +9,11 @@ use clap::{Subcommand, ValueEnum};
 use regex::Regex;
 
 use embed_log_core::config::{load_config, resolve_logs_root};
+use embed_log_core::naming::slugify;
 use embed_log_core::postprocess::{dedupe_entry, denoise_message, elapsed_time};
 use embed_log_core::session::SessionExporter;
 
+use crate::commands::daemon::{http_post_json, resolve_endpoint};
 use crate::util::open_url_in_default_browser;
 
 /// Shared `--dir`/`--config` args for resolving which logs directory a
@@ -68,6 +70,21 @@ pub(crate) fn resolve_sessions_dir(args: &LogDirArgs) -> Result<PathBuf> {
 /// `embed-log sessions <command>`.
 #[derive(Subcommand)]
 pub(crate) enum SessionsCommand {
+    /// Rotate a running server to a new titled experiment session.
+    New {
+        /// Human-readable experiment title, preserved verbatim in the manifest.
+        #[arg(long)]
+        title: String,
+        /// Registered daemon name. Defaults to EMBED_LOG_INSTANCE or the only instance.
+        #[arg(long, conflicts_with = "url")]
+        instance: Option<String>,
+        /// Explicit unregistered HTTP endpoint.
+        #[arg(long)]
+        url: Option<String>,
+        /// Machine-readable JSON output.
+        #[arg(long)]
+        json: bool,
+    },
     /// List sessions under a log directory.
     List {
         #[command(flatten)]
@@ -242,6 +259,12 @@ pub(crate) struct SessionRecord {
 /// Dispatch `embed-log sessions`.
 pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
     match command {
+        SessionsCommand::New {
+            title,
+            instance,
+            url,
+            json,
+        } => create_titled_session(instance.as_deref(), url.as_deref(), &title, json),
         SessionsCommand::List {
             log_dir,
             json,
@@ -393,6 +416,66 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn create_titled_session(
+    instance: Option<&str>,
+    url: Option<&str>,
+    title: &str,
+    json: bool,
+) -> Result<()> {
+    validate_session_title(title)?;
+    let (_, endpoint) = resolve_endpoint(instance, url)?;
+    let response = http_post_json(
+        &endpoint,
+        "/api/session/rotate",
+        &serde_json::json!({ "title": title }),
+    )?;
+    if response.get("ok").and_then(|value| value.as_bool()) != Some(true) {
+        anyhow::bail!(
+            "session rotation failed: {}",
+            response
+                .get("error")
+                .and_then(|value| value.as_str())
+                .unwrap_or("unknown backend error")
+        );
+    }
+    let session = response
+        .get("session")
+        .context("rotation response omitted session")?;
+    let session_id = session
+        .get("id")
+        .and_then(|value| value.as_str())
+        .context("rotation response omitted session id")?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string(&serde_json::json!({
+                "ok": true,
+                "session_id": session_id,
+                "title": title,
+                "session": session,
+            }))?
+        );
+    } else {
+        println!("new session: {session_id}");
+        println!("  title: {title}");
+        println!("  endpoint: {endpoint}");
+    }
+    Ok(())
+}
+
+fn validate_session_title(title: &str) -> Result<()> {
+    if title.trim().is_empty() {
+        anyhow::bail!("--title must not be empty");
+    }
+    if title.chars().count() > 120 {
+        anyhow::bail!("--title must not exceed 120 characters");
+    }
+    if slugify(title.trim()).is_empty() {
+        anyhow::bail!("--title must contain a letter or number");
+    }
+    Ok(())
 }
 
 fn list_sessions(dir: &Path, json: bool, limit: Option<usize>, with_markers: bool) -> Result<()> {
@@ -1875,6 +1958,14 @@ mod tests {
         )
         .unwrap();
         dir
+    }
+
+    #[test]
+    fn session_title_validation_matches_backend_contract() {
+        assert!(validate_session_title("Reconnect #3").is_ok());
+        assert!(validate_session_title("   ").is_err());
+        assert!(validate_session_title("***").is_err());
+        assert!(validate_session_title(&"x".repeat(121)).is_err());
     }
 
     // ------------------  Marker artifact tests  ------------------

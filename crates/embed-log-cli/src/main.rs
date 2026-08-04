@@ -398,6 +398,17 @@ mod tests {
     #[test]
     fn sessions_command_surface_parses_core_subcommands() {
         for args in [
+            [
+                "embed-log",
+                "sessions",
+                "new",
+                "--instance",
+                "bench-a",
+                "--title",
+                "test run",
+                "--json",
+            ]
+            .as_slice(),
             ["embed-log", "sessions", "list"].as_slice(),
             ["embed-log", "sessions", "info", "abc"].as_slice(),
             ["embed-log", "sessions", "open", "latest"].as_slice(),

@@ -474,8 +474,9 @@ impl LogServer {
             default_light_theme: self.config.server.default_light_theme.clone(),
             default_dark_theme: self.config.server.default_dark_theme.clone(),
             event_rules: event_rules_meta.clone(),
+            export_on_rotate: self.export_on_shutdown,
         };
-        let on_rotate: RotateCallback = Arc::new(move || rotate_session(&rotation_ctx));
+        let on_rotate: RotateCallback = Arc::new(move |title| rotate_session(&rotation_ctx, title));
         let shutdown_export = on_export.clone();
 
         // ── 12. Start HTTP + WS server ──
@@ -922,12 +923,16 @@ struct RotationContext {
     default_light_theme: Option<String>,
     default_dark_theme: Option<String>,
     event_rules: serde_json::Value,
+    export_on_rotate: bool,
 }
 
-/// Roll over to a fresh session: create the new session dir + manifest, point
-/// the writers and shared state at it, then export the old session's HTML on a
-/// background thread. Returns `(old_session_info, new_session_info)`.
-fn rotate_session(ctx: &RotationContext) -> Result<(serde_json::Value, serde_json::Value), String> {
+/// Roll over to a fresh session without restarting source tasks or releasing
+/// UART ownership. Returns `(old_session_info, new_session_info)`.
+fn rotate_session(
+    ctx: &RotationContext,
+    title: Option<String>,
+) -> Result<(serde_json::Value, serde_json::Value), String> {
+    let title = normalize_session_title(title)?;
     let (old_session, old_markers, old_events) = {
         let manager = ctx
             .session_mgr
@@ -943,8 +948,9 @@ fn rotate_session(ctx: &RotationContext) -> Result<(serde_json::Value, serde_jso
     let old_html_path = ctx.html_path.lock().unwrap().clone();
     let old_first_log_at = ctx.first_log_at.lock().unwrap().map(|dt| dt.to_rfc3339());
 
-    let new_session_id = make_session_id_for_root(&ctx.logs_root, ctx.job_id.as_deref())
-        .map_err(|err| err.to_string())?;
+    let new_session_id =
+        make_titled_session_id_for_root(&ctx.logs_root, ctx.job_id.as_deref(), title.as_deref())
+            .map_err(|err| err.to_string())?;
     let new_session_dir = ctx.logs_root.join(&new_session_id);
     std::fs::create_dir_all(&new_session_dir).map_err(|err| err.to_string())?;
 
@@ -982,7 +988,8 @@ fn rotate_session(ctx: &RotationContext) -> Result<(serde_json::Value, serde_jso
         ctx.job_id.clone(),
         ctx.timestamp_mode.clone(),
         None,
-    );
+    )
+    .with_title(title);
     new_manager
         .write_manifest()
         .map_err(|err| err.to_string())?;
@@ -1019,68 +1026,72 @@ fn rotate_session(ctx: &RotationContext) -> Result<(serde_json::Value, serde_jso
         .lock()
         .map_err(|_| "config message lock failed".to_string())? = new_config_msg.to_string();
 
-    // Export the old session's HTML off the hot path.
-    if let Some(old_manifest_path) = old_html_path.parent().map(|dir| dir.join("manifest.json")) {
-        let _ = update_manifest_file(
-            &old_manifest_path,
-            &json!({
-                "html_status": "updating",
-                "html_error": serde_json::Value::Null,
-                "last_export_reason": "rotate",
-            }),
-        );
-        let old_export_tabs = ctx.tabs.clone();
-        let old_export_labels = ctx.pane_labels.clone();
-        let old_export_frontend = ctx.frontend.clone();
-        let old_export_ts_mode = ctx.timestamp_mode.clone();
-        let old_export_plugins = ctx.plugins.clone();
-        let old_export_event_rules = ctx.event_rules.clone();
-        std::thread::spawn(move || {
-            let exporter = SessionExporter::new(
-                old_html_path.clone(),
-                old_source_files,
-                old_export_tabs,
-                old_export_labels,
-                old_export_frontend,
-                old_export_ts_mode,
-                old_first_log_at,
-            )
-            .with_plugins(
-                old_export_plugins.definitions,
-                old_export_plugins.pane_plugins,
-                old_export_plugins.scripts,
-            )
-            .with_markers(old_markers)
-            .with_events(old_events, old_export_event_rules);
+    // Export the old foreground session's HTML off the hot path. Daemons keep
+    // raw artifacts only unless an explicit export is requested.
+    if ctx.export_on_rotate {
+        if let Some(old_manifest_path) = old_html_path.parent().map(|dir| dir.join("manifest.json"))
+        {
+            let _ = update_manifest_file(
+                &old_manifest_path,
+                &json!({
+                    "html_status": "updating",
+                    "html_error": serde_json::Value::Null,
+                    "last_export_reason": "rotate",
+                }),
+            );
+            let old_export_tabs = ctx.tabs.clone();
+            let old_export_labels = ctx.pane_labels.clone();
+            let old_export_frontend = ctx.frontend.clone();
+            let old_export_ts_mode = ctx.timestamp_mode.clone();
+            let old_export_plugins = ctx.plugins.clone();
+            let old_export_event_rules = ctx.event_rules.clone();
+            std::thread::spawn(move || {
+                let exporter = SessionExporter::new(
+                    old_html_path.clone(),
+                    old_source_files,
+                    old_export_tabs,
+                    old_export_labels,
+                    old_export_frontend,
+                    old_export_ts_mode,
+                    old_first_log_at,
+                )
+                .with_plugins(
+                    old_export_plugins.definitions,
+                    old_export_plugins.pane_plugins,
+                    old_export_plugins.scripts,
+                )
+                .with_markers(old_markers)
+                .with_events(old_events, old_export_event_rules);
 
-            match exporter.export() {
-                Ok(path) => {
-                    let now = Local::now().to_rfc3339();
-                    let _ = update_manifest_file(
-                        &old_manifest_path,
-                        &json!({
-                            "session_html": path.display().to_string(),
-                            "html_status": "ready",
-                            "html_updated_at": now,
-                            "html_error": serde_json::Value::Null,
-                            "last_export_reason": "rotate",
-                        }),
-                    );
+                match exporter.export() {
+                    Ok(path) => {
+                        let now = Local::now().to_rfc3339();
+                        let _ = update_manifest_file(
+                            &old_manifest_path,
+                            &json!({
+                                "session_html": path.display().to_string(),
+                                "html_status": "ready",
+                                "html_updated_at": now,
+                                "html_error": serde_json::Value::Null,
+                                "last_export_reason": "rotate",
+                            }),
+                        );
+                    }
+                    Err(error) => {
+                        let now = Local::now().to_rfc3339();
+                        let _ = update_manifest_file(
+                            &old_manifest_path,
+                            &json!({
+                                "html_status": "error",
+                                "html_error": error.to_string(),
+                                "html_updated_at": now,
+                                "last_export_reason": "rotate",
+                            }),
+                        );
+                    }
                 }
-                Err(error) => {
-                    let now = Local::now().to_rfc3339();
-                    let _ = update_manifest_file(
-                        &old_manifest_path,
-                        &json!({
-                            "html_status": "error",
-                            "html_error": error.to_string(),
-                            "html_updated_at": now,
-                            "last_export_reason": "rotate",
-                        }),
-                    );
-                }
-            }
-        });
+            });
+        }
     }
 
     Ok((old_session, new_session))
@@ -1135,13 +1146,41 @@ fn update_manifest_file(path: &Path, updates: &serde_json::Value) -> Result<()> 
         .with_context(|| format!("update manifest {}", path.display()))
 }
 
-fn make_session_id_for_root(logs_root: &Path, job_id: Option<&str>) -> Result<String> {
-    let base_time = Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
-    let base = if let Some(job_id) = job_id {
-        format!("{base_time}__{}", slugify(job_id))
-    } else {
-        base_time
+fn normalize_session_title(title: Option<String>) -> Result<Option<String>, String> {
+    let Some(title) = title else {
+        return Ok(None);
     };
+    if title.trim().is_empty() {
+        return Err("session title must not be empty".to_string());
+    }
+    if title.chars().count() > 120 {
+        return Err("session title must not exceed 120 characters".to_string());
+    }
+    if slugify(title.trim()).is_empty() {
+        return Err("session title must contain a letter or number".to_string());
+    }
+    Ok(Some(title))
+}
+
+fn make_session_id_for_root(logs_root: &Path, job_id: Option<&str>) -> Result<String> {
+    make_titled_session_id_for_root(logs_root, job_id, None)
+}
+
+fn make_titled_session_id_for_root(
+    logs_root: &Path,
+    job_id: Option<&str>,
+    title: Option<&str>,
+) -> Result<String> {
+    let base_time = Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+    let mut base = base_time;
+    if let Some(title) = title {
+        base.push('_');
+        base.push_str(&slugify(title.trim()));
+    }
+    if let Some(job_id) = job_id {
+        base.push_str("__");
+        base.push_str(&slugify(job_id));
+    }
 
     for suffix in 0..1000 {
         let candidate = if suffix == 0 {
@@ -1696,6 +1735,22 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    #[test]
+    fn titled_session_id_preserves_job_and_rejects_invalid_titles() {
+        let root = temp_dir("titled-id");
+        let id = make_titled_session_id_for_root(
+            &root,
+            Some("nightly job"),
+            Some("Reconnect Attempt #3"),
+        )
+        .unwrap();
+        assert!(id.contains("_reconnect-attempt-3__nightly-job"));
+        assert!(normalize_session_title(Some("   ".to_string())).is_err());
+        assert!(normalize_session_title(Some("***".to_string())).is_err());
+        assert!(normalize_session_title(Some("x".repeat(121))).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[tokio::test]
     async fn writer_reopens_log_file_after_rotation_path_update() {
         let root = temp_dir("rotate-writer");
@@ -2199,10 +2254,17 @@ mod tests {
             default_light_theme: None,
             default_dark_theme: None,
             event_rules: json!({}),
+            export_on_rotate: false,
         };
 
-        let (old_session, new_session) = rotate_session(&ctx).unwrap();
+        let title = "EDHOC reconnect attempt 3".to_string();
+        let (old_session, new_session) = rotate_session(&ctx, Some(title.clone())).unwrap();
         assert_ne!(old_session, new_session, "session info should change");
+        assert_eq!(new_session["title"], title);
+        assert!(new_session["id"]
+            .as_str()
+            .unwrap()
+            .contains("_edhoc-reconnect-attempt-3"));
 
         // Writer now points into a brand-new session directory under the root.
         let new_writer = writer_path.lock().unwrap().clone();
@@ -2217,6 +2279,11 @@ mod tests {
         );
         assert!(replay.lock().unwrap().is_empty(), "replay buffer cleared");
         assert_ne!(*config_msg.lock().unwrap(), "old-config");
+        let manifest: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(new_dir.join("manifest.json")).unwrap())
+                .unwrap();
+        assert_eq!(manifest["title"], "EDHOC reconnect attempt 3");
+        assert!(!first_dir.join("session.html").exists());
 
         std::fs::remove_dir_all(root).ok();
     }

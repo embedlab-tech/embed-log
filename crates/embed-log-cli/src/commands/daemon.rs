@@ -150,14 +150,7 @@ pub(crate) fn cmd_start_daemon(
 }
 
 pub(crate) fn cmd_status(instance: Option<&str>, url: Option<&str>, json: bool) -> Result<()> {
-    cleanup_stale_records()?;
-    let (record, endpoint) = if let Some(url) = url {
-        (None, url.trim_end_matches('/').to_string())
-    } else {
-        let record = resolve_instance(instance)?;
-        let endpoint = record.endpoint.clone();
-        (Some(record), endpoint)
-    };
+    let (record, endpoint) = resolve_endpoint(instance, url)?;
     let backend = http_get_json(&endpoint, "/api/v1/status")?;
     let output = serde_json::json!({
         "ok": true,
@@ -229,6 +222,19 @@ pub(crate) fn cmd_stop(instance: Option<&str>, json: bool) -> Result<()> {
         println!("stopped daemon {} (PID {})", record.instance, record.pid);
     }
     Ok(())
+}
+
+pub(crate) fn resolve_endpoint(
+    instance: Option<&str>,
+    url: Option<&str>,
+) -> Result<(Option<InstanceRecord>, String)> {
+    cleanup_stale_records()?;
+    if let Some(url) = url {
+        return Ok((None, url.trim_end_matches('/').to_string()));
+    }
+    let record = resolve_instance(instance)?;
+    let endpoint = record.endpoint.clone();
+    Ok((Some(record), endpoint))
 }
 
 fn resolve_instance(explicit: Option<&str>) -> Result<InstanceRecord> {
@@ -435,7 +441,24 @@ fn wait_until_ready(
     )
 }
 
+pub(crate) fn http_post_json(
+    endpoint: &str,
+    path: &str,
+    body: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    http_request_json(endpoint, "POST", path, Some(&body.to_string()))
+}
+
 fn http_get_json(endpoint: &str, path: &str) -> Result<serde_json::Value> {
+    http_request_json(endpoint, "GET", path, None)
+}
+
+fn http_request_json(
+    endpoint: &str,
+    method: &str,
+    path: &str,
+    body: Option<&str>,
+) -> Result<serde_json::Value> {
     let address = endpoint
         .strip_prefix("http://")
         .context("only http:// daemon endpoints are supported")?;
@@ -450,9 +473,11 @@ fn http_get_json(endpoint: &str, path: &str) -> Result<serde_json::Value> {
     let mut stream = TcpStream::connect_timeout(&socket_address, Duration::from_secs(2))
         .with_context(|| format!("connect to {endpoint}"))?;
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+    let body = body.unwrap_or("");
     write!(
         stream,
-        "GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
+        "{method} {path} HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
     )?;
     let mut response = Vec::new();
     stream.read_to_end(&mut response)?;

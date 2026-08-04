@@ -80,11 +80,17 @@ test.describe('Rust backend browser e2e', () => {
     await waitForLineContaining(page, 'DUT', 'E2E before rotate');
 
     const rotated = await page.evaluate(async () => {
-      const response = await fetch('/api/session/rotate', { method: 'POST' });
+      const response = await fetch('/api/session/rotate', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Browser Reconnect Attempt #3' }),
+      });
       return response.json();
     });
     expect(rotated.ok).toBe(true);
     expect(rotated.old_session.id).not.toBe(rotated.session.id);
+    expect(rotated.session.id).toContain('_browser-reconnect-attempt-3');
+    expect(rotated.session.title).toBe('Browser Reconnect Attempt #3');
 
     await expect(page.locator('#log-DUT')).not.toContainText('E2E before rotate');
     await sendUdp(16000, 'E2E after rotate\n');
