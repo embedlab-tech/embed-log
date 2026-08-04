@@ -180,7 +180,7 @@ ui:
       sources: [LINK, HOST]
 ```
 
-Version 2 intentionally has no frontend plugin or per-pane plugin fields.
+Version 2 intentionally has no frontend plugin or per-pane plugin fields. The former config-v1 built-in `hex-coap` frontend plugin was removed; configurations using it fail with guidance to attach backend `parser.type: hex-coap` to the source. Explicit custom config-v1 plugins remain compatibility-only.
 
 ## Merged streams
 

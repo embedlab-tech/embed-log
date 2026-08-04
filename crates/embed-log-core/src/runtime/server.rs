@@ -45,11 +45,11 @@ struct ResolvedSource {
 /// Loaded plugin data for the config message.
 #[derive(Clone)]
 struct LoadedPlugins {
-    /// Plugin definitions: `{ "hex-coap": { "builtin": "hex-coap" } }`
+    /// Optional custom plugin definitions sent to legacy config-v1 clients.
     definitions: serde_json::Value,
-    /// Pane-plugin mappings: `{ "DUT_UART": [{ "name": "hex-coap" }] }`
+    /// Pane-plugin mappings: `{ "DUT_UART": [{ "name": "custom-line" }] }`
     pane_plugins: serde_json::Value,
-    /// Plugin JS source code: `{ "hex-coap": "..." }`
+    /// Custom plugin JS source code: `{ "custom-line": "..." }`
     scripts: serde_json::Value,
 }
 

@@ -1,6 +1,6 @@
 import {
     state, TABS, PANES, buildTimestampInfo, applyTimestampModeToLine,
-    lineHasTimestampMode, resetRelativeTimestampBase, noteRelativeTimestampCandidate,
+    lineHasTimestampMode, noteRelativeTimestampCandidate,
 } from './state.js';
 import { parseAnsi } from './ansi.js';
 import { analyzeLinePlugins, getLinePluginTooltip, getConfiguredPanePlugins, getPanePluginSettings, setPanePluginSetting } from './pluginRuntime.js';
@@ -1170,17 +1170,6 @@ document.addEventListener("keydown", ev => {
     ev.preventDefault();
     document.getElementById("btn-jump-all")?.click();
 });
-
-document.getElementById("btn-clear")?.addEventListener("click", () => {
-    window.wsSend?.({ cmd: "clear_logs", scope: "all" });
-    window.__embedLogDiscardPendingLogMessages?.();
-    resetRelativeTimestampBase();
-    state.syncTs = null;
-    state.syncTabSwitch = false;
-    PANES.forEach(clearPane);
-    _updateToolbarStats();
-});
-
 
 // Rebuild DOM for a pane from stored state — used after layout rebuild (UNWRAP toggle)
 export function repopulatePaneLogs(paneId) {

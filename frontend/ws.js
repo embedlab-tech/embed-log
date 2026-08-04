@@ -128,10 +128,6 @@ async function _handleConfigMessage(msg) {
     window.__embedLogUpdateTimestampModeUi?.();
 
     window.__embedLogSetSession?.(msg.session || null);
-    window.__embedLogOnSessionHtmlStatus?.({
-        ...msg.session,
-        type: "session_html_status",
-    });
     const paneLabels = msg.pane_labels && typeof msg.pane_labels === "object" ? msg.pane_labels : {};
     window.__embedLogPaneKinds = msg.pane_kinds && typeof msg.pane_kinds === "object" ? msg.pane_kinds : {};
     window.__embedLogPaneCommands = msg.pane_commands && typeof msg.pane_commands === "object" ? msg.pane_commands : {};
@@ -226,11 +222,6 @@ function wsConnect() {
             window.__embedLogUpdateTimestampModeUi?.();
             return;
         }
-        if (msg.type === "session_html_status") {
-            window.__embedLogOnSessionHtmlStatus?.(msg);
-            return;
-        }
-
         if (msg.type === "session_rotated") {
             currentSessionId = msg.session?.id || currentSessionId;
             state.syncTs = null;
@@ -246,10 +237,6 @@ function wsConnect() {
             setTimestampMode(state.timestampMode);
             window.__embedLogUpdateTimestampModeUi?.();
             window.__embedLogSetSession?.(msg.session || null);
-            window.__embedLogOnSessionHtmlStatus?.({
-                ...msg.session,
-                type: "session_html_status",
-            });
             window.__embedLogSchedulePersist?.();
             return;
         }

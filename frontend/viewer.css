@@ -281,73 +281,6 @@ button.active { background: var(--selection); border-color: var(--accent); color
     font-size: 12px;
 }
 
-/* Sessions list popup */
-#sessions-menu {
-    position: fixed;
-    z-index: 1100;
-    min-width: 320px;
-    max-width: 520px;
-    max-height: 60vh;
-    overflow: auto;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--panel);
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
-    display: none;
-}
-#sessions-menu.open { display: block; }
-#sessions-menu .sessions-head {
-    position: sticky;
-    top: 0;
-    background: var(--header);
-    border-bottom: 1px solid var(--border);
-    padding: 8px 10px;
-    font-size: 12px;
-    color: var(--accent);
-}
-#sessions-menu .sessions-body { padding: 8px; }
-#sessions-menu .session-row {
-    display: grid;
-    grid-template-columns: 1fr auto auto;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 4px;
-    border-bottom: 1px dashed var(--border);
-}
-#sessions-menu .session-row:last-child { border-bottom: none; }
-#sessions-menu .session-meta {
-    font-size: 12px;
-    color: var(--text);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-#sessions-menu .session-tags { display: flex; gap: 4px; }
-#sessions-menu .session-tag {
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 0 6px;
-    font-size: 10px;
-    line-height: 18px;
-}
-#sessions-menu .session-tag.current {
-    border-color: var(--accent);
-    color: var(--accent);
-}
-#sessions-menu .session-tag.pending {
-    color: var(--ansi-3);
-}
-#sessions-menu .session-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-#sessions-menu .session-actions a {
-    font-size: 11px;
-    color: var(--accent);
-    text-decoration: none;
-}
-#sessions-menu .session-actions a:hover { text-decoration: underline; }
 #pane-plugin-menu {
     position: fixed;
     z-index: 1100;
@@ -385,13 +318,6 @@ button.active { background: var(--selection); border-color: var(--accent); color
     font-size: 11px;
     color: var(--ansi-0);
 }
-#sessions-menu .session-actions a.disabled {
-
-    color: var(--ansi-0);
-    pointer-events: none;
-    text-decoration: none;
-}
-
 /* Download raw popup menu */
 #download-raw-menu {
     position: fixed;

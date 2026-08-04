@@ -154,14 +154,12 @@ impl SessionExporter {
         let static_profile = json!({
             "kind": "static",
             "capabilities": {
-                "clearAll": false,
                 "downloadRaw": true,
                 "exportHtml": false,
                 "fontSize": true,
                 "paneSwap": true,
                 "persistCache": false,
                 "selectionExportHtml": true,
-                "sessionApi": false,
                 "themeToggle": true,
                 "tx": false,
                 "unwrap": true,

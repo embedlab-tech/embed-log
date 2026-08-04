@@ -421,7 +421,7 @@ function _toggleRawMenu() {
     if (!menu || !btn) return;
 
     const isOpen = menu.classList.contains("open");
-    document.querySelectorAll("#clip-peek-menu.open, #sessions-menu.open").forEach(el =>
+    document.querySelectorAll("#clip-peek-menu.open").forEach(el =>
         el.classList.remove("open")
     );
 

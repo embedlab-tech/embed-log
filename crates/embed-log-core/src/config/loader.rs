@@ -414,6 +414,14 @@ fn reject_removed_fields(raw: &serde_yaml::Value) -> Result<(), ConfigError> {
 
 /// Validate the parsed config, applying defaults and checking constraints.
 fn validate_config(config: &mut AppConfig, config_path: &Path) -> Result<(), ConfigError> {
+    for (name, plugin) in &config.frontend_plugins {
+        if plugin.builtin.as_deref() == Some("hex-coap") {
+            return Err(ConfigError::validation(format!(
+                "frontend_plugins.{name}.builtin 'hex-coap' was removed; attach parser.type 'hex-coap' to the source instead"
+            )));
+        }
+    }
+
     let mut source_names = HashSet::new();
 
     // ── Validate sources ──
@@ -960,6 +968,28 @@ tabs:
         std::fs::write(&path, yaml).unwrap();
         let err = load_config(&path).unwrap_err().to_string();
         assert!(err.contains("at least 2 source names"), "{err}");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn removed_frontend_hex_coap_plugin_has_migration_error() {
+        let yaml = r#"
+version: 1
+frontend_plugins:
+  coap:
+    builtin: hex-coap
+sources:
+  - name: COAP
+    type: udp
+    port: 6000
+tabs:
+  - label: CoAP
+    panes: [COAP]
+"#;
+        let path = std::env::temp_dir().join("removed-frontend-hex-coap.yml");
+        std::fs::write(&path, yaml).unwrap();
+        let error = load_config(&path).unwrap_err().to_string();
+        assert!(error.contains("parser.type 'hex-coap'"), "{error}");
         std::fs::remove_file(&path).ok();
     }
 

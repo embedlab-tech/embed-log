@@ -192,39 +192,20 @@ Important files:
 | `main.js` | Live-mode entry point and import ordering. |
 | `ws.js` | WebSocket connection, config message handling, live events. |
 | `state.js` | Shared tab/pane/viewer state and timestamp context. |
-| `lines.js` | Render/append/re-render lines, timestamp mode updates, plugin analysis. |
+| `lines.js` | Render/append/re-render lines, timestamp mode updates, optional custom-plugin analysis. |
 | `tabcreate.js`, `tabs.js` | Tab/pane construction and switching. |
 | `renderPane.js`, `renderToolbar.js` | Shared shell renderers for live/static UI. |
 | `selection.js` | Line selection, markers, copy/export selected text. |
 | `export.js` | Client-side HTML snapshot/export support. |
 | `persist.js` | Browser session persistence. |
 | `settings.js`, `themes.js`, `fontsize.js` | User settings, themes, font size. |
-| `pluginRuntime.js` | Plugin registry/loading/settings. |
-| `plugin-hex-coap.js` | Legacy config-v1 CoAP hex plugin; config-v2 sources use backend `parser.type: hex-coap`. |
+| `pluginRuntime.js` | Optional custom plugin registry/loading/settings; no built-in protocol decoders. |
 | `tsparse.js` | Timestamp parsing for imports/static logs. |
 | `import.js` | Import `.log` files into panes. |
 
-## Plugin path
+## Optional custom plugin path
 
-```text
-embed-log.yml
-  frontend_plugins:
-    hex-coap:
-      builtin: hex-coap
-  tabs:
-    - panes:
-        - source: COAP_RAW
-          plugins: [hex-coap]
-
-LogServer::load_plugins()
-  ├─ reads frontend/plugin-hex-coap.js or custom plugin path
-  ├─ builds plugin metadata/scripts
-  └─ includes them in WS config + session export
-
-frontend/pluginRuntime.js
-  ├─ evaluates/registers plugins
-  └─ lets lines.js annotate/render plugin-derived UI
-```
+Custom config-v1 plugins may still be loaded from explicit paths and included in WebSocket config/session exports. Built-in protocol plugins were removed: textual CoAP belongs on the source as `parser.type: hex-coap`, so CLI, browser, TUI, watches, and persistence all receive the same decoded record.
 
 ## Release architecture
 

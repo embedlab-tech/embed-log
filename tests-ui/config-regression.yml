@@ -6,10 +6,6 @@ server:
   app_name: embed-log e2e
   timestamp_mode: relative
 
-frontend_plugins:
-  hex-coap:
-    builtin: hex-coap
-
 logs:
   dir: .tmp/logs
 
@@ -18,6 +14,8 @@ sources:
     label: DEVICE_A
     type: udp
     port: 6000
+    parser:
+      type: hex-coap
 
   - name: SENSOR_B
     label: HOST
@@ -38,6 +36,8 @@ sources:
     label: CoAP
     type: udp
     port: 6005
+    parser:
+      type: hex-coap
 
   # UART sources (silent — no PTY fds in test harness)
   - name: UART_DUT
@@ -53,8 +53,7 @@ sources:
 tabs:
   - label: DevA
     panes:
-      - source: SENSOR_A
-        plugins: [hex-coap]
+      - SENSOR_A
       - SENSOR_B
 
   - label: DevB
@@ -64,9 +63,7 @@ tabs:
     panes: [SENSOR_D]
 
   - label: CoAP
-    panes:
-      - source: SENSOR_COAP
-        plugins: [hex-coap]
+    panes: [SENSOR_COAP]
 
   - label: UART
     panes: [UART_DUT, UART_DEBUG]

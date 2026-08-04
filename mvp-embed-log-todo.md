@@ -338,6 +338,9 @@ Example error:
 - Browser UI.
 - Integrated TUI mode.
 - Standalone TUI client if it remains inexpensive.
+- Browser observation, filtering, selection, timestamp/theme/layout controls, client-side export, and UART TX.
+
+The live browser is not a session-management console. Session rotation, listing, server-side HTML generation, and other experiment lifecycle mutations belong to the explicit CLI. Remove browser Clear/New session/Sessions controls while retaining automatic handling of externally requested `session_rotated` messages.
 
 ### Delete
 
@@ -401,7 +404,7 @@ Completed:
 2. Reuse the Rust CoAP decoder used by `slip-coap`.
 3. Cover compact/separated hex, prefixed frames, partial lines, pass-through, config validation, and a daemon/file-source process path.
 
-The legacy frontend plugin remains only for version 1 compatibility. Generic plugin cleanup and optional richer structured metadata are separate follow-ups, not requirements for source-attached `hex-coap` decoding.
+The built-in frontend `hex-coap` plugin is removed. Config-v1 uses now fail with migration guidance; explicit custom plugins remain compatibility-only. Optional richer structured metadata is not required for source-attached decoding.
 
 Possible future metadata:
 

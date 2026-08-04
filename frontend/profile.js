@@ -11,14 +11,12 @@
 export const STATIC_PROFILE = {
     kind: "static",
     capabilities: {
-        clearAll: false,
         downloadRaw: true,
         exportHtml: false,
         fontSize: true,
         paneSwap: true,
         persistCache: false,
         selectionExportHtml: true,
-        sessionApi: false,
         themeToggle: true,
         tx: false,
         unwrap: true,
@@ -31,14 +29,12 @@ export const STATIC_PROFILE = {
 const LIVE_PROFILE = {
     kind: "live",
     capabilities: {
-        clearAll: true,
         downloadRaw: true,
         exportHtml: true,
         fontSize: true,
         paneSwap: true,
         persistCache: true,
         selectionExportHtml: true,
-        sessionApi: true,
         themeToggle: true,
         tx: true,
         unwrap: true,

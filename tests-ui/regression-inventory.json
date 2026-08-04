@@ -55,12 +55,6 @@
       "notes": "Python merge_logs.py dependency removed. Rust merge now backs large static export generation. One per-pane export scenario remains skipped by design."
     },
     {
-      "file": "tests/session-workflows.spec.js",
-      "status": "passing_in_isolation_full_suite_flake",
-      "verified_with": "npx playwright test --config=playwright.regression.config.js regression-tests/session-workflows.spec.js => 3 passed",
-      "notes": "Failed in the full concurrent regression run but passed immediately in isolation; treat as suite-level concurrency/flakiness until reproduced deterministically."
-    },
-    {
       "file": "tests/filter-keyboard.spec.js",
       "status": "passing",
       "verified_with": "npm run test:regression"
@@ -72,20 +66,11 @@
       "notes": "11/13 scenarios pass; 2 skipped by design."
     },
     {
-      "file": "tests/pane-plugin-coap.spec.js",
-      "status": "passing",
-      "verified_with": "dependency subset: 7/7 passed",
-      "fixes": [
-        "Spec now spawns the Rust backend instead of the original Python backend.",
-        "Exporter embeds real frontend/plugin runtime code so exported CoAP mode is preserved."
-      ]
-    },
-    {
       "file": "tests/deterministic-demo-coap.spec.js",
       "status": "passing",
       "verified_with": "dependency subset: 7/7 passed",
       "fixes": [
-        "Spec now spawns the Rust backend.",
+        "Spec spawns the Rust backend with source-attached hex-coap parsing.",
         "External Python traffic dependency replaced with inline Node UDP fixtures."
       ]
     },
@@ -132,8 +117,7 @@
     "full_regression_run": "53 passed, 2 flaky, 5 failed, 4 skipped",
     "remaining_full_regression_failures": [
       "demo-smoke: live DOM keeps full pane history while tailing",
-      "demo-smoke: marker persists after unwrap toggle",
-      "session-workflows full-suite concurrency/flaky failures (3 pass in isolation)"
+      "demo-smoke: marker persists after unwrap toggle"
     ]
   }
 }

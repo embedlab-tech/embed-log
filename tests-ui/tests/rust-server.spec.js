@@ -30,6 +30,10 @@ test.describe('Rust backend browser e2e', () => {
 
     await expect(page.locator('#pane-DUT .pane-name')).toHaveText('DUT UART');
     await expect(page.locator('#pane-HOST .pane-name')).toHaveText('Host Debug');
+    await expect(page.locator('#btn-clear')).toHaveCount(0);
+    await expect(page.locator('#btn-new-session')).toHaveCount(0);
+    await expect(page.locator('#btn-sessions')).toHaveCount(0);
+    await expect(page.locator('#btn-save-to-server')).toHaveCount(0);
 
     await sendUdp(16000, 'E2E DUT boot\n');
     await sendUdp(16001, 'E2E HOST ready\n');

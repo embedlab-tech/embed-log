@@ -459,9 +459,9 @@ mod tests {
             "pane_kinds":{"DUT":"udp","UART_DUT":"uart"},
             "pane_commands":{"UART_DUT":["help\r\n","version\r\n"]},
             "tabs":[{"label":"Device","panes":["DUT","HOST"],"pane_labels":{"DUT":"DUT Device"}}],
-            "frontend_plugins":{"hex-coap":{"builtin":"hex-coap"}},
-            "pane_plugins":{"COAP_RAW":[{"name":"hex-coap"}]},
-            "plugin_scripts":{"hex-coap":"/* js */"},
+            "frontend_plugins":{"custom-line":{"path":"custom-line.js"}},
+            "pane_plugins":{"COAP_RAW":[{"name":"custom-line"}]},
+            "plugin_scripts":{"custom-line":"/* js */"},
             "event_rules":{"DUT":[{"name":"fatal_error","severity":"error"}]},
             "markers":[{"paneId":"DUT","lineIdx":3,"endIdx":3,"numTs":5000.0,"description":"note","kind":"user"}]
         }"#;
@@ -484,7 +484,7 @@ mod tests {
         assert!(!c.markers[0].is_event());
         // pane_plugins entry: detailed variant
         let entry = &c.pane_plugins.get("COAP_RAW").unwrap()[0];
-        assert_eq!(entry.name(), "hex-coap");
+        assert_eq!(entry.name(), "custom-line");
     }
 
     #[test]
