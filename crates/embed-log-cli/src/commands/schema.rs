@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use clap::{Arg, ArgAction, Command};
 use serde_json::{json, Map, Value};
 
-pub(crate) const SCHEMA_VERSION: u32 = 1;
+pub(crate) const SCHEMA_VERSION: u32 = 2;
 
 pub(crate) fn cmd_schema(root: Command, selector: &[String], pretty: bool) -> Result<()> {
     let value = schema_value(root, selector)?;
@@ -77,7 +77,10 @@ fn capability_index(root: &Command) -> Value {
             "tx_context_records_max": 1000,
             "watch_ttl_max": "24h"
         },
-        "agent_skill": "embed-log skill",
+        "agent_skills": {
+            "live": "embed-log skill live",
+            "recorded": "embed-log skill recorded"
+        },
         "discovery": {
             "command": "embed-log schema <command>",
             "examples": [
@@ -391,7 +394,10 @@ fn semantics(path: &str) -> Semantics {
             targeting: local,
             output: json!({"modes":["human","json_with_daemon"]}),
             errors: &[],
-            notes: &["daemon mode requires explicit --config, --instance, and --port"],
+            notes: &[
+                "daemon mode requires explicit --config and --instance",
+                "the daemon endpoint uses --host/--port overrides, then YAML server.listen, then 127.0.0.1:18080",
+            ],
         },
         "status" => Semantics {
             mutates: false,

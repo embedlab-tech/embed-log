@@ -60,9 +60,7 @@ pub(crate) fn cmd_start_daemon(
         .host
         .clone()
         .unwrap_or_else(|| config.server.host.clone());
-    let port = overrides
-        .ws_port
-        .context("--port is required with --daemon; Embed-log never selects another port")?;
+    let port = overrides.ws_port.unwrap_or(config.server.ws_port);
     let connect_host = connect_host(&host);
     let endpoint = format!("http://{connect_host}:{port}");
     let config_fingerprint = fingerprint_file(&config_path)?;

@@ -6,7 +6,7 @@ This plan makes Embed-log efficient and safe for agents, scripts, and UI-driven 
 
 **Agents speak CLI.** Models are heavily trained on `gh`/`kubectl`/`docker`-style noun–verb commands and structured JSON output. A well-shaped CLI plus a small skill file is therefore the highest-leverage capability surface for Embed-log: it works unchanged for agents, humans, shell scripts, wrappers, and CI, and can be richer than an MCP-only integration.
 
-The CLI is the canonical automation contract. `embed-log skill` provides version-matched operational judgment and safety rules directly from the binary; `embed-log schema` provides progressive mechanical discovery without parsing human `--help`; `status --json` provides dynamic daemon/source state. MCP, SDKs, and higher-level tools such as `gwl log` should adapt this contract rather than become separate implementations of capture behavior.
+The CLI is the canonical automation contract. `embed-log skill live|recorded` provides focused, version-matched operational judgment directly from the binary; `embed-log schema` provides progressive mechanical discovery without parsing human `--help`; `status --json` provides dynamic daemon/source state. MCP, SDKs, and higher-level tools such as `gwl log` should adapt this contract rather than become separate implementations of capture behavior.
 
 Consequences:
 
@@ -39,7 +39,7 @@ Embed-log already provides:
 
 ## Phase 1 — Agent investigation skill
 
-Create a project skill at `.agents/skills/embed-log/SKILL.md`.
+Provide focused `embed-log-live` and `embed-log-recorded` skills, also embedded in the binary as `embed-log skill live|recorded`.
 
 ### Default investigation sequence
 
@@ -68,7 +68,7 @@ embed-log sessions search --config embed-log.yml --session latest \
 - Start with `sessions summary`; report the resolved session and sources.
 - Prefer `compact` for reasoning and `mini-jsonl` for structured processing.
 - Escalate to raw JSONL only when exact fields are required.
-- Do not start a capture, send TX, export data, or delete sessions without explicit user intent.
+- A live reproduction request authorizes capture and task-relevant UART TX; do not invent firmware commands, export data, or delete sessions without explicit user intent.
 - Bound live observation time, context size, and match count.
 - Do not assume source IDs; use those reported by the summary/manifest.
 
@@ -203,7 +203,7 @@ Do not frame this as replacing `grep`. `grep` is ideal for retrospective static-
 
 ## Safety defaults
 
-Agent auto mode is observation and annotation only unless explicitly authorized. It may subscribe, search, create bounded runtime event rules, and create markers/events. It must not send UART commands, restart devices, edit project config, import logs, delete sessions, or run indefinitely by default.
+Agent auto mode may observe, annotate, and use task-relevant UART TX during a live investigation. It may subscribe, search, create bounded runtime event rules, and create markers/events. It must not invent firmware commands, restart devices, edit project config, import logs, delete sessions, or run indefinitely by default.
 
 ## Suggested delivery order
 

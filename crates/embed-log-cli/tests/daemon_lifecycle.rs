@@ -109,8 +109,8 @@ impl Drop for DaemonGuard {
 fn daemon_start_status_duplicate_and_graceful_stop() {
     let root = temp_root("lifecycle");
     let runtime = root.join("runtime");
-    let config = write_config(&root, "daemon", free_port());
-    let port = free_port().to_string();
+    let port = free_port();
+    let config = write_config(&root, "daemon", port);
     fs::create_dir_all(&runtime).unwrap();
     fs::write(
         runtime.join("bench-a.json"),
@@ -128,7 +128,7 @@ fn daemon_start_status_duplicate_and_graceful_stop() {
     )
     .unwrap();
 
-    let started = start(&runtime, &config, "bench-a", &["--port", &port]);
+    let started = start(&runtime, &config, "bench-a", &[]);
     assert!(
         started.status.success(),
         "startup failed: {}",
@@ -249,7 +249,7 @@ fn daemon_start_status_duplicate_and_graceful_stop() {
     assert!(direct_json["instance"].is_null());
     assert_eq!(direct_json["backend"]["ok"], true);
 
-    let duplicate = start(&runtime, &config, "bench-a", &["--port", &port]);
+    let duplicate = start(&runtime, &config, "bench-a", &[]);
     assert!(duplicate.status.success());
     let reused_json: serde_json::Value = serde_json::from_slice(&duplicate.stdout).unwrap();
     assert_eq!(reused_json["reused"], true);
@@ -260,7 +260,7 @@ fn daemon_start_status_duplicate_and_graceful_stop() {
         format!("{}\n# changed\n", fs::read_to_string(&config).unwrap()),
     )
     .unwrap();
-    let changed_config = start(&runtime, &config, "bench-a", &["--port", &port]);
+    let changed_config = start(&runtime, &config, "bench-a", &[]);
     let changed_failure = json_failure(&changed_config);
     assert!(changed_failure["error"]["message"]
         .as_str()
@@ -302,8 +302,8 @@ fn occupied_port_is_never_reassigned_and_foreground_bind_failure_exits() {
     let root = temp_root("occupied");
     let runtime = root.join("runtime");
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-    let port = listener.local_addr().unwrap().port().to_string();
-    let config = write_config(&root, "occupied", free_port());
+    let port = listener.local_addr().unwrap().port();
+    let config = write_config(&root, "occupied", port);
     fs::create_dir_all(&runtime).unwrap();
     fs::write(runtime.join("broken.json"), "not json").unwrap();
     let malformed = invoke(&runtime, &["status", "--json"]);
@@ -313,7 +313,7 @@ fn occupied_port_is_never_reassigned_and_foreground_bind_failure_exits() {
         .contains("parse daemon registry"));
     fs::remove_file(runtime.join("broken.json")).unwrap();
 
-    let daemon = start(&runtime, &config, "bench-a", &["--port", &port]);
+    let daemon = start(&runtime, &config, "bench-a", &[]);
     let daemon_failure = json_failure(&daemon);
     assert!(daemon_failure["error"]["message"]
         .as_str()
@@ -328,7 +328,7 @@ fn occupied_port_is_never_reassigned_and_foreground_bind_failure_exits() {
             "--config",
             config.to_str().unwrap(),
             "--port",
-            &port,
+            &port.to_string(),
             "--no-open-browser",
             "--frontend-dir",
             "/definitely/not/a/frontend",
@@ -346,7 +346,7 @@ fn occupied_port_is_never_reassigned_and_foreground_bind_failure_exits() {
 }
 
 #[test]
-fn multiple_instances_require_explicit_ports_and_selection() {
+fn multiple_instances_use_configured_ports_and_require_explicit_selection() {
     let root = temp_root("multiple");
     let runtime = root.join("runtime");
     let port_a = free_port();
@@ -354,16 +354,8 @@ fn multiple_instances_require_explicit_ports_and_selection() {
     let config_a = write_config(&root, "a", port_a);
     let config_b = write_config(&root, "b", port_b);
 
-    let missing_port = start(&runtime, &config_a, "missing-port", &[]);
-    let missing_port_failure = json_failure(&missing_port);
-    assert_eq!(missing_port_failure["error"]["code"], "CLI_USAGE");
-    assert!(missing_port_failure["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("--port"));
-
     let port_a_text = port_a.to_string();
-    let first = start(&runtime, &config_a, "bench-a", &["--port", &port_a_text]);
+    let first = start(&runtime, &config_a, "bench-a", &[]);
     assert!(
         first.status.success(),
         "{}",
@@ -376,8 +368,7 @@ fn multiple_instances_require_explicit_ports_and_selection() {
         .unwrap()
         .contains("owned by instance \"bench-a\""));
 
-    let port_b_text = port_b.to_string();
-    let second = start(&runtime, &config_b, "bench-b", &["--port", &port_b_text]);
+    let second = start(&runtime, &config_b, "bench-b", &[]);
     assert!(
         second.status.success(),
         "{}",

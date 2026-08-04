@@ -8,7 +8,7 @@
     {
       "name": "embed-log",
       "source": ".",
-      "description": "Skill for querying embed-log sessions (device/UART/UDP logs, test output, event detections) via the embed-log CLI instead of grepping raw log files."
+      "description": "Focused skills for live firmware/test debugging and retrospective Embed-log session analysis."
     }
   ]
 }

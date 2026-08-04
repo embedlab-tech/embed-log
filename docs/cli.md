@@ -9,11 +9,12 @@ embed-log --help
 ## Embedded agent skill
 
 ```bash
-embed-log skill
-embed-log skill --json
+embed-log skill live
+embed-log skill recorded
+embed-log skill live --json
 ```
 
-`skill` prints the exact canonical `skills/embed-log/SKILL.md` embedded at build time, so an agent can load guidance matching the installed binary without locating this repository or installing a plugin. Raw Markdown is the token-efficient default. `--json` returns `schema_version`, `embed_log_version`, `format`, and escaped `content` in one document. The command needs no config, daemon, network access, or machine-specific paths.
+`skill live` and `skill recorded` print the selected canonical skill embedded at build time, so an agent can load focused, version-matched guidance without locating this repository or installing a plugin. Raw Markdown is the token-efficient default. `--json` returns the selected skill name, `schema_version`, `embed_log_version`, `format`, and escaped `content` in one document. The command needs no config, daemon, network access, or machine-specific paths.
 
 ## Machine-readable capability discovery
 
@@ -107,10 +108,10 @@ embed-log run --config embed-log.yml --host 0.0.0.0 --port 9090 --log-dir /tmp/e
 Start a named config-based daemon and wait for its status API to become ready:
 
 ```bash
-embed-log run --daemon --instance bench-a --config embed-log.yml --port 18080 --json
+embed-log run --daemon --instance bench-a --config embed-log.yml --json
 ```
 
-Daemon startup requires explicit `--config`, `--instance`, and `--port`. It never scans for or selects another port. Repeating the same instance, endpoint, and unchanged config is idempotent and returns `reused: true`; endpoint/config conflicts fail. Instance records contain the PID, endpoint, config path and fingerprint, logs directory, diagnostic log, executable, and start time. They live under `$XDG_RUNTIME_DIR/embed-log`, with a user-state fallback; tests may override this with `EMBED_LOG_RUNTIME_DIR`.
+Daemon startup requires explicit `--config` and `--instance`. Its endpoint uses `--host`/`--port` overrides, then `server.listen` from YAML, then the default `127.0.0.1:18080`; it never scans for or selects another port. Repeating the same instance, endpoint, and unchanged config is idempotent and returns `reused: true`; endpoint/config conflicts fail. Instance records contain the PID, endpoint, config path and fingerprint, logs directory, diagnostic log, executable, and start time. They live under `$XDG_RUNTIME_DIR/embed-log`, with a user-state fallback; tests may override this with `EMBED_LOG_RUNTIME_DIR`.
 
 Inspect or stop it:
 

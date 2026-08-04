@@ -6,8 +6,11 @@ This reference describes Embed-log capabilities agents can use now. For the broa
 
 When no Embed-log integration is installed, load the concise version-matched guidance directly from the binary:
 
+Choose the guidance matching the task:
+
 ```bash
-embed-log skill
+embed-log skill live
+embed-log skill recorded
 ```
 
 Do not parse human `--help` output. After loading/caching the skill, use the compact runtime-independent capability index, then inspect only the command needed:
@@ -35,11 +38,11 @@ Agents must discover source IDs rather than guessing them.
 
 ## Send UART commands with bounded expectations
 
-When UART TX is explicitly authorized, use the atomic command rather than opening the serial device separately:
+During a live investigation, use the atomic command rather than opening the serial device separately. TX needs no separate confirmation, but its firmware-specific command and expected response must come from the task, project, tests, documentation, or observed interface:
 
 ```bash
 embed-log tx --instance bench-a --source DUT_UART \
-  --line reset --expect "boot complete" \
+  --line "$DEVICE_COMMAND" --expect "$EXPECTED_REPLY" \
   --timeout 30s --context 20 --json
 ```
 
@@ -183,6 +186,6 @@ Promotion writes `<config-stem>.events.yml`. The runtime rule stays active now; 
 - Keep live subscriptions and context windows bounded.
 - Give temporary rules purpose-specific names and delete them after investigation.
 - Promote only rules worth retaining.
-- Do not send UART TX, delete session data, export sensitive logs, or edit project configuration without explicit approval.
+- Use UART TX when relevant to a live investigation, but do not invent firmware commands; do not delete session data, export sensitive logs, or edit project configuration without explicit approval.
 
-A dedicated Embed-log agent skill is planned at `.agents/skills/embed-log/SKILL.md`; until then, use this reference in project agent instructions or task prompts.
+The focused live and recorded skills are available from the repository and through `embed-log skill live|recorded`; use this document as the extended capability reference.

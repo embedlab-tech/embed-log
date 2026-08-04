@@ -66,11 +66,11 @@ The compact JSON index is runtime-independent and cacheable by `schema_version` 
 Keep configured sources, including UART ownership, alive between experiments:
 
 ```bash
-embed-log run --daemon --instance bench-a --config embed-log.yml --port 18080 --json
+embed-log run --daemon --instance bench-a --config embed-log.yml --json
 embed-log status --instance bench-a --json
 embed-log sessions new --instance bench-a --title reconnect-attempt-3 --json
-embed-log tx --instance bench-a --source DUT_UART --line reset \
-  --expect "boot complete" --timeout 30s --context 20 --json
+embed-log tx --instance bench-a --source DUT_UART --line "$DEVICE_COMMAND" \
+  --expect "$EXPECTED_REPLY" --timeout 30s --context 20 --json
 watch_id=$(embed-log watch add --instance bench-a --source DUT_UART \
   --contains "session established" --ttl 30s --json | jq -r '.watch.id')
 embed-log watch wait "$watch_id" --instance bench-a --timeout 30s --json
@@ -85,25 +85,26 @@ embed-log sessions read latest --after 100 --limit 50 --time relative --json
 embed-log sessions around latest --sequence 119 --before 5 --after 10 --time none
 ```
 
-Compact text defaults to `T+00:12.453 719 DUT_UART#428 boot complete`; choose `--time none` for minimum tokens or `--time absolute` for external correlation. A source configured with `parser: { type: hex-coap }` keeps any line prefix and replaces the first valid compact/separated hexadecimal CoAP packet with a human-readable decode before persistence and streaming. Daemon startup requires explicit `--config`, `--instance`, and `--port`; it never changes the requested port. Repeating the same request reuses the verified running instance. Mutating commands require `--instance`, `EMBED_LOG_INSTANCE`, or an explicit URL. Daemon shutdown skips automatic HTML export by default; foreground modes retain it.
+Compact text defaults to `T+00:12.453 719 DUT_UART#428 boot complete`; choose `--time none` for minimum tokens or `--time absolute` for external correlation. Daemon startup requires explicit `--config` and `--instance`; its endpoint comes from `server.listen` unless `--host` or `--port` overrides it. It never selects another port. Repeating the same request reuses the verified running instance. Mutating commands require `--instance`, `EMBED_LOG_INSTANCE`, or an explicit URL. Daemon shutdown skips automatic HTML export by default; foreground modes retain it.
 
 ## Claude Code plugin
 
 The release binary embeds the canonical agent skill for zero-setup, version-matched discovery:
 
 ```bash
-embed-log skill          # raw Markdown, best for direct model context
-embed-log skill --json   # version metadata plus Markdown content
+embed-log skill live             # live capture and device interaction
+embed-log skill recorded         # saved-session investigation
+embed-log skill live --json      # version metadata plus Markdown content
 ```
 
-The same skill is bundled as a [Claude Code](https://claude.com/claude-code) plugin. It teaches the complete safe CLI workflow: schema/runtime discovery, explicit daemon targeting, titled experiment rotation, bounded cursor analysis, atomic UART TX, retained watches, normalized errors, and backend textual CoAP parsing—without grepping raw log files or opening owned UARTs. Install it once, in any Claude Code session:
+The same focused skills are bundled as a [Claude Code](https://claude.com/claude-code) plugin. They separate live firmware/test reproduction from bounded saved-session analysis while preserving explicit daemon targeting and UART ownership. Install it once, in any Claude Code session:
 
 ```
 /plugin marketplace add embedlab-tech/embed-log
 /plugin install embed-log@embed-log-tools
 ```
 
-It's then available in every project on your machine, not just this repo. Source: `skills/embed-log/SKILL.md`, `.claude-plugin/`.
+It's then available in every project on your machine, not just this repo. Sources: `skills/embed-log-live/SKILL.md`, `skills/embed-log-recorded/SKILL.md`, and `.claude-plugin/`.
 
 ## Build from source
 

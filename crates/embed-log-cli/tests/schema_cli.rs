@@ -32,7 +32,7 @@ fn schema_discovers_capabilities_and_targeted_commands_without_runtime_state() {
         "default schema must be compact"
     );
     let index: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(index["schema_version"], 1);
+    assert_eq!(index["schema_version"], 2);
     assert_eq!(index["kind"], "embed-log.capabilities");
     assert_eq!(index["defaults"]["endpoint"], "127.0.0.1:18080");
     assert_eq!(index["limits"]["read_records_max"], 1000);
@@ -43,7 +43,11 @@ fn schema_discovers_capabilities_and_targeted_commands_without_runtime_state() {
         .any(|parser| parser == "hex-coap"));
     let commands = index["commands"].as_array().unwrap();
     assert!(commands.iter().any(|command| command == "skill"));
-    assert_eq!(index["agent_skill"], "embed-log skill");
+    assert_eq!(index["agent_skills"]["live"], "embed-log skill live");
+    assert_eq!(
+        index["agent_skills"]["recorded"],
+        "embed-log skill recorded"
+    );
     assert!(commands.iter().any(|command| command == "sessions.read"));
     assert!(commands.iter().any(|command| command == "watch.wait"));
     assert!(!commands.iter().any(|command| command == "help"));
