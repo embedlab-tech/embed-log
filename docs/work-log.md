@@ -1668,3 +1668,28 @@ Future entries must include this per-file added/removed-line summary.
 | File | Added | Removed | Summary |
 | --- | ---: | ---: | --- |
 | `skills/embed-log/SKILL.md` | 56 | 120 | Removes repetition and legacy detail while retaining the essential safe workflow. |
+
+## 2026-08-04 11:42:24 UTC / 2026-08-04 13:42:24 CEST (Warsaw)
+
+- **Commit:** `cfdce72` — `Embed agent skill in CLI`
+- **Task:** Add zero-setup `embed-log skill` discovery that prints the exact version-matched canonical Markdown embedded in the release binary, with optional structured JSON and schema advertisement.
+- **Started:** unavailable; `/worklog-start` was unavailable in this API session.
+- **Completed:** 2026-08-04 11:42:24 UTC / 2026-08-04 13:42:24 CEST (+0200) (Warsaw)
+- **Validation:** format/diff checks passed; workspace tests passed (79 CLI, 218 core, 73 TUI plus process suites); strict workspace Clippy passed; Python SDK 53 passed/2 skipped; frontend units 19 passed; sequential Playwright 5 passed; release build/package passed; packaged raw skill matched `SKILL.md` byte-for-byte and packaged JSON/schema assertions passed.
+- **Model-token delta:** unavailable; `/worklog-start` was unavailable in this API session.
+
+### File changes (`cfdce72`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 8 | 5 | Documents zero-setup skill discovery. |
+| `crates/embed-log-cli/src/commands/mod.rs` | 1 | 0 | Registers the skill module. |
+| `crates/embed-log-cli/src/commands/schema.rs` | 9 | 0 | Advertises and describes the skill command. |
+| `crates/embed-log-cli/src/commands/skill.rs` | 42 | 0 | Embeds and emits canonical Markdown or JSON. |
+| `crates/embed-log-cli/src/main.rs` | 16 | 0 | Adds CLI parsing and dispatch. |
+| `crates/embed-log-cli/tests/schema_cli.rs` | 2 | 0 | Verifies schema discovery. |
+| `crates/embed-log-cli/tests/skill_cli.rs` | 32 | 0 | Verifies exact raw and structured output. |
+| `docs/agent-capabilities.md` | 7 | 1 | Adds skill-first integration guidance. |
+| `docs/automation-agent-plan.md` | 1 | 1 | Records the three-layer discovery model. |
+| `docs/cli.md` | 9 | 0 | Documents command contract. |
+| `mvp-embed-log-todo.md` | 2 | 1 | Adds skill to the MVP CLI surface. |
