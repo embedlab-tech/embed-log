@@ -1519,3 +1519,27 @@ Future entries must include this per-file added/removed-line summary.
 | `sdk/python/tests/test_models.py` | 4 | 0 | Verifies Python log sequence/session parsing. |
 | `skills/embed-log/SKILL.md` | 10 | 3 | Teaches agents bounded cursor reads, exact context, and time selection. |
 | `tests-ui/unit/logStore.test.js` | 7 | 1 | Verifies browser hydration preserves global and local identity. |
+
+## 2026-08-04 09:59:16 UTC / 2026-08-04 11:59:16 CEST (Warsaw)
+
+- **Commit:** `2a2ba4a` — `Add machine-readable CLI discovery`
+- **Task:** Add compact, versioned `embed-log schema` discovery generated from the real Clap graph and augmented with agent-relevant command semantics, progressive command/config/error selectors, CLI-first architecture guidance, and process coverage.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 09:59:16 UTC / 2026-08-04 11:59:16 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --workspace` — passed (76 CLI unit tests, 3 daemon process tests, 2 schema process tests, 1 sequence/cursor process test, 1 TX/PTY process test, 1 watch process test, 211 core tests, and 73 TUI tests); final `cargo test --locked -p embed-log-cli --test schema_cli` rerun — passed (2 tests); `cargo clippy --locked --workspace --all-targets -- -D warnings` — passed; `PYTHONPATH=sdk/python python3 -m pytest sdk/python/tests -q` — passed (53 tests, 2 skipped); `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (5 tests); `cargo build --locked --release` and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged-binary checks verified compact and explicit-`--json` indexes, dotted/split command selectors, command targeting/cursor metadata, and config discovery. The packaged compact index was 999 bytes and the targeted `sessions.read` descriptor was 3024 bytes.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`2a2ba4a`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 11 | 0 | Introduces progressive schema discovery and optional familiar `--json` spelling. |
+| `crates/embed-log-cli/src/commands/mod.rs` | 1 | 0 | Registers the schema command module. |
+| `crates/embed-log-cli/src/commands/schema.rs` | 620 | 0 | Renders deterministic capability, command, error, and config descriptors from Clap plus semantic metadata. |
+| `crates/embed-log-cli/src/main.rs` | 34 | 1 | Adds the `schema` command, selectors, compact/pretty JSON controls, dispatch, and parser coverage. |
+| `crates/embed-log-cli/tests/schema_cli.rs` | 89 | 0 | Adds packaged-style process coverage for discovery, targeting, limits, selectors, pretty output, and unknown selectors. |
+| `docs/agent-capabilities.md` | 15 | 0 | Separates static CLI discovery from dynamic daemon status. |
+| `docs/automation-agent-plan.md` | 15 | 0 | Records the CLI-first “agents speak CLI” architecture principle and consequences. |
+| `docs/cli.md` | 20 | 0 | Documents schema selectors, cache/version behavior, contents, and partial error coverage. |
+| `mvp-embed-log-todo.md` | 4 | 1 | Adds schema to the primary surface and marks discovery complete ahead of remaining JSON normalization. |
+| `skills/embed-log/SKILL.md` | 13 | 4 | Teaches agents progressive schema discovery instead of parsing help. |
