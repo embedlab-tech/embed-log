@@ -1371,3 +1371,27 @@ Future entries must include this per-file added/removed-line summary.
 | `crates/embed-log-cli/tests/daemon_lifecycle.rs` | 204 | 0 | Adds Linux process E2E coverage for readiness, status paths, stale/duplicate records, ambiguity, distinct ports, clean stop, and skipped daemon HTML. |
 | `crates/embed-log-core/src/runtime/server.rs` | 16 | 5 | Makes clean-shutdown HTML export configurable and disables it for daemon children. |
 | `docs/cli.md` | 21 | 0 | Documents registry location, resolution order, direct URLs, auto ports, diagnostics, and stop safety. |
+
+## 2026-08-04 07:23:46 UTC / 2026-08-04 09:23:46 CEST (Warsaw)
+
+- **Commit:** `ee6b360` — `Add titled session rotation`
+- **Task:** Add instance-aware `sessions new --title` rotation that preserves source tasks/UART ownership, stores the original title, creates slugged session IDs, updates browser/TUI clients, and applies foreground-versus-daemon HTML policy.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 07:23:46 UTC / 2026-08-04 09:23:46 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --workspace` plus final focused title/daemon tests — passed (63 CLI unit tests, 2 Linux process integration tests, 208 core tests, and 73 TUI tests); `cargo clippy --locked --workspace --all-targets -- -D warnings` — passed; `PYTHONPATH=sdk/python python3 -m pytest sdk/python/tests -q` — passed (53 tests, 2 skipped); `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (4 tests), including titled browser rotation and post-rotation log routing; release build and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged daemon start/titled-rotate/status/stop verified stable PID, current session, title manifest, slug, and no automatic daemon HTML.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`ee6b360`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 2 | 1 | Adds titled experiment rotation to the daemon workflow. |
+| `crates/embed-log-cli/src/commands/daemon.rs` | 34 | 9 | Exposes instance endpoint resolution and adds reusable JSON POST support. |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 91 | 0 | Adds `sessions new`, title validation, instance/URL targeting, and bounded JSON/text results. |
+| `crates/embed-log-cli/src/main.rs` | 11 | 0 | Adds parser regression coverage for the new session command surface. |
+| `crates/embed-log-cli/tests/daemon_lifecycle.rs` | 90 | 5 | Extends process E2E coverage with titled rotation, title manifest/slug, stable PID, continued source routing, and failure cleanup guards. |
+| `crates/embed-log-core/src/net/ws_server.rs` | 14 | 4 | Accepts optional rotation titles and passes them through the broadcast/API path. |
+| `crates/embed-log-core/src/runtime/server.rs` | 142 | 75 | Validates titles, allocates titled IDs, rotates shared writers/session state, and skips rotation HTML for daemons. |
+| `crates/embed-log-core/src/session/manager.rs` | 10 | 0 | Persists and exposes the original session title in manifests and session APIs. |
+| `docs/cli.md` | 15 | 0 | Documents titled rotation, validation, client continuity, and HTML behavior. |
+| `tests-ui/tests/rust-server.spec.js` | 7 | 1 | Verifies titled HTTP rotation, slug/title response, pane clearing, and subsequent live routing. |
