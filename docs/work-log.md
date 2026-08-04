@@ -1574,3 +1574,28 @@ Future entries must include this per-file added/removed-line summary.
 | `docs/cli.md` | 1 | 1 | Defines stdout envelope, exit, fallback, and human-mode behavior. |
 | `mvp-embed-log-todo.md` | 1 | 1 | Marks JSON failure normalization complete. |
 | `skills/embed-log/SKILL.md` | 1 | 1 | Teaches agents to branch on stable error codes. |
+
+## 2026-08-04 10:40:20 UTC / 2026-08-04 12:40:20 CEST (Warsaw)
+
+- **Commit:** `e933688` — `Add backend textual CoAP parser`
+- **Task:** Add source-attached backend `hex-coap` parsing that keeps a textual log prefix, replaces bytes from the first valid compact/separated CoAP header with a readable shared decode, passes non-CoAP lines through, and works before persistence/live publication.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 10:40:20 UTC / 2026-08-04 12:40:20 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; focused parser tests — passed (38 parser tests, including compact/separated/prefixed/partial/pass-through/request/response/content-format/block cases); `cargo test --locked --workspace` — passed (77 CLI unit tests, 3 daemon tests, 1 hex-CoAP source process test, 1 JSON-error test, 2 schema tests, sequence/TX/watch tests, 217 core tests, and 73 TUI tests); `cargo clippy --locked --workspace --all-targets -- -D warnings` — passed; Python SDK tests — passed (53, 2 skipped); frontend unit tests — passed (19); sequential Playwright tests — passed (5); release build, Linux package, and packaged daemon/file-source `hex-coap` persistence check — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`e933688`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 1 | 1 | Documents source-attached textual CoAP replacement behavior. |
+| `crates/embed-log-cli/src/commands/schema.rs` | 2 | 2 | Advertises `hex-coap` in binary/config capabilities. |
+| `crates/embed-log-cli/tests/hex_coap_cli.rs` | 118 | 0 | Verifies configured file-source decoding before persisted bounded reads. |
+| `crates/embed-log-cli/tests/schema_cli.rs` | 5 | 0 | Verifies parser discovery. |
+| `crates/embed-log-core/src/config/loader.rs` | 23 | 2 | Accepts and validates `hex-coap` for textual source types. |
+| `crates/embed-log-core/src/parsers/hex_coap.rs` | 156 | 0 | Implements buffered line scanning, first-header replacement, and parity-focused tests. |
+| `crates/embed-log-core/src/parsers/mod.rs` | 3 | 0 | Registers and constructs the new parser. |
+| `crates/embed-log-core/src/parsers/slip_coap.rs` | 68 | 11 | Shares CoAP decode logic and improves response, content-format, block, token, and payload rendering. |
+| `docs/architecture.md` | 1 | 1 | Marks the frontend CoAP plugin as legacy config-v1 compatibility. |
+| `docs/configuration.md` | 16 | 1 | Documents `hex-coap` YAML and exact replacement/pass-through semantics. |
+| `mvp-embed-log-todo.md` | 9 | 8 | Records backend textual CoAP completion and separates legacy plugin cleanup. |
