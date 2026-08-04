@@ -1451,3 +1451,32 @@ Future entries must include this per-file added/removed-line summary.
 | `mvp-embed-log-todo.md` | 3 | 1 | Marks the UART experiment milestone implemented and clarifies line behavior. |
 | `sdk/python/tests/test_e2e.py` | 2 | 2 | Expects the actual normalized wire-byte count from TX acknowledgement. |
 | `skills/embed-log/SKILL.md` | 12 | 0 | Teaches agents the guarded, token-bounded TX/expect workflow. |
+
+## 2026-08-04 08:38:21 UTC / 2026-08-04 10:38:21 CEST (Warsaw)
+
+- **Commit:** `0ee3a49` — `Add retained temporary watches`
+- **Task:** Add explicit temporary watch add/wait/remove commands with runtime event-rule integration, literal/regex matching, one-shot TTL deactivation, retained pre-wait matches, standard event persistence, stable wait failures, and Linux process coverage.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 08:38:21 UTC / 2026-08-04 10:38:21 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --workspace` — passed (68 CLI unit tests, 3 daemon process tests, 1 TX/PTY process test, 1 watch process test, 210 core tests, and 73 TUI tests); `cargo clippy --locked --workspace --all-targets -- -D warnings` — passed; `PYTHONPATH=sdk/python python3 -m pytest sdk/python/tests -q` — passed (53 tests, 2 skipped); `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (5 tests); `cargo build --locked --release` and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged binary file-tail check verified explicit add, match retention, wait, remove, and stop.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`0ee3a49`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 5 | 1 | Adds the retained-watch daemon workflow. |
+| `crates/embed-log-cli/src/commands/mod.rs` | 1 | 0 | Registers the watch command module. |
+| `crates/embed-log-cli/src/commands/watch.rs` | 458 | 0 | Implements explicit add/wait/remove clients, polling without log streaming, TTL validation, and stable JSON outcomes. |
+| `crates/embed-log-cli/src/main.rs` | 8 | 0 | Adds the top-level `watch` command group and dispatch. |
+| `crates/embed-log-cli/tests/watch_cli.rs` | 273 | 0 | Covers retained pre-wait matches, literal/regex captures, expiry, local timeout, missing watches, removal, persistence, and targeting. |
+| `crates/embed-log-core/src/net/control_ws.rs` | 324 | 3 | Adds watch control operations, TTL scheduling, runtime-rule lifecycle, temporary-rule isolation, and unit coverage. |
+| `crates/embed-log-core/src/net/mod.rs` | 1 | 0 | Exposes the watch-state module. |
+| `crates/embed-log-core/src/net/watch.rs` | 229 | 0 | Defines bounded process-local watch state, expiration, retained matching, and one-shot rule removal. |
+| `crates/embed-log-core/src/net/ws_server.rs` | 6 | 0 | Stores shared watch registry and identifier allocation in server state. |
+| `crates/embed-log-core/src/runtime/server.rs` | 30 | 0 | Routes runtime event matches into retained watches while ignoring TX/expired matches. |
+| `docs/agent-capabilities.md` | 11 | 0 | Documents token-efficient external-trigger watches. |
+| `docs/cli.md` | 19 | 0 | Documents watch matching, TTL, retention, persistence, targeting, and JSON failures. |
+| `mvp-embed-log-todo.md` | 2 | 1 | Marks the temporary-watch milestone implemented. |
+| `sdk-control-api-summary.md` | 10 | 0 | Records the watch create/get/delete control protocol. |
+| `skills/embed-log/SKILL.md` | 11 | 0 | Teaches agents to use short-lived retained watches instead of streaming logs. |
