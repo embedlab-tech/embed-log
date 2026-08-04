@@ -1543,3 +1543,34 @@ Future entries must include this per-file added/removed-line summary.
 | `docs/cli.md` | 20 | 0 | Documents schema selectors, cache/version behavior, contents, and partial error coverage. |
 | `mvp-embed-log-todo.md` | 4 | 1 | Adds schema to the primary surface and marks discovery complete ahead of remaining JSON normalization. |
 | `skills/embed-log/SKILL.md` | 13 | 4 | Teaches agents progressive schema discovery instead of parsing help. |
+
+## 2026-08-04 10:27:34 UTC / 2026-08-04 12:27:34 CEST (Warsaw)
+
+- **Commit:** `5002ae9` — `Normalize machine-readable CLI failures`
+- **Task:** Normalize every JSON-requesting CLI failure into one stable nested error envelope on stdout with a nonzero exit status, preserve structured TX/watch evidence, classify common agent failures, and publish the complete contract through schema discovery.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 10:27:34 UTC / 2026-08-04 12:27:34 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --workspace` — passed (77 CLI unit tests, 3 daemon process tests, 1 JSON-error process test, 2 schema process tests, 1 sequence/cursor process test, 1 TX/PTY process test, 1 watch process test, 211 core tests, and 73 TUI tests); `cargo clippy --locked --workspace --all-targets -- -D warnings` — passed; `PYTHONPATH=sdk/python python3 -m pytest sdk/python/tests -q` — passed (53 tests, 2 skipped); `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (5 tests); release build, Linux packaging, and packaged `CLI_USAGE`/`INSTANCE_REQUIRED`/schema-error-contract checks — passed with empty stderr and expected nonzero exit statuses.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`5002ae9`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 1 | 1 | Documents the normalized JSON failure envelope. |
+| `crates/embed-log-cli/src/commands/schema.rs` | 16 | 5 | Publishes all-JSON-invocation coverage and stable error catalog. |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 19 | 0 | Identifies session commands that request machine output. |
+| `crates/embed-log-cli/src/commands/tx.rs` | 12 | 14 | Moves timeout evidence into the common nested error contract. |
+| `crates/embed-log-cli/src/commands/watch.rs` | 15 | 7 | Moves watch failures into the common contract and reports output mode. |
+| `crates/embed-log-cli/src/main.rs` | 69 | 3 | Handles Clap/runtime failures explicitly with JSON or human output and stable exits. |
+| `crates/embed-log-cli/src/output.rs` | 84 | 0 | Implements one-document JSON failures, reported-error suppression, and stable classification. |
+| `crates/embed-log-cli/tests/daemon_lifecycle.rs` | 40 | 22 | Verifies normalized daemon/target/usage failures. |
+| `crates/embed-log-cli/tests/json_errors.rs` | 63 | 0 | Adds process coverage for JSON usage/runtime envelopes and human stderr behavior. |
+| `crates/embed-log-cli/tests/schema_cli.rs` | 8 | 2 | Verifies normalized unknown-selector errors and complete catalog coverage. |
+| `crates/embed-log-cli/tests/sequence_cursor.rs` | 7 | 1 | Verifies structured invalid-cursor failures. |
+| `crates/embed-log-cli/tests/tx_cli.rs` | 18 | 5 | Verifies nested targeting and expectation-timeout evidence. |
+| `crates/embed-log-cli/tests/watch_cli.rs` | 13 | 6 | Verifies nested watch error details and empty stderr. |
+| `docs/agent-capabilities.md` | 1 | 1 | Defines code-based handling for every JSON failure. |
+| `docs/cli.md` | 1 | 1 | Defines stdout envelope, exit, fallback, and human-mode behavior. |
+| `mvp-embed-log-todo.md` | 1 | 1 | Marks JSON failure normalization complete. |
+| `skills/embed-log/SKILL.md` | 1 | 1 | Teaches agents to branch on stable error codes. |
