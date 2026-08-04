@@ -1599,3 +1599,41 @@ Future entries must include this per-file added/removed-line summary.
 | `docs/architecture.md` | 1 | 1 | Marks the frontend CoAP plugin as legacy config-v1 compatibility. |
 | `docs/configuration.md` | 16 | 1 | Documents `hex-coap` YAML and exact replacement/pass-through semantics. |
 | `mvp-embed-log-todo.md` | 9 | 8 | Records backend textual CoAP completion and separates legacy plugin cleanup. |
+
+## 2026-08-04 11:06:02 UTC / 2026-08-04 13:06:02 CEST (Warsaw)
+
+- **Commit:** `33893c3` — `Simplify browser to experiment viewing`
+- **Task:** Remove the built-in frontend CoAP plugin now replaced by backend `hex-coap`, reject stale configs with migration guidance, and apply YAGNI to remove browser Clear/New session/server-session-management controls while preserving external rotation continuity and focused viewing/export/TX behavior.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 11:06:02 UTC / 2026-08-04 13:06:02 CEST (+0200) (Warsaw)
+- **Validation:** formatting/diff checks — passed; `cargo test --locked --workspace` — passed (77 CLI, daemon/hex-CoAP/JSON/schema/sequence/TX/watch process tests, 218 core, 73 TUI); strict workspace Clippy — passed; Python SDK — 53 passed, 2 skipped; frontend units — 19 passed; required sequential browser E2E — 5 passed including absent management controls and external rotation continuity; sequential backend-CoAP/custom-plugin regression subset — 2 passed. One mistakenly parallel Playwright attempt raced the shared `.tmp` server config and was discarded; sequential reruns passed. Release build/package and packaged removed-plugin migration check — passed; packaged frontend source has no removed controls/plugin file.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`33893c3`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-core/src/config/loader.rs` | 30 | 0 | Rejects removed built-in CoAP plugin with parser migration guidance and tests. |
+| `crates/embed-log-core/src/runtime/server.rs` | 3 | 3 | Rewords remaining plugin data as optional custom compatibility. |
+| `crates/embed-log-core/src/session/exporter.rs` | 0 | 2 | Removes obsolete browser-management capabilities from static profiles. |
+| `crates/embed-log-tui/src/protocol.rs` | 4 | 4 | Uses a neutral custom plugin fixture instead of removed CoAP UI. |
+| `docs/architecture.md` | 4 | 23 | Replaces built-in plugin flow with backend parsing/custom compatibility description. |
+| `docs/configuration.md` | 1 | 1 | Documents removed-plugin migration failure. |
+| `frontend/export.js` | 1 | 1 | Removes dead sessions-menu cleanup. |
+| `frontend/index.html` | 0 | 2 | Removes Clear and New session buttons. |
+| `frontend/lines.js` | 1 | 12 | Removes browser clear action while keeping internal rotation clearing. |
+| `frontend/main.js` | 1 | 1 | Removes obsolete session capability comment. |
+| `frontend/plugin-hex-coap.js` | 0 | 342 | Deletes frontend protocol decoder. |
+| `frontend/profile.js` | 0 | 4 | Removes clear/session-management capability flags. |
+| `frontend/renderToolbar.js` | 0 | 2 | Removes Clear and New session static actions. |
+| `frontend/ui.js` | 1 | 295 | Removes server save/open/list/rotate session UI. |
+| `frontend/viewer.css` | 0 | 74 | Removes sessions popup styling. |
+| `frontend/ws.js` | 0 | 13 | Removes dead HTML-status UI callbacks while retaining rotation handling. |
+| `mvp-embed-log-todo.md` | 4 | 1 | Records viewer-focused browser policy and plugin removal. |
+| `tests-ui/config-regression.yml` | 6 | 9 | Migrates regression sources from pane plugins to backend parser. |
+| `tests-ui/regression-categories.mjs` | 0 | 1 | Removes deleted session-workflow suite. |
+| `tests-ui/regression-inventory.json` | 2 | 18 | Removes obsolete plugin/session UI inventory. |
+| `tests-ui/regression-tests/deterministic-demo-coap.spec.js` | 17 | 34 | Verifies backend-decoded CoAP text in the browser. |
+| `tests-ui/regression-tests/pane-plugin-coap.spec.js` | 0 | 249 | Deletes obsolete frontend decoder/settings/export scenarios. |
+| `tests-ui/regression-tests/session-workflows.spec.js` | 0 | 133 | Deletes removed browser session-management scenarios. |
+| `tests-ui/tests/rust-server.spec.js` | 4 | 0 | Verifies management controls stay absent. |
