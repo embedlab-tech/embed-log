@@ -24,7 +24,7 @@ The index advertises `schema_version`, `embed_log_version`, commands, interfaces
 
 Discovery is progressive and token-bounded: call bare `schema` first, then request only the relevant command. Static output contains no daemon state or machine-specific paths and can be cached by the pair `(schema_version, embed_log_version)`. Continue using `status --json` for current instances, sessions, sources, and write capabilities.
 
-`schema errors` deliberately reports `"coverage":"partial"`: TX/watch codes listed there are stable, while remaining ad hoc CLI errors will be converted during the JSON normalization milestone. `schema config` is a compact capability descriptor, not yet a formal JSON Schema document.
+`schema errors` reports `"coverage":"all_json_invocations"`. A failed invocation requesting JSON writes exactly one `{ "ok": false, "error": { "code", "message", "details" } }` document to stdout and exits nonzero; `COMMAND_FAILED` is the stable fallback when no narrower classification applies. Human-mode failures remain concise stderr text. `schema config` is a compact capability descriptor, not yet a formal JSON Schema document.
 
 Global options:
 

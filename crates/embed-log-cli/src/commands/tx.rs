@@ -15,6 +15,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 
 use super::daemon::{resolve_mutating_endpoint, InstanceRecord};
+use crate::output::report_json_failure;
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_CONTEXT: usize = 1_000;
@@ -318,12 +319,15 @@ fn expectation_timeout(
 ) -> Result<()> {
     let matcher = state.matcher.as_ref().expect("timeout requires matcher");
     let (kind, pattern) = matcher.description();
+    let message = format!(
+        "timed out after {:?} waiting for {} {:?} on source {:?}",
+        options.timeout, kind, pattern, options.source
+    );
     if options.json {
-        println!(
-            "{}",
-            serde_json::to_string(&json!({
-                "ok": false,
-                "code": "EXPECT_TIMEOUT",
+        return Err(report_json_failure(
+            "EXPECT_TIMEOUT",
+            message,
+            json!({
                 "instance": record.map(|record| record.instance.as_str()),
                 "endpoint": endpoint,
                 "session_id": session_id,
@@ -333,16 +337,10 @@ fn expectation_timeout(
                 "next_cursor": state.context.back().and_then(|entry| entry.get("sequence")).cloned(),
                 "context": state.context_json(),
                 "truncated": state.truncated(),
-            }))?
-        );
+            }),
+        ));
     }
-    anyhow::bail!(
-        "timed out after {:?} waiting for {} {:?} on source {:?}",
-        options.timeout,
-        kind,
-        pattern,
-        options.source
-    )
+    anyhow::bail!(message)
 }
 
 async fn send_json(

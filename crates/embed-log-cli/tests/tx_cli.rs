@@ -158,7 +158,9 @@ fn tx_line_raw_expect_timeout_and_persistence() {
         &["tx", "--source", "DUT_UART", "--line", "status", "--json"],
     );
     assert!(!implicit.status.success());
-    assert!(String::from_utf8_lossy(&implicit.stderr).contains("explicit target"));
+    assert!(implicit.stderr.is_empty());
+    let implicit_json: serde_json::Value = serde_json::from_slice(&implicit.stdout).unwrap();
+    assert_eq!(implicit_json["error"]["code"], "INSTANCE_REQUIRED");
     let non_writable = invoke(
         &runtime,
         &[
@@ -263,10 +265,21 @@ fn tx_line_raw_expect_timeout_and_persistence() {
     assert!(!timed_out.status.success());
     let timeout_json: serde_json::Value = serde_json::from_slice(&timed_out.stdout).unwrap();
     assert_eq!(timeout_json["ok"], false);
-    assert_eq!(timeout_json["code"], "EXPECT_TIMEOUT");
-    assert_eq!(timeout_json["bytes_written"], 8);
-    assert_eq!(timeout_json["expectation"]["matched"], false);
-    assert!(timeout_json["context"].as_array().unwrap().len() <= 2);
+    assert_eq!(timeout_json["error"]["code"], "EXPECT_TIMEOUT");
+    assert!(timeout_json["error"]["message"].as_str().is_some());
+    assert_eq!(timeout_json["error"]["details"]["bytes_written"], 8);
+    assert_eq!(
+        timeout_json["error"]["details"]["expectation"]["matched"],
+        false
+    );
+    assert!(
+        timeout_json["error"]["details"]["context"]
+            .as_array()
+            .unwrap()
+            .len()
+            <= 2
+    );
+    assert!(timed_out.stderr.is_empty());
 
     let tx_file = root.join("tx.bin");
     fs::write(&tx_file, b"FILE\0").unwrap();

@@ -212,9 +212,13 @@ fn watches_retain_matches_expire_timeout_and_remove() {
     );
     assert!(!expired.status.success());
     let expired_json: serde_json::Value = serde_json::from_slice(&expired.stdout).unwrap();
-    assert_eq!(expired_json["code"], "WATCH_EXPIRED");
-    assert_eq!(expired_json["watch"]["status"], "expired");
-    assert!(expired_json["watch"]["match"].is_null());
+    assert_eq!(expired_json["error"]["code"], "WATCH_EXPIRED");
+    assert_eq!(
+        expired_json["error"]["details"]["watch"]["status"],
+        "expired"
+    );
+    assert!(expired_json["error"]["details"]["watch"]["match"].is_null());
+    assert!(expired.stderr.is_empty());
 
     let pending = add_watch(&runtime, "--contains", "not emitted", "3s");
     let pending_id = pending["watch"]["id"].as_str().unwrap();
@@ -233,8 +237,11 @@ fn watches_retain_matches_expire_timeout_and_remove() {
     );
     assert!(!timed_out.status.success());
     let timed_out_json: serde_json::Value = serde_json::from_slice(&timed_out.stdout).unwrap();
-    assert_eq!(timed_out_json["code"], "WATCH_WAIT_TIMEOUT");
-    assert_eq!(timed_out_json["watch"]["status"], "active");
+    assert_eq!(timed_out_json["error"]["code"], "WATCH_WAIT_TIMEOUT");
+    assert_eq!(
+        timed_out_json["error"]["details"]["watch"]["status"],
+        "active"
+    );
 
     for id in [&watch_id, regex_id, expiring_id, pending_id] {
         let removed = invoke(
@@ -259,7 +266,7 @@ fn watches_retain_matches_expire_timeout_and_remove() {
     );
     assert!(!missing.status.success());
     let missing_json: serde_json::Value = serde_json::from_slice(&missing.stdout).unwrap();
-    assert_eq!(missing_json["code"], "WATCH_NOT_FOUND");
+    assert_eq!(missing_json["error"]["code"], "WATCH_NOT_FOUND");
 
     let session_id = waited_json["match"]["session_id"].as_str().unwrap();
     let events = fs::read_to_string(logs.join(session_id).join("events.jsonl")).unwrap();

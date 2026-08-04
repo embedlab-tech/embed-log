@@ -70,7 +70,7 @@ fn schema_discovers_capabilities_and_targeted_commands_without_runtime_state() {
     assert_eq!(split["output"]["next_cursor_on_match"], true);
 
     let errors = parse_success(&["schema", "errors"]);
-    assert_eq!(errors["coverage"], "partial");
+    assert_eq!(errors["coverage"], "all_json_invocations");
     let config = parse_success(&["schema", "config"]);
     assert_eq!(config["canonical_version"], 2);
 }
@@ -85,5 +85,11 @@ fn schema_pretty_is_valid_json_and_unknown_selector_fails_actionably() {
 
     let unknown = invoke(&["schema", "not-a-command"]);
     assert!(!unknown.status.success());
-    assert!(String::from_utf8_lossy(&unknown.stderr).contains("run `embed-log schema`"));
+    assert!(unknown.stderr.is_empty());
+    let failure: Value = serde_json::from_slice(&unknown.stdout).unwrap();
+    assert_eq!(failure["error"]["code"], "SCHEMA_SELECTOR_NOT_FOUND");
+    assert!(failure["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("run `embed-log schema`"));
 }

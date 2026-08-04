@@ -61,7 +61,7 @@ embed-log schema tx --pretty
 embed-log schema errors
 ```
 
-The compact JSON index is runtime-independent and cacheable by `schema_version` plus `embed_log_version`; query one command for details instead of loading the whole CLI contract.
+The compact JSON index is runtime-independent and cacheable by `schema_version` plus `embed_log_version`; query one command for details instead of loading the whole CLI contract. Failed invocations requesting JSON return one `{ok:false,error:{code,message,details}}` document on stdout and a nonzero exit status.
 
 Keep configured sources, including UART ownership, alive between experiments:
 

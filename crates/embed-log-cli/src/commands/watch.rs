@@ -13,6 +13,7 @@ use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 
 use super::daemon::{resolve_mutating_endpoint, InstanceRecord};
 use super::tx::parse_duration;
+use crate::output::report_json_failure;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
@@ -85,6 +86,14 @@ pub(crate) enum WatchCommand {
         #[arg(long)]
         json: bool,
     },
+}
+
+impl WatchCommand {
+    pub(crate) fn machine_output(&self) -> bool {
+        match self {
+            Self::Add { json, .. } | Self::Wait { json, .. } | Self::Remove { json, .. } => *json,
+        }
+    }
 }
 
 pub(crate) async fn cmd_watch(command: WatchCommand) -> Result<()> {
@@ -301,17 +310,16 @@ fn fail_wait(
     message: String,
 ) -> Result<()> {
     if output_json {
-        println!(
-            "{}",
-            serde_json::to_string(&json!({
-                "ok":false,
-                "code":code,
+        return Err(report_json_failure(
+            code,
+            message,
+            json!({
                 "instance":instance_name(record),
                 "endpoint":endpoint,
                 "watch_id":watch_id,
                 "watch":watch,
-            }))?
-        );
+            }),
+        ));
     }
     anyhow::bail!(message)
 }

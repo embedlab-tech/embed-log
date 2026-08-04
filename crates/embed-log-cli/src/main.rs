@@ -6,12 +6,14 @@
 
 mod commands;
 mod config;
+mod output;
 mod util;
 
 use std::path::PathBuf;
+use std::process::ExitCode;
 
 use anyhow::Result;
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 
 use commands::daemon::{cmd_start_daemon, cmd_status, cmd_stop};
 use commands::misc;
@@ -254,7 +256,7 @@ enum Command {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> ExitCode {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -262,8 +264,72 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    let cli = Cli::parse();
+    let args = std::env::args_os().collect::<Vec<_>>();
+    let json_hint =
+        args.iter().any(|arg| arg == "--json") || args.get(1).is_some_and(|arg| arg == "schema");
+    let cli = match Cli::try_parse_from(args) {
+        Ok(cli) => cli,
+        Err(error)
+            if matches!(
+                error.kind(),
+                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+            ) =>
+        {
+            let _ = error.print();
+            return ExitCode::SUCCESS;
+        }
+        Err(error) => {
+            if json_hint {
+                let _ = crate::output::report_json_failure(
+                    "CLI_USAGE",
+                    error.to_string(),
+                    serde_json::json!({"exit_code": error.exit_code()}),
+                );
+            } else {
+                let _ = error.print();
+            }
+            return ExitCode::from(2);
+        }
+    };
+    let machine_output = cli.machine_output();
+    match dispatch(cli).await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            if !crate::output::is_json_failure_reported(&error) {
+                if machine_output {
+                    let message = format!("{error:#}");
+                    let code = crate::output::generic_error_code(&message);
+                    let _ =
+                        crate::output::report_json_failure(code, message, serde_json::Value::Null);
+                } else {
+                    eprintln!("Error: {error:#}");
+                }
+            }
+            ExitCode::FAILURE
+        }
+    }
+}
 
+impl Cli {
+    fn machine_output(&self) -> bool {
+        match self.command.as_ref() {
+            Some(Command::Schema { .. }) => true,
+            Some(Command::Run { json, .. })
+            | Some(Command::Status { json, .. })
+            | Some(Command::Tx { json, .. })
+            | Some(Command::Stop { json, .. })
+            | Some(Command::Version { json, .. })
+            | Some(Command::Doctor { json, .. })
+            | Some(Command::Ports { json })
+            | Some(Command::Validate { json, .. }) => *json,
+            Some(Command::Watch { command }) => command.machine_output(),
+            Some(Command::Sessions { command }) => command.machine_output(),
+            Some(Command::Hello) | None => false,
+        }
+    }
+}
+
+async fn dispatch(cli: Cli) -> Result<()> {
     match cli.command {
         Some(Command::Run {
             serial_paths,

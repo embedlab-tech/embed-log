@@ -11,7 +11,7 @@ severity/pattern hits. Full reference: `docs/cli.md` in the embed-log repo.
 
 ## Discover capabilities instead of parsing help
 
-When the installed version is unknown, call `embed-log schema` once and cache the compact result by `schema_version` plus `embed_log_version`. Use a targeted query such as `embed-log schema sessions.read`, `embed-log schema tx`, or `embed-log schema errors` only when those details are needed. Use `status --json` separately for runtime sources and sessions. Never infer mutating targets from discovery output.
+When the installed version is unknown, call `embed-log schema` once and cache the compact result by `schema_version` plus `embed_log_version`. Use a targeted query such as `embed-log schema sessions.read`, `embed-log schema tx`, or `embed-log schema errors` only when those details are needed. Use `status --json` separately for runtime sources and sessions. Never infer mutating targets from discovery output. Failed JSON invocations return one `{ok:false,error:{code,message,details}}` document on stdout with a nonzero exit status; branch on `error.code`, not message text.
 
 ## Golden rule: never grep/cat the raw log files
 

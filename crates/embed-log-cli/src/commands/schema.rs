@@ -500,7 +500,7 @@ fn semantics(path: &str) -> Semantics {
             execution: "local",
             targeting: local,
             output: json!({"modes":["compact_json","pretty_json"],"stdout_documents":1}),
-            errors: &[],
+            errors: &["SCHEMA_SELECTOR_NOT_FOUND"],
             notes: &["schema output contains no runtime state and can be cached by schema_version and embed_log_version"],
         },
         _ => Semantics {
@@ -519,9 +519,20 @@ fn error_catalog() -> Value {
         "schema_version": SCHEMA_VERSION,
         "embed_log_version": env!("CARGO_PKG_VERSION"),
         "kind": "embed-log.errors",
-        "coverage": "partial",
-        "note": "These codes are currently stable. Other CLI failures remain human-readable until JSON error normalization is complete.",
+        "coverage": "all_json_invocations",
+        "contract": {"ok":false,"error":{"code":"<stable code>","message":"<human detail>","details":"<object or null>"}},
+        "note": "Every invocation requesting JSON emits one JSON failure document on stdout and exits nonzero. COMMAND_FAILED is the stable fallback when no narrower code applies.",
         "errors": [
+            {"code":"CLI_USAGE","commands":["*"],"meaning":"Clap rejected arguments for an invocation requesting JSON."},
+            {"code":"COMMAND_FAILED","commands":["*"],"meaning":"The command failed without a narrower stable classification."},
+            {"code":"CONFIG_NOT_FOUND","commands":["run","validate","doctor"],"meaning":"The selected configuration file does not exist."},
+            {"code":"INSTANCE_REQUIRED","commands":["stop","tx","watch.*","sessions.new"],"meaning":"A mutating command had no explicit daemon target."},
+            {"code":"INSTANCE_NOT_FOUND","commands":["status","stop","tx","watch.*","sessions.new"],"meaning":"The selected registered daemon instance does not exist."},
+            {"code":"SESSION_NOT_FOUND","commands":["sessions.*"],"meaning":"The selected offline session could not be resolved."},
+            {"code":"SOURCE_NOT_FOUND","commands":["tx","watch.add","sessions.read"],"meaning":"The selected source does not exist."},
+            {"code":"SOURCE_NOT_WRITABLE","commands":["tx"],"meaning":"The selected source cannot accept TX."},
+            {"code":"CURSOR_INVALID","commands":["sessions.read","sessions.around"],"meaning":"Stored sequence or requested cursor/context is invalid."},
+            {"code":"SCHEMA_SELECTOR_NOT_FOUND","commands":["schema"],"meaning":"The requested command or schema topic is unknown."},
             {"code":"EXPECT_TIMEOUT","commands":["tx"],"meaning":"No matching RX record arrived before the expectation deadline."},
             {"code":"WATCH_EXPIRED","commands":["watch.wait"],"meaning":"The server-side watch TTL elapsed before a match."},
             {"code":"WATCH_WAIT_TIMEOUT","commands":["watch.wait"],"meaning":"This wait invocation ended while the server-side watch remains active."},
@@ -602,9 +613,9 @@ mod tests {
     }
 
     #[test]
-    fn error_catalog_is_honest_about_partial_normalization() {
+    fn error_catalog_documents_normalized_json_failures() {
         let value = schema_value(Cli::command(), &["errors".into()]).unwrap();
-        assert_eq!(value["coverage"], "partial");
+        assert_eq!(value["coverage"], "all_json_invocations");
         assert!(value["errors"]
             .as_array()
             .unwrap()

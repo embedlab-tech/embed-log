@@ -354,7 +354,13 @@ fn global_sequence_bounded_reads_context_and_rotation() {
         ],
     );
     assert!(!invalid.status.success());
-    assert!(String::from_utf8_lossy(&invalid.stderr).contains("beyond the final sequence"));
+    assert!(invalid.stderr.is_empty());
+    let invalid_json: serde_json::Value = serde_json::from_slice(&invalid.stdout).unwrap();
+    assert_eq!(invalid_json["error"]["code"], "CURSOR_INVALID");
+    assert!(invalid_json["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("beyond the final sequence"));
 
     let rotated = invoke(
         &runtime,

@@ -285,6 +285,25 @@ pub(crate) enum SessionsCommand {
     },
 }
 
+impl SessionsCommand {
+    pub(crate) fn machine_output(&self) -> bool {
+        match self {
+            Self::New { json, .. }
+            | Self::List { json, .. }
+            | Self::Info { json, .. }
+            | Self::Events { json, .. }
+            | Self::Summary { json, .. } => *json,
+            Self::Read { json, format, .. } | Self::Around { json, format, .. } => {
+                *json || *format == ReadFormat::FullJson
+            }
+            Self::Open { .. }
+            | Self::Export { .. }
+            | Self::Combined { .. }
+            | Self::Search { .. } => false,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub(crate) enum ExportFormat {
     Html,

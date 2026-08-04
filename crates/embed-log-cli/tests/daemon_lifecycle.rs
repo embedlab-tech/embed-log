@@ -57,6 +57,12 @@ fn invoke(runtime: &Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
+fn json_failure(output: &Output) -> serde_json::Value {
+    assert!(!output.status.success());
+    assert!(output.stderr.is_empty());
+    serde_json::from_slice(&output.stdout).expect("structured JSON failure")
+}
+
 fn start(runtime: &Path, config: &Path, instance: &str, extra: &[&str]) -> Output {
     let mut args = vec![
         "run",
@@ -151,8 +157,10 @@ fn daemon_start_status_duplicate_and_graceful_stop() {
         &runtime,
         &["sessions", "new", "--title", "implicit mutation", "--json"],
     );
-    assert!(!implicit_rotation.status.success());
-    assert!(String::from_utf8_lossy(&implicit_rotation.stderr).contains("explicit target"));
+    assert_eq!(
+        json_failure(&implicit_rotation)["error"]["code"],
+        "INSTANCE_REQUIRED"
+    );
 
     let rotated = invoke(
         &runtime,
@@ -253,12 +261,17 @@ fn daemon_start_status_duplicate_and_graceful_stop() {
     )
     .unwrap();
     let changed_config = start(&runtime, &config, "bench-a", &["--port", &port]);
-    assert!(!changed_config.status.success());
-    assert!(String::from_utf8_lossy(&changed_config.stderr).contains("already running"));
+    let changed_failure = json_failure(&changed_config);
+    assert!(changed_failure["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("already running"));
 
     let implicit_stop = invoke(&runtime, &["stop", "--json"]);
-    assert!(!implicit_stop.status.success());
-    assert!(String::from_utf8_lossy(&implicit_stop.stderr).contains("explicit target"));
+    assert_eq!(
+        json_failure(&implicit_stop)["error"]["code"],
+        "INSTANCE_REQUIRED"
+    );
 
     let stopped = invoke(&runtime, &["stop", "--instance", "bench-a", "--json"]);
     assert!(
@@ -294,17 +307,18 @@ fn occupied_port_is_never_reassigned_and_foreground_bind_failure_exits() {
     fs::create_dir_all(&runtime).unwrap();
     fs::write(runtime.join("broken.json"), "not json").unwrap();
     let malformed = invoke(&runtime, &["status", "--json"]);
-    assert!(!malformed.status.success());
-    assert!(String::from_utf8_lossy(&malformed.stderr).contains("parse daemon registry"));
+    assert!(json_failure(&malformed)["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("parse daemon registry"));
     fs::remove_file(runtime.join("broken.json")).unwrap();
 
     let daemon = start(&runtime, &config, "bench-a", &["--port", &port]);
-    assert!(!daemon.status.success());
-    let daemon_error = String::from_utf8_lossy(&daemon.stderr);
-    assert!(
-        daemon_error.contains("unregistered process"),
-        "{daemon_error}"
-    );
+    let daemon_failure = json_failure(&daemon);
+    assert!(daemon_failure["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("unregistered process"));
     assert!(!runtime.join("bench-a.json").exists());
 
     let foreground = invoke(
@@ -341,8 +355,12 @@ fn multiple_instances_require_explicit_ports_and_selection() {
     let config_b = write_config(&root, "b", port_b);
 
     let missing_port = start(&runtime, &config_a, "missing-port", &[]);
-    assert!(!missing_port.status.success());
-    assert!(String::from_utf8_lossy(&missing_port.stderr).contains("--port"));
+    let missing_port_failure = json_failure(&missing_port);
+    assert_eq!(missing_port_failure["error"]["code"], "CLI_USAGE");
+    assert!(missing_port_failure["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("--port"));
 
     let port_a_text = port_a.to_string();
     let first = start(&runtime, &config_a, "bench-a", &["--port", &port_a_text]);
@@ -353,10 +371,10 @@ fn multiple_instances_require_explicit_ports_and_selection() {
     );
     let mut guard = DaemonGuard::new(&runtime, "bench-a");
     let same_endpoint = start(&runtime, &config_b, "bench-c", &["--port", &port_a_text]);
-    assert!(!same_endpoint.status.success());
-    assert!(
-        String::from_utf8_lossy(&same_endpoint.stderr).contains("owned by instance \"bench-a\"")
-    );
+    assert!(json_failure(&same_endpoint)["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("owned by instance \"bench-a\""));
 
     let port_b_text = port_b.to_string();
     let second = start(&runtime, &config_b, "bench-b", &["--port", &port_b_text]);
@@ -375,8 +393,8 @@ fn multiple_instances_require_explicit_ports_and_selection() {
     );
 
     let ambiguous = invoke(&runtime, &["status", "--json"]);
-    assert!(!ambiguous.status.success());
-    let error = String::from_utf8_lossy(&ambiguous.stderr);
+    let ambiguous_failure = json_failure(&ambiguous);
+    let error = ambiguous_failure["error"]["message"].as_str().unwrap();
     assert!(error.contains("multiple Embed-log instances"), "{error}");
     assert!(error.contains("bench-a"), "{error}");
     assert!(error.contains("bench-b"), "{error}");

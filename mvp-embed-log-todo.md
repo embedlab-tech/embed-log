@@ -673,6 +673,6 @@ Keep the LLM benchmark nightly or manual. Deterministic Rust, CLI, PTY, parser, 
 5. Add CLI UART TX and atomic `--expect`.
 6. Add durable temporary watches.
 7. Add global sequence, bounded read, and event context. **Done.**
-8. Add machine-readable schema discovery (**done**), then normalize remaining JSON output and errors.
+8. Add machine-readable schema discovery and normalize JSON failure output/errors. **Done.**
 9. Move frontend CoAP parsing into the backend and remove generic plugins.
 10. Add the Linux MVP integration harness and model benchmark.

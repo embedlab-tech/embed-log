@@ -13,7 +13,7 @@ embed-log schema tx
 embed-log schema errors
 ```
 
-Descriptors include actual arguments plus mutation, targeting, limits, output, and stable-error semantics. Cache them by `schema_version` and `embed_log_version`. The error catalog currently identifies its coverage as partial rather than advertising planned codes as implemented.
+Descriptors include actual arguments plus mutation, targeting, limits, output, and stable-error semantics. Cache them by `schema_version` and `embed_log_version`. Every invocation requesting JSON returns one structured failure document on stdout with a stable code and nonzero exit status; `COMMAND_FAILED` is the fallback when no narrower classification applies.
 
 ## Discover a running server
 
