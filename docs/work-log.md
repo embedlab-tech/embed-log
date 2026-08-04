@@ -1480,3 +1480,42 @@ Future entries must include this per-file added/removed-line summary.
 | `mvp-embed-log-todo.md` | 2 | 1 | Marks the temporary-watch milestone implemented. |
 | `sdk-control-api-summary.md` | 10 | 0 | Records the watch create/get/delete control protocol. |
 | `skills/embed-log/SKILL.md` | 11 | 0 | Teaches agents to use short-lived retained watches instead of streaming logs. |
+
+## 2026-08-04 09:23:16 UTC / 2026-08-04 11:23:16 CEST (Warsaw)
+
+- **Commit:** `ba2b38f` — `Add global sequence and bounded cursors`
+- **Task:** Add authoritative session-global ordering, sequence-bearing log/event/TX/watch streams, atomic rotation reset, bounded cursor reads, deterministic event/sequence context, and compact agent output with selectable relative/none/absolute time.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 09:23:16 UTC / 2026-08-04 11:23:16 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --workspace` plus final sequence/TX/watch focused reruns — passed (70 CLI unit tests, 3 daemon process tests, 1 sequence/cursor process test, 1 TX/PTY process test, 1 watch process test, 211 core tests, and 73 TUI tests); `cargo clippy --locked --workspace --all-targets -- -D warnings` — passed; `PYTHONPATH=sdk/python python3 -m pytest sdk/python/tests -q` — passed (53 tests, 2 skipped); `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (5 tests); `cargo build --locked --release` and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged functional checks verified multi-source sequence pagination, relative compact tuples, sequence context, and full JSON, followed by a final packaged CLI-surface check.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`ba2b38f`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 8 | 1 | Adds bounded cursor and selectable-time examples. |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 609 | 0 | Implements bounded read/around, pagination, validation, compact tuples/text, full JSON, event resolution, and time selection. |
+| `crates/embed-log-cli/src/commands/tx.rs` | 2 | 0 | Exposes matched/context sequence as the next cursor. |
+| `crates/embed-log-cli/src/commands/watch.rs` | 1 | 0 | Exposes retained match sequence as the next cursor. |
+| `crates/embed-log-cli/src/main.rs` | 29 | 0 | Adds parser coverage for read and around command surfaces. |
+| `crates/embed-log-cli/tests/daemon_lifecycle.rs` | 17 | 0 | Verifies sequence and source-local line reset on rotation. |
+| `crates/embed-log-cli/tests/sequence_cursor.rs` | 419 | 0 | Covers multi-source ordering, pagination, time modes, filtering, full JSON, sequence/event context, invalid cursors, and rotation. |
+| `crates/embed-log-cli/tests/tx_cli.rs` | 7 | 0 | Verifies TX expectations carry sequence and next cursor. |
+| `crates/embed-log-cli/tests/watch_cli.rs` | 2 | 1 | Verifies retained watch matches carry sequence and next cursor. |
+| `crates/embed-log-core/src/net/control_ws.rs` | 14 | 0 | Preserves sequence/session identity in control `log.entry` messages and tests. |
+| `crates/embed-log-core/src/net/watch.rs` | 1 | 3 | Retains the real event sequence instead of replacing it with null. |
+| `crates/embed-log-core/src/runtime/server.rs` | 156 | 9 | Serializes cross-source commits, assigns/publishes sequence, resets rotation state, and proves concurrent ordering. |
+| `crates/embed-log-core/src/session/manager.rs` | 26 | 7 | Owns per-session sequence allocation and atomic sequenced combined append. |
+| `crates/embed-log-tui/src/protocol.rs` | 10 | 0 | Accepts sequence and session identity on live logs/events. |
+| `docs/agent-capabilities.md` | 10 | 1 | Documents bounded cursor and timestamp-selection workflows. |
+| `docs/architecture.md` | 4 | 0 | Documents the serialized ordering invariant. |
+| `docs/cli.md` | 42 | 3 | Defines compact/full output, time modes, pagination, context, limits, and compatibility behavior. |
+| `frontend/kernel/logStore.js` | 3 | 0 | Retains sequence/session identity through lazy line hydration. |
+| `frontend/lines.js` | 2 | 0 | Stores sequence/session identity on hydrated browser lines. |
+| `frontend/ws.js` | 3 | 1 | Passes live sequence/session metadata into browser storage. |
+| `mvp-embed-log-todo.md` | 4 | 2 | Marks global sequence/cursor work complete and leaves atomic live replay as future work. |
+| `sdk/python/embed_log_sdk/models.py` | 9 | 0 | Adds optional sequence/session fields to log and event models. |
+| `sdk/python/tests/test_models.py` | 4 | 0 | Verifies Python log sequence/session parsing. |
+| `skills/embed-log/SKILL.md` | 10 | 3 | Teaches agents bounded cursor reads, exact context, and time selection. |
+| `tests-ui/unit/logStore.test.js` | 7 | 1 | Verifies browser hydration preserves global and local identity. |
