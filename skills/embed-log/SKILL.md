@@ -1,69 +1,57 @@
 ---
-description: Investigate firmware, hardware, UART, pytest, CoAP, and integration-test behavior with Embed-log. Use for both active capture and saved-session analysis.
+description: Investigate live firmware/test behavior and saved Embed-log sessions.
 ---
 
 # Embed-log investigation
 
-Use Embed-log CLI only; never open configured UARTs or read session files directly.
+Use Embed-log CLI only. Never open configured UARTs or read session files directly.
 
-## Evidence format
+## Evidence
 
-All log evidence must use this concise format:
+Use only `sessions summary`, `sessions read`, `sessions search`, and `sessions around` for log evidence. Keep evidence in this format:
 
 ```text
 +time seq=N src=SOURCE#INDEX | message
 ```
 
-Use only `sessions summary`, `sessions read`, `sessions search`, and `sessions around` for evidence. Do not request JSON for log-bearing commands.
+Do not use JSON for log-bearing commands. Do not dump complete logs. For an unfamiliar command, use `embed-log schema`.
 
 ## Workflow
 
 ```text
-identify session/source → establish cursor → act or wait → bounded read → around relevant sequence → conclude
+doctor → identify session/source → cursor → act/wait → read → around → conclude
 ```
 
-Discover unfamiliar commands with `embed-log schema`, never `--help`. Start with `embed-log doctor` to confirm the resolved config, endpoint, logs directory, and physical source names; it validates the YAML without opening UARTs.
-
-List and summarize before reading:
+Start with configuration and physical-source discovery:
 
 ```bash
-embed-log sessions list --dir "$LOGS_DIR" --limit 10
-embed-log sessions summary "$SESSION_ID" --dir "$LOGS_DIR"
+embed-log doctor
 ```
 
-Read incrementally after the last observed global sequence:
+Use bounded readers:
 
 ```bash
+embed-log sessions summary latest --dir "$LOGS_DIR"
 embed-log sessions read "$SESSION_ID" --dir "$LOGS_DIR" \
   --after "$CURSOR" --limit 100
-```
-
-Set `CURSOR` to the final printed `seq=N`. If 100 records are returned, immediately read again before waiting. For one source, add `--source SOURCE`; omit it for cross-source ordering.
-
-Search known evidence without scanning or dumping files:
-
-```bash
+# add --source "$SOURCE" for one physical source
 embed-log sessions search --dir "$LOGS_DIR" --session "$SESSION_ID" \
   --source SOURCE --contains "$TEXT" --limit 20
-```
-
-Get bounded cross-source context for evidence:
-
-```bash
 embed-log sessions around "$SESSION_ID" --dir "$LOGS_DIR" \
   --sequence "$SEQUENCE" --before 10 --after 20
 ```
 
+Set `CURSOR` to the final printed `seq=N`. If a read returns 100 records, read again immediately.
+
 ## Actions
 
-For active capture, start/reuse the project daemon, then identify its session and sources:
+For active capture, reuse the daemon or start it with the project config:
 
 ```bash
-embed-log run --daemon --instance NAME --config embed-log.yml
-embed-log status --instance NAME --brief
+embed-log run --daemon --instance NAME --config "$CONFIG"
 ```
 
-Send UART commands only through the daemon. Treat TX output as action acknowledgement; retrieve evidence afterward with `sessions read`:
+Send UART commands only through Embed-log, then read session evidence:
 
 ```bash
 embed-log tx --instance NAME --source SOURCE --line "$COMMAND"
@@ -71,8 +59,4 @@ sleep 1
 embed-log sessions read "$SESSION_ID" --dir "$LOGS_DIR" --after "$CURSOR" --limit 100
 ```
 
-Use `embed-log mark --instance NAME --action reset` for an external experiment boundary. Use `embed-log export --instance NAME` only when a durable HTML report is requested.
-
-Use JSON only for a separate orchestration step that must extract an ID, endpoint, or stable error code; never present its payload as log evidence.
-
-Report session/source IDs, action, sequence range, concise evidence, and uncertainty.
+Use JSON only to extract an ID, endpoint, or stable error code; never present it as log evidence.
