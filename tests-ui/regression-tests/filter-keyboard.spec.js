@@ -90,11 +90,29 @@ test.describe('filter and keyboard UX', () => {
         key: 'd', code: 'KeyD', bubbles: true, cancelable: true, repeat: true,
       });
       target.dispatchEvent(repeat);
+      const ordinary = new KeyboardEvent('keydown', {
+        key: 'd', code: 'KeyD', bubbles: true, cancelable: true, repeat: false,
+      });
+      target.dispatchEvent(ordinary);
       document.dispatchEvent(new KeyboardEvent('keyup', { key: 'd', code: 'KeyD', bubbles: true }));
-      return repeat.defaultPrevented;
+      return { repeat: repeat.defaultPrevented, ordinary: ordinary.defaultPrevented };
     });
-    expect(prevented).toBe(true);
+    expect(prevented).toEqual({ repeat: true, ordinary: true });
     await expect(input).toHaveValue('');
+  });
+
+  test('filter text selection remains highlighted after pointer release', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    const input = page.locator('.filter-input[data-pane="SENSOR_A"]');
+    await input.fill('select-me');
+    await input.selectText();
+    await expect.poll(async () => input.evaluate(el => [el.selectionStart, el.selectionEnd]))
+      .toEqual([0, 'select-me'.length]);
+    await page.waitForTimeout(1_100);
+    await expect(input).toBeFocused();
+    await expect.poll(async () => input.evaluate(el => [el.selectionStart, el.selectionEnd]))
+      .toEqual([0, 'select-me'.length]);
   });
 
   test('filter keeps focus and accepts keyboard input while logs arrive', async ({ page }) => {

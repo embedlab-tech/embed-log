@@ -1031,7 +1031,11 @@ document.addEventListener("pointermove", e => {
     _applySelection(_drag.paneId);
 });
 
-document.addEventListener("pointerup", () => {
+document.addEventListener("pointerup", e => {
+    if (isEditableTarget(e.target)) {
+        _drag = null;
+        return;
+    }
     if (_altSelection) {
         _altSelection = false;
         const text = window.getSelection()?.toString();
