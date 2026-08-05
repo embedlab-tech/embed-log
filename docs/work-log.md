@@ -2057,3 +2057,21 @@ Future entries must include this per-file added/removed-line summary.
 | `docs/cli.md` | 24 | 52 | Rewrites reader, lifecycle, TX, stats, and marker guidance. |
 | `skills/embed-log-live/SKILL.md` | 1 | 1 | Updates bounded reader usage. |
 | `skills/embed-log-recorded/SKILL.md` | 2 | 2 | Removes obsolete reader format/time options. |
+
+## 2026-08-05 13:33:41 UTC / 2026-08-05 15:33:41 CEST (Warsaw)
+
+- **Commit:** `c833425` — `Compact source indexes in reader text`
+- **Task:** Refine the concise reader format from `src=SOURCE idx=42` to the more compact and readable `src=SOURCE#42`, while retaining explicit sequence and structured JSON fields.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 13:33:41 UTC / 2026-08-05 15:33:41 CEST (+0200) (Warsaw)
+- **Validation:** focused CLI formatter unit test — passed; sequence/cursor integration test — passed; `cargo check -p embed-log-cli` — passed; `cargo fmt --all` — passed; `git diff --check` — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`c833425`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 1 | 1 | Updates the concise reader example. |
+| `crates/embed-log-cli/src/commands/schema.rs` | 2 | 2 | Updates discovery text for the source/index notation. |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 6 | 6 | Renders concise source-local indexes as `SOURCE#INDEX`. |
+| `docs/cli.md` | 2 | 2 | Updates CLI documentation and examples. |
