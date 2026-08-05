@@ -538,9 +538,9 @@ function _pendingCopyText(paneId) {
         const sel = state.selected[paneId];
         if (!sel?.size) return "";
         const indices = Array.from(sel).sort((a, b) => a - b);
-        return _formatSelectionBlock(paneId, indices, true) || "";
+        return _formatSelectionBlock(paneId, indices, true, state.timestampMode !== "hidden") || "";
     }
-    return _formatRangeRaw(_collectRangeEntries(paneId), true) || "";
+    return _formatRangeRaw(_collectRangeEntries(paneId), true, state.timestampMode !== "hidden") || "";
 }
 
 function _selectionMessageText(entry, useRendered = false) {
@@ -581,7 +581,7 @@ function _applyMarkerAnnotations(paneId, items) {
 }
 
 
-function _formatRangeRaw(entries, useRendered = false) {
+function _formatRangeRaw(entries, useRendered = false, includeTimestamp = true) {
     const parts = [];
     let currentPane = null;
     let paneItems = [];
@@ -595,7 +595,9 @@ function _formatRangeRaw(entries, useRendered = false) {
         if (e.paneId !== currentPane) flushPane();
         currentPane = e.paneId;
         const rawMessage = _selectionMessageText(e, useRendered);
-        const text = `[${e.line.ts}] [${e.paneId}] ${rawMessage}`;
+        const text = includeTimestamp
+            ? `[${e.line.ts}] [${e.paneId}] ${rawMessage}`
+            : `[${e.paneId}] ${rawMessage}`;
         paneItems.push({ idx: e.idx, text });
     });
     flushPane();
@@ -621,13 +623,15 @@ function _buildRangeLogData(entries) {
     return logData;
 }
 
-function _formatSelectionBlock(paneId, indices, useRendered = false) {
+function _formatSelectionBlock(paneId, indices, useRendered = false, includeTimestamp = true) {
     const items = indices
         .map(idx => {
             const line = _selectionLine(paneId, idx);
             if (!line) return null;
             const raw = useRendered ? _lineRenderedPlain(line) : _linePlain(line);
-            const text = `${line.ts}  [${paneId}] ${raw}`;
+            const text = includeTimestamp
+                ? `${line.ts}  [${paneId}] ${raw}`
+                : `[${paneId}] ${raw}`;
             return { idx, text };
         })
         .filter(Boolean);
@@ -682,7 +686,7 @@ function _copyExact(paneId) {
     const sel = state.selected[paneId];
     if (!sel.size) return;
     const indices = Array.from(sel).sort((a, b) => a - b);
-    const text = _formatSelectionBlock(paneId, indices, true);
+    const text = _formatSelectionBlock(paneId, indices, true, state.timestampMode !== "hidden");
     if (!text) return;
     _copyText(text).then(() => {
         const btn = document.getElementById("copy-" + paneId);
@@ -695,7 +699,7 @@ function _copyExact(paneId) {
 
 function _copyContext(paneId) {
     const entries = _collectRangeEntries(paneId);
-    const text = _formatRangeRaw(entries, true);
+    const text = _formatRangeRaw(entries, true, state.timestampMode !== "hidden");
     if (!text) return;
     _copyText(text).then(() => {
         const btn = document.getElementById("copy-" + paneId);
@@ -916,7 +920,7 @@ document.addEventListener("keydown", e => {
                 ? state.highlightedIdx[hlPane]
                 : parseInt(div?.dataset.idx, 10);
             if (Number.isFinite(idx)) {
-                const text = _formatSelectionBlock(hlPane, [idx], !!div);
+                const text = _formatSelectionBlock(hlPane, [idx], !!div, state.timestampMode !== "hidden");
                 if (text) { _copyText(text); e.preventDefault(); return; }
             }
         }

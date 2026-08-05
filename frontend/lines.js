@@ -896,10 +896,11 @@ export function reanalyzePanePlugins(paneId) {
     rerenderPane(paneId);
 }
 export function setTimestampMode(mode) {
-    const nextMode = mode === "relative" ? "relative" : "absolute";
+    const nextMode = mode === "relative" || mode === "hidden" ? mode : "absolute";
     if (state.timestampMode === nextMode) return;
 
     state.timestampMode = nextMode;
+    state.showTs = nextMode !== "hidden";
     state.syncTs = null;
     state.syncTabSwitch = false;
 
@@ -918,6 +919,7 @@ export function setTimestampMode(mode) {
     window.__embedLogUpdateTimestampModeUi?.();
 }
 export function canDisplayTimestampMode(mode) {
+    if (mode === "hidden") return true;
     for (const paneId of PANES) {
         const lines = state.rawLines[paneId] || [];
         for (const entry of lines) {

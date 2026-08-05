@@ -154,6 +154,9 @@ export function lineHasTimestampMode(line, mode) {
 
 export function applyTimestampModeToLine(line) {
     if (!line) return;
+    // No time is presentation-only: keep line.ts on the configured mode so
+    // clipboard/download/export metadata can still retain the timestamp.
+    if (state.timestampMode === "hidden") return;
     if (state.timestampMode === "relative" && line.relTs) {
         line.ts = line.relTs;
         line.numTs = Number.isFinite(line.relNum) ? line.relNum : 0;

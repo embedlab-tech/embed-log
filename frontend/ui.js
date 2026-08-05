@@ -25,27 +25,29 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Toolbar — timestamp mode toggle (switches between relative/absolute)
+// Toolbar — timestamp mode toggle (cycles absolute/relative/hidden)
 // ---------------------------------------------------------------------------
 (function () {
     const btn = document.getElementById("btn-timestamp-mode");
     if (!btn) return;
 
     function update() {
-        const current = state.timestampMode === "relative" ? "relative" : "absolute";
-        const other = current === "relative" ? "absolute" : "relative";
+        const current = state.timestampMode;
+        const next = current === "absolute" ? "relative" : current === "relative" ? "hidden" : "absolute";
         const hasLines = PANES.some(id => (state.rawLines[id] || []).length > 0);
-        const canSwitch = canDisplayTimestampMode(other) || !hasLines;
-        btn.textContent = current === "relative" ? "Relative" : "Absolute";
+        const canSwitch = canDisplayTimestampMode(next) || !hasLines;
+        btn.textContent = current === "hidden" ? "No time" : current === "relative" ? "Relative" : "Absolute";
         btn.title = canSwitch
-            ? `Switch timestamps to ${other}`
-            : `${other} timestamps are unavailable for the current data`;
+            ? `Switch timestamps to ${next === "hidden" ? "No time" : next}`
+            : `${next} timestamps are unavailable for the current data`;
         btn.disabled = !canSwitch;
         btn.classList.toggle("active", current === "relative");
     }
 
     btn.addEventListener("click", () => {
-        setTimestampMode(state.timestampMode === "relative" ? "absolute" : "relative");
+        const next = state.timestampMode === "absolute" ? "relative"
+            : state.timestampMode === "relative" ? "hidden" : "absolute";
+        setTimestampMode(next);
         update();
     });
 

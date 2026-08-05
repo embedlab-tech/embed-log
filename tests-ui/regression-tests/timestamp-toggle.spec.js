@@ -1,13 +1,14 @@
 import { expect, test } from '@playwright/test';
-import { collectPageErrors, waitForSourceTestLine } from './helpers.js';
+import { collectPageErrors, waitForRangePair, waitForSourceTestLine } from './helpers.js';
 
 // Feature: timestamp mode toggle — Live viewer toggles between absolute and relative timestamp formats
 //
 test.describe('timestamp mode toggle', () => {
   let errors;
 
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, context }) => {
     errors = collectPageErrors(page);
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   });
 
   test.afterEach(async () => {
@@ -38,5 +39,21 @@ test.describe('timestamp mode toggle', () => {
     await page.locator('#btn-timestamp-mode').click();
     await expect(page.locator('#btn-timestamp-mode')).toHaveText('Relative');
     await expect(firstTs).toHaveText(/^T\+\d+:\d{2}:\d{2}\.\d{3}$/);
+
+    await page.locator('#btn-timestamp-mode').click();
+    await expect(page.locator('#btn-timestamp-mode')).toHaveText('No time');
+    await expect(firstTs).toBeHidden();
+
+    const { start, end } = await waitForRangePair(page, 'SENSOR_A', 'kind=prefix-cleanup', 'kind=timestamp-cleanup');
+    await start.click();
+    await end.click({ modifiers: ['Shift'] });
+    await page.locator('#copy-SENSOR_A').click();
+    const copied = await page.evaluate(() => navigator.clipboard.readText());
+    expect(copied).toMatch(/^\[SENSOR_A\] /m);
+    expect(copied).not.toMatch(/T\+\d+:\d{2}:\d{2}\.\d{3}/);
+
+    await page.locator('#btn-timestamp-mode').click();
+    await expect(page.locator('#btn-timestamp-mode')).toHaveText('Absolute');
+    await expect(firstTs).toHaveText(/\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}/);
   });
 });

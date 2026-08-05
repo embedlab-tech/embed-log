@@ -114,7 +114,7 @@ export async function exportHtmlSnapshot(options = {}) {
             `window.__embedLogPluginScripts = ${_safeJson(pluginScripts)};\n` +
             `window.__embedLogInitialPanePluginUiState = ${_safeJson(panePluginUiState)};\n` +
             `window.__embedLogInitialThemeState = ${_safeJson(themeState)};\n` +
-            `window.__embedLogInitialTimestampMode = ${_safeJson(state.timestampMode)};\n` +
+            `window.__embedLogInitialTimestampMode = ${_safeJson(state.timestampMode === "hidden" ? state.sessionTimestampMode : state.timestampMode)};\n` +
             `window.__embedLogFirstLogAt = ${_safeJson(state.firstLogAt)};\n` +
             `window.__embedLogInitialFontSize = ${state.fontSize};`;
 
