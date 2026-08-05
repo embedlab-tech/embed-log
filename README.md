@@ -123,10 +123,10 @@ Then open:
 http://127.0.0.1:18080/
 ```
 
-Copy a relevant file from `config-samples/`, then validate and run it:
+Copy a relevant file from `config-samples/`, then diagnose and run it:
 
 ```bash
-cargo run --package embed-log-cli --bin embed-log -- validate --config embed-log.yml
+cargo run --package embed-log-cli --bin embed-log -- doctor --config embed-log.yml
 cargo run --package embed-log-cli --bin embed-log -- run --config embed-log.yml
 ```
 

@@ -63,7 +63,7 @@ Use a config for custom tabs, two-pane layouts, different source baud rates, par
 
 ```bash
 cp config-samples/single_uart_single_tab.yml embed-log.yml
-embed-log validate --config embed-log.yml
+embed-log doctor --config embed-log.yml
 embed-log run --config embed-log.yml
 ```
 
@@ -176,7 +176,6 @@ See the [README](../README.md#python-sdk), `sdk/python/`, and [CLI reference](cl
 Validate configs before lab runs:
 
 ```bash
-embed-log validate --config embed-log.yml
 embed-log doctor --config embed-log.yml
 ```
 

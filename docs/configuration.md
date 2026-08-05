@@ -213,4 +213,4 @@ A merge must reference at least two distinct existing sources and must not colli
 | `tabs[].panes` | `ui.tabs[].sources` |
 | frontend/pane plugins | omitted; protocol decoding moves to the backend |
 
-Use `embed-log validate --config embed-log.yml --json` to inspect the normalized configuration.
+Use `embed-log doctor --config embed-log.yml --json` to validate and inspect the resolved configuration, physical sources, endpoint, logs directory, and UART accessibility.

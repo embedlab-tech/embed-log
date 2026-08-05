@@ -512,7 +512,7 @@ fn semantics(path: &str) -> Semantics {
             errors: &[],
             notes: &[],
         },
-        "validate" | "version" | "doctor" | "ports" => Semantics {
+        "version" | "doctor" | "ports" => Semantics {
             mutates: false,
             execution: "local",
             targeting: local,
@@ -558,7 +558,7 @@ fn error_catalog() -> Value {
         "errors": [
             {"code":"CLI_USAGE","commands":["*"],"meaning":"Clap rejected arguments for an invocation requesting JSON."},
             {"code":"COMMAND_FAILED","commands":["*"],"meaning":"The command failed without a narrower stable classification."},
-            {"code":"CONFIG_NOT_FOUND","commands":["run","validate","doctor"],"meaning":"The selected configuration file does not exist."},
+            {"code":"CONFIG_NOT_FOUND","commands":["run","doctor"],"meaning":"The selected configuration file does not exist."},
             {"code":"INSTANCE_REQUIRED","commands":["export","stop","tx","watch.*","sessions.new"],"meaning":"A mutating command had no explicit daemon target."},
             {"code":"INSTANCE_NOT_FOUND","commands":["status","export","stop","tx","watch.*","sessions.new"],"meaning":"The selected registered daemon instance does not exist."},
             {"code":"SESSION_NOT_FOUND","commands":["sessions.*"],"meaning":"The selected offline session could not be resolved."},
@@ -587,7 +587,7 @@ fn config_capabilities() -> Value {
         "source_types": ["uart", "file", "udp"],
         "parser_types": ["text", "hex-coap", "slip-coap", "zephyr-dict"],
         "default_endpoint": "127.0.0.1:18080",
-        "validation_command": "embed-log validate --config <PATH> --json",
+        "diagnostic_command": "embed-log doctor --config <PATH> --json",
         "documentation": "docs/configuration.md",
         "note": "This is a compact capability descriptor, not a formal JSON Schema for YAML configuration."
     })

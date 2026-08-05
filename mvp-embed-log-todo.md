@@ -133,7 +133,6 @@ embed-log status
 embed-log stop
 embed-log doctor
 embed-log ports
-embed-log validate
 embed-log version
 
 embed-log sessions new

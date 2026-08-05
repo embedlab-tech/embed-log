@@ -22,7 +22,7 @@ Use only `sessions summary`, `sessions read`, `sessions search`, and `sessions a
 identify session/source → establish cursor → act or wait → bounded read → around relevant sequence → conclude
 ```
 
-Discover unfamiliar commands with `embed-log schema`, never `--help`.
+Discover unfamiliar commands with `embed-log schema`, never `--help`. Start with `embed-log doctor` to confirm the resolved config, endpoint, logs directory, and physical source names; it validates the YAML without opening UARTs.
 
 List and summarize before reading:
 

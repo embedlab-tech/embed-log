@@ -198,15 +198,6 @@ The original title is stored in `manifest.json` and returned by the session APIs
 
 Rotation broadcasts `session_rotated`; connected browser and TUI clients clear their old panes and continue on the new session. Foreground rotation exports the completed session HTML. Daemon rotation leaves raw artifacts only unless export is explicitly requested. Disconnecting the final browser never triggers an export.
 
-## Validate config
-
-```bash
-embed-log validate --config embed-log.yml
-embed-log validate --config embed-log.yml --json
-```
-
-Loads the config, runs validation, and prints the resolved server/log/source/tab summary.
-
 ## Diagnostics
 
 Version:
@@ -228,11 +219,11 @@ embed-log doctor --config embed-log.yml
 embed-log doctor --serial /dev/ttyUSB0
 ```
 
-`doctor` reports the binary version, host system info, and config resolution:
+`doctor` validates the resolved YAML and reports the binary version, host system info, and config resolution:
 - which OS / architecture the binary is running on
 - `config env: EMBED_LOG_CONFIG_YML_PATH=...` — shown whenever that env var is set, so you can tell why a given config got picked
 - `resolved config: <path>` — always shown; the exact config path `run` would load (`--config` → `EMBED_LOG_CONFIG_YML_PATH` → `embed-log.yml`), even if you didn't pass `--config` to `doctor` itself
-- config summary (sources and tabs) if the resolved config file exists and loads; a missing config is reported as normal, not a warning
+- resolved server endpoint, logs directory, and every configured physical source (name, type, parser, writability, source endpoint, and UART baud rate when applicable); UI tabs and virtual merges are intentionally omitted
 - configured UART paths, plus explicitly requested repeatable `--serial <path>` checks
 
 Serial checks only test filesystem-level readability/writability and never configure or reset an attached UART. A missing path or permission denial produces an actionable warning.

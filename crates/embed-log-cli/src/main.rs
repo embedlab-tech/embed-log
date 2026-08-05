@@ -309,16 +309,6 @@ enum Command {
     /// Print a greeting (smoke-test target)
     #[command(hide = true)]
     Hello,
-
-    /// Validate a config file and print the resolved runtime summary.
-    Validate {
-        /// YAML config file. Defaults to EMBED_LOG_CONFIG_YML_PATH, then embed-log.yml.
-        #[arg(short, long)]
-        config: Option<PathBuf>,
-        /// Machine-readable JSON output.
-        #[arg(long)]
-        json: bool,
-    },
 }
 
 #[tokio::main]
@@ -390,8 +380,7 @@ impl Cli {
             | Some(Command::Stop { json, .. })
             | Some(Command::Version { json, .. })
             | Some(Command::Doctor { json, .. })
-            | Some(Command::Ports { json })
-            | Some(Command::Validate { json, .. }) => *json,
+            | Some(Command::Ports { json }) => *json,
             Some(Command::Watch { command }) => command.machine_output(),
             Some(Command::Sessions { command }) => command.machine_output(),
             Some(Command::Hello) | None => false,
@@ -554,10 +543,6 @@ async fn dispatch(cli: Cli) -> Result<()> {
         Some(Command::Ports { json }) => misc::cmd_ports(json),
         Some(Command::Hello) => misc::cmd_hello(),
         Some(Command::Sessions { command }) => cmd_sessions(*command),
-        Some(Command::Validate { config, json }) => {
-            let path = crate::config::resolve_config_path(config.as_ref());
-            misc::cmd_validate(&path, json)
-        }
         None => {
             let open_browser = !cli.no_open_browser;
             cmd_run(
@@ -644,6 +629,7 @@ mod tests {
             ["embed-log", "update"].as_slice(),
             ["embed-log", "merge"].as_slice(),
             ["embed-log", "parse"].as_slice(),
+            ["embed-log", "validate"].as_slice(),
             ["embed-log", "sessions", "import"].as_slice(),
             ["embed-log", "sessions", "bundle"].as_slice(),
             ["embed-log", "sessions", "prune"].as_slice(),
@@ -818,18 +804,6 @@ mod tests {
         ] {
             Cli::parse_from(args);
         }
-    }
-
-    #[test]
-    fn validate_command_parses() {
-        Cli::parse_from(["embed-log", "validate"]);
-        Cli::parse_from([
-            "embed-log",
-            "validate",
-            "--json",
-            "--config",
-            "embed-log.yml",
-        ]);
     }
 
     #[test]

@@ -41,19 +41,6 @@ fn json_usage_and_runtime_failures_share_one_envelope() {
 
     assert_json_failure(invoke(&temp, &["tx", "--json"]), "CLI_USAGE");
     assert_json_failure(invoke(&temp, &["stop", "--json"]), "INSTANCE_REQUIRED");
-    assert_json_failure(
-        invoke(
-            &temp,
-            &[
-                "validate",
-                "--config",
-                temp.join("missing.yml").to_str().unwrap(),
-                "--json",
-            ],
-        ),
-        "CONFIG_NOT_FOUND",
-    );
-
     let human = invoke(&temp, &["stop"]);
     assert!(!human.status.success());
     assert!(human.stdout.is_empty());

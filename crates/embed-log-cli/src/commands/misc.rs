@@ -1,5 +1,5 @@
-//! The grab-bag of leaf subcommands: `version`, `doctor`, `validate`, `ports`,
-//! and `hello`. None of them start the server.
+//! The grab-bag of leaf subcommands: `version`, `doctor`, `ports`, and
+//! `hello`. None of them start the server.
 
 use std::path::Path;
 
@@ -75,81 +75,6 @@ fn version_report() -> serde_json::Value {
     })
 }
 
-/// `embed-log validate` — load/validate config and print resolved summary.
-pub(crate) fn cmd_validate(config_path: &Path, json: bool) -> Result<()> {
-    let cfg = load_config(config_path).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let logs_root = resolve_logs_root(config_path, &cfg.logs.dir);
-    let sources: Vec<_> = cfg
-        .sources
-        .iter()
-        .map(|s| {
-            serde_json::json!({
-                "name": s.name,
-                "label": s.label.as_deref().unwrap_or(&s.name),
-                "kind": s.source_type,
-                "parser": s.parser.parser_type,
-                "writable": s.source_type.eq_ignore_ascii_case("uart"),
-            })
-        })
-        .collect();
-    let tabs: Vec<_> = cfg
-        .tabs
-        .iter()
-        .map(|t| {
-            serde_json::json!({
-                "label": t.label,
-                "panes": t.panes.iter().map(|p| p.source_name()).collect::<Vec<_>>(),
-            })
-        })
-        .collect();
-
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "status": "ok",
-                "config": config_path.display().to_string(),
-                "server": {
-                    "host": cfg.server.host,
-                    "ws_port": cfg.server.ws_port,
-                    "app_name": cfg.server.app_name,
-                    "control_api": cfg.server.control_api,
-                },
-                "logs_root": logs_root.display().to_string(),
-                "sources": sources,
-                "tabs": tabs,
-            }))?
-        );
-    } else {
-        println!("config ok: {}", config_path.display());
-        println!(
-            "  server:   http://{}:{}",
-            cfg.server.host, cfg.server.ws_port
-        );
-        println!("  logs:     {}", logs_root.display());
-        println!("  sources:  {}", cfg.sources.len());
-        for source in &cfg.sources {
-            println!(
-                "    - {} [{}] label={}",
-                source.name,
-                source.source_type,
-                source.label.as_deref().unwrap_or(&source.name)
-            );
-        }
-        println!("  tabs:     {}", cfg.tabs.len());
-        for tab in &cfg.tabs {
-            let panes = tab
-                .panes
-                .iter()
-                .map(|p| p.source_name())
-                .collect::<Vec<_>>()
-                .join(", ");
-            println!("    - {}: {}", tab.label, panes);
-        }
-    }
-    Ok(())
-}
-
 /// `embed-log doctor` — environment/config/runtime diagnostics.
 pub(crate) fn cmd_doctor(
     config_path: Option<&Path>,
@@ -196,11 +121,27 @@ pub(crate) fn cmd_doctor(
         if let Some(path) = config.get("path").and_then(|v| v.as_str()) {
             println!("  config:   {path}");
         }
-        if let Some(sources) = config.get("sources").and_then(|v| v.as_u64()) {
-            println!("  sources:  {sources}");
+        if let Some(endpoint) = config.get("endpoint").and_then(|v| v.as_str()) {
+            println!("  endpoint: {endpoint}");
         }
-        if let Some(tabs) = config.get("tabs").and_then(|v| v.as_u64()) {
-            println!("  tabs:     {tabs}");
+        if let Some(logs_root) = config.get("logs_root").and_then(|v| v.as_str()) {
+            println!("  logs:     {logs_root}");
+        }
+        if let Some(sources) = config.get("sources").and_then(|v| v.as_array()) {
+            println!("  sources:  {} physical", sources.len());
+            for source in sources {
+                let name = source["name"].as_str().unwrap_or("?");
+                let kind = source["kind"].as_str().unwrap_or("?");
+                let parser = source["parser"].as_str().unwrap_or("?");
+                let writable = source["writable"].as_bool().unwrap_or(false);
+                let endpoint = source["endpoint"]
+                    .as_str()
+                    .map_or_else(|| source["endpoint"].to_string(), str::to_string);
+                let baud = source["baudrate"]
+                    .as_u64()
+                    .map_or_else(String::new, |baud| format!(" baud={baud}"));
+                println!("    - {name} [{kind}] parser={parser} writable={writable} endpoint={endpoint}{baud}");
+            }
         }
     }
     if let Some(error) = report.get("config_error").and_then(|v| v.as_str()) {
@@ -280,10 +221,24 @@ fn build_doctor_report_with_env_and_serial(
     if resolved_path.exists() {
         match load_config(&resolved_path) {
             Ok(cfg) => {
+                let sources = cfg.sources.iter().map(|source| {
+                    serde_json::json!({
+                        "name": source.name,
+                        "label": source.label.as_deref().unwrap_or(&source.name),
+                        "kind": source.source_type,
+                        "parser": source.parser.parser_type,
+                        "writable": source.source_type.eq_ignore_ascii_case("uart"),
+                        "endpoint": serde_json::to_value(&source.port).unwrap_or(serde_json::Value::Null),
+                        "baudrate": source.baudrate,
+                    })
+                }).collect::<Vec<_>>();
                 config_info = Some(serde_json::json!({
                     "path": resolved_path.display().to_string(),
-                    "sources": cfg.sources.len(),
-                    "tabs": cfg.tabs.len(),
+                    "valid": true,
+                    "endpoint": format!("http://{}:{}", cfg.server.host, cfg.server.ws_port),
+                    "logs_root": resolve_logs_root(&resolved_path, &cfg.logs.dir).display().to_string(),
+                    "control_api": cfg.server.control_api,
+                    "sources": sources,
                 }));
                 serial_paths.extend(cfg.sources.iter().filter_map(|source| {
                     source
@@ -484,6 +439,40 @@ mod tests {
         assert_eq!(report["resolved_config_path"], "/set/by/env.yml");
         assert_eq!(report["config_env"]["value"], "/set/by/env.yml");
         assert_eq!(report["config_env"]["var"], "EMBED_LOG_CONFIG_YML_PATH");
+    }
+
+    #[test]
+    fn doctor_reports_only_physical_configured_sources() {
+        let path = std::env::temp_dir().join(format!(
+            "embed-log-doctor-physical-sources-{}-{}.yml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(
+            &path,
+            "version: 2\nserver:\n  listen: 127.0.0.1:19100\nlogs:\n  dir: captures\nsources:\n  READER:\n    type: uart\n    path: /dev/ttyREADER\n    parser: { type: text }\n  MCU_LINK_TX:\n    type: udp\n    port: 6010\n    parser: { type: text }\nmerges:\n  - name: MCU_LINK\n    of: [MCU_LINK_TX, READER]\n",
+        )
+        .unwrap();
+        let report = build_doctor_report_with_env(Some(&path), None);
+        std::fs::remove_file(&path).ok();
+        assert_eq!(report["config"]["endpoint"], "http://127.0.0.1:19100");
+        assert_eq!(
+            report["config"]["logs_root"].as_str().unwrap(),
+            path.parent()
+                .unwrap()
+                .join("captures")
+                .display()
+                .to_string()
+        );
+        let sources = report["config"]["sources"].as_array().unwrap();
+        assert_eq!(sources.len(), 2);
+        assert!(sources
+            .iter()
+            .any(|source| source["name"] == "READER" && source["writable"] == true));
+        assert!(sources.iter().all(|source| source["name"] != "MCU_LINK"));
     }
 
     #[test]
