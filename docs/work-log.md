@@ -1910,3 +1910,19 @@ Future entries must include this per-file added/removed-line summary.
 | `tests-ui/regression-tests/filter-keyboard.spec.js` | 20 | 0 | Verifies filter typing and focus survive incoming live records. |
 | `tests-ui/regression-tests/helpers.js` | 3 | 1 | Ignores the known missing-favicon 404 in Edge console-error assertions. |
 | `tests-ui/tests/helpers.js` | 3 | 1 | Applies the same harmless 404 filtering to backend E2E assertions. |
+
+## 2026-08-05 09:49:02 UTC / 2026-08-05 11:49:02 CEST (Warsaw)
+
+- **Commit:** `d98c15c` — `Prevent Edge key repeat leaking into inputs`
+- **Task:** Address the reported Edge behavior where a key held before clicking a filter or Serial TX input can continue auto-repeating into the newly focused control. Track key origins and suppress only repeats that began outside editable controls, while preserving normal key holding after focus is already in an input.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 09:49:02 UTC / 2026-08-05 11:49:02 CEST (+0200) (Warsaw)
+- **Validation:** Edge keyboard regression — 6 passed; Chromium keyboard regression — 6 passed; frontend unit tests — 19 passed; Rust exporter tests — 5 passed; `cargo fmt --all -- --check` — passed; `git diff --check` — passed; release CLI/TUI rebuilt and installed atomically, installed CLI reports SHA `d98c15c`.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`d98c15c`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `frontend/keyboard.js` | 26 | 0 | Tracks key origins, suppresses only cross-focus auto-repeat, and clears state on keyup/window blur. |
+| `tests-ui/regression-tests/filter-keyboard.spec.js` | 20 | 0 | Reproduces a pre-focus key followed by a repeated key in Edge and verifies the input remains empty. |
