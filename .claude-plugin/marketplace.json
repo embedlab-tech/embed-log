@@ -8,7 +8,7 @@
     {
       "name": "embed-log",
       "source": ".",
-      "description": "Focused skills for live firmware/test debugging and retrospective Embed-log session analysis."
+      "description": "One concise skill for live firmware/test debugging and recorded-session analysis."
     }
   ]
 }

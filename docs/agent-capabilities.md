@@ -9,8 +9,7 @@ When no Embed-log integration is installed, load the concise version-matched gui
 Choose the guidance matching the task:
 
 ```bash
-embed-log skill live
-embed-log skill recorded
+embed-log skill
 ```
 
 Do not parse human `--help` output. After loading/caching the skill, use the compact runtime-independent capability index, then inspect only the command needed:
@@ -127,4 +126,4 @@ The server sends structured `log.entry` messages. Use temporary watches when a p
 - Remove temporary watches after investigation.
 - Use UART TX when relevant to a live investigation, but do not invent firmware commands; do not delete session data, export sensitive logs, or edit project configuration without explicit approval.
 
-The focused live and recorded skills are available from the repository and through `embed-log skill live|recorded`; use this document as the extended capability reference.
+The canonical investigation skill is available from the repository and through `embed-log skill`; use this document as the extended capability reference.

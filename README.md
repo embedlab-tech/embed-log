@@ -97,19 +97,18 @@ Concise reader output is `+12.453 seq=719 src=DUT_UART#428 | message`; use `--js
 The release binary embeds the canonical agent skill for zero-setup, version-matched discovery:
 
 ```bash
-embed-log skill live             # live capture and device interaction
-embed-log skill recorded         # saved-session investigation
-embed-log skill live --json      # version metadata plus Markdown content
+embed-log skill                  # canonical investigation workflow
+embed-log skill --json           # version metadata plus Markdown content
 ```
 
-The same focused skills are bundled as a [Claude Code](https://claude.com/claude-code) plugin. They separate live firmware/test reproduction from bounded saved-session analysis while preserving explicit daemon targeting and UART ownership. Install it once, in any Claude Code session:
+The same canonical investigation skill is bundled as a [Claude Code](https://claude.com/claude-code) plugin. It uses bounded session readers for both active capture and saved-session analysis while preserving explicit daemon targeting and UART ownership. Install it once, in any Claude Code session:
 
 ```
 /plugin marketplace add embedlab-tech/embed-log
 /plugin install embed-log@embed-log-tools
 ```
 
-It's then available in every project on your machine, not just this repo. Sources: `skills/embed-log-live/SKILL.md`, `skills/embed-log-recorded/SKILL.md`, and `.claude-plugin/`.
+It's then available in every project on your machine, not just this repo. Sources: `skills/embed-log/SKILL.md` and `.claude-plugin/`.
 
 ## Build from source
 

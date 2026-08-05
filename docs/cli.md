@@ -9,12 +9,11 @@ embed-log --help
 ## Embedded agent skill
 
 ```bash
-embed-log skill live
-embed-log skill recorded
-embed-log skill live --json
+embed-log skill
+embed-log skill --json
 ```
 
-`skill live` and `skill recorded` print the selected canonical skill embedded at build time, so an agent can load focused, version-matched guidance without locating this repository or installing a plugin. Raw Markdown is the token-efficient default. `--json` returns the selected skill name, `schema_version`, `embed_log_version`, `format`, and escaped `content` in one document. The command needs no config, daemon, network access, or machine-specific paths.
+`skill` prints the canonical investigation skill embedded at build time, so an agent can load version-matched guidance without locating this repository or installing a plugin. It uses concise session readers as the sole log-evidence interface for both active capture and saved-session analysis. Raw Markdown is the token-efficient default. `--json` returns the skill name, `schema_version`, `embed_log_version`, `format`, and escaped `content` in one document. The command needs no config, daemon, network access, or machine-specific paths.
 
 ## Machine-readable capability discovery
 

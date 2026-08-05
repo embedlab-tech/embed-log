@@ -21,7 +21,7 @@ use commands::misc;
 use commands::run::{cmd_run, cmd_run_quick, RunOverrides};
 use commands::schema::cmd_schema;
 use commands::sessions::{cmd_sessions, SessionsCommand};
-use commands::skill::{cmd_skill, SkillKind};
+use commands::skill::cmd_skill;
 use commands::tx::{cmd_tx, parse_duration, TxInput, TxOptions};
 use commands::watch::{cmd_watch, WatchCommand};
 
@@ -134,11 +134,8 @@ enum Command {
         pretty: bool,
     },
 
-    /// Print the version-matched agent skill embedded in this binary.
+    /// Print the version-matched investigation skill embedded in this binary.
     Skill {
-        /// Investigation mode whose guidance should be printed.
-        #[arg(value_enum)]
-        kind: SkillKind,
         /// Wrap the Markdown skill and version metadata in one JSON document.
         #[arg(long)]
         json: bool,
@@ -383,7 +380,7 @@ impl Cli {
     fn machine_output(&self) -> bool {
         match self.command.as_ref() {
             Some(Command::Schema { .. }) => true,
-            Some(Command::Skill { json, .. }) => *json,
+            Some(Command::Skill { json }) => *json,
             Some(Command::Run { json, .. })
             | Some(Command::Status { json, .. })
             | Some(Command::Stats { json, .. })
@@ -469,7 +466,7 @@ async fn dispatch(cli: Cli) -> Result<()> {
             json: _,
             pretty,
         }) => cmd_schema(Cli::command(), &selector, pretty),
-        Some(Command::Skill { kind, json }) => cmd_skill(kind, json),
+        Some(Command::Skill { json }) => cmd_skill(json),
         Some(Command::Status {
             instance,
             url,
@@ -803,10 +800,10 @@ mod tests {
     }
 
     #[test]
-    fn skill_command_accepts_modes_and_raw_or_json_output() {
-        Cli::parse_from(["embed-log", "skill", "live"]);
-        Cli::parse_from(["embed-log", "skill", "recorded", "--json"]);
-        assert!(Cli::try_parse_from(["embed-log", "skill"]).is_err());
+    fn skill_command_accepts_raw_or_json_output() {
+        Cli::parse_from(["embed-log", "skill"]);
+        Cli::parse_from(["embed-log", "skill", "--json"]);
+        assert!(Cli::try_parse_from(["embed-log", "skill", "live"]).is_err());
     }
 
     #[test]

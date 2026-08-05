@@ -1,6 +1,6 @@
 {
   "name": "embed-log",
-  "description": "Debug live firmware and test behavior or investigate saved sessions through focused Embed-log CLI skills.",
+  "description": "Investigate live firmware, tests, and saved sessions through one concise Embed-log CLI skill.",
   "version": "0.1.0",
   "author": {
     "name": "krezolekcoder"

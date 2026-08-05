@@ -78,8 +78,7 @@ fn capability_index(root: &Command) -> Value {
             "watch_ttl_max": "24h"
         },
         "agent_skills": {
-            "live": "embed-log skill live",
-            "recorded": "embed-log skill recorded"
+            "investigation": "embed-log skill"
         },
         "discovery": {
             "command": "embed-log schema <command>",
@@ -372,7 +371,7 @@ fn semantics(path: &str) -> Semantics {
     });
     let json_or_text = json!({"modes":["text","json"]});
     let compact_cursor = json!({
-        "modes":["text","compact_json","full_json"],
+        "modes":["text","json"],
         "default_time":"relative",
         "cursor":"sequence",
         "next_cursor":"next_cursor",
