@@ -150,6 +150,30 @@ body {
 }
 .btn-live.behind:hover { filter: brightness(1.05); }
 
+/* On narrow windows keep the toolbar a single controlled row. Horizontal
+   scrolling is preferable to auto-placement creating an orphan Options/
+   Settings button on a second grid row. */
+@media (max-width: 900px) {
+    #toolbar {
+        display: flex;
+        gap: 8px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: thin;
+    }
+    #toolbar > .toolbar-left,
+    #toolbar > .toolbar-right,
+    #toolbar > .btn-live {
+        flex: 0 0 auto;
+    }
+    #toolbar > .btn-live {
+        margin-inline: auto;
+    }
+    .toolbar-group {
+        min-width: max-content;
+    }
+}
+
 #toolbar .app-name {
     font-weight: 700;
     color: var(--accent);

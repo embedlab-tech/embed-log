@@ -214,6 +214,16 @@ test.describe('HTML export replay', () => {
       expect(settingsBox.y).toBeGreaterThanOrEqual(toolbarBox.y);
       expect(settingsBox.y + settingsBox.height).toBeLessThanOrEqual(toolbarBox.y + toolbarBox.height);
 
+      await exported.setViewportSize({ width: 700, height: 600 });
+      const narrowToolbarBox = await exported.locator('#toolbar').boundingBox();
+      const narrowTops = await exported.locator('#toolbar > button, #toolbar .toolbar-left > button, #toolbar .toolbar-right > button').evaluateAll(buttons => {
+        return buttons.filter(button => getComputedStyle(button).display !== 'none')
+          .map(button => Math.round(button.getBoundingClientRect().top));
+      });
+      expect(narrowToolbarBox).toBeTruthy();
+      expect(narrowTops.length).toBeGreaterThan(0);
+      expect(Math.max(...narrowTops) - Math.min(...narrowTops)).toBeLessThanOrEqual(1);
+
       await exported.locator('#btn-unwrap').click();
       await expect(exported.locator('#btn-unwrap')).toHaveClass(/active/);
       await expect(exported.locator('#tab-bar .tab-btn')).toHaveText(['DEVICE_A-DevA', 'HOST-DevA', 'AUX-DevB', 'PYTEST-PYTEST', 'CoAP-CoAP', 'DUT-UART', 'DEBUG-UART']);
