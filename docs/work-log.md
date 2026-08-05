@@ -2112,3 +2112,30 @@ Future entries must include this per-file added/removed-line summary.
 | `docs/cli.md` | 1 | 1 | Documents concise real-time TX response output. |
 | `skills/embed-log-live/SKILL.md` | 4 | 3 | Removes default TX JSON and mandates canonical text for live log evidence. |
 | `skills/embed-log-recorded/SKILL.md` | 2 | 1 | Mandates canonical text for recorded log evidence. |
+
+## 2026-08-05 14:06:01 UTC / 2026-08-05 16:06:01 CEST (Warsaw)
+
+- **Commit:** `cbf1d82` — `Consolidate agent guidance into one skill`
+- **Task:** Replace the separate live and recorded agent skills with one concise `embed-log` investigation skill. The skill uses session summary/read/search/around as the sole evidence interfaces, promotes the canonical concise log format, omits watch functionality, and describes daemon/TX/marker/export capabilities only as minimal actions. Simplify the embedded `embed-log skill` CLI surface accordingly.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 14:06:01 UTC / 2026-08-05 16:06:01 CEST (+0200) (Warsaw)
+- **Validation:** `cargo test --locked -p embed-log-cli --test skill_cli --test schema_cli` — 4 passed; `cargo test --locked -p embed-log-cli --bin embed-log tests::skill_command_accepts_raw_or_json_output -- --nocapture` — passed; `cargo check -p embed-log-cli` — passed; `cargo fmt --all` — passed; `git diff --check` — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`cbf1d82`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.claude-plugin/marketplace.json` | 1 | 1 | Describes the single investigation skill. |
+| `.claude-plugin/plugin.json` | 1 | 1 | Describes the single investigation skill. |
+| `README.md` | 4 | 5 | Documents `embed-log skill` and the consolidated plugin. |
+| `crates/embed-log-cli/src/commands/schema.rs` | 2 | 3 | Advertises one investigation skill and current reader modes. |
+| `crates/embed-log-cli/src/commands/skill.rs` | 11 | 46 | Embeds and serves one canonical skill. |
+| `crates/embed-log-cli/src/main.rs` | 8 | 11 | Removes the skill-mode argument. |
+| `crates/embed-log-cli/tests/schema_cli.rs` | 1 | 5 | Verifies one advertised skill. |
+| `crates/embed-log-cli/tests/skill_cli.rs` | 30 | 30 | Verifies `skill`/`skill --json` and rejects removed modes. |
+| `docs/agent-capabilities.md` | 2 | 3 | References the consolidated skill. |
+| `docs/cli.md` | 3 | 4 | Documents the simplified skill command. |
+| `skills/embed-log-live/SKILL.md` | 0 | 84 | Removes superseded live-specific guidance. |
+| `skills/embed-log-recorded/SKILL.md` | 0 | 70 | Removes superseded recorded-specific guidance. |
+| `skills/embed-log/SKILL.md` | 78 | 0 | Adds concise session-reader-first investigation guidance. |
