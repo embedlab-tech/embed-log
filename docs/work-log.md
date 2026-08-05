@@ -2029,3 +2029,31 @@ Future entries must include this per-file added/removed-line summary.
 | --- | ---: | ---: | --- |
 | `frontend/viewer.css` | 24 | 0 | Adds a narrow single-row, horizontal-overflow toolbar layout. |
 | `tests-ui/regression-tests/export-replay.spec.js` | 10 | 0 | Verifies exported Settings remains inside the toolbar at a 700px viewport. |
+
+## 2026-08-05 13:09:40 UTC / 2026-08-05 15:09:40 CEST (Warsaw)
+
+- **Commit:** `913322c` — `Simplify agent session workflows`
+- **Task:** Establish the agent-focused CLI defaults and reliability improvements: reduce `sessions read`, `around`, and `search` to concise text or one compact `--json` envelope; add daemon registration repair/adoption and URL-targeted stop; add repeated UART TX and prompt-bounded response capture; add concise/source-filtered status and separate statistics; expose source rate/pressure/gap/drop telemetry fields; and add persisted external timeline markers while preserving HTML/session exports.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 13:09:40 UTC / 2026-08-05 15:09:40 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all` — passed; `cargo test --locked -p embed-log-core --lib` — 185 passed; `cargo test --locked -p embed-log-cli -- --nocapture` — passed (82 unit tests plus all CLI integration suites); `cargo check -p embed-log-cli` — passed; `git diff --check` — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`913322c`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 4 | 2 | Updates agent reader examples and documents the two reader modes. |
+| `crates/embed-log-cli/src/commands/daemon.rs` | 131 | 11 | Adds URL stop, live-record adoption, concise status/stats, and timeline marker commands. |
+| `crates/embed-log-cli/src/commands/schema.rs` | 13 | 5 | Advertises the simplified readers, stats, and lifecycle semantics. |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 69 | 122 | Replaces reader format variants with concise text and fixed tuple envelopes. |
+| `crates/embed-log-cli/src/commands/tx.rs` | 31 | 7 | Adds prompt termination and repeated TX count/interval handling. |
+| `crates/embed-log-cli/src/main.rs` | 86 | 6 | Adds Mark/Stats commands and new TX/status/stop options. |
+| `crates/embed-log-cli/tests/hex_coap_cli.rs` | 2 | 3 | Migrates reader assertions to the structured tuple envelope. |
+| `crates/embed-log-cli/tests/sequence_cursor.rs` | 13 | 47 | Covers the new reader fields and concise text shape. |
+| `crates/embed-log-cli/tests/virtual_merge_cli.rs` | 7 | 11 | Migrates virtual-merge reader coverage to the new envelope. |
+| `crates/embed-log-core/src/net/ws_server.rs` | 98 | 3 | Adds timeline marker API, session/process stats separation, and source telemetry fields. |
+| `crates/embed-log-core/src/session/manager.rs` | 5 | 0 | Exposes current-session record count for statistics. |
+| `docs/cli.md` | 24 | 52 | Rewrites reader, lifecycle, TX, stats, and marker guidance. |
+| `skills/embed-log-live/SKILL.md` | 1 | 1 | Updates bounded reader usage. |
+| `skills/embed-log-recorded/SKILL.md` | 2 | 2 | Removes obsolete reader format/time options. |
