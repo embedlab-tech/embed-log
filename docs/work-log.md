@@ -1832,3 +1832,39 @@ Future entries must include this per-file added/removed-line summary.
 | `frontend/ws.js` | 18 | 7 | Projects live/replayed physical messages into browser virtual panes. |
 | `sdk/python/embed_log_sdk/models.py` | 1 | 1 | Recognizes merge as a presentation-only discovered source type. |
 | `skills/embed-log-recorded/SKILL.md` | 1 | 0 | Guides agents to use virtual source filters without duplicate legacy records. |
+
+## 2026-08-05 07:48:26 UTC / 2026-08-05 09:48:26 CEST (Warsaw)
+
+- **Commit:** `1084b95` — `Unify and harden session HTML exports`
+- **Task:** Make browser, daemon/TUI, active CLI, and recorded-session CLI full-session exports use one canonical Rust HTML renderer; serialize competing producers, publish HTML/metadata atomically, derive new reports from complete `combined.jsonl` records, preserve the previous complete report on failure, and make the browser download the exact file saved in the session directory.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 07:48:26 UTC / 2026-08-05 09:48:26 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` — passed; `cargo test --locked --workspace` — passed (82 CLI unit tests, 14 CLI integration tests, 185 core tests, and 60 TUI tests); `npm run test:unit --prefix tests-ui` — 19 passed; `npm run test:regression --prefix tests-ui` — 50 passed, 4 intentionally skipped; `npm run test:e2e --prefix tests-ui -- --workers=1` — 5 passed; `cd sdk/python && python3 -m pytest tests/test_client.py tests/test_config.py tests/test_e2e.py tests/test_models.py -q` — 34 passed; `cargo build --locked --workspace --release` — passed; atomically installed CLI/TUI, verified installed version 1.2.1 at `1084b95`, export schema, and matching release/installed SHA-256 hashes.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`1084b95`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `Cargo.lock` | 11 | 0 | Locks the advisory file-lock dependency. |
+| `Cargo.toml` | 1 | 0 | Adds the shared `fs2` dependency. |
+| `README.md` | 3 | 0 | Documents canonical active/browser/recorded export behavior. |
+| `crates/embed-log-cli/src/commands/daemon.rs` | 19 | 3 | Adds a long-timeout daemon request helper for HTML generation. |
+| `crates/embed-log-cli/src/commands/export.rs` | 54 | 0 | Implements `embed-log export` for active daemon sessions. |
+| `crates/embed-log-cli/src/commands/mod.rs` | 1 | 0 | Registers the active export command module. |
+| `crates/embed-log-cli/src/commands/schema.rs` | 13 | 2 | Advertises active export targeting, mutation, and atomic semantics. |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 69 | 3 | Refreshes reports on open and atomically records successful offline canonical exports. |
+| `crates/embed-log-cli/src/main.rs` | 35 | 0 | Adds and tests the top-level active export CLI surface. |
+| `crates/embed-log-cli/tests/virtual_merge_cli.rs` | 26 | 6 | Proves daemon and recorded CLI exports are byte-identical for one snapshot. |
+| `crates/embed-log-core/Cargo.toml` | 1 | 0 | Enables cross-process advisory export locking. |
+| `crates/embed-log-core/src/net/ws_server.rs` | 77 | 8 | Runs exports off the async hot path and serves exact published HTML bytes in one POST. |
+| `crates/embed-log-core/src/runtime/server.rs` | 13 | 53 | Removes mtime freshness shortcuts and always uses the canonical atomic exporter. |
+| `crates/embed-log-core/src/session/exporter.rs` | 213 | 67 | Reads complete canonical JSONL, validates output, serializes producers, atomically publishes, and preserves old HTML on failure. |
+| `crates/embed-log-core/src/session/manager.rs` | 34 | 3 | Atomically writes manifests and markers. |
+| `docs/architecture.md` | 5 | 4 | Documents lock, atomic publication, exact download, and failure behavior. |
+| `docs/cli.md` | 16 | 2 | Documents active and post-factum canonical export commands. |
+| `frontend/export.js` | 42 | 5 | Delegates full-session export to one server POST while retaining selection-only snapshots. |
+| `frontend/renderPane.js` | 1 | 1 | Removes stale Python exporter terminology. |
+| `skills/embed-log-live/SKILL.md` | 2 | 0 | Guides agents to the active canonical export command. |
+| `tests-ui/regression-tests/export-replay.spec.js` | 23 | 4 | Verifies downloaded bytes equal session HTML and replaces obsolete merge-command fixture generation. |
+| `tests-ui/regression-tests/relative-time-replay.spec.js` | 24 | 14 | Migrates static replay fixtures to recorded-session export. |
