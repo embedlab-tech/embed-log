@@ -1957,3 +1957,22 @@ Future entries must include this per-file added/removed-line summary.
 | File | Added | Removed | Summary |
 | --- | ---: | ---: | --- |
 | `frontend/keyboard.js` | 7 | 7 | Blocks ordinary as well as repeat keydowns after a key-origin focus handoff. |
+
+## 2026-08-05 10:40:01 UTC / 2026-08-05 12:40:01 CEST (Warsaw)
+
+- **Commit:** `d5d568e` — `Simplify browser selection actions`
+- **Task:** Remove browser selection Full/Compact format controls and state, make clipboard selection always use Full formatting, remove the selection-bar Add note creation flow and its CSS, and retain marker rendering/navigation through the control protocol.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 10:40:01 UTC / 2026-08-05 12:40:01 CEST (+0200) (Warsaw)
+- **Validation:** `node --check frontend/selection.js` and `node --check frontend/state.js` — passed; `cargo fmt --all -- --check` — passed; `cargo test --locked -p embed-log-core session::exporter --lib` — 5 passed; `git diff --check` — passed; backend browser E2E — 10 passed across Chromium and Edge. The focused regression selection/marker tests could not receive traffic because the existing live daemon occupied the regression fixture UDP ports; failures were fixture startup/traffic failures before assertions, not frontend assertion failures.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`d5d568e`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `frontend/selection.js` | 5 | 201 | Removes browser copy-format controls/state and selection Add note creation while retaining marker rendering and Full clipboard formatting. |
+| `frontend/state.js` | 0 | 1 | Removes obsolete browser copy-format state. |
+| `frontend/viewer.css` | 0 | 89 | Removes format-toggle and marker-input-overlay styling. |
+| `tests-ui/regression-tests/copy-format.spec.js` | 9 | 44 | Replaces Compact behavior coverage with Full-only and absent-control assertions. |
+| `tests-ui/regression-tests/demo-smoke.spec.js` | 15 | 15 | Creates the marker through the control protocol now that browser selection no longer exposes Add note. |
