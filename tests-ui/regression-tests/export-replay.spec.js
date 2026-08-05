@@ -207,6 +207,12 @@ test.describe('HTML export replay', () => {
       await expect(exported.locator('#btn-unwrap')).toBeVisible();
       await expect(exported.locator('#btn-theme')).toBeVisible();
       await expect(exported.locator('#btn-settings')).toBeVisible();
+      const toolbarBox = await exported.locator('#toolbar').boundingBox();
+      const settingsBox = await exported.locator('#btn-settings').boundingBox();
+      expect(toolbarBox).toBeTruthy();
+      expect(settingsBox).toBeTruthy();
+      expect(settingsBox.y).toBeGreaterThanOrEqual(toolbarBox.y);
+      expect(settingsBox.y + settingsBox.height).toBeLessThanOrEqual(toolbarBox.y + toolbarBox.height);
 
       await exported.locator('#btn-unwrap').click();
       await expect(exported.locator('#btn-unwrap')).toHaveClass(/active/);
