@@ -82,7 +82,7 @@ embed-log stop --instance bench-a --json
 Each titled session rotation keeps source tasks and UART ownership alive while the browser and TUI switch to the new experiment. `tx --expect` subscribes before writing, then returns only the matching RX entry and bounded live context. Temporary server-side watches retain a match even when it occurs before `watch wait` starts. Every new-session record also has a global sequence cursor, enabling bounded retrieval such as:
 
 ```bash
-embed-log sessions read latest --after 100 --limit 50 --json
+embed-log sessions read latest --after 100 --limit 50
 embed-log sessions around latest --sequence 119 --before 5 --after 10
 ```
 
@@ -90,7 +90,7 @@ The browser full-session Export button and `embed-log export` both atomically pu
 
 Session readers use concise text by default (`+0.123 seq=1234 src=UART#42 | message`) or one compact structured envelope with `--json`.
 
-Compact text defaults to `T+00:12.453 719 DUT_UART#428 boot complete`; choose `--time none` for minimum tokens or `--time absolute` for external correlation. Daemon startup requires explicit `--config` and `--instance`; its endpoint comes from `server.listen` unless `--host` or `--port` overrides it. It never selects another port. Repeating the same request reuses the verified running instance. Mutating commands require `--instance`, `EMBED_LOG_INSTANCE`, or an explicit URL. Daemon shutdown skips automatic HTML export by default; foreground modes retain it.
+Concise reader output is `+12.453 seq=719 src=DUT_UART#428 | message`; use `--json` only when a script needs tuple fields or cursor metadata. Daemon startup requires explicit `--config` and `--instance`; its endpoint comes from `server.listen` unless `--host` or `--port` overrides it. It never selects another port. Repeating the same request reuses the verified running instance. Mutating commands require `--instance`, `EMBED_LOG_INSTANCE`, or an explicit URL. Daemon shutdown skips automatic HTML export by default; foreground modes retain it.
 
 ## Claude Code plugin
 

@@ -50,14 +50,14 @@ For sessions with global sequences, use bounded cursor reads:
 
 ```bash
 embed-log sessions read "$SESSION_ID" --dir "$LOGS_DIR" \
-  --after "$CURSOR" --limit 100 --json
+  --after "$CURSOR" --limit 100
 ```
 
-Continue from `next_cursor` only while `truncated` is true. `sequence` is session-global; `source_id + line_idx` is source-local. Retrieve deterministic cross-source context around relevant evidence:
+Continue from `next_cursor` only while `truncated` is true. Use default concise text for reasoning; add `--json` only when a script needs tuple fields or cursor metadata. `sequence` is session-global; `source_id + line_idx` is source-local. Retrieve deterministic cross-source context around relevant evidence:
 
 ```bash
 embed-log sessions around "$SESSION_ID" --dir "$LOGS_DIR" \
-  --sequence "$SEQUENCE" --before 10 --after 20 --json
+  --sequence "$SEQUENCE" --before 10 --after 20
 ```
 
 When comparing runs, summarize both first and retrieve context around the first meaningful divergence rather than reading both sessions completely. Use `sessions search` for legacy sessions without global sequences.
