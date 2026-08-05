@@ -2093,3 +2093,22 @@ Future entries must include this per-file added/removed-line summary.
 | `docs/agent-capabilities.md` | 4 | 6 | Updates agent workflow examples and concise output guidance. |
 | `skills/embed-log-live/SKILL.md` | 3 | 3 | Makes live bounded reads/context default to concise text. |
 | `skills/embed-log-recorded/SKILL.md` | 3 | 3 | Makes recorded bounded reads/context default to concise text. |
+
+## 2026-08-05 13:54:16 UTC / 2026-08-05 15:54:16 CEST (Warsaw)
+
+- **Commit:** `575e680` — `Use one canonical format for agent log input`
+- **Task:** Make the canonical concise log-record format the single format promoted for agent reasoning, including real-time UART expectation responses: `+time seq=N src=SOURCE#INDEX | message`. Live and recorded skills now avoid JSON for log-bearing commands; JSON is reserved for orchestration metadata or explicit script needs.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 13:54:16 UTC / 2026-08-05 15:54:16 CEST (+0200) (Warsaw)
+- **Validation:** `cargo test --locked -p embed-log-cli --test skill_cli -- --nocapture` — 2 passed; `cargo fmt --all -- --check` — passed; `git diff --check` — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`575e680`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-cli/src/commands/tx.rs` | 45 | 5 | Prints matched human-mode TX response records in the canonical concise format. |
+| `docs/agent-capabilities.md` | 8 | 0 | Defines the single log-record input format for agents. |
+| `docs/cli.md` | 1 | 1 | Documents concise real-time TX response output. |
+| `skills/embed-log-live/SKILL.md` | 4 | 3 | Removes default TX JSON and mandates canonical text for live log evidence. |
+| `skills/embed-log-recorded/SKILL.md` | 2 | 1 | Mandates canonical text for recorded log evidence. |
