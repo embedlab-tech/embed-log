@@ -293,18 +293,58 @@ async fn cmd_tx_once(options: TxOptions) -> Result<()> {
     );
     if options.json {
         println!("{}", serde_json::to_string(&output)?);
-    } else if let Some(matched) = &state.matched {
+    } else if state.matched.is_some() {
         println!(
-            "wrote {bytes_written} bytes to {}; matched at line {}: {}",
-            options.source,
-            matched.get("line_idx").and_then(Value::as_u64).unwrap_or(0),
-            matched.get("message").and_then(Value::as_str).unwrap_or("")
+            "wrote {bytes_written} bytes to {}; response:",
+            options.source
         );
+        let mut printed = false;
+        for entry in state
+            .context
+            .iter()
+            .filter(|entry| !entry.get("is_tx").and_then(Value::as_bool).unwrap_or(false))
+        {
+            println!("{}", concise_entry(entry));
+            printed = true;
+        }
+        if !printed {
+            if let Some(matched) = &state.matched {
+                println!("{}", concise_entry(matched));
+            }
+        }
     } else {
         println!("wrote {bytes_written} bytes to {}", options.source);
     }
     let _ = write.send(Message::Close(None)).await;
     Ok(())
+}
+
+fn concise_entry(entry: &Value) -> String {
+    let time = entry
+        .get("relNum")
+        .and_then(Value::as_f64)
+        .map(|milliseconds| {
+            let milliseconds = milliseconds.max(0.0) as u64;
+            format!("+{}.{:03}", milliseconds / 1_000, milliseconds % 1_000)
+        })
+        .or_else(|| {
+            entry
+                .get("timestamp_iso")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "+0.000".to_string());
+    let sequence = entry.get("sequence").and_then(Value::as_u64).unwrap_or(0);
+    let source = entry
+        .get("source_id")
+        .and_then(Value::as_str)
+        .unwrap_or("?");
+    let source = entry
+        .get("line_idx")
+        .and_then(Value::as_u64)
+        .map_or_else(|| source.to_string(), |index| format!("{source}#{index}"));
+    let message = entry.get("message").and_then(Value::as_str).unwrap_or("");
+    format!("{time} seq={sequence} src={source} | {message}")
 }
 
 fn success_output(

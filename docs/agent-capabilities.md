@@ -61,6 +61,14 @@ The match is retained even if it occurs before `watch wait` starts. Watches are 
 
 ## Inspect recorded sessions efficiently
 
+Use one canonical log-record format for agent reasoning:
+
+```text
++time seq=N src=SOURCE#INDEX | message
+```
+
+Keep JSON off log-bearing commands. Use it only for orchestration metadata or scripts that explicitly need cursor/tuple fields.
+
 Start with an overview:
 
 ```bash

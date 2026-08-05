@@ -15,6 +15,7 @@ Use bounded `embed-log sessions` commands. A running daemon is not required.
 - Prefer literal matching; use regex only when necessary.
 - Discover unfamiliar commands through `embed-log schema`, not `--help`.
 - Treat configured merges as virtual source filters: selecting one expands to original member records without changing `source_id` or `sequence`. Legacy materialized merge records are excluded by default; do not enable compatibility output unless explicitly needed.
+- Use one canonical log-record format for agent reasoning: `+time seq=N src=SOURCE#INDEX | message`. Do not request JSON for log-bearing commands; JSON is reserved for orchestration or scripts that need cursor metadata.
 
 ## Investigate
 
@@ -53,7 +54,7 @@ embed-log sessions read "$SESSION_ID" --dir "$LOGS_DIR" \
   --after "$CURSOR" --limit 100
 ```
 
-Continue from `next_cursor` only while `truncated` is true. Use default concise text for reasoning; add `--json` only when a script needs tuple fields or cursor metadata. `sequence` is session-global; `source_id + line_idx` is source-local. Retrieve deterministic cross-source context around relevant evidence:
+Continue from `next_cursor` only while `truncated` is true. Keep all log evidence in the canonical concise text format; use `--json` only for a separate script/control path that needs tuple fields or cursor metadata. `sequence` is session-global; `source_id + line_idx` is source-local. Retrieve deterministic cross-source context around relevant evidence:
 
 ```bash
 embed-log sessions around "$SESSION_ID" --dir "$LOGS_DIR" \

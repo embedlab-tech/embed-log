@@ -15,6 +15,7 @@ Use the CLI as the canonical interface. Never open configured UARTs directly.
 - Do not invent firmware commands. Keep reads, expectations, and context bounded.
 - Leave a persistent daemon running unless asked to stop it.
 - Do not parse `--help`, scrape the browser, or load whole session files.
+- Use one canonical log-record format for agent reasoning: `+time seq=N src=SOURCE#INDEX | message`. Do not request JSON for log-bearing commands; JSON is reserved for orchestration metadata.
 
 ## Ensure capture
 
@@ -73,11 +74,11 @@ Confirm through `status` that the source is writable, then use firmware-specific
 ```bash
 embed-log tx --instance bench-a --source DUT_UART \
   --line "$DEVICE_COMMAND" --expect "$EXPECTED_REPLY" \
-  --timeout 30s --context 20 --json
+  --timeout 30s --context 20
 ```
 
-The expectation is armed before TX and cannot match the TX record. For actions performed outside UART TX, use a short-lived `watch add` → `watch wait` → `watch remove` flow.
+The expectation is armed before TX and cannot match the TX record. A matched response is printed in the canonical log-record format above. For complete prompt-bounded responses, use `--until-prompt PROMPT`. For actions performed outside UART TX, use a short-lived `watch add` → `watch wait` → `watch remove` flow.
 
-On failure, branch on structured `error.code`; inspect bounded returned context instead of dumping the session.
+On failure, branch on structured `error.code` from an explicitly requested JSON control response; inspect bounded returned log context in the canonical text format instead of dumping the session.
 
 Report the instance, session, source IDs, reproduction action, relevant sequences, evidence, final cursor, and any timeout, stream gap, or source-health uncertainty.

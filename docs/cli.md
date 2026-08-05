@@ -151,7 +151,7 @@ embed-log tx --instance bench-a --source DUT_UART \
   --timeout 30s --context 20 --json
 ```
 
-Substring matching is the default; `--expect-regex` enables a regular expression. TX entries never satisfy an expectation. A timeout exits unsuccessfully and, with `--json`, emits an `EXPECT_TIMEOUT` object containing the successful byte count and bounded context observed after the command was armed. A control-stream gap fails instead of claiming a potentially unsafe result. Successful expectations expose the match sequence as `next_cursor`. TX requires `--instance`, `EMBED_LOG_INSTANCE`, or `--url http://host:port`; it never infers the sole daemon.
+Substring matching is the default; `--expect-regex` enables a regular expression. TX entries never satisfy an expectation. Human-mode matched RX records use the same concise reader format (`+time seq=... src=SOURCE#INDEX | message`); use `--json` when a script needs the structured response envelope. A timeout exits unsuccessfully and, with `--json`, emits an `EXPECT_TIMEOUT` object containing the successful byte count and bounded context observed after the command was armed. A control-stream gap fails instead of claiming a potentially unsafe result. Successful expectations expose the match sequence as `next_cursor`. TX requires `--instance`, `EMBED_LOG_INSTANCE`, or `--url http://host:port`; it never infers the sole daemon.
 
 ### Temporary watches
 
