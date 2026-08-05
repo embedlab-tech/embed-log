@@ -1926,3 +1926,34 @@ Future entries must include this per-file added/removed-line summary.
 | --- | ---: | ---: | --- |
 | `frontend/keyboard.js` | 26 | 0 | Tracks key origins, suppresses only cross-focus auto-repeat, and clears state on keyup/window blur. |
 | `tests-ui/regression-tests/filter-keyboard.spec.js` | 20 | 0 | Reproduces a pre-focus key followed by a repeated key in Edge and verifies the input remains empty. |
+
+## 2026-08-05 10:28:11 UTC / 2026-08-05 12:28:11 CEST (Warsaw)
+
+- **Commit:** `dfff6a4` — `Preserve text selection inside frontend inputs`
+- **Task:** Preserve browser text selection in Filter and Serial TX inputs instead of clearing it from the document-level pointer cleanup used for log-line selection.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 10:28:11 UTC / 2026-08-05 12:28:11 CEST (+0200) (Warsaw)
+- **Validation:** Edge focused-input selection regression — 1 passed; release workspace rebuilt and installed atomically.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`dfff6a4`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `frontend/selection.js` | 5 | 1 | Leaves native input selections intact on pointer release. |
+| `tests-ui/regression-tests/filter-keyboard.spec.js` | 20 | 2 | Verifies Filter text remains selected after pointer release and a delay. |
+
+## 2026-08-05 10:28:42 UTC / 2026-08-05 12:28:42 CEST (Warsaw)
+
+- **Commit:** `ace1f22` — `Block non-repeat key batches after focus handoff`
+- **Task:** Extend the Edge focus-handoff keyboard guard to block both repeat-marked and ordinary keydown batches until a key pressed outside an editable control is released.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 10:28:42 UTC / 2026-08-05 12:28:42 CEST (+0200) (Warsaw)
+- **Validation:** Edge and Chromium focused-input keyboard regressions — passed before the final pointer-selection-only change; release workspace rebuilt and installed atomically; installed CLI reports clean SHA `ace1f22`.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`ace1f22`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `frontend/keyboard.js` | 7 | 7 | Blocks ordinary as well as repeat keydowns after a key-origin focus handoff. |
