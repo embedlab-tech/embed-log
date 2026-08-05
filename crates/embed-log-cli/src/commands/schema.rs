@@ -407,6 +407,17 @@ fn semantics(path: &str) -> Semantics {
             errors: &[],
             notes: &["read-only status may infer the sole registered daemon"],
         },
+        "export" => Semantics {
+            mutates: true,
+            execution: "daemon",
+            targeting: mutation_target,
+            output: json_or_text,
+            errors: &[],
+            notes: &[
+                "atomically publishes the active session's canonical session.html",
+                "uses the same Rust renderer as sessions export",
+            ],
+        },
         "stop" => Semantics {
             mutates: true,
             execution: "daemon",
@@ -541,8 +552,8 @@ fn error_catalog() -> Value {
             {"code":"CLI_USAGE","commands":["*"],"meaning":"Clap rejected arguments for an invocation requesting JSON."},
             {"code":"COMMAND_FAILED","commands":["*"],"meaning":"The command failed without a narrower stable classification."},
             {"code":"CONFIG_NOT_FOUND","commands":["run","validate","doctor"],"meaning":"The selected configuration file does not exist."},
-            {"code":"INSTANCE_REQUIRED","commands":["stop","tx","watch.*","sessions.new"],"meaning":"A mutating command had no explicit daemon target."},
-            {"code":"INSTANCE_NOT_FOUND","commands":["status","stop","tx","watch.*","sessions.new"],"meaning":"The selected registered daemon instance does not exist."},
+            {"code":"INSTANCE_REQUIRED","commands":["export","stop","tx","watch.*","sessions.new"],"meaning":"A mutating command had no explicit daemon target."},
+            {"code":"INSTANCE_NOT_FOUND","commands":["status","export","stop","tx","watch.*","sessions.new"],"meaning":"The selected registered daemon instance does not exist."},
             {"code":"SESSION_NOT_FOUND","commands":["sessions.*"],"meaning":"The selected offline session could not be resolved."},
             {"code":"SOURCE_NOT_FOUND","commands":["tx","watch.add","sessions.read"],"meaning":"The selected source does not exist."},
             {"code":"SOURCE_NOT_WRITABLE","commands":["tx"],"meaning":"The selected source cannot accept TX."},

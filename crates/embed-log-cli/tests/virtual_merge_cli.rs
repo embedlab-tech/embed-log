@@ -146,8 +146,25 @@ fn merge_is_virtual_and_cli_expands_it_to_original_records() {
     assert_eq!(combined.lines().count(), 2, "{combined}");
     assert!(!combined.contains("\"source_kind\":\"merge\""));
 
-    let html = root.join("session.html");
-    let exported = invoke(
+    let active_export = invoke(&runtime, &["export", "--instance", "merge", "--json"]);
+    assert!(
+        active_export.status.success(),
+        "{}",
+        String::from_utf8_lossy(&active_export.stderr)
+    );
+    let active_result: serde_json::Value = serde_json::from_slice(&active_export.stdout).unwrap();
+    assert_eq!(active_result["export"]["html_status"], "ready");
+    assert_eq!(
+        active_result["export"]["download_url"],
+        format!("/sessions/{session_id}/session.html")
+    );
+    let canonical_html_path = session_dir.join("session.html");
+    let canonical_html = fs::read(&canonical_html_path).unwrap();
+
+    // Post-factum CLI export uses the same Rust renderer and is byte-identical
+    // for the same combined.jsonl/manifest/markers snapshot.
+    let copy_path = root.join("session-copy.html");
+    let recorded_export = invoke(
         &runtime,
         &[
             "sessions",
@@ -158,15 +175,18 @@ fn merge_is_virtual_and_cli_expands_it_to_original_records() {
             "--format",
             "html",
             "--output",
-            html.to_str().unwrap(),
+            copy_path.to_str().unwrap(),
         ],
     );
     assert!(
-        exported.status.success(),
+        recorded_export.status.success(),
         "{}",
-        String::from_utf8_lossy(&exported.stderr)
+        String::from_utf8_lossy(&recorded_export.stderr)
     );
-    let html = fs::read_to_string(html).unwrap();
+    let recorded_html = fs::read(&copy_path).unwrap();
+    assert_eq!(recorded_html, canonical_html);
+
+    let html = String::from_utf8(canonical_html).unwrap();
     assert!(html.contains("data-pane=\"MCU_LINK\""));
     assert!(html.contains("MCU_TX: sent") || html.contains("MCU TX: sent"));
     assert!(html.contains("sourceId"));

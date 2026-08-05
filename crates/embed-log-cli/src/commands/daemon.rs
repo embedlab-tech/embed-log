@@ -520,11 +520,26 @@ pub(crate) fn http_post_json(
     path: &str,
     body: &serde_json::Value,
 ) -> Result<serde_json::Value> {
-    http_request_json(endpoint, "POST", path, Some(&body.to_string()))
+    http_request_json(
+        endpoint,
+        "POST",
+        path,
+        Some(&body.to_string()),
+        Duration::from_secs(2),
+    )
+}
+
+pub(crate) fn http_post_json_with_timeout(
+    endpoint: &str,
+    path: &str,
+    body: &serde_json::Value,
+    timeout: Duration,
+) -> Result<serde_json::Value> {
+    http_request_json(endpoint, "POST", path, Some(&body.to_string()), timeout)
 }
 
 fn http_get_json(endpoint: &str, path: &str) -> Result<serde_json::Value> {
-    http_request_json(endpoint, "GET", path, None)
+    http_request_json(endpoint, "GET", path, None, Duration::from_secs(2))
 }
 
 fn http_request_json(
@@ -532,6 +547,7 @@ fn http_request_json(
     method: &str,
     path: &str,
     body: Option<&str>,
+    timeout: Duration,
 ) -> Result<serde_json::Value> {
     let address = endpoint
         .strip_prefix("http://")
@@ -546,7 +562,7 @@ fn http_request_json(
         .with_context(|| format!("endpoint did not resolve: {endpoint}"))?;
     let mut stream = TcpStream::connect_timeout(&socket_address, Duration::from_secs(2))
         .with_context(|| format!("connect to {endpoint}"))?;
-    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+    stream.set_read_timeout(Some(timeout))?;
     let body = body.unwrap_or("");
     write!(
         stream,

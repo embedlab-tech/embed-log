@@ -33,6 +33,8 @@ Discover the exact session, logs directory, source IDs, health, and writable UAR
 embed-log status --instance bench-a --json
 ```
 
+When a durable report is requested, use `embed-log export --instance bench-a --json`; it publishes the same canonical HTML that the browser downloads.
+
 Use those returned values rather than assuming `latest` or a logs directory.
 
 ## Investigate

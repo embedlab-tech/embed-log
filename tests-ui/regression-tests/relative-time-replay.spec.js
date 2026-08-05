@@ -9,11 +9,25 @@ import { openHtmlFile } from './helpers.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../..');
-function runRustMerge(args) {
+function runRecordedExport({ tmpDir, logPath, htmlPath, firstLogAt = null }) {
+  const logsDir = path.join(tmpDir, 'sessions');
+  const sessionId = 'relative-replay';
+  const sessionDir = path.join(logsDir, sessionId);
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.writeFileSync(path.join(sessionDir, 'manifest.json'), JSON.stringify({
+    session_id: sessionId,
+    session_dir: sessionDir,
+    timestamp_mode: 'relative',
+    first_log_at: firstLogAt,
+    tabs: [{ label: 'Demo', panes: ['SENSOR_A'] }],
+    pane_labels: { SENSOR_A: 'SENSOR' },
+    source_files: { SENSOR_A: logPath },
+    combined_file: path.join(sessionDir, 'combined.jsonl'),
+  }, null, 2));
   execFileSync('cargo', [
     'run', '--quiet', '--package', 'embed-log-cli', '--bin', 'embed-log', '--',
-    'merge',
-    ...args,
+    'sessions', 'export', sessionId, '--dir', logsDir,
+    '--format', 'html', '--output', htmlPath,
   ], { cwd: repoRoot });
 }
 
@@ -37,12 +51,12 @@ test('merged static replay toggles between relative and absolute timestamps', as
     'utf-8',
   );
 
-  runRustMerge([
-    '--timestamp-mode', 'relative',
-    '--first-log-at', '2026-01-01T12:00:00.000+00:00',
-    '--tab', 'Demo', 'SENSOR_A=SENSOR', logPath,
-    '--output', htmlPath,
-  ]);
+  runRecordedExport({
+    tmpDir,
+    logPath,
+    htmlPath,
+    firstLogAt: '2026-01-01T12:00:00.000+00:00',
+  });
 
   const page = await openHtmlFile(browser, htmlPath);
   try {
@@ -87,11 +101,7 @@ test('relative-only static replay shows hint when absolute origin is unavailable
     'utf-8',
   );
 
-  runRustMerge([
-    '--timestamp-mode', 'relative',
-    '--tab', 'Demo', 'SENSOR_A=SENSOR', logPath,
-    '--output', htmlPath,
-  ]);
+  runRecordedExport({ tmpDir, logPath, htmlPath });
 
   const page = await openHtmlFile(browser, htmlPath);
   try {

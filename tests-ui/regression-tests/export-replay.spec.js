@@ -11,11 +11,23 @@ async function openMore(page, paneId) {
 
 function generateMergedHtml(htmlPath, logPath) {
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+  const logsDir = path.join(path.dirname(htmlPath), 'recorded-sessions');
+  const sessionId = 'large-export';
+  const sessionDir = path.join(logsDir, sessionId);
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.writeFileSync(path.join(sessionDir, 'manifest.json'), JSON.stringify({
+    session_id: sessionId,
+    session_dir: sessionDir,
+    timestamp_mode: 'absolute',
+    tabs: [{ label: 'Large', panes: ['A'] }],
+    pane_labels: { A: 'SENSOR' },
+    source_files: { A: logPath },
+    combined_file: path.join(sessionDir, 'combined.jsonl'),
+  }, null, 2));
   execFileSync('cargo', [
     'run', '--quiet', '--package', 'embed-log-cli', '--bin', 'embed-log', '--',
-    'merge',
-    '--tab', 'Large', 'A=SENSOR', logPath,
-    '--output', htmlPath,
+    'sessions', 'export', sessionId, '--dir', logsDir,
+    '--format', 'html', '--output', htmlPath,
   ], { cwd: repoRoot });
 }
 
@@ -84,13 +96,20 @@ test.describe('HTML export replay', () => {
     await waitForSourceTestLine(page, 'SENSOR_B');
     await waitForLineContaining(page, 'SENSOR_A', 'kind=filter-alpha');
 
+    const sessionResponse = await page.request.get('/api/session/current');
+    expect(sessionResponse.ok()).toBe(true);
+    const session = await sessionResponse.json();
+
     const downloadPromise = page.waitForEvent('download');
     await page.locator('#btn-export').click();
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toMatch(/^embed-log-.*\.html$/);
     const htmlPath = await saveDownload(download, testInfo);
 
-    const html = fs.readFileSync(htmlPath, 'utf-8');
+    const downloadedBytes = fs.readFileSync(htmlPath);
+    const canonicalBytes = fs.readFileSync(path.join(session.dir, 'session.html'));
+    expect(downloadedBytes).toEqual(canonicalBytes);
+    const html = downloadedBytes.toString('utf-8');
     expect(html).toContain('hydratePanesFromJson');
     expect(html).toContain('kind=filter-alpha');
 

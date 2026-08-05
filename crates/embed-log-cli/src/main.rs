@@ -16,6 +16,7 @@ use anyhow::Result;
 use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 
 use commands::daemon::{cmd_start_daemon, cmd_status, cmd_stop};
+use commands::export::cmd_export;
 use commands::misc;
 use commands::run::{cmd_run, cmd_run_quick, RunOverrides};
 use commands::schema::cmd_schema;
@@ -146,6 +147,19 @@ enum Command {
     /// Show readiness and source status for a running daemon or URL.
     Status {
         /// Registered daemon name. Defaults to EMBED_LOG_INSTANCE or the only running instance.
+        #[arg(long, conflicts_with = "url")]
+        instance: Option<String>,
+        /// Explicit unregistered HTTP endpoint.
+        #[arg(long)]
+        url: Option<String>,
+        /// Machine-readable JSON output.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Generate the active daemon session's canonical HTML report.
+    Export {
+        /// Registered daemon name. Defaults to EMBED_LOG_INSTANCE; never inferred.
         #[arg(long, conflicts_with = "url")]
         instance: Option<String>,
         /// Explicit unregistered HTTP endpoint.
@@ -324,6 +338,7 @@ impl Cli {
             Some(Command::Skill { json, .. }) => *json,
             Some(Command::Run { json, .. })
             | Some(Command::Status { json, .. })
+            | Some(Command::Export { json, .. })
             | Some(Command::Tx { json, .. })
             | Some(Command::Stop { json, .. })
             | Some(Command::Version { json, .. })
@@ -410,6 +425,11 @@ async fn dispatch(cli: Cli) -> Result<()> {
             url,
             json,
         }) => cmd_status(instance.as_deref(), url.as_deref(), json),
+        Some(Command::Export {
+            instance,
+            url,
+            json,
+        }) => cmd_export(instance.as_deref(), url.as_deref(), json),
         Some(Command::Tx {
             instance,
             url,
@@ -637,6 +657,21 @@ mod tests {
         ] {
             Cli::parse_from(args);
         }
+    }
+
+    #[test]
+    fn active_export_accepts_explicit_daemon_targets() {
+        Cli::parse_from(["embed-log", "export", "--instance", "bench-a", "--json"]);
+        Cli::parse_from(["embed-log", "export", "--url", "http://127.0.0.1:18080"]);
+        assert!(Cli::try_parse_from([
+            "embed-log",
+            "export",
+            "--instance",
+            "bench-a",
+            "--url",
+            "http://127.0.0.1:18080",
+        ])
+        .is_err());
     }
 
     #[test]

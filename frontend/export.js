@@ -120,8 +120,8 @@ export async function exportHtmlSnapshot(options = {}) {
 
 
         // ------------------------------------------------------------------
-        // Serialize all pane data as compact JSON tuples (same format as
-        // merge_logs.py's lazy mode) for fast hydration with windowed rendering.
+        // Serialize selection-export pane data as compact JSON tuples for
+        // fast hydration with windowed rendering.
         // rawText may be absent on lines loaded before this session; fall back
         // to decoding the stored HTML via a temporary element.
         // ------------------------------------------------------------------
@@ -168,8 +168,8 @@ export async function exportHtmlSnapshot(options = {}) {
             });
         }
         // ------------------------------------------------------------------
-        // Build pane + tab HTML (mirrors merge_logs.py's _pane_html /
-        // _tab_content_html, with TX input row hidden in static mode)
+        // Build pane + tab HTML for selection-only snapshots, with the TX
+        // input row hidden in static mode.
         // ------------------------------------------------------------------
         function _paneHtml(paneId) {
             const raw = document.querySelector(`#pane-${paneId} .pane-name`)?.textContent.trim() || paneId;
@@ -315,7 +315,44 @@ ${pluginScriptTags}
 }
 
 async function exportToHtml() {
-    return exportHtmlSnapshot();
+    const btn = document.getElementById("btn-export");
+    const previous = btn?.textContent;
+    if (btn) {
+        btn.textContent = "…";
+        btn.disabled = true;
+    }
+    try {
+        const response = await fetch("/api/session/export?download=true", {
+            method: "POST",
+            headers: { "Accept": "text/html" },
+        });
+        if (!response.ok || !response.headers.get("content-type")?.includes("text/html")) {
+            const result = await response.json().catch(() => ({}));
+            throw new Error(result.html_error || `server returned ${response.status}`);
+        }
+
+        // This response is the exact file atomically published in the session
+        // directory; the browser does not run a second full-session renderer.
+        const disposition = response.headers.get("content-disposition") || "";
+        const filename = disposition.match(/filename="([^"]+)"/)?.[1]
+            || "embed-log-session.html";
+        const blobUrl = URL.createObjectURL(await response.blob());
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 0);
+    } catch (err) {
+        console.error("Export failed:", err);
+        alert("Export failed: " + err.message);
+    } finally {
+        if (btn) {
+            btn.textContent = previous;
+            btn.disabled = false;
+        }
+    }
 }
 
 window.__embedLogExportSnapshot = exportHtmlSnapshot;

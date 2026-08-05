@@ -1,6 +1,6 @@
 // Shared pane shell renderer.
 // Used by tabcreate.js (live mode) and export.js (runtime export).
-// merge_logs.py produces the same structure in Python.
+// The Rust session exporter emits the same structure for static reports.
 
 export function _escHtml(str) {
     return str

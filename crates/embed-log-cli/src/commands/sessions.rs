@@ -1,6 +1,8 @@
 //! `embed-log sessions` — inspect and export recorded sessions.
 
 use std::collections::{HashMap, VecDeque};
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -506,9 +508,9 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             let dir = resolve_sessions_dir(&log_dir)?;
             let session = resolve_session(&dir, &session_id)?;
             let html = session.dir.join("session.html");
-            if !html.exists() {
-                export_session_html(&session, html.clone())?;
-            }
+            // Explicit open always refreshes through the canonical exporter so
+            // stale or pre-atomic reports are repaired before the browser opens.
+            export_session_html(&session, html.clone())?;
             let path = html.canonicalize().unwrap_or(html);
             open_url_in_default_browser(&path.display().to_string())
                 .context("open session report in default browser")?;
@@ -2001,8 +2003,52 @@ pub(crate) fn export_session_html(session: &SessionRecord, output: PathBuf) -> R
     .with_plugins(frontend_plugins, pane_plugins, plugin_scripts)
     .with_markers(markers);
     exporter.export()?;
+    if output == session.dir.join("session.html") {
+        mark_recorded_html_ready(session, &output)?;
+    }
     println!("{}", output.display());
     Ok(())
+}
+
+fn mark_recorded_html_ready(session: &SessionRecord, output: &Path) -> Result<()> {
+    let manifest_path = session.dir.join("manifest.json");
+    let mut manifest = session.manifest.clone();
+    let object = manifest
+        .as_object_mut()
+        .context("session manifest root must be an object")?;
+    object.insert(
+        "session_html".to_string(),
+        serde_json::json!(output.display().to_string()),
+    );
+    object.insert("html_status".to_string(), serde_json::json!("ready"));
+    object.insert(
+        "html_updated_at".to_string(),
+        serde_json::json!(Local::now().to_rfc3339()),
+    );
+    object.insert("html_error".to_string(), serde_json::Value::Null);
+    object.insert(
+        "last_export_reason".to_string(),
+        serde_json::json!("recorded_cli"),
+    );
+
+    let temp_path = session
+        .dir
+        .join(format!(".manifest.json.tmp-{}", std::process::id()));
+    let result = (|| -> Result<()> {
+        let mut temp = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&temp_path)?;
+        temp.write_all(serde_json::to_string_pretty(&manifest)?.as_bytes())?;
+        temp.sync_all()?;
+        std::fs::rename(&temp_path, &manifest_path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp_path);
+    }
+    result.with_context(|| format!("update manifest {}", manifest_path.display()))
 }
 
 pub(crate) fn export_session_raw(session: &SessionRecord, output: PathBuf) -> Result<()> {
@@ -2607,6 +2653,26 @@ mod tests {
         let merged = std::fs::read_to_string(output).unwrap();
         assert!(merged.contains("dut\t[2026-06-13 00:00:00.000] boot"));
 
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn canonical_recorded_html_export_updates_manifest_status() {
+        let root = temp_log_dir();
+        let session_dir = write_test_session(&root, "recorded");
+        let session = resolve_session(&root, "recorded").unwrap();
+        let output = session_dir.join("session.html");
+        export_session_html(&session, output.clone()).unwrap();
+
+        let html = std::fs::read_to_string(&output).unwrap();
+        assert!(html.starts_with("<!DOCTYPE html>"));
+        let manifest: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(session_dir.join("manifest.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(manifest["html_status"], "ready");
+        assert_eq!(manifest["last_export_reason"], "recorded_cli");
+        assert_eq!(manifest["session_html"], output.display().to_string());
         std::fs::remove_dir_all(root).unwrap();
     }
 

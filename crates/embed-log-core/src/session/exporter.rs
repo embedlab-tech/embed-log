@@ -1,14 +1,20 @@
 use std::collections::HashMap;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
+use fs2::FileExt;
 use regex::Regex;
 use serde_json::json;
 use tracing::info;
 
 use super::log_parse::{enrich_timestamps, parse_log_file, LogEntry};
 use crate::frontend_assets::FrontendAssets;
+
+static EXPORT_TEMP_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// Generates a self-contained HTML file from session log files.
 ///
@@ -91,8 +97,34 @@ impl SessionExporter {
         self
     }
 
-    /// Generate the self-contained session HTML file.
+    /// Generate and atomically publish the self-contained session HTML file.
+    /// All producers use the same per-directory advisory lock, so daemon and
+    /// recorded-session CLI exports cannot overwrite one another concurrently.
     pub fn export(&self) -> Result<PathBuf> {
+        if let Some(parent) = self.html_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let lock_path = self
+            .html_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(".session-html.lock");
+        let lock = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .with_context(|| format!("open export lock {}", lock_path.display()))?;
+        lock.lock_exclusive()
+            .with_context(|| format!("lock export {}", lock_path.display()))?;
+        let result = self.export_locked();
+        let unlock_result = FileExt::unlock(&lock)
+            .with_context(|| format!("unlock export {}", lock_path.display()));
+        result.and(unlock_result.map(|()| self.html_path.clone()))
+    }
+
+    fn export_locked(&self) -> Result<()> {
         let css = self.read_frontend_asset("viewer.css").unwrap_or_default();
         let css = self.inline_font_urls(&css);
 
@@ -103,7 +135,8 @@ impl SessionExporter {
             if !log_path.exists() {
                 continue;
             }
-            let content = std::fs::read_to_string(log_path).unwrap_or_default();
+            let content = std::fs::read_to_string(log_path)
+                .with_context(|| format!("read source log {}", log_path.display()))?;
             let entries = parse_log_file(
                 &content,
                 Some(source_name.as_str()),
@@ -112,67 +145,69 @@ impl SessionExporter {
             log_data.insert(source_name.clone(), entries);
         }
 
-        if !self.merges.is_empty() {
-            if let Some(combined_file) = self.combined_file.as_ref().filter(|path| path.exists()) {
-                let mut combined_data: HashMap<String, Vec<LogEntry>> = HashMap::new();
-                for line in std::fs::read_to_string(combined_file)
-                    .unwrap_or_default()
-                    .lines()
-                {
-                    let Ok(record) = serde_json::from_str::<serde_json::Value>(line) else {
-                        continue;
-                    };
-                    if record.get("source_kind").and_then(|value| value.as_str()) == Some("merge") {
-                        continue;
-                    }
-                    let Some(source_id) = record
-                        .get("source_id")
-                        .and_then(|value| value.as_str())
-                        .map(str::to_string)
-                    else {
-                        continue;
-                    };
-                    let number = |name: &str| {
-                        record
-                            .get(name)
-                            .and_then(|value| value.as_f64())
-                            .map(|value| value as i64)
-                    };
-                    combined_data
-                        .entry(source_id.clone())
-                        .or_default()
-                        .push(LogEntry {
-                            source_id: Some(source_id),
-                            sequence: record.get("sequence").and_then(|value| value.as_u64()),
-                            ts: record
-                                .get("timestamp")
-                                .or_else(|| record.get("absTs"))
-                                .and_then(|value| value.as_str())
-                                .unwrap_or_default()
-                                .to_string(),
-                            text: record
-                                .get("message")
-                                .and_then(|value| value.as_str())
-                                .unwrap_or_default()
-                                .to_string(),
-                            is_tx: record.get("type").and_then(|value| value.as_str())
-                                == Some("tx")
-                                || record.get("is_tx").and_then(|value| value.as_bool())
-                                    == Some(true),
-                            abs_ts: record
-                                .get("absTs")
-                                .and_then(|value| value.as_str())
-                                .map(str::to_string),
-                            abs_num: number("absNum"),
-                            rel_ts: record
-                                .get("relTs")
-                                .and_then(|value| value.as_str())
-                                .map(str::to_string),
-                            rel_num: number("relNum"),
-                        });
+        // New sessions use combined.jsonl as the single canonical export input
+        // whether or not virtual merges are configured. Physical .log files are
+        // retained only as a compatibility fallback for older sessions.
+        if let Some(combined_file) = self.combined_file.as_ref().filter(|path| path.exists()) {
+            let mut combined_data: HashMap<String, Vec<LogEntry>> = HashMap::new();
+            let combined = read_complete_jsonl(combined_file)?;
+            for (line_idx, line) in combined.lines().enumerate() {
+                let record =
+                    serde_json::from_str::<serde_json::Value>(line).with_context(|| {
+                        format!(
+                            "parse combined JSONL {} line {}",
+                            combined_file.display(),
+                            line_idx + 1
+                        )
+                    })?;
+                if record.get("source_kind").and_then(|value| value.as_str()) == Some("merge") {
+                    continue;
                 }
-                log_data = combined_data;
+                let Some(source_id) = record
+                    .get("source_id")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string)
+                else {
+                    continue;
+                };
+                let number = |name: &str| {
+                    record
+                        .get(name)
+                        .and_then(|value| value.as_f64())
+                        .map(|value| value as i64)
+                };
+                combined_data
+                    .entry(source_id.clone())
+                    .or_default()
+                    .push(LogEntry {
+                        source_id: Some(source_id),
+                        sequence: record.get("sequence").and_then(|value| value.as_u64()),
+                        ts: record
+                            .get("timestamp")
+                            .or_else(|| record.get("absTs"))
+                            .and_then(|value| value.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        text: record
+                            .get("message")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        is_tx: record.get("type").and_then(|value| value.as_str()) == Some("tx")
+                            || record.get("is_tx").and_then(|value| value.as_bool()) == Some(true),
+                        abs_ts: record
+                            .get("absTs")
+                            .and_then(|value| value.as_str())
+                            .map(str::to_string),
+                        abs_num: number("absNum"),
+                        rel_ts: record
+                            .get("relTs")
+                            .and_then(|value| value.as_str())
+                            .map(str::to_string),
+                        rel_num: number("relNum"),
+                    });
             }
+            log_data = combined_data;
         }
 
         // Build presentation-only merge panes from original source entries.
@@ -460,14 +495,14 @@ impl SessionExporter {
         html.push_str("</body>\n");
         html.push_str("</html>\n");
 
-        // Write.
-        if let Some(parent) = self.html_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&self.html_path, &html)
+        anyhow::ensure!(
+            html.starts_with("<!DOCTYPE html>") && html.ends_with("</html>\n"),
+            "generated session HTML is incomplete"
+        );
+        atomic_write(&self.html_path, html.as_bytes())
             .with_context(|| format!("write session HTML {}", self.html_path.display()))?;
         info!("session HTML exported: {}", self.html_path.display());
-        Ok(self.html_path.clone())
+        Ok(())
     }
 
     /// Read a frontend asset from embedded assets or filesystem.
@@ -630,6 +665,53 @@ fn html_escape(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
+fn read_complete_jsonl(path: &Path) -> Result<String> {
+    let mut bytes =
+        std::fs::read(path).with_context(|| format!("read combined JSONL {}", path.display()))?;
+    let complete_len = bytes
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(0, |idx| idx + 1);
+    bytes.truncate(complete_len);
+    String::from_utf8(bytes).context("combined JSONL is not UTF-8")
+}
+
+fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("session.html");
+    let nonce = EXPORT_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_path = parent.join(format!(".{file_name}.tmp-{}-{nonce}", std::process::id()));
+
+    let result = (|| -> Result<()> {
+        let mut temp = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temp_path)
+            .with_context(|| format!("create temporary export {}", temp_path.display()))?;
+        temp.write_all(bytes)?;
+        temp.sync_all()?;
+        std::fs::rename(&temp_path, path).with_context(|| {
+            format!(
+                "publish temporary export {} as {}",
+                temp_path.display(),
+                path.display()
+            )
+        })?;
+        if let Ok(parent_file) = File::open(parent) {
+            let _ = parent_file.sync_all();
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp_path);
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -649,6 +731,70 @@ mod tests {
         let escaped = esc_script_text(src);
         assert!(escaped.contains("<\\/script"));
         assert!(!escaped.contains("</script>"));
+    }
+
+    #[test]
+    fn incomplete_trailing_jsonl_record_is_not_published() {
+        let dir = std::env::temp_dir().join(format!(
+            "embed-log-export-tail-{}-{}",
+            std::process::id(),
+            EXPORT_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let combined = dir.join("combined.jsonl");
+        std::fs::write(
+            &combined,
+            "{\"sequence\":1,\"source_id\":\"DUT\",\"message\":\"COMMITTED_LINE_7a1\"}\n{\"sequence\":2,\"source_id\":\"DUT\",\"message\":\"UNCOMMITTED_TAIL_9f2",
+        )
+        .unwrap();
+        let html_path = dir.join("session.html");
+        SessionExporter::new(
+            html_path.clone(),
+            HashMap::new(),
+            vec![json!({"label":"Main","panes":["DUT"]})],
+            HashMap::new(),
+            PathBuf::from("frontend"),
+            "absolute".to_string(),
+            None,
+        )
+        .with_combined_file(combined)
+        .export()
+        .unwrap();
+        let html = std::fs::read_to_string(html_path).unwrap();
+        assert!(html.contains("COMMITTED_LINE_7a1"));
+        assert!(!html.contains("UNCOMMITTED_TAIL_9f2"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn malformed_complete_jsonl_keeps_previous_html() {
+        let dir = std::env::temp_dir().join(format!(
+            "embed-log-export-invalid-{}-{}",
+            std::process::id(),
+            EXPORT_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let combined = dir.join("combined.jsonl");
+        std::fs::write(&combined, "{not-json}\n").unwrap();
+        let html_path = dir.join("session.html");
+        std::fs::write(&html_path, "previous complete report").unwrap();
+        let result = SessionExporter::new(
+            html_path.clone(),
+            HashMap::new(),
+            vec![],
+            HashMap::new(),
+            PathBuf::from("frontend"),
+            "absolute".to_string(),
+            None,
+        )
+        .with_combined_file(combined)
+        .export();
+        assert!(result.is_err());
+        assert_eq!(
+            std::fs::read_to_string(html_path).unwrap(),
+            "previous complete report"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

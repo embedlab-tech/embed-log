@@ -1,10 +1,15 @@
 use std::collections::HashMap;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local};
 use serde_json::json;
 use tracing::{info, warn};
+
+static ARTIFACT_TEMP_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// Manages a single session's artifacts: manifest, markers, and static HTML export.
 pub struct SessionManager {
@@ -92,7 +97,7 @@ impl SessionManager {
     pub fn write_manifest(&self) -> Result<()> {
         let manifest = self.build_manifest();
         let path = self.manifest_path();
-        std::fs::write(&path, serde_json::to_string_pretty(&manifest)?)
+        atomic_write_file(&path, serde_json::to_string_pretty(&manifest)?.as_bytes())
             .with_context(|| format!("write manifest {}", path.display()))?;
         info!("manifest written: {}", path.display());
         Ok(())
@@ -129,7 +134,7 @@ impl SessionManager {
             }
         }
 
-        std::fs::write(&path, serde_json::to_string_pretty(&manifest)?)
+        atomic_write_file(&path, serde_json::to_string_pretty(&manifest)?.as_bytes())
             .with_context(|| format!("update manifest {}", path.display()))?;
         Ok(())
     }
@@ -224,7 +229,7 @@ impl SessionManager {
             "session_id": self.session_id,
             "markers": markers,
         });
-        std::fs::write(&path, serde_json::to_string_pretty(&body)?)
+        atomic_write_file(&path, serde_json::to_string_pretty(&body)?.as_bytes())
             .with_context(|| format!("save markers {}", path.display()))?;
         Ok(())
     }
@@ -340,6 +345,32 @@ impl SessionManager {
         self.session_dir.join("session.html")
     }
 }
+
+pub(crate) fn atomic_write_file(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("artifact");
+    let nonce = ARTIFACT_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_path = parent.join(format!(".{file_name}.tmp-{}-{nonce}", std::process::id()));
+    let result = (|| -> Result<()> {
+        let mut temp = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temp_path)?;
+        temp.write_all(bytes)?;
+        temp.sync_all()?;
+        std::fs::rename(&temp_path, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp_path);
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

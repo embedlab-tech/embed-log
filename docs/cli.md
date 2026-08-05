@@ -163,6 +163,18 @@ embed-log watch remove "$watch_id" --instance bench-a --json
 
 `--ttl` controls how long the server actively matches; it defaults to 30 seconds and is capped at 24 hours. Matched or expired state remains queryable until `watch remove` or process shutdown. `watch wait --timeout` only limits that CLI invocation and does not alter server TTL. JSON failures use `WATCH_EXPIRED`, `WATCH_WAIT_TIMEOUT`, or `WATCH_NOT_FOUND`. All watch mutations require `--instance`, `EMBED_LOG_INSTANCE`, or `--url`; they never infer the sole daemon. Matched watch output includes the triggering record's session-global `sequence` and exposes it as `next_cursor` for bounded follow-up reads.
 
+### Export the active session
+
+Generate the daemon's canonical `session.html`:
+
+```bash
+embed-log export --instance bench-a --json
+# or target an unregistered daemon explicitly
+embed-log export --url http://127.0.0.1:18080 --json
+```
+
+The command returns after the complete report has been atomically published in the session directory. The browser's full-session Export button invokes the same daemon endpoint and downloads that exact file.
+
 ### Create an experiment session
 
 Rotate a running server without restarting source tasks or releasing UARTs:
@@ -264,19 +276,21 @@ embed-log sessions info <SESSION_ID> --dir logs
 embed-log sessions info latest --dir logs --json
 ```
 
-Open a session report in the default browser. If the HTML export is missing, it is generated first:
+Open a session report in the default browser. The canonical HTML export is refreshed first, repairing stale or legacy partially written reports:
 
 ```bash
 embed-log sessions open latest --dir logs
 ```
 
-Export a recorded session:
+Export a recorded session from its manifest, markers, and canonical `combined.jsonl`:
 
 ```bash
 embed-log sessions export <SESSION_ID> --dir logs --format html --output session.html
 embed-log sessions export <SESSION_ID> --dir logs --format raw --output merged.txt
 embed-log sessions export <SESSION_ID> --dir logs --format jsonl-deduped --output session.jsonl
 ```
+
+Given the same input snapshot and Embed-log build, the HTML path produces the same bytes as `embed-log export` and the browser full-session export. Prefer `embed-log export --instance NAME` while capture is active so the daemon owns the snapshot.
 
 Formats:
 

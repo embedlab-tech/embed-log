@@ -20,6 +20,7 @@ use crate::net::control_ws::SourceInfo;
 use crate::net::ws_server::{
     start_server, ExportCallback, RotateCallback, RuntimeStats, ServerState, SourceRuntimeStats,
 };
+use crate::session::manager::atomic_write_file;
 use crate::session::{SessionExporter, SessionManager};
 use crate::sources::{FileSource, LogSource, TxCommand, UartSource, UdpSource};
 
@@ -716,30 +717,17 @@ struct ExportContext {
     merges: serde_json::Value,
 }
 
-/// Export the current session to HTML. Skips re-export when the existing HTML
-/// is already newer than every source and marker file.
+/// Export the current session to HTML from the latest complete canonical
+/// combined stream. SessionExporter serializes producers and publishes atomically.
 fn export_session(ctx: &ExportContext) -> Result<String, String> {
     let fla = ctx.first_log_at.lock().unwrap().map(|dt| dt.to_rfc3339());
     let export_html = ctx.html_path.lock().unwrap().clone();
     let export_sources = ctx.source_files.lock().unwrap().clone();
-    let (export_markers, marker_paths, combined_file) = ctx
+    let (export_markers, combined_file) = ctx
         .session_mgr
         .lock()
-        .map(|mgr| {
-            (
-                mgr.load_markers(),
-                vec![mgr.session_dir().join("markers.json")],
-                mgr.combined_file(),
-            )
-        })
+        .map(|mgr| (mgr.load_markers(), mgr.combined_file()))
         .unwrap_or_default();
-
-    if session_html_is_current(&export_html, &export_sources, &marker_paths) {
-        if let Ok(mut mgr) = ctx.session_mgr.lock() {
-            let _ = mgr.mark_html_exported(&export_html);
-        }
-        return Ok(export_html.display().to_string());
-    }
 
     let exporter = SessionExporter::new(
         export_html.clone(),
@@ -982,37 +970,6 @@ fn rotate_session(
     Ok((old_session, new_session))
 }
 
-fn session_html_is_current(
-    html_path: &Path,
-    source_files: &HashMap<String, String>,
-    extra_paths: &[PathBuf],
-) -> bool {
-    let Ok(html_meta) = std::fs::metadata(html_path) else {
-        return false;
-    };
-    let Ok(html_mtime) = html_meta.modified() else {
-        return false;
-    };
-
-    for path in source_files
-        .values()
-        .map(PathBuf::from)
-        .chain(extra_paths.iter().cloned())
-    {
-        let Ok(meta) = std::fs::metadata(&path) else {
-            continue;
-        };
-        let Ok(mtime) = meta.modified() else {
-            return false;
-        };
-        if mtime > html_mtime {
-            return false;
-        }
-    }
-
-    true
-}
-
 fn update_manifest_file(path: &Path, updates: &serde_json::Value) -> Result<()> {
     let mut manifest = if path.exists() {
         let text = std::fs::read_to_string(path)?;
@@ -1027,7 +984,7 @@ fn update_manifest_file(path: &Path, updates: &serde_json::Value) -> Result<()> 
         }
     }
 
-    std::fs::write(path, serde_json::to_string_pretty(&manifest)?)
+    atomic_write_file(path, serde_json::to_string_pretty(&manifest)?.as_bytes())
         .with_context(|| format!("update manifest {}", path.display()))
 }
 
@@ -1820,13 +1777,12 @@ mod tests {
     }
 
     #[test]
-    fn export_session_skips_when_html_already_current() {
-        let dir = temp_dir("export-skip");
+    fn explicit_export_regenerates_and_replaces_existing_html() {
+        let dir = temp_dir("export-replace");
         let log = dir.join("dut.log");
         std::fs::write(&log, "[t] hello\n").unwrap();
-        // HTML written after the log → newer mtime → export is skipped.
         let html = dir.join("session.html");
-        std::fs::write(&html, "<html></html>").unwrap();
+        std::fs::write(&html, "<html>stale</html>").unwrap();
 
         let mgr = test_manager("session-1", dir.clone(), log.clone());
         mgr.write_manifest().unwrap();
@@ -1849,6 +1805,10 @@ mod tests {
 
         let path = export_session(&ctx).unwrap();
         assert_eq!(path, html.display().to_string());
+        let exported = std::fs::read_to_string(&html).unwrap();
+        assert!(exported.starts_with("<!DOCTYPE html>"));
+        assert!(exported.ends_with("</html>\n"));
+        assert!(!exported.contains("<html>stale</html>"));
 
         std::fs::remove_dir_all(dir).ok();
     }

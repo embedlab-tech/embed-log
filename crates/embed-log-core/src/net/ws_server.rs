@@ -4,12 +4,13 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use axum::extract::ws::{Message, WebSocket};
-use axum::extract::{Path as AxumPath, State, WebSocketUpgrade};
+use axum::extract::{Path as AxumPath, Query, State, WebSocketUpgrade};
 use axum::http::{header, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::Router;
 use futures::StreamExt;
+use serde::Deserialize;
 use tokio::sync::{broadcast, mpsc};
 use tower_http::services::ServeDir;
 use tracing::{info, warn};
@@ -347,7 +348,7 @@ async fn handle_client_command(text: &str, state: &ServerState) -> Option<String
 
     match cmd_type {
         "export_session_html" => {
-            let status = do_export(state);
+            let status = do_export_async(state).await;
             let status_str = status.to_string();
             let _ = state.broadcast_tx.send(status_str.clone());
             Some(status_str)
@@ -359,16 +360,35 @@ async fn handle_client_command(text: &str, state: &ServerState) -> Option<String
     }
 }
 
+async fn do_export_async(state: &ServerState) -> serde_json::Value {
+    let state = state.clone();
+    tokio::task::spawn_blocking(move || do_export(&state))
+        .await
+        .unwrap_or_else(|error| {
+            serde_json::json!({
+                "type": "session_html_status",
+                "html_status": "error",
+                "html_error": format!("export task failed: {error}"),
+            })
+        })
+}
+
 fn do_export(state: &ServerState) -> serde_json::Value {
     if let Some(ref export_fn) = state.on_export {
         match export_fn() {
             Ok(path) => {
                 info!("session HTML exported: {path}");
+                let session = current_session_value(state);
+                let download_url = session
+                    .get("id")
+                    .and_then(|value| value.as_str())
+                    .map(|id| format!("/sessions/{id}/session.html"));
                 serde_json::json!({
                     "type": "session_html_status",
                     "html_status": "ready",
                     "html_path": path,
-                    "session": current_session_value(state),
+                    "download_url": download_url,
+                    "session": session,
                 })
             }
             Err(err) => {
@@ -577,24 +597,72 @@ async fn api_current_session_handler(State(state): State<ServerState>) -> impl I
     }
 }
 
-/// POST /api/session/export — trigger HTML export (HTTP alternative to WS command).
-async fn api_export_handler(State(state): State<ServerState>) -> impl IntoResponse {
-    let status_payload = do_export(&state);
+#[derive(Debug, Default, Deserialize)]
+struct ExportQuery {
+    #[serde(default)]
+    download: bool,
+}
+
+/// POST /api/session/export — atomically publish canonical HTML. JSON callers
+/// receive metadata; `?download=true` receives those exact published bytes.
+async fn api_export_handler(
+    State(state): State<ServerState>,
+    Query(query): Query<ExportQuery>,
+) -> Response {
+    let status_payload = do_export_async(&state).await;
     let ok = status_payload.get("html_status").and_then(|s| s.as_str()) == Some("ready");
+    let _ = state.broadcast_tx.send(status_payload.to_string());
+
+    if query.download && ok {
+        let path = status_payload
+            .get("html_path")
+            .and_then(|value| value.as_str())
+            .map(PathBuf::from);
+        let session_id = status_payload
+            .pointer("/session/id")
+            .and_then(|value| value.as_str())
+            .unwrap_or("session");
+        match path.and_then(|path| std::fs::read(path).ok()) {
+            Some(bytes) => {
+                return Response::builder()
+                    .status(StatusCode::OK)
+                    .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+                    .header(
+                        header::CONTENT_DISPOSITION,
+                        format!("attachment; filename=\"embed-log-{session_id}.html\""),
+                    )
+                    .header("x-embed-log-session", session_id)
+                    .body(axum::body::Body::from(bytes))
+                    .unwrap();
+            }
+            None => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    axum::Json(serde_json::json!({
+                        "ok": false,
+                        "html_status": "error",
+                        "html_error": "published session HTML could not be read",
+                    })),
+                )
+                    .into_response();
+            }
+        }
+    }
+
     let body = serde_json::json!({
         "ok": ok,
         "session": current_session_value(&state),
         "html_status": status_payload.get("html_status").cloned().unwrap_or(serde_json::Value::Null),
         "html_path": status_payload.get("html_path").cloned().unwrap_or(serde_json::Value::Null),
+        "download_url": status_payload.get("download_url").cloned().unwrap_or(serde_json::Value::Null),
         "html_error": status_payload.get("html_error").cloned().unwrap_or(serde_json::Value::Null),
     });
-    let _ = state.broadcast_tx.send(status_payload.to_string());
     let status = if ok {
         StatusCode::OK
     } else {
         StatusCode::INTERNAL_SERVER_ERROR
     };
-    (status, axum::Json(body))
+    (status, axum::Json(body)).into_response()
 }
 
 async fn api_stats_handler(State(state): State<ServerState>) -> impl IntoResponse {
@@ -931,6 +999,7 @@ mod tests {
         let response: serde_json::Value = serde_json::from_str(&response).unwrap();
         assert_eq!(response["type"], "session_html_status");
         assert_eq!(response["html_status"], "ready");
+        assert_eq!(response["download_url"], "/sessions/session-1/session.html");
 
         let broadcast: serde_json::Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
         assert_eq!(broadcast["type"], "session_html_status");

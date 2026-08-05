@@ -140,7 +140,7 @@ The Axum server serves API routes first, then static frontend assets from `front
 | `/ws` | WebSocket | Config message, replay buffer, live logs, frontend commands. |
 | `/api/health` | `GET` | Health probe. |
 | `/api/session/current` | `GET` | Current session info. |
-| `/api/session/export` | `POST` | Generate/update `session.html`. |
+| `/api/session/export` | `POST` | Atomically generate/update canonical `session.html`; `?download=true` returns those same published bytes as an attachment. |
 | `/api/session/rotate` | `POST` | Close current session, start a new one, export old session in background. |
 | `/api/sessions` | `GET` | List sessions under logs root. |
 | `/api/stats` | `GET` | Runtime counters and WebSocket/replay state. |
@@ -166,11 +166,12 @@ logs/
     ├── combined.jsonl            # structured append-only stream across all sources
     │
     ├── markers.json              # after markers are saved
-    ├── session.html              # after export/shutdown/no-client export
+    ├── .session-html.lock        # advisory lock shared by daemon/offline exporters
+    ├── session.html              # atomically published after an export trigger
     └── <tab>__<source>__<session>.log
 ```
 
-Session HTML is self-contained: log data, CSS, JS, plugin metadata/scripts, markers, and static profile are embedded into one file.
+Session HTML is self-contained: log data, CSS, JS, plugin metadata/scripts, markers, and static profile are embedded into one file. New exports read the complete newline-terminated prefix of canonical `combined.jsonl`, render behind the per-session lock, and rename a flushed temporary file into place. A failed export therefore leaves the previous complete report intact.
 
 ## Frontend architecture
 
@@ -191,7 +192,7 @@ Important files:
 | `tabcreate.js`, `tabs.js` | Tab/pane construction and switching. |
 | `renderPane.js`, `renderToolbar.js` | Shared shell renderers for live/static UI. |
 | `selection.js` | Line selection, markers, copy/export selected text. |
-| `export.js` | Client-side HTML snapshot/export support. |
+| `export.js` | Canonical daemon export download plus client-side selection-only HTML snapshots. |
 | `persist.js` | Browser session persistence. |
 | `settings.js`, `themes.js`, `fontsize.js` | User settings, themes, font size. |
 | `pluginRuntime.js` | Optional custom plugin registry/loading/settings; no built-in protocol decoders. |
