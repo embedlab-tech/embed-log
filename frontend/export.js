@@ -10,6 +10,7 @@ const STATIC_EXPORT_PROFILE =
 import { renderPaneWindow, updateJumpBtn, getLine } from './lines.js';
 
 import { state, TABS, PANES, PANE_LABELS } from './state.js';
+import { isEditableTarget, isComposingEvent } from './keyboard.js';
 
 export async function exportHtmlSnapshot(options = {}) {
     const btn = options.button === undefined ? document.getElementById("btn-export") : options.button;
@@ -490,6 +491,7 @@ document.addEventListener("click", e => {
 }, true);
 
 document.addEventListener("keydown", e => {
+    if (isComposingEvent(e) || isEditableTarget(e.target)) return;
     if (e.key === "Escape") _closeRawMenu();
 });
 

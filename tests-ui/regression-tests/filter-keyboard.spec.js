@@ -77,6 +77,26 @@ test.describe('filter and keyboard UX', () => {
 //   When  the filter is changed to an invalid regex
 //   Then  the input shows invalid class but the previous valid filter continues to apply; fixing the regex removes the error
 
+  test('filter keeps focus and accepts keyboard input while logs arrive', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    const input = page.locator('.filter-input[data-pane="SENSOR_A"]');
+
+    await input.click();
+    await page.keyboard.type('kind=filter-alpha');
+    await expect(input).toHaveValue('kind=filter-alpha');
+    await expect(input).toBeFocused();
+
+    // Incoming records must not replace the control or steal focus.
+    await expect.poll(async () => page.locator('#log-SENSOR_A .log-line').count())
+      .toBeGreaterThan(0);
+    await expect(input).toBeFocused();
+    await page.keyboard.press('End');
+    await page.keyboard.type('|filter-beta');
+    await expect(input).toHaveValue('kind=filter-alpha|filter-beta');
+  });
+
+// Scenario: Invalid regex preserves the previous valid filter while showing error state
   test('invalid regex preserves previous valid filter', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });

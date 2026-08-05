@@ -5,6 +5,7 @@ import { can } from './profile.js';
 import { switchTab } from './tabs.js';
 import { _escHtml } from './renderPane.js';
 import { denoiseMessage, elapsedTime, ShortcodeTable, estimateTokens } from './postprocess.js';
+import { isEditableTarget, isComposingEvent } from './keyboard.js';
 // Line selection + copy / export actions
 //
 // Two explicit scopes (toggled per-pane overlay):
@@ -1094,6 +1095,8 @@ document.addEventListener("click", e => {
 // Keyboard
 // ---------------------------------------------------------------------------
 document.addEventListener("keydown", e => {
+    if (isComposingEvent(e)) return;
+    if (isEditableTarget(e.target)) return;
     if ((e.ctrlKey || e.metaKey) && e.key === "c") {
         const pane = PANES.find(id => state.selected[id].size > 0);
         if (pane) { _copyExact(pane); e.preventDefault(); return; }
@@ -1118,11 +1121,13 @@ document.addEventListener("keydown", e => {
 });
 // ── Alt key: hold to enable native text selection on log lines ──
 document.addEventListener("keydown", e => {
+    if (isComposingEvent(e) || isEditableTarget(e.target)) return;
     if (e.key === "Alt" && !e.ctrlKey && !e.metaKey) {
         document.body.classList.add("alt-held");
     }
 });
 document.addEventListener("keyup", e => {
+    if (isEditableTarget(e.target)) return;
     if (e.key === "Alt") document.body.classList.remove("alt-held");
 });
 window.addEventListener("blur", () => document.body.classList.remove("alt-held"));

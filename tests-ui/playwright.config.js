@@ -29,5 +29,6 @@ export default defineConfig({
   } : undefined,
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'edge', use: { ...devices['Desktop Edge'], channel: 'msedge' } },
   ],
 });

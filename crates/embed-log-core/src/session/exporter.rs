@@ -387,6 +387,7 @@ impl SessionExporter {
         // Read and strip frontend JS files.
         let js_files = [
             "profile.js",
+            "keyboard.js",
             "renderPane.js",
             "renderToolbar.js",
             "pluginRuntime.js",

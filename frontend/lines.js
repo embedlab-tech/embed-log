@@ -4,6 +4,7 @@ import {
 } from './state.js';
 import { parseAnsi } from './ansi.js';
 import { analyzeLinePlugins, getLinePluginTooltip, getConfiguredPanePlugins, getPanePluginSettings, setPanePluginSetting } from './pluginRuntime.js';
+import { isEditableTarget, isComposingEvent } from './keyboard.js';
 
 // ---------------------------------------------------------------------------
 // Line rendering
@@ -286,6 +287,7 @@ window.addEventListener("resize", () => {
     _scheduleVirtualResizeRefresh();
 });
 document.addEventListener("keydown", ev => {
+    if (isComposingEvent(ev) || isEditableTarget(ev.target)) return;
     if (ev.key === "Escape") _hidePluginInfo();
 });
 
@@ -1158,9 +1160,8 @@ document.getElementById("btn-jump-all")?.addEventListener("click", () => {
 // Shift+L: same as clicking Live. Use e.code (physical key) rather than
 // e.key so it fires regardless of Caps Lock state.
 document.addEventListener("keydown", ev => {
+    if (isComposingEvent(ev) || isEditableTarget(ev.target)) return;
     if (!ev.shiftKey || ev.ctrlKey || ev.altKey || ev.metaKey || ev.code !== "KeyL") return;
-    const tag = ev.target?.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA" || ev.target?.isContentEditable) return;
     ev.preventDefault();
     document.getElementById("btn-jump-all")?.click();
 });
