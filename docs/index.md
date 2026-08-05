@@ -8,6 +8,7 @@
 - [CLI reference](cli.md) — commands, options, environment variables.
 - [Status and capabilities API](api-status.md) — REST readiness and source discovery for harnesses.
 - [Development](development.md) — local workflow, `just` recipes, extension points.
+- [Frontend overhaul plan](frontend-overhaul-plan.md) — Edge input reliability, shared static/live layout, simplified selection actions, and No time behavior.
 - [Terminal UI](tui.md) — launch modes, supported features, limitations, and keybindings.
 - [Releasing](releasing.md) — self-hosted runner release workflow and installers.
 - [STM hardware CI](hardware-ci.md) — hosted build plus self-hosted physical-device integration template.

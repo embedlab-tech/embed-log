@@ -1,5 +1,7 @@
 # Copy Compact / Agent-Friendly Selection Plan
 
+> **Superseded:** The browser multi-format copy proposal in this document is no longer planned. Browser selection copy will always use Full formatting, with timestamps omitted only while the presentation-only No time mode is active. Compact agent output remains available through the CLI. See [`docs/frontend-overhaul-plan.md`](docs/frontend-overhaul-plan.md) for the authoritative direction.
+
 This document describes a human-in-the-loop workflow for copying selected log evidence from the `embed-log` UI into an AI agent context without wasting tokens.
 
 The user often visually inspects logs in the web UI, selects suspicious lines or a time range, and then wants to paste a concise representation into an AI agent for analysis. The goal is to support that workflow with low-token copy formats.
