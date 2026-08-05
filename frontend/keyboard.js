@@ -19,15 +19,15 @@ const _keyOrigins = new Map();
 document.addEventListener("keydown", event => {
     if (isComposingEvent(event)) return;
     const key = event.code || event.key;
-    if (!event.repeat) {
-        _keyOrigins.set(key, event.target);
+    const origin = _keyOrigins.get(key);
+    if (origin !== undefined) {
+        if (isEditableTarget(event.target) && !isEditableTarget(origin)) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+        }
         return;
     }
-    const origin = _keyOrigins.get(key);
-    if (isEditableTarget(event.target) && !isEditableTarget(origin)) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-    }
+    _keyOrigins.set(key, event.target);
 }, true);
 
 document.addEventListener("keyup", event => {
