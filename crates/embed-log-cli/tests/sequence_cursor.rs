@@ -165,18 +165,12 @@ fn global_sequence_bounded_reads_context_and_rotation() {
     let page1 = json(&page1);
     assert_eq!(
         page1["fields"],
-        serde_json::json!([
-            "relative_time",
-            "sequence",
-            "source_id",
-            "line_idx",
-            "message"
-        ])
+        serde_json::json!(["time", "sequence", "source", "index", "message"])
     );
     assert_eq!(page1["records"].as_array().unwrap().len(), 2);
     assert_eq!(page1["records"][0][1], 1);
     assert_eq!(page1["records"][1][1], 2);
-    assert!(page1["records"][0][0].as_str().unwrap().starts_with("T+"));
+    assert!(page1["records"][0][0].as_str().unwrap().starts_with("+"));
     assert_eq!(page1["truncated"], true);
     assert_eq!(page1["next_cursor"], 2);
 
@@ -192,8 +186,6 @@ fn global_sequence_bounded_reads_context_and_rotation() {
             "2",
             "--limit",
             "2",
-            "--time",
-            "none",
             "--json",
         ],
     );
@@ -201,10 +193,10 @@ fn global_sequence_bounded_reads_context_and_rotation() {
     let page2 = json(&page2);
     assert_eq!(
         page2["fields"],
-        serde_json::json!(["sequence", "source_id", "line_idx", "message"])
+        serde_json::json!(["time", "sequence", "source", "index", "message"])
     );
-    assert_eq!(page2["records"][0][0], 3);
-    assert_eq!(page2["records"][1][0], 4);
+    assert_eq!(page2["records"][0][1], 3);
+    assert_eq!(page2["records"][1][1], 4);
 
     let absolute = invoke(
         &runtime,
@@ -223,7 +215,7 @@ fn global_sequence_bounded_reads_context_and_rotation() {
     );
     assert!(absolute.status.success());
     let absolute = json(&absolute);
-    assert_eq!(absolute["fields"][0], "timestamp_iso");
+    assert_eq!(absolute["fields"][0], "time");
     assert!(absolute["records"][0][0].as_str().unwrap().contains('T'));
 
     let text = invoke(
@@ -240,9 +232,9 @@ fn global_sequence_bounded_reads_context_and_rotation() {
     );
     assert!(text.status.success());
     let text = String::from_utf8(text.stdout).unwrap();
-    assert!(text.starts_with("T+"), "{text}");
-    assert!(text.contains(" 1 "), "{text}");
-    assert!(text.contains('#'), "{text}");
+    assert!(text.starts_with('+'), "{text}");
+    assert!(text.contains("seq=1"), "{text}");
+    assert!(text.contains("src="), "{text}");
 
     let source_only = invoke(
         &runtime,
@@ -256,8 +248,6 @@ fn global_sequence_bounded_reads_context_and_rotation() {
             "HOST",
             "--last",
             "10",
-            "--time",
-            "none",
             "--json",
         ],
     );
@@ -267,27 +257,7 @@ fn global_sequence_bounded_reads_context_and_rotation() {
         .as_array()
         .unwrap()
         .iter()
-        .all(|record| record[1] == "HOST"));
-
-    let full = invoke(
-        &runtime,
-        &[
-            "sessions",
-            "read",
-            session_id,
-            "--dir",
-            logs.to_str().unwrap(),
-            "--limit",
-            "1",
-            "--format",
-            "full-json",
-        ],
-    );
-    assert!(full.status.success());
-    let full = json(&full);
-    assert!(full.get("fields").is_none());
-    assert_eq!(full["records"][0]["sequence"], 1);
-    assert!(full["records"][0]["timestamp_iso"].is_string());
+        .all(|record| record[2] == "HOST"));
 
     let around = invoke(
         &runtime,
@@ -303,8 +273,6 @@ fn global_sequence_bounded_reads_context_and_rotation() {
             "1",
             "--after",
             "1",
-            "--time",
-            "none",
             "--json",
         ],
     );
@@ -315,7 +283,7 @@ fn global_sequence_bounded_reads_context_and_rotation() {
         .as_array()
         .unwrap()
         .iter()
-        .any(|record| record[0] == event_sequence));
+        .any(|record| record[1] == event_sequence));
     assert!(around["records"].as_array().unwrap().len() <= 3);
 
     let invalid = invoke(
@@ -367,8 +335,6 @@ fn global_sequence_bounded_reads_context_and_rotation() {
                 logs.to_str().unwrap(),
                 "--limit",
                 "1",
-                "--time",
-                "none",
                 "--json",
             ],
         );
@@ -382,8 +348,8 @@ fn global_sequence_bounded_reads_context_and_rotation() {
         thread::sleep(Duration::from_millis(20));
     }
     let new_read = new_read.expect("new session record was not persisted");
-    assert_eq!(new_read["records"][0][0], 1);
-    assert_eq!(new_read["records"][0][2], 0);
+    assert_eq!(new_read["records"][0][1], 1);
+    assert_eq!(new_read["records"][0][3], 0);
 
     let removed = invoke(
         &runtime,

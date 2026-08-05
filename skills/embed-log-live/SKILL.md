@@ -56,7 +56,7 @@ Read only records produced after the established cursor:
 
 ```bash
 embed-log sessions read "$SESSION_ID" --dir "$LOGS_DIR" \
-  --after "$CURSOR" --limit 100 --time relative --json
+  --after "$CURSOR" --limit 100 --json
 ```
 
 Continue from `next_cursor` only while `truncated` is true. Retrieve exact cross-source context around evidence:

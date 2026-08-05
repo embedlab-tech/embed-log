@@ -159,10 +159,7 @@ pub(crate) enum SessionsCommand {
         /// Timestamp shown in compact records.
         #[arg(long, value_enum, default_value_t = TimeDisplay::Relative)]
         time: TimeDisplay,
-        /// Compact records or complete stored JSON objects.
-        #[arg(long, value_enum, default_value_t = ReadFormat::Compact)]
-        format: ReadFormat,
-        /// Emit a structured envelope; full-json always emits JSON.
+        /// Emit the compact structured envelope instead of concise text.
         #[arg(long)]
         json: bool,
         /// Include redundant materialized merge records from legacy sessions.
@@ -186,10 +183,7 @@ pub(crate) enum SessionsCommand {
         /// Timestamp shown in compact records.
         #[arg(long, value_enum, default_value_t = TimeDisplay::Relative)]
         time: TimeDisplay,
-        /// Compact records or complete stored JSON objects.
-        #[arg(long, value_enum, default_value_t = ReadFormat::Compact)]
-        format: ReadFormat,
-        /// Emit a structured envelope; full-json always emits JSON.
+        /// Emit the compact structured envelope instead of concise text.
         #[arg(long)]
         json: bool,
         /// Include redundant materialized merge records from legacy sessions.
@@ -250,9 +244,9 @@ pub(crate) enum SessionsCommand {
         /// Print only the number of matches.
         #[arg(long)]
         count: bool,
-        /// Output format: jsonl (default), compact, or mini-jsonl.
-        #[arg(long, value_enum, default_value_t = OutputFormat::Jsonl)]
-        format: OutputFormat,
+        /// Emit the compact structured envelope instead of concise text.
+        #[arg(long)]
+        json: bool,
         /// Print N lines of context (before and after) around each match. Conflicts with --count and --last.
         #[arg(short = 'C', long)]
         context: Option<usize>,
@@ -275,13 +269,10 @@ impl SessionsCommand {
             | Self::List { json, .. }
             | Self::Info { json, .. }
             | Self::Summary { json, .. } => *json,
-            Self::Read { json, format, .. } | Self::Around { json, format, .. } => {
-                *json || *format == ReadFormat::FullJson
+            Self::Read { json, .. } | Self::Around { json, .. } | Self::Search { json, .. } => {
+                *json
             }
-            Self::Open { .. }
-            | Self::Export { .. }
-            | Self::Combined { .. }
-            | Self::Search { .. } => false,
+            Self::Open { .. } | Self::Export { .. } | Self::Combined { .. } => false,
         }
     }
 }
@@ -310,17 +301,12 @@ pub(crate) enum OutputFormat {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub(crate) enum TimeDisplay {
-    None,
     Relative,
     Absolute,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-pub(crate) enum ReadFormat {
-    Compact,
-    FullJson,
-}
-
+// Reader output intentionally has only two modes: concise text and --json.
+// Raw stored objects remain available through session export/diagnostic paths.
 #[derive(Debug, Clone)]
 pub(crate) struct SessionRecord {
     pub id: String,
@@ -380,7 +366,6 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             last,
             limit,
             time,
-            format,
             json,
             include_materialized_merges,
         } => {
@@ -394,7 +379,6 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
                     last,
                     limit,
                     time,
-                    format,
                     json,
                     include_materialized_merges,
                 },
@@ -407,7 +391,6 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             before,
             after,
             time,
-            format,
             json,
             include_materialized_merges,
         } => {
@@ -420,7 +403,6 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
                     before,
                     after,
                     time,
-                    format,
                     json,
                     include_materialized_merges,
                 },
@@ -449,7 +431,7 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             limit,
             last,
             count,
-            format,
+            json,
             context,
             before_context,
             after_context,
@@ -494,11 +476,11 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             if has_context {
                 let before = before_context.or(context).unwrap_or(0);
                 let after = after_context.or(context).unwrap_or(0);
-                search_sessions_with_context(&dir, filters, format, before, after)
+                search_sessions_with_context(&dir, filters, json, before, after)
             } else if let Some(last) = last {
-                search_sessions_last_n(&dir, filters, format, last)
+                search_sessions_last_n(&dir, filters, json, last)
             } else {
-                search_sessions(&dir, filters, format)
+                search_sessions(&dir, filters, json)
             }
         }
         SessionsCommand::Open {
@@ -834,7 +816,6 @@ struct ReadOptions {
     last: Option<usize>,
     limit: usize,
     time: TimeDisplay,
-    format: ReadFormat,
     json: bool,
     include_materialized_merges: bool,
 }
@@ -844,7 +825,6 @@ struct AroundOptions {
     before: usize,
     after: usize,
     time: TimeDisplay,
-    format: ReadFormat,
     json: bool,
     include_materialized_merges: bool,
 }
@@ -970,7 +950,6 @@ fn read_session(dir: &Path, session_id: &str, options: ReadOptions) -> Result<()
         &session,
         records,
         options.time,
-        options.format,
         options.json,
         truncated,
         next_cursor,
@@ -1052,7 +1031,6 @@ fn around_session(dir: &Path, session_id: &str, options: AroundOptions) -> Resul
         &session,
         records,
         options.time,
-        options.format,
         options.json,
         false,
         next_cursor,
@@ -1098,30 +1076,21 @@ fn render_bounded_records(
     session: &SessionRecord,
     records: Vec<serde_json::Value>,
     time: TimeDisplay,
-    format: ReadFormat,
     json_output: bool,
     truncated: bool,
     next_cursor: u64,
     invalid_records: usize,
     target: Option<serde_json::Value>,
 ) -> Result<()> {
-    let full_json = format == ReadFormat::FullJson;
-    if json_output || full_json {
+    if json_output {
         let mut output = serde_json::json!({
-            "ok": true,
             "session_id": session.id,
-            "records": if full_json {
-                serde_json::Value::Array(records)
-            } else {
-                serde_json::Value::Array(records.iter().map(|record| compact_tuple(record, time)).collect())
-            },
-            "truncated": truncated,
+            "fields": ["time", "sequence", "source", "index", "message"],
+            "records": records.iter().map(|record| compact_tuple(record, time)).collect::<Vec<_>>(),
             "next_cursor": next_cursor,
+            "truncated": truncated,
             "invalid_records": invalid_records,
         });
-        if !full_json {
-            output["fields"] = serde_json::json!(compact_fields(time));
-        }
         if let Some(target) = target {
             output["target"] = target;
         }
@@ -1130,29 +1099,15 @@ fn render_bounded_records(
         for record in &records {
             println!("{}", compact_text(record, time));
         }
-        eprintln!(
-            "sessions: next cursor {next_cursor}; truncated={truncated}; invalid_records={invalid_records}"
-        );
     }
     Ok(())
 }
 
-fn compact_fields(time: TimeDisplay) -> Vec<&'static str> {
-    let mut fields = Vec::new();
-    match time {
-        TimeDisplay::None => {}
-        TimeDisplay::Relative => fields.push("relative_time"),
-        TimeDisplay::Absolute => fields.push("timestamp_iso"),
-    }
-    fields.extend(["sequence", "source_id", "line_idx", "message"]);
-    fields
-}
-
 fn compact_tuple(record: &serde_json::Value, time: TimeDisplay) -> serde_json::Value {
     let mut values = Vec::new();
-    if let Some(value) = compact_time(record, time) {
-        values.push(serde_json::json!(value));
-    }
+    values.push(serde_json::json!(
+        compact_time(record, time).unwrap_or_default()
+    ));
     values.push(
         record
             .get("sequence")
@@ -1184,13 +1139,13 @@ fn compact_text(record: &serde_json::Value, time: TimeDisplay) -> String {
         .get("source_id")
         .and_then(|value| value.as_str())
         .unwrap_or("?");
-    let line = record
+    let index = record
         .get("line_idx")
         .and_then(|value| value.as_u64())
-        .map_or_else(|| "#?".to_string(), |line| format!("#{line}"));
-    let prefix = compact_time(record, time).map_or_else(String::new, |time| format!("{time} "));
+        .map_or_else(|| "?".to_string(), |line| line.to_string());
+    let time = compact_time(record, time).unwrap_or_default();
     format!(
-        "{prefix}{sequence} {source}{line} {}",
+        "{time} seq={sequence} src={source} idx={index} | {}",
         compact_message(record)
     )
 }
@@ -1208,7 +1163,6 @@ fn compact_message(record: &serde_json::Value) -> String {
 
 fn compact_time(record: &serde_json::Value, time: TimeDisplay) -> Option<String> {
     match time {
-        TimeDisplay::None => None,
         TimeDisplay::Relative => Some(agent_relative_time(record)),
         TimeDisplay::Absolute => Some(
             record
@@ -1227,15 +1181,8 @@ fn agent_relative_time(record: &serde_json::Value) -> String {
         .unwrap_or(0.0)
         .max(0.0) as u64;
     let millis = total_ms % 1_000;
-    let total_seconds = total_ms / 1_000;
-    let seconds = total_seconds % 60;
-    let minutes = (total_seconds / 60) % 60;
-    let hours = total_seconds / 3_600;
-    if hours > 0 {
-        format!("T+{hours:02}:{minutes:02}:{seconds:02}.{millis:03}")
-    } else {
-        format!("T+{minutes:02}:{seconds:02}.{millis:03}")
-    }
+    let elapsed_seconds = total_ms / 1_000;
+    format!("+{elapsed_seconds}.{millis:03}")
 }
 
 /// `HH:MM:SS.mmm` clock time, preferring `timestamp_iso`, falling back to the
@@ -1590,16 +1537,13 @@ fn resolve_latest_session_filter(filters: &mut SearchFilters, sessions: &[Sessio
     }
 }
 
-fn search_sessions(dir: &Path, mut filters: SearchFilters, format: OutputFormat) -> Result<()> {
+fn search_sessions(dir: &Path, mut filters: SearchFilters, json: bool) -> Result<()> {
     use std::io::{BufRead, BufReader};
 
     let sessions = load_sessions(dir)?;
     resolve_latest_session_filter(&mut filters, &sessions);
     let mut matches = 0usize;
-    let mut codes = ShortcodeTable::default();
-    if !filters.count {
-        note_elapsed_time_format(format);
-    }
+    let mut json_records = Vec::new();
 
     for session in sessions
         .iter()
@@ -1628,7 +1572,11 @@ fn search_sessions(dir: &Path, mut filters: SearchFilters, format: OutputFormat)
             }
             matches += 1;
             if !filters.count {
-                println!("{}", render_entry(&entry, &line, format, &mut codes));
+                if json {
+                    json_records.push(compact_tuple(&entry, TimeDisplay::Relative));
+                } else {
+                    println!("{}", compact_text(&entry, TimeDisplay::Relative));
+                }
             }
             if filters.limit.is_some_and(|limit| matches >= limit) {
                 if filters.count {
@@ -1641,6 +1589,18 @@ fn search_sessions(dir: &Path, mut filters: SearchFilters, format: OutputFormat)
 
     if filters.count {
         println!("{matches}");
+    } else if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "session_id": serde_json::Value::Null,
+                "fields": ["time", "sequence", "source", "index", "message"],
+                "records": json_records,
+                "next_cursor": 0,
+                "truncated": false,
+                "invalid_records": 0,
+            })
+        );
     }
     Ok(())
 }
@@ -1653,15 +1613,13 @@ fn search_sessions(dir: &Path, mut filters: SearchFilters, format: OutputFormat)
 fn search_sessions_with_context(
     dir: &Path,
     mut filters: SearchFilters,
-    format: OutputFormat,
+    _json: bool,
     before: usize,
     after: usize,
 ) -> Result<()> {
     let sessions = load_sessions(dir)?;
     resolve_latest_session_filter(&mut filters, &sessions);
     let mut match_num = 0usize;
-    let mut codes = ShortcodeTable::default();
-    note_elapsed_time_format(format);
 
     for session in sessions
         .iter()
@@ -1712,7 +1670,7 @@ fn search_sessions_with_context(
                 let ctx_entry = parsed[raw_idx]
                     .as_ref()
                     .expect("visible entries are parsed");
-                let rendered = render_entry(ctx_entry, lines[raw_idx], format, &mut codes);
+                let rendered = compact_text(ctx_entry, TimeDisplay::Relative);
                 if raw_idx == idx {
                     println!("{rendered}   << MATCH");
                 } else {
@@ -1735,7 +1693,7 @@ fn search_sessions_with_context(
 fn search_sessions_last_n(
     dir: &Path,
     mut filters: SearchFilters,
-    format: OutputFormat,
+    json: bool,
     last: usize,
 ) -> Result<()> {
     use std::io::{BufRead, BufReader};
@@ -1743,10 +1701,6 @@ fn search_sessions_last_n(
     let sessions = load_sessions(dir)?;
     resolve_latest_session_filter(&mut filters, &sessions);
     let mut buffer: VecDeque<String> = VecDeque::with_capacity(last.min(4096));
-    let mut codes = ShortcodeTable::default();
-    if !filters.count {
-        note_elapsed_time_format(format);
-    }
 
     for session in sessions
         .iter()
@@ -1774,16 +1728,26 @@ fn search_sessions_last_n(
             if !filters.matches_entry(session, &entry) {
                 continue;
             }
-            push_bounded(
-                &mut buffer,
-                render_entry(&entry, &line, format, &mut codes),
-                last,
-            );
+            let rendered = if json {
+                serde_json::to_string(&compact_tuple(&entry, TimeDisplay::Relative))?
+            } else {
+                compact_text(&entry, TimeDisplay::Relative)
+            };
+            push_bounded(&mut buffer, rendered, last);
         }
     }
 
     if filters.count {
         println!("{}", buffer.len());
+    } else if json {
+        let records = buffer
+            .iter()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .collect::<Vec<_>>();
+        println!(
+            "{}",
+            serde_json::json!({"session_id": serde_json::Value::Null, "fields": ["time", "sequence", "source", "index", "message"], "records": records, "next_cursor": 0, "truncated": false, "invalid_records": 0})
+        );
     } else {
         for line in &buffer {
             println!("{line}");
@@ -2770,27 +2734,19 @@ mod tests {
         });
         assert_eq!(
             compact_text(&entry, TimeDisplay::Relative),
-            "T+00:12.453 719 DUT_UART#428 boot complete"
-        );
-        assert_eq!(
-            compact_text(&entry, TimeDisplay::None),
-            "719 DUT_UART#428 boot complete"
+            "+12.453 seq=719 src=DUT_UART idx=428 | boot complete"
         );
         assert_eq!(
             compact_text(&entry, TimeDisplay::Absolute),
-            "2026-08-04T10:30:12.453+02:00 719 DUT_UART#428 boot complete"
+            "2026-08-04T10:30:12.453+02:00 seq=719 src=DUT_UART idx=428 | boot complete"
         );
         assert_eq!(
             compact_tuple(&entry, TimeDisplay::Relative),
-            serde_json::json!(["T+00:12.453", 719, "DUT_UART", 428, "boot complete"])
-        );
-        assert_eq!(
-            compact_fields(TimeDisplay::None),
-            vec!["sequence", "source_id", "line_idx", "message"]
+            serde_json::json!(["+12.453", 719, "DUT_UART", 428, "boot complete"])
         );
         assert_eq!(
             agent_relative_time(&serde_json::json!({"relNum":3_723_004.0})),
-            "T+01:02:03.004"
+            "+3723.004"
         );
     }
 
@@ -2986,16 +2942,7 @@ mod tests {
         use clap::Parser as _;
 
         for args in [
-            [
-                "embed-log",
-                "sessions",
-                "search",
-                "--session",
-                "latest",
-                "--format",
-                "compact",
-            ]
-            .as_slice(),
+            ["embed-log", "sessions", "search", "--session", "latest"].as_slice(),
             ["embed-log", "sessions", "search", "--since", "10m"].as_slice(),
             ["embed-log", "sessions", "search", "--last", "50"].as_slice(),
             ["embed-log", "sessions", "search", "-C", "5"].as_slice(),

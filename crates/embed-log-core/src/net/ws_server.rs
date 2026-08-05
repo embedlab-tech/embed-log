@@ -30,10 +30,17 @@ pub type RotateCallback = Arc<
 pub struct SourceRuntimeStats {
     dequeued: AtomicU64,
     bytes: AtomicU64,
+    first_seen_ms: AtomicU64,
+    last_seen_ms: AtomicU64,
 }
 
 impl SourceRuntimeStats {
     pub fn record_dequeued(&self, bytes: usize) {
+        let now = unix_millis();
+        self.first_seen_ms
+            .compare_exchange(0, now, Ordering::Relaxed, Ordering::Relaxed)
+            .ok();
+        self.last_seen_ms.store(now, Ordering::Relaxed);
         self.dequeued.fetch_add(1, Ordering::Relaxed);
         self.bytes.fetch_add(bytes as u64, Ordering::Relaxed);
     }
@@ -42,12 +49,27 @@ impl SourceRuntimeStats {
     // would need the producer side wired in too; add those back if a consumer
     // needs real backpressure telemetry.
     fn snapshot(&self, maxsize: usize) -> serde_json::Value {
+        let dequeued = self.dequeued.load(Ordering::Relaxed);
+        let first = self.first_seen_ms.load(Ordering::Relaxed);
+        let last = self.last_seen_ms.load(Ordering::Relaxed);
+        let elapsed_s = (last.saturating_sub(first) as f64 / 1000.0).max(0.001);
         serde_json::json!({
             "maxsize": maxsize,
-            "dequeued": self.dequeued.load(Ordering::Relaxed),
+            "dequeued": dequeued,
             "bytes": self.bytes.load(Ordering::Relaxed),
+            "record_rate": if dequeued == 0 { 0.0 } else { dequeued as f64 / elapsed_s },
+            "queue_pressure": null,
+            "stream_gaps": 0,
+            "firmware_drop_markers": 0,
         })
     }
+}
+
+fn unix_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or_default()
 }
 
 pub struct RuntimeStats {
@@ -171,6 +193,10 @@ pub async fn start_server(
         .route(
             "/api/session/export",
             axum::routing::post(api_export_handler),
+        )
+        .route(
+            "/api/session/marker",
+            axum::routing::post(api_marker_handler),
         )
         .route(
             "/api/session/rotate",
@@ -666,10 +692,16 @@ async fn api_export_handler(
 }
 
 async fn api_stats_handler(State(state): State<ServerState>) -> impl IntoResponse {
-    let session_id = state
+    let (session_id, session_records) = state
         .session_manager
         .as_ref()
-        .and_then(|manager| manager.lock().ok().map(|mgr| mgr.session_id().to_string()));
+        .and_then(|manager| {
+            manager
+                .lock()
+                .ok()
+                .map(|mgr| (Some(mgr.session_id().to_string()), mgr.record_count()))
+        })
+        .unwrap_or((None, 0));
 
     let replay_depth = state
         .replay
@@ -679,6 +711,10 @@ async fn api_stats_handler(State(state): State<ServerState>) -> impl IntoRespons
 
     axum::Json(serde_json::json!({
         "session_id": session_id,
+        "scopes": {
+            "process_lifetime": {"sources": state.stats.snapshot(), "records": null},
+            "current_session": {"sources": null, "records": session_records},
+        },
         "ws_clients": state.ws_client_count.load(Ordering::Relaxed),
         "replay_depth": replay_depth,
         "sources": state.stats.snapshot(),
@@ -686,6 +722,65 @@ async fn api_stats_handler(State(state): State<ServerState>) -> impl IntoRespons
             "sources": state.stats.sources.len(),
         },
     }))
+}
+
+#[derive(serde::Deserialize)]
+struct MarkerRequest {
+    action: String,
+    label: Option<String>,
+}
+
+async fn api_marker_handler(
+    State(state): State<ServerState>,
+    axum::Json(request): axum::Json<MarkerRequest>,
+) -> impl IntoResponse {
+    if request.action.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({"ok": false, "error": "action must not be empty"})),
+        )
+            .into_response();
+    }
+    let Some(manager) = state.session_manager.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({"ok": false, "error": "session unavailable"})),
+        )
+            .into_response();
+    };
+    let manager = match manager.lock() {
+        Ok(manager) => manager,
+        Err(_) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                axum::Json(serde_json::json!({"ok": false, "error": "session lock unavailable"})),
+            )
+                .into_response()
+        }
+    };
+    let mut markers = manager.load_markers();
+    let marker = serde_json::json!({
+        "type": "timeline",
+        "action": request.action.trim(),
+        "label": request.label,
+        "sequence": manager.record_count(),
+        "created_at_ms": unix_millis(),
+    });
+    markers.push(marker.clone());
+    if let Err(error) = manager.save_markers(&markers) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            axum::Json(serde_json::json!({"ok": false, "error": error.to_string()})),
+        )
+            .into_response();
+    }
+    let _ = state
+        .broadcast_tx
+        .send(serde_json::json!({"type": "timeline_marker", "marker": marker}).to_string());
+    axum::Json(
+        serde_json::json!({"ok": true, "session_id": manager.session_id(), "marker": marker}),
+    )
+    .into_response()
 }
 
 #[derive(serde::Deserialize)]

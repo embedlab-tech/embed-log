@@ -23,7 +23,7 @@ const MAX_CONTEXT: usize = 1_000;
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type WsRead = futures::stream::SplitStream<WsStream>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum TxInput {
     Line(String),
     Raw(String),
@@ -31,7 +31,7 @@ pub(crate) enum TxInput {
     Stdin,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct TxOptions {
     pub instance: Option<String>,
     pub url: Option<String>,
@@ -39,6 +39,9 @@ pub(crate) struct TxOptions {
     pub input: TxInput,
     pub expect: Option<String>,
     pub expect_regex: Option<String>,
+    pub until_prompt: Option<String>,
+    pub count: usize,
+    pub interval: Duration,
     pub timeout: Duration,
     pub context: usize,
     pub json: bool,
@@ -121,6 +124,19 @@ impl ReceiveState {
 }
 
 pub(crate) async fn cmd_tx(options: TxOptions) -> Result<()> {
+    anyhow::ensure!(options.count > 0, "--count must be greater than zero");
+    for index in 0..options.count {
+        let mut request = options.clone();
+        request.count = 1;
+        cmd_tx_once(request).await?;
+        if index + 1 < options.count && !options.interval.is_zero() {
+            tokio::time::sleep(options.interval).await;
+        }
+    }
+    Ok(())
+}
+
+async fn cmd_tx_once(options: TxOptions) -> Result<()> {
     anyhow::ensure!(
         options.context <= MAX_CONTEXT,
         "--context must not exceed {MAX_CONTEXT}"
@@ -131,19 +147,27 @@ pub(crate) async fn cmd_tx(options: TxOptions) -> Result<()> {
     let (data, line_ending) = read_input(&options.input)?;
     anyhow::ensure!(!data.is_empty(), "TX input must not be empty");
 
-    let matcher = match (options.expect.as_ref(), options.expect_regex.as_ref()) {
-        (Some(pattern), None) => {
+    let matcher = match (
+        options.expect.as_ref(),
+        options.expect_regex.as_ref(),
+        options.until_prompt.as_ref(),
+    ) {
+        (Some(pattern), None, None) => {
             anyhow::ensure!(!pattern.is_empty(), "--expect must not be empty");
             Some(Matcher::Contains(pattern.clone()))
         }
-        (None, Some(pattern)) => {
+        (None, Some(pattern), None) => {
             anyhow::ensure!(!pattern.is_empty(), "--expect-regex must not be empty");
             Some(Matcher::Regex(Regex::new(pattern).with_context(|| {
                 format!("invalid --expect-regex {pattern:?}")
             })?))
         }
-        (None, None) => None,
-        (Some(_), Some(_)) => anyhow::bail!("--expect conflicts with --expect-regex"),
+        (None, None, Some(pattern)) => {
+            anyhow::ensure!(!pattern.is_empty(), "--until-prompt must not be empty");
+            Some(Matcher::Contains(pattern.clone()))
+        }
+        (None, None, None) => None,
+        _ => anyhow::bail!("expectation options are mutually exclusive"),
     };
     let expects_reply = matcher.is_some();
     let mut state = ReceiveState::new(options.source.clone(), matcher, options.context);

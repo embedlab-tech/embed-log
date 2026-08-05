@@ -116,13 +116,22 @@ Daemon startup requires explicit `--config` and `--instance`. Its endpoint uses 
 Inspect or stop it:
 
 ```bash
-embed-log status --instance bench-a --json
+embed-log status --instance bench-a --brief
+embed-log stats --instance bench-a --brief
+embed-log status --instance bench-a --source DUT_UART --json
 embed-log stop --instance bench-a --json
+embed-log stop --url http://127.0.0.1:18080 --json
 ```
 
 Read-only `status` resolves `--instance`, then `EMBED_LOG_INSTANCE`, then the only running instance. Mutating commands such as `stop` and `sessions new` require `--instance`, `EMBED_LOG_INSTANCE`, or an explicit URL where supported. Query an unregistered or remote server directly with `embed-log status --url http://127.0.0.1:18080 --json`.
 
-`stop` verifies that the recorded PID still refers to the same executable before signaling it, waits for clean shutdown, and removes the registry record. Stale-record removal is reported on stderr, while malformed registry files fail visibly instead of being ignored. Daemon shutdown does not automatically export HTML. CLI-only source definitions are not yet accepted with `--daemon`.
+`status --brief` is a one-line readiness check; `--source NAME` limits source details. `stats` is deliberately separate from status and distinguishes process-lifetime source counters from current-session record totals. Record external experiment boundaries without altering log records:
+
+```bash
+embed-log mark --instance bench-a --action power-cycle --label "cycled DUT supply" --json
+```
+
+Timeline markers are persisted with the session and included by the existing HTML/session export paths. `stop` verifies that the recorded PID still refers to the same executable before signaling it, waits for clean shutdown, and removes the registry record. If a binary was replaced while a daemon stayed alive, lifecycle commands repair/adopt the live PID and endpoint record. `stop --url` targets a registered daemon by endpoint. Daemon shutdown does not automatically export HTML. CLI-only source definitions are not yet accepted with `--daemon`.
 
 ### UART TX and atomic expectations
 
@@ -132,7 +141,7 @@ Write a line through a UART already owned by the daemon:
 embed-log tx --instance bench-a --source DUT_UART --line status --json
 ```
 
-`--line` strips existing CR/LF terminators and writes one trailing carriage return. Use `--raw TEXT`, `--file PATH`, or `--stdin` to send exact bytes without line-ending normalization. Exactly one input mode is required.
+`--line` strips existing CR/LF terminators and writes one trailing carriage return. Use `--raw TEXT`, `--file PATH`, or `--stdin` to send exact bytes without line-ending normalization. Exactly one input mode is required. Use `--count N --interval 250ms` for repeated experiments. `--until-prompt PROMPT` waits for the terminating prompt and returns the bounded response context instead of stopping at an arbitrary first matching line.
 
 Arm an RX expectation before writing and return bounded live context:
 
@@ -319,7 +328,7 @@ Formats:
 Every record captured by the current version receives a session-global `sequence` in the same serialized order used by `combined.jsonl`, replay, and live publication. `line_idx` remains source-local. A compact line therefore identifies both positions:
 
 ```text
-T+00:12.453 719 DUT_UART#428 boot complete
++12.453 seq=719 src=DUT_UART idx=428 | boot complete
 ```
 
 Read only a bounded page:
@@ -327,22 +336,16 @@ Read only a bounded page:
 ```bash
 embed-log sessions read latest --dir logs --limit 100
 embed-log sessions read latest --dir logs --after 100 --limit 50 --json
-embed-log sessions read latest --dir logs --source DUT_UART --last 20 --time none --json
+embed-log sessions read latest --dir logs --source DUT_UART --last 20 --json
 ```
 
-Forward reads default to 100 records and all limits are capped at 1000. `--after` is the global cursor even when `--source` filters the returned records. Selecting a configured virtual merge dynamically expands to its member sources while returned records retain their original `source_id`, `line_idx`, and `sequence`. JSON compact output hoists its schema once:
+Forward reads default to 100 records and all limits are capped at 1000. `--after` is the global cursor even when `--source` filters the returned records. Selecting a configured virtual merge dynamically expands to its member sources while returned records retain their physical source, source-local index, and global sequence. Readers have exactly two output modes: concise text by default, or one compact structured envelope with `--json`:
 
 ```json
-{"ok":true,"session_id":"...","fields":["relative_time","sequence","source_id","line_idx","message"],"records":[["T+00:12.453",719,"DUT_UART",428,"boot complete"]],"truncated":false,"next_cursor":719,"invalid_records":0}
+{"session_id":"...","fields":["time","sequence","source","index","message"],"records":[["+12.453",719,"DUT_UART",428,"boot complete"]],"next_cursor":719,"truncated":false,"invalid_records":0}
 ```
 
-Timestamp display is independent of output representation:
-
-- `--time relative` (default): `T+00:12.453`;
-- `--time none`: omit time for the smallest output;
-- `--time absolute`: include RFC3339 wall-clock time.
-
-Use `--format full-json` when complete stored records, including all timestamp and parser metadata, are required. It always emits a JSON envelope. Sessions captured before global sequencing fail with an actionable compatibility error instead of inventing cursors.
+Use `--time absolute` when wall-clock timestamps are required; relative time is the default. Raw stored objects are available through export/diagnostic paths, not reader format switches. Sessions captured before global sequencing fail with an actionable compatibility error instead of inventing cursors.
 
 Fetch deterministic cross-source context by sequence:
 
@@ -352,52 +355,21 @@ embed-log sessions around latest --sequence 719 --before 10 --after 20 --json
 
 The total around window is capped at 1000 records. Sequence and source-local line counters reset to 1 and 0 respectively on titled rotation. Materialized merge records from older sessions are excluded from combined output, bounded reads/context, search, summaries, and exports by default; pass `--include-materialized-merges` to the applicable read command only when the redundant compatibility records are specifically required. TX expectations, watch matches, browser records, and TUI records carry the same sequence.
 
-### Legacy search/combined output format: `--format`
+### Reader output
 
-`sessions search` and `sessions combined` take `--format`, useful for keeping agent/script output small:
+`sessions read`, `sessions around`, and `sessions search` intentionally expose only two formats:
 
-| Format | What it looks like | Size vs. `jsonl`\* |
-| --- | --- | --- |
-| `jsonl` (default) | The full JSONL record, byte-for-byte as stored. | baseline |
-| `compact` | One human-readable line: `1:23.644 D#1234 panic: watchdog reset`. | ~81% smaller |
-| `mini-jsonl` | Small JSON object with short keys: `{"t":"1:23.644","s":"D","i":1234,"m":"panic: watchdog reset"}` (adds `src`/`dst`/`len` for packet entries). | ~77% smaller |
+- default concise text: `+0.123 seq=1234 src=UART idx=42 | message`;
+- `--json`: one compact envelope with `session_id`, fixed `fields`, tuple `records`, cursor, truncation, and invalid-record metadata.
 
-\* Measured on a real 43k-line session. `compact`/`mini-jsonl` apply two layers on top of the raw
-record:
-
-- **Denoised** (always): ANSI/terminal control sequences, a message's duplicate leading timestamp
-  (when it repeats the record's own timestamp — common in pytest output), padded log-level
-  brackets (`[   ERROR]` → `[ERROR]`), and redundant device uptime counters
-  (`[00000002] <inf> ...` → `<inf> ...`, keeping the level tag) are all stripped.
-- **Compacted further** (always): the timestamp shown is elapsed time since *that entry's own
-  session start* (`1:23.644` = 1 minute 23.644s in), not wall-clock time — shorter for typical
-  session lengths since it never encodes hour-of-day, and it directly answers "how far into the
-  run is this." The absolute anchor isn't lost — `sessions summary <id>` shows it. Source names
-  are shortcoded rather than spelled out — derived from the source's own name (initials of its
-  `_`/`-`-separated words: `COUNTER` → `C`, `MCU_LINK_RX` → `MLR`, `NODE-RED-COAP` → `NRC`),
-  falling back to a longer prefix on a rare collision, so codes stay mnemonic instead of arbitrary
-  and mostly stable across runs. The first time each timestamp convention or source code is used
-  in a given command's output, a one-line explanation is printed to **stderr** (never stdout, so
-  scripts/agents parsing output see only clean data) — e.g. `sessions: source code C = COUNTER`.
-  If a search spans multiple sessions, elapsed times are relative to each entry's *own* session
-  start — scope with `--session <id>` for unambiguous
-  elapsed times across a single run.
-
-Both layers are on by default for `compact`/`mini-jsonl` — `jsonl` remains the untouched,
-byte-exact format (original wall-clock timestamps, full source names) for anyone who needs it.
-
-```bash
-embed-log sessions search --dir logs --regex 'panic|fatal' --format compact
-embed-log sessions combined latest --lines 50 --format mini-jsonl
-```
-
+The stored `combined.jsonl` stream remains available through `sessions combined` and session export; it is not a reader format selector.
 Read the session-wide combined JSONL stream:
 
 ```bash
 embed-log sessions combined <SESSION_ID> --dir logs
 embed-log sessions combined <SESSION_ID> --dir logs --lines 50
 embed-log sessions tail-combined <SESSION_ID> --dir logs --follow
-embed-log sessions combined latest --follow --format compact
+embed-log sessions combined latest --follow
 ```
 
 Show a token-efficient overview of one session — the recommended first call before searching, especially for agents:
@@ -417,7 +389,7 @@ embed-log sessions search --dir logs --source DUT --from 2026-07-03T09:00:00 --t
 embed-log sessions search --dir logs --job nightly-42 --kind udp --contains timeout
 embed-log sessions search --dir logs --contains panic --regex 'ERROR|WARN'
 embed-log sessions search --dir logs --source DUT --count
-embed-log sessions search --session latest --regex 'timeout' --format compact
+embed-log sessions search --session latest --regex 'timeout'
 ```
 
 `search` scans `combined.jsonl` files under the selected log directory and prints matching entries. It can filter by session id/prefix (including `latest`), job id, source id, source kind, time window, message substring/regex, and packet fields such as source/destination UDP port or IP address.

@@ -254,6 +254,11 @@ impl SessionManager {
         Ok(markers)
     }
 
+    /// Number of records appended to the current session.
+    pub fn record_count(&self) -> u64 {
+        self.next_sequence.saturating_sub(1)
+    }
+
     /// Build the session info payload sent to the frontend and HTTP clients.
     pub fn build_session_info(&self) -> serde_json::Value {
         let html_path = self.html_path();

@@ -43,14 +43,14 @@ Retrieve bounded matches:
 ```bash
 embed-log sessions search --dir "$LOGS_DIR" \
   --session "$SESSION_ID" --contains "$ERROR_TEXT" \
-  --limit 20 --format compact --context 10
+  --limit 20 --context 10
 ```
 
 For sessions with global sequences, use bounded cursor reads:
 
 ```bash
 embed-log sessions read "$SESSION_ID" --dir "$LOGS_DIR" \
-  --after "$CURSOR" --limit 100 --time none --json
+  --after "$CURSOR" --limit 100 --json
 ```
 
 Continue from `next_cursor` only while `truncated` is true. `sequence` is session-global; `source_id + line_idx` is source-local. Retrieve deterministic cross-source context around relevant evidence:

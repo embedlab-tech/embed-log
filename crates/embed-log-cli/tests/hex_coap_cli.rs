@@ -91,8 +91,7 @@ fn configured_hex_coap_source_replaces_wire_hex_before_persistence() {
                 logs.to_str().unwrap(),
                 "--last",
                 "1",
-                "--format",
-                "full-json",
+                "--json",
             ],
         );
         if read.status.success() {
@@ -103,7 +102,7 @@ fn configured_hex_coap_source_replaces_wire_hex_before_persistence() {
         }
         thread::sleep(Duration::from_millis(20));
     }
-    let message = records["records"][0]["message"].as_str().unwrap();
+    let message = records["records"][0][4].as_str().unwrap();
     assert!(
         message.starts_with("radio rx: [CoAP] t:CON c:GET"),
         "{message}"

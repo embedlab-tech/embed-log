@@ -99,8 +99,7 @@ fn merge_is_virtual_and_cli_expands_it_to_original_records() {
                 "MCU_LINK",
                 "--limit",
                 "10",
-                "--format",
-                "full-json",
+                "--json",
             ],
         );
         if read.status.success() {
@@ -119,13 +118,13 @@ fn merge_is_virtual_and_cli_expands_it_to_original_records() {
     assert_eq!(rows.len(), 2, "{records}");
     let source_ids = rows
         .iter()
-        .map(|record| record["source_id"].as_str().unwrap())
+        .map(|record| record[2].as_str().unwrap())
         .collect::<std::collections::HashSet<_>>();
     assert_eq!(
         source_ids,
         std::collections::HashSet::from(["MCU_TX", "MCU_RX"])
     );
-    assert!(rows.iter().all(|record| record["source_kind"] != "merge"));
+    assert!(rows.iter().all(|record| record[2] != "MCU_LINK"));
 
     let session_dir = logs.join(session_id);
     let manifest: serde_json::Value =
@@ -245,8 +244,7 @@ fn legacy_materialized_merge_records_are_hidden_unless_requested() {
             logs.to_str().unwrap(),
             "--limit",
             "10",
-            "--format",
-            "full-json",
+            "--json",
         ],
     );
     assert!(
@@ -268,8 +266,7 @@ fn legacy_materialized_merge_records_are_hidden_unless_requested() {
             logs.to_str().unwrap(),
             "--limit",
             "10",
-            "--format",
-            "full-json",
+            "--json",
             "--include-materialized-merges",
         ],
     );
@@ -289,8 +286,7 @@ fn legacy_materialized_merge_records_are_hidden_unless_requested() {
             "MCU_LINK",
             "--limit",
             "10",
-            "--format",
-            "full-json",
+            "--json",
         ],
     );
     assert!(virtual_read.status.success());
@@ -300,7 +296,7 @@ fn legacy_materialized_merge_records_are_hidden_unless_requested() {
         .as_array()
         .unwrap()
         .iter()
-        .all(|record| record["source_id"] != "MCU_LINK"));
+        .all(|record| record[2] != "MCU_LINK"));
 
     let combined = invoke(
         &runtime,

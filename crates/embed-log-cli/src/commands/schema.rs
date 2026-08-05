@@ -407,6 +407,14 @@ fn semantics(path: &str) -> Semantics {
             errors: &[],
             notes: &["read-only status may infer the sole registered daemon"],
         },
+        "stats" => Semantics {
+            mutates: false,
+            execution: "daemon",
+            targeting: read_target,
+            output: json_or_text,
+            errors: &[],
+            notes: &["separates process-lifetime source counters from current-session record count", "--brief and --source reduce response size"],
+        },
         "export" => Semantics {
             mutates: true,
             execution: "daemon",
@@ -421,7 +429,7 @@ fn semantics(path: &str) -> Semantics {
         "stop" => Semantics {
             mutates: true,
             execution: "daemon",
-            targeting: json!({"mode":"explicit_registered_daemon","instance_env":"EMBED_LOG_INSTANCE","sole_instance_inference":false}),
+            targeting: json!({"mode":"registered_daemon_or_explicit_url","instance_env":"EMBED_LOG_INSTANCE","sole_instance_inference":false}),
             output: json_or_text,
             errors: &[],
             notes: &[],
@@ -479,7 +487,7 @@ fn semantics(path: &str) -> Semantics {
             targeting: session_target,
             output: compact_cursor,
             errors: &[],
-            notes: &["--after is exclusive and globally applied before source filtering", "default limit is 100; hard limit is 1000", "legacy sessions without global sequence are rejected"],
+            notes: &["default text is +time seq= source= idx= | message; --json emits one fixed tuple envelope", "--after is exclusive and globally applied before source filtering", "default limit is 100; hard limit is 1000", "legacy sessions without global sequence are rejected"],
         },
         "sessions.around" => Semantics {
             mutates: false,
@@ -487,7 +495,7 @@ fn semantics(path: &str) -> Semantics {
             targeting: session_target,
             output: compact_cursor,
             errors: &[],
-            notes: &["target plus before and after context is capped at 1000 records"],
+            notes: &["default text is +time seq= source= idx= | message; --json emits one fixed tuple envelope", "target plus before and after context is capped at 1000 records"],
         },
         "sessions.list" | "sessions.search" => Semantics {
             mutates: false,
@@ -495,7 +503,7 @@ fn semantics(path: &str) -> Semantics {
             targeting: json!({"mode":"offline_logs_directory"}),
             output: json_or_text,
             errors: &[],
-            notes: &[],
+            notes: &["default text is concise records; --json emits one fixed tuple envelope"],
         },
         path if path.starts_with("sessions.") => Semantics {
             mutates: path == "sessions.export",
@@ -626,7 +634,7 @@ mod tests {
         assert_eq!(limit["long"], "--limit");
         assert_eq!(limit["default"], json!(["100"]));
         let time = arguments.iter().find(|arg| arg["id"] == "time").unwrap();
-        assert_eq!(time["enum"], json!(["none", "relative", "absolute"]));
+        assert_eq!(time["enum"], json!(["relative", "absolute"]));
     }
 
     #[test]

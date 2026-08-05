@@ -15,7 +15,7 @@ use std::process::ExitCode;
 use anyhow::Result;
 use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 
-use commands::daemon::{cmd_start_daemon, cmd_status, cmd_stop};
+use commands::daemon::{cmd_mark, cmd_start_daemon, cmd_stats, cmd_status, cmd_stop};
 use commands::export::cmd_export;
 use commands::misc;
 use commands::run::{cmd_run, cmd_run_quick, RunOverrides};
@@ -155,6 +155,42 @@ enum Command {
         /// Machine-readable JSON output.
         #[arg(long)]
         json: bool,
+        /// Print only a one-line readiness summary.
+        #[arg(long)]
+        brief: bool,
+        /// Restrict source details to these names.
+        #[arg(long = "source")]
+        sources: Vec<String>,
+    },
+
+    /// Record an external timeline action in the active session.
+    Mark {
+        #[arg(long, conflicts_with = "url")]
+        instance: Option<String>,
+        #[arg(long)]
+        url: Option<String>,
+        /// Action name such as erase, flash, power-cycle, or reset.
+        #[arg(long)]
+        action: String,
+        /// Optional human-readable detail.
+        #[arg(long)]
+        label: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Show process-lifetime and current-session statistics.
+    Stats {
+        #[arg(long, conflicts_with = "url")]
+        instance: Option<String>,
+        #[arg(long)]
+        url: Option<String>,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        brief: bool,
+        #[arg(long = "source")]
+        sources: Vec<String>,
     },
 
     /// Generate the active daemon session's canonical HTML report.
@@ -199,6 +235,15 @@ enum Command {
         /// Wait for an RX message matching this regular expression.
         #[arg(long)]
         expect_regex: Option<String>,
+        /// Wait until an RX line containing this prompt arrives, returning the bounded response context.
+        #[arg(long, conflicts_with_all = ["expect", "expect_regex"])]
+        until_prompt: Option<String>,
+        /// Repeat the TX request this many times.
+        #[arg(long, default_value_t = 1)]
+        count: usize,
+        /// Delay between repeated TX requests.
+        #[arg(long, default_value = "1ms", value_parser = parse_duration)]
+        interval: std::time::Duration,
         /// Maximum wait for the expectation.
         #[arg(long, default_value = "30s", value_parser = parse_duration)]
         timeout: std::time::Duration,
@@ -219,8 +264,11 @@ enum Command {
     /// Gracefully stop a registered daemon.
     Stop {
         /// Registered daemon name. Defaults to EMBED_LOG_INSTANCE or the only running instance.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "url")]
         instance: Option<String>,
+        /// Stop the daemon serving this explicit endpoint, even if registration is missing.
+        #[arg(long)]
+        url: Option<String>,
         /// Machine-readable JSON output.
         #[arg(long)]
         json: bool,
@@ -338,6 +386,8 @@ impl Cli {
             Some(Command::Skill { json, .. }) => *json,
             Some(Command::Run { json, .. })
             | Some(Command::Status { json, .. })
+            | Some(Command::Stats { json, .. })
+            | Some(Command::Mark { json, .. })
             | Some(Command::Export { json, .. })
             | Some(Command::Tx { json, .. })
             | Some(Command::Stop { json, .. })
@@ -424,7 +474,29 @@ async fn dispatch(cli: Cli) -> Result<()> {
             instance,
             url,
             json,
-        }) => cmd_status(instance.as_deref(), url.as_deref(), json),
+            brief,
+            sources,
+        }) => cmd_status(instance.as_deref(), url.as_deref(), json, brief, &sources),
+        Some(Command::Mark {
+            instance,
+            url,
+            action,
+            label,
+            json,
+        }) => cmd_mark(
+            instance.as_deref(),
+            url.as_deref(),
+            &action,
+            label.as_deref(),
+            json,
+        ),
+        Some(Command::Stats {
+            instance,
+            url,
+            json,
+            brief,
+            sources,
+        }) => cmd_stats(instance.as_deref(), url.as_deref(), json, brief, &sources),
         Some(Command::Export {
             instance,
             url,
@@ -440,6 +512,9 @@ async fn dispatch(cli: Cli) -> Result<()> {
             stdin,
             expect,
             expect_regex,
+            until_prompt,
+            count,
+            interval,
             timeout,
             context,
             json,
@@ -458,6 +533,9 @@ async fn dispatch(cli: Cli) -> Result<()> {
                 input,
                 expect,
                 expect_regex,
+                until_prompt,
+                count,
+                interval,
                 timeout,
                 context,
                 json,
@@ -465,7 +543,11 @@ async fn dispatch(cli: Cli) -> Result<()> {
             .await
         }
         Some(Command::Watch { command }) => cmd_watch(command).await,
-        Some(Command::Stop { instance, json }) => cmd_stop(instance.as_deref(), json),
+        Some(Command::Stop {
+            instance,
+            url,
+            json,
+        }) => cmd_stop(instance.as_deref(), url.as_deref(), json),
         Some(Command::Version { config, json }) => misc::cmd_version(config.as_deref(), json),
         Some(Command::Doctor {
             config,
@@ -621,8 +703,6 @@ mod tests {
                 "10",
                 "--limit",
                 "20",
-                "--time",
-                "none",
                 "--json",
             ]
             .as_slice(),

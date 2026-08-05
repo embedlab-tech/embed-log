@@ -196,9 +196,91 @@ fn print_daemon_result(
     Ok(())
 }
 
-pub(crate) fn cmd_status(instance: Option<&str>, url: Option<&str>, json: bool) -> Result<()> {
+pub(crate) fn cmd_mark(
+    instance: Option<&str>,
+    url: Option<&str>,
+    action: &str,
+    label: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    anyhow::ensure!(!action.trim().is_empty(), "--action must not be empty");
+    let (_, endpoint) = resolve_mutating_endpoint(instance, url)?;
+    let marker = http_post_json(
+        &endpoint,
+        "/api/session/marker",
+        &serde_json::json!({"action": action, "label": label}),
+    )?;
+    if json {
+        println!("{}", serde_json::to_string(&marker)?);
+    } else {
+        println!(
+            "marked {} at sequence {}",
+            action,
+            marker["marker"]["sequence"].as_u64().unwrap_or(0)
+        );
+    }
+    Ok(())
+}
+
+pub(crate) fn cmd_stats(
+    instance: Option<&str>,
+    url: Option<&str>,
+    json: bool,
+    brief: bool,
+    sources: &[String],
+) -> Result<()> {
+    let (_, endpoint) = resolve_endpoint(instance, url)?;
+    let mut stats = http_get_json(&endpoint, "/api/stats")?;
+    if !sources.is_empty() {
+        if let Some(source_map) = stats
+            .pointer_mut("/scopes/process_lifetime/sources")
+            .and_then(|value| value.as_object_mut())
+        {
+            source_map.retain(|name, _| sources.iter().any(|requested| requested == name));
+        }
+    }
+    if json {
+        println!("{}", serde_json::to_string(&stats)?);
+    } else if brief {
+        println!(
+            "session={} records={} ws_clients={}",
+            stats["session_id"].as_str().unwrap_or("-"),
+            stats
+                .pointer("/scopes/current_session/records")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
+            stats["ws_clients"].as_u64().unwrap_or(0)
+        );
+    } else {
+        println!(
+            "process_lifetime: {}",
+            serde_json::to_string(&stats["scopes"]["process_lifetime"])?
+        );
+        println!(
+            "current_session: {}",
+            serde_json::to_string(&stats["scopes"]["current_session"])?
+        );
+    }
+    Ok(())
+}
+
+pub(crate) fn cmd_status(
+    instance: Option<&str>,
+    url: Option<&str>,
+    json: bool,
+    brief: bool,
+    sources: &[String],
+) -> Result<()> {
     let (record, endpoint) = resolve_endpoint(instance, url)?;
-    let backend = http_get_json(&endpoint, "/api/v1/status")?;
+    let mut backend = http_get_json(&endpoint, "/api/v1/status")?;
+    if !sources.is_empty() {
+        if let Some(source_map) = backend
+            .get_mut("sources")
+            .and_then(|value| value.as_object_mut())
+        {
+            source_map.retain(|name, _| sources.iter().any(|requested| requested == name));
+        }
+    }
     let output = serde_json::json!({
         "ok": true,
         "instance": record,
@@ -207,6 +289,16 @@ pub(crate) fn cmd_status(instance: Option<&str>, url: Option<&str>, json: bool) 
     });
     if json {
         println!("{}", serde_json::to_string(&output)?);
+    } else if brief {
+        let session = output["backend"]["session_id"].as_str().unwrap_or("-");
+        let source_count = output["backend"]["sources"]
+            .as_object()
+            .map_or(0, serde_json::Map::len);
+        println!(
+            "ready endpoint={} session={} sources={source_count}",
+            output["endpoint"].as_str().unwrap_or("-"),
+            session
+        );
     } else {
         if let Some(record) = output.get("instance").filter(|value| !value.is_null()) {
             println!(
@@ -230,9 +322,19 @@ pub(crate) fn cmd_status(instance: Option<&str>, url: Option<&str>, json: bool) 
     Ok(())
 }
 
-pub(crate) fn cmd_stop(instance: Option<&str>, json: bool) -> Result<()> {
+pub(crate) fn cmd_stop(instance: Option<&str>, url: Option<&str>, json: bool) -> Result<()> {
     cleanup_stale_records()?;
-    let record = resolve_mutating_instance(instance)?;
+    let record = if let Some(url) = url {
+        let endpoint = url.trim_end_matches('/');
+        list_records()?
+            .into_iter()
+            .find(|record| record.endpoint.trim_end_matches('/') == endpoint)
+            .ok_or_else(|| anyhow::anyhow!(
+                "no registered daemon matches {endpoint}; URL stop requires a registry record so the correct process can be signaled safely"
+            ))?
+    } else {
+        resolve_mutating_instance(instance)?
+    };
     if !process_matches_record(&record) {
         remove_record(&record.instance)?;
         anyhow::bail!(
@@ -414,14 +516,32 @@ fn list_records() -> Result<Vec<InstanceRecord>> {
 }
 
 fn cleanup_stale_records() -> Result<()> {
-    for record in list_records()? {
-        if !process_matches_record(&record) {
-            remove_record(&record.instance)?;
-            eprintln!(
-                "removed stale daemon record for instance {:?} (PID {})",
-                record.instance, record.pid
-            );
+    for mut record in list_records()? {
+        if process_matches_record(&record) {
+            continue;
         }
+
+        // A release install can replace the executable while an older daemon
+        // remains alive. If its endpoint still answers, adopt the live
+        // process instead of deleting the only way to stop it.
+        let live_executable = PathBuf::from(format!("/proc/{}/exe", record.pid));
+        if let Ok(actual) = fs::read_link(&live_executable) {
+            if http_get_json(&record.endpoint, "/api/v1/status").is_ok() {
+                record.executable = actual.display().to_string();
+                write_record(&record)?;
+                eprintln!(
+                    "repaired daemon record for instance {:?}: adopted live PID {} at {}",
+                    record.instance, record.pid, record.endpoint
+                );
+                continue;
+            }
+        }
+
+        remove_record(&record.instance)?;
+        eprintln!(
+            "removed stale daemon record for instance {:?} (PID {})",
+            record.instance, record.pid
+        );
     }
     Ok(())
 }
