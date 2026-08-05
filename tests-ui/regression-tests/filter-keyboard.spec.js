@@ -77,6 +77,26 @@ test.describe('filter and keyboard UX', () => {
 //   When  the filter is changed to an invalid regex
 //   Then  the input shows invalid class but the previous valid filter continues to apply; fixing the regex removes the error
 
+  test('held keys from before a click do not leak into the focused filter', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    const input = page.locator('.filter-input[data-pane="SENSOR_A"]');
+
+    const prevented = await page.evaluate(() => {
+      const target = document.querySelector('.filter-input[data-pane="SENSOR_A"]');
+      target.focus();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', code: 'KeyD', bubbles: true }));
+      const repeat = new KeyboardEvent('keydown', {
+        key: 'd', code: 'KeyD', bubbles: true, cancelable: true, repeat: true,
+      });
+      target.dispatchEvent(repeat);
+      document.dispatchEvent(new KeyboardEvent('keyup', { key: 'd', code: 'KeyD', bubbles: true }));
+      return repeat.defaultPrevented;
+    });
+    expect(prevented).toBe(true);
+    await expect(input).toHaveValue('');
+  });
+
   test('filter keeps focus and accepts keyboard input while logs arrive', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
