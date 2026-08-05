@@ -1868,3 +1868,20 @@ Future entries must include this per-file added/removed-line summary.
 | `skills/embed-log-live/SKILL.md` | 2 | 0 | Guides agents to the active canonical export command. |
 | `tests-ui/regression-tests/export-replay.spec.js` | 23 | 4 | Verifies downloaded bytes equal session HTML and replaces obsolete merge-command fixture generation. |
 | `tests-ui/regression-tests/relative-time-replay.spec.js` | 24 | 14 | Migrates static replay fixtures to recorded-session export. |
+
+## 2026-08-05 09:23:26 UTC / 2026-08-05 11:23:26 CEST (Warsaw)
+
+- **Commit:** `64350ff` — `Document frontend overhaul plan`
+- **Task:** Record the authoritative frontend overhaul plan covering Edge keyboard reliability, shared live/static layout, Full-only selection copy, removal of the selection Add note action, presentation-only No time behavior, canonical HTML export safeguards, and Chromium/Edge acceptance coverage.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 09:23:26 UTC / 2026-08-05 11:23:26 CEST (+0200) (Warsaw)
+- **Validation:** repository-relative Markdown link validation for `docs/frontend-overhaul-plan.md`, `docs/index.md`, and `copy-compact-mode-plan.md` — passed; requirement search for Edge, Full-only copy, Add note, No time, retained HTML timestamps, and canonical export — passed; `git diff --check` — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`64350ff`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `copy-compact-mode-plan.md` | 2 | 0 | Marks the obsolete browser multi-format copy proposal as superseded. |
+| `docs/frontend-overhaul-plan.md` | 290 | 0 | Defines agreed requirements, implementation order, non-goals, and browser/mode acceptance matrix. |
+| `docs/index.md` | 1 | 0 | Links the authoritative frontend overhaul plan from the documentation index. |
