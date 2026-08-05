@@ -2139,3 +2139,27 @@ Future entries must include this per-file added/removed-line summary.
 | `skills/embed-log-live/SKILL.md` | 0 | 84 | Removes superseded live-specific guidance. |
 | `skills/embed-log-recorded/SKILL.md` | 0 | 70 | Removes superseded recorded-specific guidance. |
 | `skills/embed-log/SKILL.md` | 78 | 0 | Adds concise session-reader-first investigation guidance. |
+
+## 2026-08-05 14:22:16 UTC / 2026-08-05 16:22:16 CEST (Warsaw)
+
+- **Commit:** `263eef8` — `Consolidate config inspection in doctor`
+- **Task:** Remove the redundant `validate` command and make `doctor` the single config preflight. Doctor now validates the resolved YAML and reports endpoint, logs root, and physical configured sources with type, parser, writability, endpoint, baud rate, and UART accessibility. It deliberately omits UI tabs and virtual merges so agents discover only evidence-producing sources.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 14:22:16 UTC / 2026-08-05 16:22:16 CEST (+0200) (Warsaw)
+- **Validation:** `cargo test --locked -p embed-log-cli --bin embed-log commands::misc::tests -- --nocapture` — 6 passed; `cargo test --locked -p embed-log-cli --no-run` — passed; `cargo fmt --all` — passed; `git diff --check` — passed; manual `doctor --config embed-log.yml` and removed-command rejection — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`263eef8`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 2 | 2 | Replaces config validation guidance with doctor. |
+| `crates/embed-log-cli/src/commands/misc.rs` | 72 | 83 | Removes validate and expands doctor with physical-source diagnostics. |
+| `crates/embed-log-cli/src/commands/schema.rs` | 3 | 3 | Removes validate discovery/error references and points diagnostics to doctor. |
+| `crates/embed-log-cli/src/main.rs` | 2 | 28 | Removes validate command parsing and dispatch. |
+| `crates/embed-log-cli/tests/json_errors.rs` | 0 | 13 | Removes obsolete validate JSON-error coverage. |
+| `docs/cli.md` | 2 | 11 | Documents doctor as the single configuration preflight. |
+| `docs/configuration.md` | 1 | 1 | Uses doctor for configuration inspection. |
+| `docs/getting-up-to-speed.md` | 1 | 2 | Uses doctor in setup examples. |
+| `mvp-embed-log-todo.md` | 0 | 1 | Removes validate from the CLI list. |
+| `skills/embed-log/SKILL.md` | 1 | 1 | Begins investigations with doctor source discovery. |
