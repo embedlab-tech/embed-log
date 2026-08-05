@@ -2075,3 +2075,21 @@ Future entries must include this per-file added/removed-line summary.
 | `crates/embed-log-cli/src/commands/schema.rs` | 2 | 2 | Updates discovery text for the source/index notation. |
 | `crates/embed-log-cli/src/commands/sessions.rs` | 6 | 6 | Renders concise source-local indexes as `SOURCE#INDEX`. |
 | `docs/cli.md` | 2 | 2 | Updates CLI documentation and examples. |
+
+## 2026-08-05 13:48:30 UTC / 2026-08-05 15:48:30 CEST (Warsaw)
+
+- **Commit:** `81056cc` — `Align agent skills with concise readers`
+- **Task:** Align the live and recorded agent skills, README, and agent-capability guidance with the new default-concise reader workflow. Reader examples no longer pass `--json` by default; guidance now reserves `--json` for scripts that need tuple fields or cursor metadata and documents the `src=SOURCE#INDEX` notation.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 13:48:30 UTC / 2026-08-05 15:48:30 CEST (+0200) (Warsaw)
+- **Validation:** `cargo test --locked -p embed-log-cli --test skill_cli -- --nocapture` — 2 passed; `cargo fmt --all -- --check` — passed; `git diff --check` — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`81056cc`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 2 | 2 | Removes default reader JSON usage and documents when JSON is appropriate. |
+| `docs/agent-capabilities.md` | 4 | 6 | Updates agent workflow examples and concise output guidance. |
+| `skills/embed-log-live/SKILL.md` | 3 | 3 | Makes live bounded reads/context default to concise text. |
+| `skills/embed-log-recorded/SKILL.md` | 3 | 3 | Makes recorded bounded reads/context default to concise text. |
