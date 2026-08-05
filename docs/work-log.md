@@ -2163,3 +2163,18 @@ Future entries must include this per-file added/removed-line summary.
 | `docs/getting-up-to-speed.md` | 1 | 2 | Uses doctor in setup examples. |
 | `mvp-embed-log-todo.md` | 0 | 1 | Removes validate from the CLI list. |
 | `skills/embed-log/SKILL.md` | 1 | 1 | Begins investigations with doctor source discovery. |
+
+## 2026-08-05 14:24:24 UTC / 2026-08-05 16:24:24 CEST (Warsaw)
+
+- **Commit:** `e862599` — `Reduce agent skill to essential workflow`
+- **Task:** Reduce the unified Embed-log skill to essential agent guidance only: canonical concise evidence format, doctor preflight, bounded session readers, cursor progression, and minimal daemon/TX actions. Remove nonessential explanation, marker/export/reporting guidance, and mode-specific detail.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 14:24:24 UTC / 2026-08-05 16:24:24 CEST (+0200) (Warsaw)
+- **Validation:** `cargo test --locked -p embed-log-cli --test skill_cli` — 2 passed; `cargo fmt --all -- --check` — passed; `git diff --check` — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`e862599`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `skills/embed-log/SKILL.md` | 17 | 33 | Reduces the canonical agent skill to the essential session-reader-first workflow. |
