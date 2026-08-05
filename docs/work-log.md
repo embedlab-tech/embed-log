@@ -1885,3 +1885,28 @@ Future entries must include this per-file added/removed-line summary.
 | `copy-compact-mode-plan.md` | 2 | 0 | Marks the obsolete browser multi-format copy proposal as superseded. |
 | `docs/frontend-overhaul-plan.md` | 290 | 0 | Defines agreed requirements, implementation order, non-goals, and browser/mode acceptance matrix. |
 | `docs/index.md` | 1 | 0 | Links the authoritative frontend overhaul plan from the documentation index. |
+
+## 2026-08-05 09:35:54 UTC / 2026-08-05 11:35:54 CEST (Warsaw)
+
+- **Commit:** `3e32966` — `Harden frontend keyboard input across browsers`
+- **Task:** Implement the first frontend-overhaul workstream: protect editable controls from global keyboard shortcuts and composition handling, make filter/TX inputs explicit text controls, include the keyboard helper in static HTML exports, add Microsoft Edge projects, and cover filter focus retention during incoming logs.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 09:35:54 UTC / 2026-08-05 11:35:54 CEST (+0200) (Warsaw)
+- **Validation:** `npm run test:regression --prefix tests-ui -- --project=edge tests/filter-keyboard.spec.js` — 5 passed; same Chromium command — 5 passed; `npm run test:e2e --prefix tests-ui -- --workers=1` — 10 passed (5 Chromium, 5 Edge); `npm run test:unit --prefix tests-ui` — 19 passed; `cargo fmt --all -- --check` — passed; `cargo test --locked -p embed-log-core session::exporter --lib` — 5 passed; `git diff --check` — passed. Full regression matrix — 99 passed, 8 skipped, and 3 unrelated existing timing/drag/synchronization failures (`drag-selection` in Chromium and Edge, `layout-sync` in Edge).
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`3e32966`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-core/src/session/exporter.rs` | 1 | 0 | Embeds the shared keyboard helper in static HTML exports. |
+| `frontend/export.js` | 2 | 0 | Prevents static export menu shortcuts from consuming editable input events. |
+| `frontend/keyboard.js` | 11 | 0 | Provides shared editable-target and IME/composition guards. |
+| `frontend/lines.js` | 3 | 2 | Protects global Live/plugin shortcuts from input and composition events. |
+| `frontend/renderPane.js` | 2 | 2 | Makes filter and Serial TX controls explicit, non-spellchecking text inputs. |
+| `frontend/selection.js` | 5 | 0 | Prevents selection copy/Alt-mode shortcuts from interrupting editable controls. |
+| `tests-ui/playwright.config.js` | 1 | 0 | Adds a Microsoft Edge browser project to backend E2E tests. |
+| `tests-ui/playwright.regression.config.js` | 1 | 0 | Adds a Microsoft Edge browser project to regression tests. |
+| `tests-ui/regression-tests/filter-keyboard.spec.js` | 20 | 0 | Verifies filter typing and focus survive incoming live records. |
+| `tests-ui/regression-tests/helpers.js` | 3 | 1 | Ignores the known missing-favicon 404 in Edge console-error assertions. |
+| `tests-ui/tests/helpers.js` | 3 | 1 | Applies the same harmless 404 filtering to backend E2E assertions. |
