@@ -2013,3 +2013,19 @@ Future entries must include this per-file added/removed-line summary.
 | `frontend/state.js` | 3 | 0 | Treats No time as presentation-only and avoids mutating line timestamp metadata. |
 | `frontend/ui.js` | 10 | 8 | Cycles and labels Absolute, Relative, and No time. |
 | `tests-ui/regression-tests/timestamp-toggle.spec.js` | 19 | 2 | Verifies No time display and timestamp-free clipboard selection, then restoration to Absolute. |
+
+## 2026-08-05 12:18:03 UTC / 2026-08-05 14:18:03 CEST (Warsaw)
+
+- **Commit:** `e584d03` — `Stabilize narrow frontend toolbar layout`
+- **Task:** Complete the responsive toolbar part of the frontend overhaul. At narrow widths, keep live and exported toolbar controls in one controlled horizontal row with scrolling instead of allowing Settings/Options or other controls to auto-wrap onto an orphan second row. Add exported HTML narrow-viewport alignment coverage.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 12:18:03 UTC / 2026-08-05 14:18:03 CEST (+0200) (Warsaw)
+- **Validation:** `git diff --check` — passed; backend browser E2E — 10 passed across Chromium and Edge; `npm run test:unit --prefix tests-ui` — 19 passed; `cargo fmt --all -- --check` — passed; release workspace rebuilt and installed atomically, installed CLI reports SHA `e584d03`.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`e584d03`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `frontend/viewer.css` | 24 | 0 | Adds a narrow single-row, horizontal-overflow toolbar layout. |
+| `tests-ui/regression-tests/export-replay.spec.js` | 10 | 0 | Verifies exported Settings remains inside the toolbar at a 700px viewport. |
