@@ -1976,3 +1976,19 @@ Future entries must include this per-file added/removed-line summary.
 | `frontend/viewer.css` | 0 | 89 | Removes format-toggle and marker-input-overlay styling. |
 | `tests-ui/regression-tests/copy-format.spec.js` | 9 | 44 | Replaces Compact behavior coverage with Full-only and absent-control assertions. |
 | `tests-ui/regression-tests/demo-smoke.spec.js` | 15 | 15 | Creates the marker through the control protocol now that browser selection no longer exposes Add note. |
+
+## 2026-08-05 12:11:09 UTC / 2026-08-05 14:11:09 CEST (Warsaw)
+
+- **Commit:** `2e89cc8` — `Keep exported settings button in toolbar`
+- **Task:** Inspect the two latest screenshots from `~/Pictures/Screenshots` and fix the exported HTML Settings/Options button wrapping onto a second row. Static exports now place the button inside the existing right toolbar group, matching the live layout.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 12:11:09 UTC / 2026-08-05 14:11:09 CEST (+0200) (Warsaw)
+- **Validation:** inspected `Screenshot from 2026-08-05 14-08-35.png` and `Screenshot from 2026-08-05 14-08-42.png`; `node --check frontend/settings.js` — passed; `git diff --check` — passed; backend browser E2E — 10 passed across Chromium and Edge; release workspace rebuilt and installed atomically, installed CLI reports SHA `2e89cc8`.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`2e89cc8`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `frontend/settings.js` | 5 | 1 | Places Settings in `.toolbar-right` for static exports instead of creating a new grid item/row. |
+| `tests-ui/regression-tests/export-replay.spec.js` | 6 | 0 | Asserts exported Settings remains vertically inside the toolbar bounds. |
