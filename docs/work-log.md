@@ -1992,3 +1992,24 @@ Future entries must include this per-file added/removed-line summary.
 | --- | ---: | ---: | --- |
 | `frontend/settings.js` | 5 | 1 | Places Settings in `.toolbar-right` for static exports instead of creating a new grid item/row. |
 | `tests-ui/regression-tests/export-replay.spec.js` | 6 | 0 | Asserts exported Settings remains vertically inside the toolbar bounds. |
+
+## 2026-08-05 12:14:42 UTC / 2026-08-05 14:14:42 CEST (Warsaw)
+
+- **Commit:** `3a01fc7` — `Add presentation-only no-time mode`
+- **Task:** Add the third timestamp presentation mode, cycling Absolute → Relative → No time → Absolute. No time hides timestamp spans and omits timestamps from browser clipboard selection only; line metadata, raw downloads, selection HTML, canonical exports, ordering, and synchronization retain timestamps.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 12:14:42 UTC / 2026-08-05 14:14:42 CEST (+0200) (Warsaw)
+- **Validation:** JavaScript syntax checks for changed frontend modules — passed; `npm run test:unit --prefix tests-ui` — 19 passed; `cargo fmt --all -- --check` — passed; `cargo test --locked -p embed-log-core session::exporter --lib` — 5 passed; `git diff --check` — passed; release workspace rebuilt and installed atomically, installed CLI reports SHA `3a01fc7`. The focused timestamp Playwright test was not run because the existing live daemon occupied the regression fixture UDP ports.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`3a01fc7`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `frontend/export.js` | 1 | 1 | Keeps selection HTML exports initially on the configured Absolute/Relative mode when the live viewer is in No time. |
+| `frontend/lines.js` | 3 | 1 | Adds hidden mode to timestamp switching while keeping line timestamp values intact. |
+| `frontend/persist.js` | 1 | 1 | Restores the presentation-only hidden mode from viewer state. |
+| `frontend/selection.js` | 13 | 9 | Omits timestamps from clipboard copy in No time while retaining timestamps for raw downloads and HTML data. |
+| `frontend/state.js` | 3 | 0 | Treats No time as presentation-only and avoids mutating line timestamp metadata. |
+| `frontend/ui.js` | 10 | 8 | Cycles and labels Absolute, Relative, and No time. |
+| `tests-ui/regression-tests/timestamp-toggle.spec.js` | 19 | 2 | Verifies No time display and timestamp-free clipboard selection, then restoration to Absolute. |
