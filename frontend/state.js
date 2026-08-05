@@ -107,7 +107,6 @@ export const state = {
     selected:    {},
     selectionScope:  'exact', // 'exact', 'context', or 'context-selected'
     contextPanes:    {},       // paneId → bool; only used when selectionScope === 'context-selected'
-    copyFormat:      'full',   // 'full' (default, unchanged) or 'compact' — see postprocess.js
     unwrap:        false,
     timestampMode: INITIAL_TIMESTAMP_MODE,
     sessionTimestampMode: INITIAL_TIMESTAMP_MODE,

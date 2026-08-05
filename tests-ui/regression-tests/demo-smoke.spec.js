@@ -319,22 +319,22 @@ test('runtime settings panel exposes working font-size controls', async ({ page 
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
     await waitForSourceTestLine(page, 'SENSOR_A');
 
-    // Select a range in SENSOR_A to enable the Add Note button (Exact scope)
-    const { start, end } = await waitForRangePair(page, 'SENSOR_A', 'kind=prefix-cleanup', 'kind=timestamp-cleanup');
-    await start.click();
-    await end.click({ modifiers: ['Shift'] });
+    const markerCandidate = await waitForLineContaining(page, 'SENSOR_A', 'kind=prefix-cleanup');
 
-    // Grab the first selected line index for later verification
-    const firstIdx = await page.evaluate(() => {
-      const sel = document.querySelector('#log-SENSOR_A .log-line.selected');
-      return sel ? parseInt(sel.dataset.idx, 10) : -1;
-    });
+    // Create a marker through the control protocol; browser selection no longer
+    // exposes a marker-creation action, but rendering/navigation remain supported.
+    const firstIdx = Number.parseInt(await markerCandidate.getAttribute('data-idx'), 10);
+    const numTs = await page.evaluate(async idx => {
+      const { state } = await import('/state.js');
+      return state.rawLines.SENSOR_A?.[idx]?.numTs ?? 0;
+    }, firstIdx);
     expect(firstIdx).toBeGreaterThanOrEqual(0);
-
-    // Click Add Note and save a marker
-    await page.locator('#marker-toggle-SENSOR_A').click();
-    await page.locator('.marker-input').fill('unwrap regression marker');
-    await page.locator('.marker-input-save').click();
+    await page.evaluate(({ idx, numTs }) => {
+      window.wsSend({ cmd: 'save_markers', markers: [{
+        paneId: 'SENSOR_A', lineIdx: idx, numTs,
+        description: 'unwrap regression marker', createdAt: new Date().toISOString(),
+      }] });
+    }, { idx: firstIdx, numTs });
 
     // Wait for marker UI to appear
     await expect(page.locator('#marker-nav')).not.toBeHidden({ timeout: 10_000 });

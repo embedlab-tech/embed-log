@@ -1,10 +1,9 @@
 import { state, TABS, PANES, paneLabel, unwrapPaneLabel } from './state.js';
 import { onLineClick, hidePluginOverlays, ensureLineVisible, getLine } from './lines.js';
 import { exportHtmlSnapshot } from './export.js';
-import { can } from './profile.js';
 import { switchTab } from './tabs.js';
 import { _escHtml } from './renderPane.js';
-import { denoiseMessage, elapsedTime, ShortcodeTable, estimateTokens } from './postprocess.js';
+import { estimateTokens } from './postprocess.js';
 import { isEditableTarget, isComposingEvent } from './keyboard.js';
 // Line selection + copy / export actions
 //
@@ -64,28 +63,6 @@ export function _selectionSetupPane(id) {
     scopeRow.appendChild(scopeContext);
     scopeRow.appendChild(scopeSel);
 
-    // Copy format toggle — "Full" (default, unchanged today's behavior) vs
-    // the CLI-mirroring "Compact" compaction level (postprocess.js).
-    const formatRow = document.createElement("div");
-    formatRow.className = "format-row";
-
-    const formatFull = document.createElement("button");
-    formatFull.className = "format-btn active";
-    formatFull.id = "format-full-" + id;
-    formatFull.textContent = "Full";
-    formatFull.title = "Full timestamp and source name (today's default)";
-    formatFull.addEventListener("click", e => { e.stopPropagation(); _setCopyFormat(id, "full"); });
-
-    const formatCompact = document.createElement("button");
-    formatCompact.className = "format-btn";
-    formatCompact.id = "format-compact-" + id;
-    formatCompact.textContent = "Compact";
-    formatCompact.title = "Elapsed time + source shortcode + denoised message — most token-efficient for pasting to an agent";
-    formatCompact.addEventListener("click", e => { e.stopPropagation(); _setCopyFormat(id, "compact"); });
-
-    formatRow.appendChild(formatFull);
-    formatRow.appendChild(formatCompact);
-
     // Pane selector (lazily rebuilt when scope becomes context-selected)
     const paneSelector = document.createElement("div");
     paneSelector.className = "pane-selector";
@@ -132,21 +109,10 @@ export function _selectionSetupPane(id) {
     moreDropdown.appendChild(rawBtn);
 
     actionRow.appendChild(copyBtn);
-    // Marker toggle (runtime only) — in the main action row
-    if (can('markers')) {
-        const markerBtn = document.createElement("button");
-        markerBtn.className = "copy-btn";
-        markerBtn.id = "marker-toggle-" + id;
-        markerBtn.textContent = "Add Note";
-        markerBtn.title = "Add a note to the selected/sync-highlighted line(s)";
-        markerBtn.addEventListener("click", e => { e.stopPropagation(); _toggleMarker(id); });
-        actionRow.appendChild(markerBtn);
-    }
     actionRow.appendChild(moreToggle);
     actionRow.appendChild(moreDropdown);
 
     wrap.appendChild(scopeRow);
-    wrap.appendChild(formatRow);
     wrap.appendChild(paneSelector);
     wrap.appendChild(actionRow);
     body.appendChild(wrap);
@@ -203,17 +169,6 @@ function _setScope(paneId, scope) {
     _syncSelectionActions(paneId);
 }
 
-function _setCopyFormat(paneId, format) {
-    state.copyFormat = format;
-    PANES.forEach(id => {
-        ['full', 'compact'].forEach(f => {
-            const btn = document.getElementById(`format-${f}-${id}`);
-            if (btn) btn.classList.toggle('active', format === f);
-        });
-    });
-    _syncSelectionActions(paneId);
-}
-
 function _toggleMore(paneId) {
     const dd = document.getElementById("more-dropdown-" + paneId);
     if (!dd) return;
@@ -241,7 +196,7 @@ function _syncSelectionActions(paneId) {
         ? selectedCount
         : _countRangeEntries(paneId);
     wrap.classList.toggle("visible", visible);
-    wrap.querySelectorAll(".copy-btn, .scope-btn, .format-btn, .more-toggle").forEach(el =>
+    wrap.querySelectorAll(".copy-btn, .scope-btn, .more-toggle").forEach(el =>
         el.classList.toggle("visible", visible)
     );
 
@@ -251,14 +206,10 @@ function _syncSelectionActions(paneId) {
         const tok = estimateTokens(_pendingCopyText(paneId));
         copyBtn.textContent = `Copy (${displayCount}, ~${tok} tok)`;
     }
-    // Scope-gate secondary actions: marker only in Exact, Export HTML only outside Exact
+    // Scope-gate secondary actions: Export HTML only outside Exact
     const htmlBtn = document.getElementById("export-html-" + paneId);
     if (htmlBtn) {
         htmlBtn.style.display = state.selectionScope === "exact" ? "none" : "";
-    }
-    const markerBtn = document.getElementById("marker-toggle-" + paneId);
-    if (markerBtn) {
-        markerBtn.style.display = state.selectionScope === "exact" ? "" : "none";
     }
 }
 function _flatMarkerList() {
@@ -280,120 +231,6 @@ function _markerMatchesRawIndex(paneId, marker, rawIdx) {
 function _markerRawIndex(marker) {
     return marker.lineIdx;
 }
-
-function _markerLineIdx(paneId) {
-    const idx = state.highlightedIdx[paneId];
-    if (Number.isFinite(idx)) return idx;
-    const div = state.highlighted[paneId];
-    if (div) return parseInt(div.dataset.idx, 10);
-    const sel = state.selected[paneId];
-    if (sel?.size === 1) return [...sel][0];
-    return -1;
-}
-
-function _toggleMarker(paneId) {
-    // Get indices to mark: selected lines, or fall back to highlighted line
-    const sel = state.selected[paneId];
-    const indices = sel?.size > 0
-        ? Array.from(sel)
-        : (() => {
-            const idx = _markerLineIdx(paneId);
-            return idx >= 0 ? [idx] : [];
-          })();
-    if (!indices.length) return;
-
-    const markers = state.markers[paneId] = state.markers[paneId] || [];
-    const lines = state.rawLines[paneId] || [];
-
-    // If any indices are not yet marked, show the input to add/overwrite
-    _showMarkerInput(paneId, indices, lines);
-    // We don't handle "remove existing" here anymore — the save/commit
-    // in _showMarkerInput replaces any overlapping markers.
-}
-
-
-function _showMarkerInput(paneId, indices, lines) {
-    const body = document.querySelector(`#pane-${paneId} .pane-body`);
-    if (!body) return;
-
-    // Remove any existing marker input overlay
-    document.querySelectorAll(".marker-input-overlay").forEach(el => el.remove());
-
-    const overlay = document.createElement("div");
-    overlay.className = "marker-input-overlay";
-    overlay.innerHTML =
-        '<span class="marker-input-label">Marker:</span>' +
-        '<input class="marker-input" type="text" placeholder="Describe this marker…" autofocus>' +
-        '<button class="marker-input-save">Save</button>' +
-        '<button class="marker-input-cancel">✕</button>';
-
-    const input = overlay.querySelector(".marker-input");
-    const saveBtn = overlay.querySelector(".marker-input-save");
-    const cancelBtn = overlay.querySelector(".marker-input-cancel");
-
-    const candidates = indices.map(i => ({ lineIdx: i, numTs: lines[i]?.numTs ?? 0 }));
-    // Single marker for the entire range (first → last)
-    const rangeStart = Math.min(...indices);
-    const rangeEnd = Math.max(...indices);
-    let inputActive = true;
-
-    function commit() {
-        if (!inputActive) return;
-        inputActive = false;
-        const desc = (input.value || "").trim() || "(no description)";
-        const markers = state.markers[paneId] = state.markers[paneId] || [];
-        const keep = markers.filter(m => m.lineIdx < rangeStart || m.lineIdx > rangeEnd);
-        state.markers[paneId] = keep;
-        keep.push({
-            lineIdx: rangeStart,
-            endIdx: rangeEnd,
-            numTs: lines[rangeStart]?.numTs ?? 0,
-            description: desc,
-            createdAt: new Date().toISOString(),
-        });
-        overlay.remove();
-        applyMarkers();
-        _updateMarkerNav();
-        wsSend({ cmd: "save_markers", markers: _flatMarkerList() });
-    }
-
-    function cancel() {
-        if (!inputActive) return;
-        inputActive = false;
-        overlay.remove();
-    }
-
-    saveBtn.addEventListener("click", e => { e.stopPropagation(); commit(); });
-    cancelBtn.addEventListener("click", e => { e.stopPropagation(); cancel(); });
-    input.addEventListener("keydown", e => {
-        if (e.key === "Enter") commit();
-        if (e.key === "Escape") cancel();
-    });
-
-    // Show which lines are being marked
-    const label = overlay.querySelector(".marker-input-label");
-    const count = rangeEnd - rangeStart + 1;
-    if (count > 1) label.textContent = `Marker (${count} lines):`;
-
-    // Position overlay near the copy-actions
-    const actions = body.querySelector(".copy-actions");
-    if (actions) {
-        const rect = actions.getBoundingClientRect();
-        overlay.style.position = "fixed";
-        overlay.style.left = rect.left + "px";
-        overlay.style.top = (rect.bottom + 4) + "px";
-        // Clamp so overlay doesn't extend past right edge
-        requestAnimationFrame(() => {
-            const ow = overlay.offsetWidth;
-            if (rect.left + ow > window.innerWidth) {
-                overlay.style.left = Math.max(8, window.innerWidth - ow - 8) + "px";
-                }
-            });
-        }
-    body.appendChild(overlay);
-    setTimeout(() => input.focus(), 50);
-}
-
 
 export function applyMarkers() {
     const byPane = state.markers;
@@ -693,30 +530,6 @@ function _escapeRegExp(str) {
     return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// "HH:MM:SS.mmm" for a line, mirroring the CLI's `clock_time()` — derived
-// from `absTs` ("MM-DD HH:MM:SS.mmm", the same field format used everywhere
-// else in this codebase), not from `line.ts` (which can already be showing
-// relative time depending on the display's timestamp mode).
-function _clockTimeOf(line) {
-    const absTs = line?.absTs;
-    if (typeof absTs === "string" && absTs.includes(" ")) {
-        return absTs.split(" ").pop();
-    }
-    return line?.ts || "";
-}
-
-// One line in the "compact" copy format (state.copyFormat === "compact") —
-// mirrors format_compact_entry in crates/embed-log-cli/src/commands/sessions.rs.
-// `codes` is shared across an entire copy/download action so the same source
-// gets the same shortcode throughout one block.
-function _formatCompactedLine(line, paneId, idx, rawMessage, codes) {
-    const clock = _clockTimeOf(line);
-    const ts = elapsedTime(line, clock);
-    const code = codes.codeFor(paneId);
-    const message = denoiseMessage(rawMessage, clock);
-    return `${ts} ${code}#${idx} ${message}`;
-}
-
 // The text that _copy()/_copyContext() would actually produce right now —
 // used both for the real copy and for the live token estimate, so the
 // estimate can never drift from what's actually copied.
@@ -769,10 +582,6 @@ function _applyMarkerAnnotations(paneId, items) {
 
 
 function _formatRangeRaw(entries, useRendered = false) {
-    // One shared table across the whole (possibly multi-pane) block, so a
-    // source keeps the same shortcode throughout — matches the CLI's
-    // per-invocation ShortcodeTable.
-    const codes = state.copyFormat !== "full" ? new ShortcodeTable() : null;
     const parts = [];
     let currentPane = null;
     let paneItems = [];
@@ -786,9 +595,7 @@ function _formatRangeRaw(entries, useRendered = false) {
         if (e.paneId !== currentPane) flushPane();
         currentPane = e.paneId;
         const rawMessage = _selectionMessageText(e, useRendered);
-        const text = codes
-            ? _formatCompactedLine(e.line, e.paneId, e.idx, rawMessage, codes)
-            : `[${e.line.ts}] [${e.paneId}] ${rawMessage}`;
+        const text = `[${e.line.ts}] [${e.paneId}] ${rawMessage}`;
         paneItems.push({ idx: e.idx, text });
     });
     flushPane();
@@ -815,15 +622,12 @@ function _buildRangeLogData(entries) {
 }
 
 function _formatSelectionBlock(paneId, indices, useRendered = false) {
-    const codes = state.copyFormat !== "full" ? new ShortcodeTable() : null;
     const items = indices
         .map(idx => {
             const line = _selectionLine(paneId, idx);
             if (!line) return null;
             const raw = useRendered ? _lineRenderedPlain(line) : _linePlain(line);
-            const text = codes
-                ? _formatCompactedLine(line, paneId, idx, raw, codes)
-                : `${line.ts}  [${paneId}] ${raw}`;
+            const text = `${line.ts}  [${paneId}] ${raw}`;
             return { idx, text };
         })
         .filter(Boolean);
