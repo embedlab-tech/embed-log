@@ -328,7 +328,7 @@ Formats:
 Every record captured by the current version receives a session-global `sequence` in the same serialized order used by `combined.jsonl`, replay, and live publication. `line_idx` remains source-local. A compact line therefore identifies both positions:
 
 ```text
-+12.453 seq=719 src=DUT_UART idx=428 | boot complete
++12.453 seq=719 src=DUT_UART#428 | boot complete
 ```
 
 Read only a bounded page:
@@ -359,7 +359,7 @@ The total around window is capped at 1000 records. Sequence and source-local lin
 
 `sessions read`, `sessions around`, and `sessions search` intentionally expose only two formats:
 
-- default concise text: `+0.123 seq=1234 src=UART idx=42 | message`;
+- default concise text: `+0.123 seq=1234 src=UART#42 | message`;
 - `--json`: one compact envelope with `session_id`, fixed `fields`, tuple `records`, cursor, truncation, and invalid-record metadata.
 
 The stored `combined.jsonl` stream remains available through `sessions combined` and session export; it is not a reader format selector.

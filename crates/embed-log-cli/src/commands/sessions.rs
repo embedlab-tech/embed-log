@@ -1138,14 +1138,14 @@ fn compact_text(record: &serde_json::Value, time: TimeDisplay) -> String {
     let source = record
         .get("source_id")
         .and_then(|value| value.as_str())
-        .unwrap_or("?");
-    let index = record
+        .map_or("?", |source| source);
+    let source = record
         .get("line_idx")
         .and_then(|value| value.as_u64())
-        .map_or_else(|| "?".to_string(), |line| line.to_string());
+        .map_or_else(|| source.to_string(), |index| format!("{source}#{index}"));
     let time = compact_time(record, time).unwrap_or_default();
     format!(
-        "{time} seq={sequence} src={source} idx={index} | {}",
+        "{time} seq={sequence} src={source} | {}",
         compact_message(record)
     )
 }
@@ -2734,11 +2734,11 @@ mod tests {
         });
         assert_eq!(
             compact_text(&entry, TimeDisplay::Relative),
-            "+12.453 seq=719 src=DUT_UART idx=428 | boot complete"
+            "+12.453 seq=719 src=DUT_UART#428 | boot complete"
         );
         assert_eq!(
             compact_text(&entry, TimeDisplay::Absolute),
-            "2026-08-04T10:30:12.453+02:00 seq=719 src=DUT_UART idx=428 | boot complete"
+            "2026-08-04T10:30:12.453+02:00 seq=719 src=DUT_UART#428 | boot complete"
         );
         assert_eq!(
             compact_tuple(&entry, TimeDisplay::Relative),

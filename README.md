@@ -88,7 +88,7 @@ embed-log sessions around latest --sequence 119 --before 5 --after 10
 
 The browser full-session Export button and `embed-log export` both atomically publish the same Rust-generated `session.html`; the browser downloads those exact published bytes. Recorded `sessions export --format html` uses that renderer from `manifest.json`, markers, and canonical `combined.jsonl`.
 
-Session readers use concise text by default (`+0.123 seq=1234 src=UART idx=42 | message`) or one compact structured envelope with `--json`.
+Session readers use concise text by default (`+0.123 seq=1234 src=UART#42 | message`) or one compact structured envelope with `--json`.
 
 Compact text defaults to `T+00:12.453 719 DUT_UART#428 boot complete`; choose `--time none` for minimum tokens or `--time absolute` for external correlation. Daemon startup requires explicit `--config` and `--instance`; its endpoint comes from `server.listen` unless `--host` or `--port` overrides it. It never selects another port. Repeating the same request reuses the verified running instance. Mutating commands require `--instance`, `EMBED_LOG_INSTANCE`, or an explicit URL. Daemon shutdown skips automatic HTML export by default; foreground modes retain it.
 

@@ -487,7 +487,7 @@ fn semantics(path: &str) -> Semantics {
             targeting: session_target,
             output: compact_cursor,
             errors: &[],
-            notes: &["default text is +time seq= source= idx= | message; --json emits one fixed tuple envelope", "--after is exclusive and globally applied before source filtering", "default limit is 100; hard limit is 1000", "legacy sessions without global sequence are rejected"],
+            notes: &["default text is +time seq= source#local_index | message; --json emits one fixed tuple envelope", "--after is exclusive and globally applied before source filtering", "default limit is 100; hard limit is 1000", "legacy sessions without global sequence are rejected"],
         },
         "sessions.around" => Semantics {
             mutates: false,
@@ -495,7 +495,7 @@ fn semantics(path: &str) -> Semantics {
             targeting: session_target,
             output: compact_cursor,
             errors: &[],
-            notes: &["default text is +time seq= source= idx= | message; --json emits one fixed tuple envelope", "target plus before and after context is capped at 1000 records"],
+            notes: &["default text is +time seq= source#local_index | message; --json emits one fixed tuple envelope", "target plus before and after context is capped at 1000 records"],
         },
         "sessions.list" | "sessions.search" => Semantics {
             mutates: false,
