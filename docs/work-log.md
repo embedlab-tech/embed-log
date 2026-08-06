@@ -2178,3 +2178,20 @@ Future entries must include this per-file added/removed-line summary.
 | File | Added | Removed | Summary |
 | --- | ---: | ---: | --- |
 | `skills/embed-log/SKILL.md` | 17 | 33 | Reduces the canonical agent skill to the essential session-reader-first workflow. |
+
+## 2026-08-06 10:47:53 UTC / 2026-08-06 12:47:53 CEST (Warsaw)
+
+- **Commit:** `7e7fc47` — `Fix CI lint and Edge browser setup`
+- **Task:** Repair the Unit tests Clippy failure and install every browser configured for UI E2E tests.
+- **Started:** 2026-08-06 10:46:59 UTC / 2026-08-06 12:46:59 CEST (+0200) (Warsaw)
+- **Completed:** 2026-08-06 10:47:53 UTC / 2026-08-06 12:47:53 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check && cargo clippy --locked --package embed-log-core --package embed-log-cli --all-targets -- -D warnings` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli` — 281 tests passed; `npm --prefix tests-ui run test:e2e` — 10 tests passed (Chromium and Edge); `git diff --check` — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`7e7fc47`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 4 | 4 | Installs Chromium and Microsoft Edge before both source-build and installed-binary E2E suites. |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 4 | 12 | Initializes the compact JSON tuple with `vec![]`, satisfying Clippy's `vec_init_then_push` lint. |
+| `tests-ui/tests/rust-server.spec.js` | 1 | 1 | Initializes page-error collection so fixture setup failures do not cause a misleading teardown assertion. |
