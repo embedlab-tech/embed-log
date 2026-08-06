@@ -393,9 +393,9 @@ jobs:
       - name: Install UI test dependencies
         run: npm --prefix tests-ui ci
 
-      - name: Install Playwright Chromium
+      - name: Install Playwright browsers
         working-directory: tests-ui
-        run: npx playwright install chromium
+        run: npx playwright install chromium msedge
 
       - name: UI e2e tests
         run: npm --prefix tests-ui run test:e2e
@@ -520,9 +520,9 @@ jobs:
       - name: Install UI test dependencies
         run: npm --prefix tests-ui ci
 
-      - name: Install Playwright Chromium
+      - name: Install Playwright browsers
         working-directory: tests-ui
-        run: npx playwright install chromium
+        run: npx playwright install chromium msedge
 
       - name: UI e2e tests (installed binary)
         env:

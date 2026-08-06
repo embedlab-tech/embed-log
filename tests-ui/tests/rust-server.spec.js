@@ -14,7 +14,7 @@ async function sendUdp(port, payload) {
 }
 
 test.describe('Rust backend browser e2e', () => {
-  let errors;
+  let errors = [];
 
   test.beforeEach(async ({ page }) => {
     errors = collectPageErrors(page);

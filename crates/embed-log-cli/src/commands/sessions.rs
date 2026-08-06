@@ -1104,30 +1104,22 @@ fn render_bounded_records(
 }
 
 fn compact_tuple(record: &serde_json::Value, time: TimeDisplay) -> serde_json::Value {
-    let mut values = Vec::new();
-    values.push(serde_json::json!(
-        compact_time(record, time).unwrap_or_default()
-    ));
-    values.push(
+    serde_json::Value::Array(vec![
+        serde_json::json!(compact_time(record, time).unwrap_or_default()),
         record
             .get("sequence")
             .cloned()
             .unwrap_or(serde_json::Value::Null),
-    );
-    values.push(
         record
             .get("source_id")
             .cloned()
             .unwrap_or(serde_json::Value::Null),
-    );
-    values.push(
         record
             .get("line_idx")
             .cloned()
             .unwrap_or(serde_json::Value::Null),
-    );
-    values.push(serde_json::json!(compact_message(record)));
-    serde_json::Value::Array(values)
+        serde_json::json!(compact_message(record)),
+    ])
 }
 
 fn compact_text(record: &serde_json::Value, time: TimeDisplay) -> String {
