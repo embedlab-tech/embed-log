@@ -186,9 +186,11 @@ test('live pane history is retained while tailing', async ({ page }) => {
   await waitForSourceTestLine(page, 'SENSOR_B');
 
   async function scrollPane(paneId, position) {
-    await page.locator(`#log-${paneId}`).evaluate((el, pos) => {
+    await page.locator(`#log-${paneId}`).evaluate(async (el, pos) => {
       el.scrollTop = pos === 'top' ? 0 : el.scrollHeight;
       el.dispatchEvent(new Event('scroll'));
+      // The virtual scroller updates its rendered window on the next frame.
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     }, position);
   }
 

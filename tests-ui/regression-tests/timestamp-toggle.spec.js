@@ -32,6 +32,11 @@ test.describe('timestamp mode toggle', () => {
     await expect(page.locator('#settings-panel')).toHaveClass(/open/);
     await expect(page.locator('#btn-timestamp-mode')).toHaveText('Relative');
 
+    // The toggle cycles Relative → No time → Absolute → Relative.
+    await page.locator('#btn-timestamp-mode').click();
+    await expect(page.locator('#btn-timestamp-mode')).toHaveText('No time');
+    await expect(firstTs).toBeHidden();
+
     await page.locator('#btn-timestamp-mode').click();
     await expect(page.locator('#btn-timestamp-mode')).toHaveText('Absolute');
     await expect(firstTs).toHaveText(/\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}/);
