@@ -2195,3 +2195,18 @@ Future entries must include this per-file added/removed-line summary.
 | `.github/workflows/ci.yml` | 4 | 4 | Installs Chromium and Microsoft Edge before both source-build and installed-binary E2E suites. |
 | `crates/embed-log-cli/src/commands/sessions.rs` | 4 | 12 | Initializes the compact JSON tuple with `vec![]`, satisfying Clippy's `vec_init_then_push` lint. |
 | `tests-ui/tests/rust-server.spec.js` | 1 | 1 | Initializes page-error collection so fixture setup failures do not cause a misleading teardown assertion. |
+
+## 2026-08-07 07:37:34 UTC / 2026-08-07 09:37:34 CEST (Warsaw)
+
+- **Commit:** `db10da1` — `Use pre-installed Edge in CI`
+- **Task:** Make self-hosted UI E2E jobs use the runner's pre-provisioned Microsoft Edge rather than attempting a password-protected system installation during CI.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-07 07:37:34 UTC / 2026-08-07 09:37:34 CEST (+0200) (Warsaw)
+- **Validation:** `git diff --check` — passed; workflow review confirms both E2E jobs install only Playwright Chromium and explicitly require `/opt/microsoft/msedge/msedge`.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`db10da1`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 10 | 4 | Installs Playwright Chromium without sudo and verifies the runner-provisioned Edge executable in both E2E jobs. |
