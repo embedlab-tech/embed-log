@@ -393,9 +393,12 @@ jobs:
       - name: Install UI test dependencies
         run: npm --prefix tests-ui ci
 
-      - name: Install Playwright browsers
+      - name: Install Playwright Chromium
         working-directory: tests-ui
-        run: npx playwright install chromium msedge
+        run: npx playwright install chromium
+
+      - name: Verify pre-installed Microsoft Edge
+        run: test -x /opt/microsoft/msedge/msedge
 
       - name: UI e2e tests
         run: npm --prefix tests-ui run test:e2e
@@ -520,9 +523,12 @@ jobs:
       - name: Install UI test dependencies
         run: npm --prefix tests-ui ci
 
-      - name: Install Playwright browsers
+      - name: Install Playwright Chromium
         working-directory: tests-ui
-        run: npx playwright install chromium msedge
+        run: npx playwright install chromium
+
+      - name: Verify pre-installed Microsoft Edge
+        run: test -x /opt/microsoft/msedge/msedge
 
       - name: UI e2e tests (installed binary)
         env:
