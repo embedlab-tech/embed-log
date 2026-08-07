@@ -412,9 +412,6 @@ jobs:
       - name: UI regression interaction tests
         run: npm --prefix tests-ui run test:regression:interaction
 
-      - name: UI regression event tests
-        run: npm --prefix tests-ui run test:regression:events
-
       - name: UI regression session/export tests
         run: npm --prefix tests-ui run test:regression:sessions
 

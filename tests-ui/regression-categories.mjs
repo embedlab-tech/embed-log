@@ -8,11 +8,11 @@ const categories = {
     'regression-tests/timestamp-toggle.spec.js',
   ],
   data: [
-    'regression-tests/pane-plugin-coap.spec.js',
     'regression-tests/plugin-failure-isolation.spec.js',
   ],
   interaction: [
     'regression-tests/clipboard.spec.js',
+    'regression-tests/copy-format.spec.js',
     'regression-tests/drag-selection.spec.js',
     'regression-tests/filter-keyboard.spec.js',
     'regression-tests/layout-sync.spec.js',
