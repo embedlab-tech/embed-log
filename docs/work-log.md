@@ -2226,3 +2226,20 @@ Future entries must include this per-file added/removed-line summary.
 | --- | ---: | ---: | --- |
 | `tests-ui/regression-tests/demo-smoke.spec.js` | 3 | 1 | Waits two animation frames for the virtualized pane after programmatic scrolling. |
 | `tests-ui/regression-tests/timestamp-toggle.spec.js` | 5 | 0 | Tests the implemented timestamp-mode cycle, including presentation-only No time mode. |
+
+## 2026-08-07 10:02:52 UTC / 2026-08-07 12:02:52 CEST (Warsaw)
+
+- **Commit:** `a1d770e` — `Align UI regression jobs with test categories`
+- **Task:** Remove the obsolete event-regression CI step, reconcile the category manifest with the remaining test files, and update static replay assertions for the No time timestamp mode.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-07 10:02:52 UTC / 2026-08-07 12:02:52 CEST (+0200) (Warsaw)
+- **Validation:** `CI=true TEST_TRAFFIC_TICK_MS=250 npm --prefix tests-ui run test:regression:categorized` — smoke, data, and interaction categories passed before stale session assertions were found; `CI=true TEST_TRAFFIC_TICK_MS=250 npm --prefix tests-ui run test:regression:sessions` — 12 passed, 2 skipped (Chromium and Edge); `git diff --check` — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`a1d770e`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 0 | 3 | Removes the CI invocation of the deleted event-regression script. |
+| `tests-ui/regression-categories.mjs` | 1 | 1 | Removes a deleted CoAP spec and places copy-format coverage in interaction tests. |
+| `tests-ui/regression-tests/relative-time-replay.spec.js` | 13 | 4 | Tests the current static replay timestamp cycle and no-absolute-origin behavior. |
