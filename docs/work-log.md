@@ -2210,3 +2210,19 @@ Future entries must include this per-file added/removed-line summary.
 | File | Added | Removed | Summary |
 | --- | ---: | ---: | --- |
 | `.github/workflows/ci.yml` | 10 | 4 | Installs Playwright Chromium without sudo and verifies the runner-provisioned Edge executable in both E2E jobs. |
+
+## 2026-08-07 07:52:06 UTC / 2026-08-07 09:52:06 CEST (Warsaw)
+
+- **Commit:** `f8ed56c` — `Stabilize timestamp and history regression tests`
+- **Task:** Align the timestamp-toggle regression with the current Relative → No time → Absolute cycle and wait for virtual-scroll rendering before asserting retained live history.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-07 07:52:06 UTC / 2026-08-07 09:52:06 CEST (+0200) (Warsaw)
+- **Validation:** `CI=true TEST_TRAFFIC_TICK_MS=250 npm --prefix tests-ui run test:regression:smoke` — 24 passed (Chromium and Edge); `git diff --check` — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`f8ed56c`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `tests-ui/regression-tests/demo-smoke.spec.js` | 3 | 1 | Waits two animation frames for the virtualized pane after programmatic scrolling. |
+| `tests-ui/regression-tests/timestamp-toggle.spec.js` | 5 | 0 | Tests the implemented timestamp-mode cycle, including presentation-only No time mode. |
