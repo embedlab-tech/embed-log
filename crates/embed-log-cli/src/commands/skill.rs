@@ -32,7 +32,11 @@ mod tests {
     #[test]
     fn embedded_skill_is_canonical_and_complete() {
         assert_eq!(SKILL, include_str!("../../../../skills/embed-log/SKILL.md"));
-        assert!(SKILL.starts_with("---\ndescription:"));
+        assert_eq!(SKILL.lines().next(), Some("---"));
+        assert!(SKILL
+            .lines()
+            .nth(1)
+            .is_some_and(|line| line.starts_with("description:")));
         assert!(SKILL.contains("embed-log schema"));
         assert!(SKILL.contains("embed-log sessions read"));
         assert!(!SKILL.contains("watch"));
