@@ -74,7 +74,7 @@ fn candidate_runs(line: &str) -> Vec<(usize, usize)> {
     for (index, character) in line.char_indices() {
         let allowed = character.is_ascii_hexdigit()
             || character.is_ascii_whitespace()
-            || matches!(character, ':' | ',' | '_' | '|' | '.' | '-');
+            || matches!(character, ':' | ',' | '_' | '.' | '-');
         match (start, allowed) {
             (None, true) if character.is_ascii_hexdigit() => start = Some(index),
             (Some(run_start), false) => {
@@ -123,6 +123,22 @@ mod tests {
         assert!(lines[0].starts_with("radio rx frame aa 55 payload [CoAP] t:CON c:GET"));
         assert!(!lines[0].contains("40 01 12 34"));
         assert!(!lines[0].contains("suffix"));
+    }
+
+    #[test]
+    fn pipe_delimited_capture_does_not_merge_port_and_payload_nibbles() {
+        let mut parser = HexCoapParser::new();
+        // Generic capture metadata followed by a synthetic CoAP POST with an
+        // eight-byte token. The pipe before the payload must be a boundary.
+        let line = "2026-01-02 03:04:05.006 | udp | tx | 49152 | 5683 | 480212340102030405060708\n";
+        let lines = parser.feed(line.as_bytes());
+        assert!(
+            lines[0].starts_with(
+                "2026-01-02 03:04:05.006 | udp | tx | 49152 | 5683 | [CoAP] t:CON c:POST i:1234"
+            ),
+            "{}",
+            lines[0]
+        );
     }
 
     #[test]
