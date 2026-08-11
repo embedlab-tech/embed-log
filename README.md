@@ -33,7 +33,7 @@ embed-log doctor --config embed-log.yml
 embed-log run --config embed-log.yml
 ```
 
-Use `--tui` for the terminal UI. Sessions are written under `./logs/` by default.
+The web server and browser UI start automatically. Use `--no-open-browser` for headless use or `--tui` for the terminal UI instead. Sessions are written under `./logs/` by default.
 
 ## Agent use
 
@@ -56,12 +56,7 @@ embed-log tx --instance bench-a --source DUT_UART --line "status"
 
 Evidence is concise text (`+time seq=N src=SOURCE#INDEX | message`). Set `CURSOR` to the final returned sequence number and use `sessions around` for context. Run `embed-log schema` when an agent needs the machine-readable CLI contract.
 
-The same skill is available as a [Claude Code](https://claude.com/claude-code) plugin:
-
-```text
-/plugin marketplace add embedlab-tech/embed-log
-/plugin install embed-log@embed-log-tools
-```
+Ask your coding agent to create its project skill from the output of `embed-log skill`; this keeps its instructions matched to the installed CLI version.
 
 ## More documentation
 
