@@ -17,7 +17,7 @@ test.describe('selection copy actions', () => {
     expect(errors).toEqual([]);
   });
 
-  test('selection copy always uses Full formatting and has no format or note actions', async ({ page }) => {
+  test('selection offers full and backend-compatible compact copy without format or note actions', async ({ page }, testInfo) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
 
@@ -26,13 +26,25 @@ test.describe('selection copy actions', () => {
     await end.click({ modifiers: ['Shift'] });
 
     await expect(page.locator('.format-btn')).toHaveCount(0);
-    await expect(page.getByText('Compact', { exact: true })).toHaveCount(0);
     await expect(page.getByText('Add Note', { exact: true })).toHaveCount(0);
+    await expect(page.locator('#copy-SENSOR_A + #copy-compact-SENSOR_A')).toBeVisible();
 
     await page.locator('#copy-SENSOR_A').click();
-    const copied = await readClipboard(page);
-    expect(copied).toMatch(/\[[^\]]+\] \[SENSOR_A\]/);
-    expect(copied).toContain('kind=prefix-cleanup');
+    const full = await readClipboard(page);
+    expect(full).toMatch(/\[[^\]]+\] \[SENSOR_A\]/);
+    expect(full).toContain('kind=prefix-cleanup');
+
+    await page.locator('#copy-compact-SENSOR_A').click();
+    const compact = await readClipboard(page);
+    expect(compact).toMatch(/^\+\d+\.\d{3} seq=\d+ src=SENSOR_A#\d+ \| /);
+    expect(compact).toContain('kind=prefix-cleanup');
+    expect(compact.split('\n')).toHaveLength(full.split('\n').length);
+
+    const savedBytes = full.length - compact.length;
+    testInfo.annotations.push({
+      type: 'copy-size',
+      description: `full=${full.length} B compact=${compact.length} B delta=${savedBytes} B`,
+    });
   });
 
   test('Copy button shows a token count estimate for Full output', async ({ page }) => {

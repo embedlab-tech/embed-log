@@ -3,7 +3,7 @@ import { onLineClick, hidePluginOverlays, ensureLineVisible, getLine } from './l
 import { exportHtmlSnapshot } from './export.js';
 import { switchTab } from './tabs.js';
 import { _escHtml } from './renderPane.js';
-import { estimateTokens } from './postprocess.js';
+import { denoiseMessage, estimateTokens } from './postprocess.js';
 import { isEditableTarget, isComposingEvent } from './keyboard.js';
 // Line selection + copy / export actions
 //
@@ -79,6 +79,13 @@ export function _selectionSetupPane(id) {
     copyBtn.id = "copy-" + id;
     copyBtn.addEventListener("click", e => { e.stopPropagation(); _copy(id); });
 
+    const compactCopyBtn = document.createElement("button");
+    compactCopyBtn.className = "copy-btn compact-copy-btn";
+    compactCopyBtn.id = "copy-compact-" + id;
+    compactCopyBtn.textContent = "Copy compact";
+    compactCopyBtn.title = "Copy backend-compatible compact records";
+    compactCopyBtn.addEventListener("click", e => { e.stopPropagation(); _copyCompact(id); });
+
     // More ··· toggle
     const moreToggle = document.createElement("button");
     moreToggle.className = "copy-btn more-toggle";
@@ -109,6 +116,7 @@ export function _selectionSetupPane(id) {
     moreDropdown.appendChild(rawBtn);
 
     actionRow.appendChild(copyBtn);
+    actionRow.appendChild(compactCopyBtn);
     actionRow.appendChild(moreToggle);
     actionRow.appendChild(moreDropdown);
 
@@ -188,7 +196,8 @@ function _closeAllMore() {
 function _syncSelectionActions(paneId) {
     const wrap = document.getElementById("copy-actions-" + paneId);
     const copyBtn = document.getElementById("copy-" + paneId);
-    if (!wrap || !copyBtn) return;
+    const compactCopyBtn = document.getElementById("copy-compact-" + paneId);
+    if (!wrap || !copyBtn || !compactCopyBtn) return;
 
     const selectedCount = state.selected[paneId].size;
     const visible = selectedCount > 0;
@@ -205,6 +214,8 @@ function _syncSelectionActions(paneId) {
         // estimate can never drift from what actually ends up on the clipboard.
         const tok = estimateTokens(_pendingCopyText(paneId));
         copyBtn.textContent = `Copy (${displayCount}, ~${tok} tok)`;
+        const compactTok = estimateTokens(_pendingCompactCopyText(paneId));
+        compactCopyBtn.textContent = `Compact (~${compactTok} tok)`;
     }
     // Scope-gate secondary actions: Export HTML only outside Exact
     const htmlBtn = document.getElementById("export-html-" + paneId);
@@ -543,6 +554,49 @@ function _pendingCopyText(paneId) {
     return _formatRangeRaw(_collectRangeEntries(paneId), true, state.timestampMode !== "hidden") || "";
 }
 
+// Browser counterpart of `sessions.rs::compact_text`. This format is kept
+// deliberately independent of the timestamp display toggle: agent-oriented
+// compact records always use session-relative `+seconds.millis` time.
+function _compactRelativeTime(line) {
+    const totalMs = Number.isFinite(line?.relNum) ? Math.max(0, Math.trunc(line.relNum)) : 0;
+    return `+${Math.trunc(totalMs / 1000)}.${String(totalMs % 1000).padStart(3, "0")}`;
+}
+
+function _compactClockTime(line) {
+    // `absTs` is the browser's local rendering of the backend timestamp. The
+    // denoiser only needs its HH:MM:SS.mmm portion to remove a duplicate prefix.
+    return String(line?.absTs || line?.ts || "").match(/\b\d{2}:\d{2}:\d{2}\.\d{3}\b/)?.[0] || "";
+}
+
+function _formatCompactEntry(entry) {
+    const line = entry.line;
+    const sequence = Number.isFinite(line?.sequence) ? Math.trunc(line.sequence) : 0;
+    const sourceId = line?.sourceId || entry.paneId || "?";
+    const source = Number.isFinite(line?.serverLineIdx)
+        ? `${sourceId}#${Math.trunc(line.serverLineIdx)}`
+        : sourceId;
+    // `line.html` has already passed through ansi.js, which strips terminal
+    // control sequences just as the backend compact formatter does.
+    const message = denoiseMessage(_linePlain(line), _compactClockTime(line));
+    return `${_compactRelativeTime(line)} seq=${sequence} src=${source} | ${message}`;
+}
+
+function _formatCompactEntries(entries) {
+    return entries.map(_formatCompactEntry).join("\n");
+}
+
+function _pendingCompactCopyText(paneId) {
+    if (state.selectionScope === "exact") {
+        const selected = state.selected[paneId];
+        if (!selected?.size) return "";
+        return _formatCompactEntries(Array.from(selected)
+            .sort((a, b) => a - b)
+            .map(idx => ({ paneId, idx, line: _selectionLine(paneId, idx) }))
+            .filter(entry => entry.line));
+    }
+    return _formatCompactEntries(_collectRangeEntries(paneId));
+}
+
 function _selectionMessageText(entry, useRendered = false) {
     let text = (useRendered ? _lineRenderedPlain(entry.line) : _linePlain(entry.line)).trim();
     const sourcePrefix = new RegExp(`^\\[${_escapeRegExp(entry.paneId)}\\]\\s*`);
@@ -703,6 +757,18 @@ function _copyContext(paneId) {
     if (!text) return;
     _copyText(text).then(() => {
         const btn = document.getElementById("copy-" + paneId);
+        if (!btn) return;
+        const prev = btn.textContent;
+        btn.textContent = `Copied (~${estimateTokens(text)} tok)`;
+        setTimeout(() => { btn.textContent = prev; _syncSelectionActions(paneId); }, 900);
+    }).catch(() => {});
+}
+
+function _copyCompact(paneId) {
+    const text = _pendingCompactCopyText(paneId);
+    if (!text) return;
+    _copyText(text).then(() => {
+        const btn = document.getElementById("copy-compact-" + paneId);
         if (!btn) return;
         const prev = btn.textContent;
         btn.textContent = `Copied (~${estimateTokens(text)} tok)`;

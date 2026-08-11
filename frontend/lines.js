@@ -56,6 +56,7 @@ export function buildStoredLine(paneId, ts, rawText, isTx, meta = null) {
         ...buildTimestampInfo(ts, lineMeta),
         serverLineIdx: Number.isFinite(lineMeta.lineIdx) ? lineMeta.lineIdx : null,
         sequence: Number.isFinite(lineMeta.sequence) ? lineMeta.sequence : null,
+        sourceId: typeof lineMeta.sourceId === "string" && lineMeta.sourceId ? lineMeta.sourceId : paneId,
         sessionId: lineMeta.sessionId || null,
         html,
         rawText,
