@@ -20,11 +20,11 @@ All source writers share one commit lock. Within that serialized section Embed-l
                         └──────────────┬───────────────┘
                                        │ starts tasks
                                        ▼
-          ┌──────────────┬─────────────┬──────────────┬──────────────┐
-          │ UART sources │ UDP sources │ file sources │ mock network │
-          └──────┬───────┴──────┬──────┴──────┬───────┴──────┬───────┘
-                 │ LogEntry      │ LogEntry     │ LogEntry      │ LogEntry
-                 ▼               ▼              ▼              ▼
+          ┌──────────────┬─────────────┬──────────────┐
+          │ UART sources │ UDP sources │ file sources │
+          └──────┬───────┴──────┬──────┴──────┬───────┘
+                 │ LogEntry      │ LogEntry     │ LogEntry
+                 ▼               ▼              ▼
           ┌─────────────────────────────────────────────────────────┐
           │ per-source writer tasks                                 │
           │ - append `[timestamp] message` to session log files      │
@@ -87,7 +87,7 @@ Terminal WebSocket client used by integrated `--tui` mode and by the standalone 
 
 ```text
 source task
-  │ reads bytes/datagrams/files/mock events
+  │ reads bytes/datagrams/files
   ▼
 parser
   │ emits text lines
@@ -125,8 +125,9 @@ bytes/datagram ──▶ StreamParser::feed(&[u8]) ──▶ Vec<String>
 | Parser `type` | Scope | Behavior |
 | --- | --- | --- |
 | `text` | UART, UDP, file | UTF-8-ish line splitting with buffering. |
-| `slip-coap` | UART only | Decodes SLIP-framed UDP datagrams carrying CoAP messages (device-to-device links). |
-| `zephyr-dict` | Any source | Decodes Zephyr dictionary-logging binary messages against a `database.json` (`parser.database`). Buffers across `feed()` calls since messages are length-prefixed, not delimited. DB format v3 only. |
+| `hex-coap` | UART, UDP, file | Replaces textual hexadecimal CoAP packets with a readable decode. |
+| `slip-coap` | UART only | Decodes SLIP-framed UDP datagrams carrying CoAP messages. |
+| `zephyr-dict` | Any source | Decodes Zephyr dictionary-logging binary messages against `parser.database`. |
 
 Config validation rejects `slip-coap` on non-UART sources and `zephyr-dict` without `parser.database` set.
 

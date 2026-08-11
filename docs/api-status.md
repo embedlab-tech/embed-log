@@ -12,7 +12,7 @@ HTTP status: `200 OK`
 {
   "ok": true,
   "api_version": "v1",
-  "version": "1.0.0",
+  "version": "<running-version>",
   "session_id": "2026-07-12_09-45-00",
   "control_api": true,
   "sources": {
@@ -35,7 +35,7 @@ HTTP status: `200 OK`
 |---|---|---|
 | `ok` | boolean | Endpoint successfully served a ready Embed-log process. |
 | `api_version` | string | REST status schema version. |
-| `version` | string | Running Embed-log package version. |
+| `version` | string | Running Embed-log package version; do not depend on a specific value. |
 | `session_id` | string or null | Active session identifier, when available. |
 | `control_api` | boolean | Whether `/api/v1/control` WebSocket control is enabled. |
 | `sources` | object | Source ID keyed capability map. |

@@ -1,8 +1,0 @@
-{
-  "name": "embed-log",
-  "description": "Investigate live firmware, tests, and saved sessions through one concise Embed-log CLI skill.",
-  "version": "0.1.0",
-  "author": {
-    "name": "krezolekcoder"
-  }
-}

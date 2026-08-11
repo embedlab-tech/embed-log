@@ -169,15 +169,24 @@ Supported backend parser types are `text`, `hex-coap`, `slip-coap`, and `zephyr-
 
 ## UI layout
 
-Without `ui`, Embed-log creates one tab per source. A configured tab contains one or two sources:
+Without `ui`, Embed-log creates one tab per source. Put two source IDs in one tab to show their panes side by side in the browser:
 
 ```yaml
+sources:
+  DUT_UART:
+    label: DUT UART
+    type: uart
+    path: /dev/ttyUSB0
+    baud: 115200
+  HOST_UART:
+    label: Host UART
+    type: uart
+    path: /dev/ttyUSB1
+    baud: 115200
 ui:
   tabs:
     - title: Device
-      sources: [DUT, TEST]
-    - title: Protocol
-      sources: [LINK, HOST]
+      sources: [DUT_UART, HOST_UART]
 ```
 
 Version 2 intentionally has no frontend plugin or per-pane plugin fields. The former config-v1 built-in `hex-coap` frontend plugin was removed; configurations using it fail with guidance to attach backend `parser.type: hex-coap` to the source. Explicit custom config-v1 plugins remain compatibility-only.

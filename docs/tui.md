@@ -10,7 +10,7 @@ Start the server and TUI in one process:
 # Fast path: no YAML required
 embed-log run /dev/ttyUSB0 --tui
 
-# Saved configuration or demo
+# Saved configuration
 embed-log run --config embed-log.yml --tui
 ```
 
