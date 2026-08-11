@@ -41,11 +41,12 @@ All source writers share one commit lock. Within that serialized section Embed-l
                          │
                          ▼
           ┌────────────────────────────────────────┐
-          │ frontend viewer                        │
-          │ live browser UI and terminal UI        │
-          │ static exported HTML uses browser assets│
+          │ browser viewer and exported HTML       │
+          │ static HTML uses embedded browser assets│
           └────────────────────────────────────────┘
 ```
+
+The Rust TUI is a separate `/ws` client of the same server.
 
 ## Crates
 
@@ -61,7 +62,7 @@ Shared library used by the CLI and TUI.
 | `models` | Core runtime data types like `LogEntry`, `TimestampMode`, ANSI color mapping. |
 | `naming` | Slug helpers for filesystem-safe session/log names. |
 | `net` | HTTP/WebSocket server and structured control WebSocket API. |
-| `parsers` | Stream parsers: text, SLIP/CoAP, and Zephyr dictionary logging. |
+| `parsers` | Stream parsers: text, hex-CoAP, SLIP/CoAP, and Zephyr dictionary logging. |
 | `runtime` | `LogServer`, the main orchestrator. Resolves sources, starts tasks, writes logs, broadcasts messages, rotates/exports sessions. |
 | `session` | Session manifest, markers, and static HTML export. |
 | `sources` | Source implementations: UART, UDP, and file tail. |
@@ -140,8 +141,11 @@ The Axum server serves API routes first, then static frontend assets from `front
 | `/` and static paths | `GET` | Viewer UI. |
 | `/ws` | WebSocket | Config message, replay buffer, live logs, frontend commands. |
 | `/api/health` | `GET` | Health probe. |
+| `/api/v1/status` | `GET` | Readiness and configured-source discovery. |
+| `/api/v1/control` | `GET` WebSocket | Optional structured control API for subscriptions, injection, TX, and markers. |
 | `/api/session/current` | `GET` | Current session info. |
 | `/api/session/export` | `POST` | Atomically generate/update canonical `session.html`; `?download=true` returns those same published bytes as an attachment. |
+| `/api/session/marker` | `POST` | Record an external timeline marker. |
 | `/api/session/rotate` | `POST` | Close current session, start a new one, export old session in background. |
 | `/api/sessions` | `GET` | List sessions under logs root. |
 | `/api/stats` | `GET` | Runtime counters and WebSocket/replay state. |
@@ -169,18 +173,19 @@ logs/
     ├── markers.json              # after markers are saved
     ├── .session-html.lock        # advisory lock shared by daemon/offline exporters
     ├── session.html              # atomically published after an export trigger
-    └── <tab>__<source>__<session>.log
+    └── <source-log>.log          # physical-source compatibility artifact; manifest maps source IDs to paths
 ```
 
 Session HTML is self-contained: log data, CSS, JS, plugin metadata/scripts, markers, and static profile are embedded into one file. New exports read the complete newline-terminated prefix of canonical `combined.jsonl`, render behind the per-session lock, and rename a flushed temporary file into place. A failed export therefore leaves the previous complete report intact.
 
 ## Frontend architecture
 
-The viewer is plain ES modules in `frontend/`. The same UI code supports:
+The browser viewer is plain ES modules in `frontend/`. It supports:
 
 - live browser mode served by Axum
-- terminal UI mode
-- static exported HTML mode, where module imports/exports are stripped and data is bootstrapped inline
+- static exported HTML, where module imports/exports are stripped and data is bootstrapped inline
+
+The terminal UI is a separate Rust client in `crates/embed-log-tui`.
 
 Important files:
 
@@ -206,7 +211,7 @@ Custom config-v1 plugins may still be loaded from explicit paths and included in
 
 ## Release architecture
 
-The CLI release workflow builds precompiled binaries on native/self-hosted runners and publishes one GitHub Release:
+The CLI release workflow builds precompiled binaries on GitHub-hosted native runners and publishes one GitHub Release:
 
 ```text
 Linux runner   ─▶ embed-log-x86_64-unknown-linux-gnu.tar.gz
