@@ -2316,3 +2316,18 @@ Future entries must include this per-file added/removed-line summary.
 | File | Added | Removed | Summary |
 | --- | ---: | ---: | --- |
 | `docs/architecture.md` | 14 | 9 | Aligns browser/TUI roles, routes, parsers, session artifacts, and hosted release runner architecture with implementation. |
+
+## 2026-08-11 07:34:46 UTC / 2026-08-11 09:34:46 CEST (Warsaw)
+
+- **Commit:** `db101ea` — `Temporarily disable STM32G0 CI jobs`
+- **Task:** Exclude both STM32G0 hardware integration jobs from CI while the shared hardware rig is repaired.
+- **Started:** unavailable; the repository-local `/worklog-start` extension was removed in the preceding documentation cleanup.
+- **Completed:** 2026-08-11 07:34:46 UTC / 2026-08-11 09:34:46 CEST (+0200) (Warsaw)
+- **Validation:** `git diff --check` — passed; PyYAML workflow parse — passed.
+- **Model-token delta:** unavailable; the repository-local `/worklog-start` extension was removed in the preceding documentation cleanup.
+
+### File changes (`db101ea`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 4 | 4 | Sets both STM32G0 hardware jobs to `if: ${{ false }}` with temporary-repair comments. |
