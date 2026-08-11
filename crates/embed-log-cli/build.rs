@@ -18,6 +18,12 @@ fn main() {
 
     let target = std::env::var("TARGET").unwrap_or_else(|_| "unknown".to_string());
     println!("cargo:rustc-env=EMBED_LOG_TARGET={target}");
+
+    // The Windows executable parses a large Clap command tree. Its default
+    // 1 MiB main-thread stack can overflow while rendering a usage error.
+    if target.contains("windows") {
+        println!("cargo:rustc-link-arg=/STACK:8388608");
+    }
 }
 
 fn git_output(args: &[&str]) -> Option<String> {
