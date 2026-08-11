@@ -2301,3 +2301,18 @@ Future entries must include this per-file added/removed-line summary.
 | `docs/index.md` | 9 | 12 | Keeps a concise index of maintained documents. |
 | `docs/non-session-roadmap.md` | 0 | 46 | Removes the stale deferred-product roadmap. |
 | `docs/tui.md` | 1 | 1 | Removes the deleted demo-mode reference. |
+
+## 2026-08-11 07:23:09 UTC / 2026-08-11 09:23:09 CEST (Warsaw)
+
+- **Commit:** `55ee384` — `Refresh architecture documentation`
+- **Task:** Verify the architecture reference against the current runtime and release workflow, then correct browser/TUI boundaries, active API routes, parser inventory, artifact naming, and runner description.
+- **Started:** unavailable; the repository-local `/worklog-start` extension was removed in the preceding documentation cleanup.
+- **Completed:** 2026-08-11 07:23:09 UTC / 2026-08-11 09:23:09 CEST (+0200) (Warsaw)
+- **Validation:** `cargo test --locked --package embed-log-core net::ws_server::tests::embedded_fallback_keeps_css_and_js_content_types` — passed (1 test); local Markdown-link existence check — passed; `git diff --check` — passed.
+- **Model-token delta:** unavailable; the repository-local `/worklog-start` extension was removed in the preceding documentation cleanup.
+
+### File changes (`55ee384`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `docs/architecture.md` | 14 | 9 | Aligns browser/TUI roles, routes, parsers, session artifacts, and hosted release runner architecture with implementation. |
