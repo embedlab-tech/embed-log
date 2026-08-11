@@ -1,0 +1,17 @@
+# Replay BLE capture rows with scripts/replay_ble_coap_capture.py.
+version: 2
+server:
+  listen: 127.0.0.1:10080
+logs:
+  dir: logs
+sources:
+  BLE_COAP:
+    label: BLE CoAP capture
+    type: udp
+    port: 10001
+    parser:
+      type: hex-coap
+ui:
+  tabs:
+    - title: BLE CoAP
+      sources: [BLE_COAP]
