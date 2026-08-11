@@ -2273,3 +2273,31 @@ Future entries must include this per-file added/removed-line summary.
 | File | Added | Removed | Summary |
 | --- | ---: | ---: | --- |
 | `README.md` | 2 | 7 | Replaces marketplace setup with CLI-derived project-skill guidance and states browser-start behavior. |
+
+## 2026-08-11 07:18:35 UTC / 2026-08-11 09:18:35 CEST (Warsaw)
+
+- **Commit:** `25b7a78` — `Prune stale documentation and agent integrations`
+- **Task:** Retain concise current documentation, remove completed plans and duplicate guides, add the two-UART side-by-side layout recipe, and delete obsolete Pi/Claude integration metadata.
+- **Started:** unavailable; the `/worklog-start` extension command was removed as part of this cleanup.
+- **Completed:** 2026-08-11 07:18:35 UTC / 2026-08-11 09:18:35 CEST (+0200) (Warsaw)
+- **Validation:** `cargo test --locked --package embed-log-core config::loader::tests::parse_all_sample_configs` — passed (1 test); local Markdown-link existence check — passed; `git diff --check` — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was removed as part of this cleanup.
+
+### File changes (`25b7a78`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.claude-plugin/marketplace.json` | 0 | 14 | Removes obsolete Claude marketplace metadata. |
+| `.claude-plugin/plugin.json` | 0 | 8 | Removes obsolete Claude plugin metadata. |
+| `.pi/extensions/README.md` | 0 | 18 | Removes retired repository-local Pi extension documentation. |
+| `.pi/extensions/worklog-checkpoint.ts` | 0 | 152 | Removes the retired Pi work-log extension. |
+| `copy-compact-mode-plan.md` | 0 | 558 | Removes the superseded browser compact-copy plan. |
+| `docs/agent-capabilities.md` | 0 | 129 | Removes duplicate agent guidance superseded by `embed-log skill` and CLI reference. |
+| `docs/api-status.md` | 2 | 2 | Uses a version-neutral status response example. |
+| `docs/architecture.md` | 9 | 8 | Removes deleted mock-source references and lists the hex-CoAP parser. |
+| `docs/configuration.md` | 13 | 4 | Adds a concise two-UART side-by-side browser-layout example. |
+| `docs/frontend-overhaul-plan.md` | 0 | 290 | Removes the completed frontend overhaul plan. |
+| `docs/getting-up-to-speed.md` | 0 | 201 | Removes the stale, duplicative onboarding guide. |
+| `docs/index.md` | 9 | 12 | Keeps a concise index of maintained documents. |
+| `docs/non-session-roadmap.md` | 0 | 46 | Removes the stale deferred-product roadmap. |
+| `docs/tui.md` | 1 | 1 | Removes the deleted demo-mode reference. |
