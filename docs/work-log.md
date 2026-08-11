@@ -2258,3 +2258,18 @@ Future entries must include this per-file added/removed-line summary.
 | File | Added | Removed | Summary |
 | --- | ---: | ---: | --- |
 | `README.md` | 25 | 195 | Keeps only install, direct/configured run, agent and skill workflow, Claude Code plugin, and reference links. |
+
+## 2026-08-11 07:13:46 UTC / 2026-08-11 09:13:46 CEST (Warsaw)
+
+- **Commit:** `f7fd8e9` — `Clarify browser and agent skill setup`
+- **Task:** Remove marketplace instructions from the concise README, direct users to create a project skill from `embed-log skill`, and explicitly describe automatic browser startup.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-11 07:13:46 UTC / 2026-08-11 09:13:46 CEST (+0200) (Warsaw)
+- **Validation:** `git diff --check` — passed; verified `run` opens the browser unless `--no-open-browser` or `--tui` is selected.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`f7fd8e9`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 2 | 7 | Replaces marketplace setup with CLI-derived project-skill guidance and states browser-start behavior. |
