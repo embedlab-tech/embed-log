@@ -36,6 +36,17 @@ impl StreamParser for HexCoapParser {
 }
 
 fn decode_line(line: &str) -> Option<String> {
+    // Structured capture rows conventionally put their wire payload in the
+    // final pipe-delimited field. When that field is hexadecimal, it is the
+    // sole CoAP candidate: metadata must never contribute nibbles or win as
+    // an earlier false-positive CoAP-looking value.
+    if let Some((payload_offset, payload)) = final_pipe_hex_payload(line) {
+        return coap::parse(&payload)
+            .map(|decoded| format!("{}[CoAP]{}", &line[..payload_offset], decoded));
+    }
+
+    // Preserve generic log-line behavior for non-structured inputs, such as
+    // `radio rx: 40 01 ...`, where a hexadecimal packet follows free text.
     for (run_start, run_end) in candidate_runs(line) {
         let run = &line[run_start..run_end];
         let mut nibbles = String::new();
@@ -68,13 +79,35 @@ fn decode_line(line: &str) -> Option<String> {
     None
 }
 
+fn final_pipe_hex_payload(line: &str) -> Option<(usize, Vec<u8>)> {
+    let (_, final_field) = line.rsplit_once('|')?;
+    let trimmed = final_field.trim();
+    if trimmed.len() < 8
+        || !trimmed
+            .chars()
+            .all(|character| character.is_ascii_hexdigit() || character.is_ascii_whitespace())
+    {
+        return None;
+    }
+    let hex: String = trimmed
+        .chars()
+        .filter(|character| character.is_ascii_hexdigit())
+        .collect();
+    if hex.len() < 8 || hex.len() % 2 != 0 {
+        return None;
+    }
+    let payload_offset =
+        line.len() - final_field.len() + (final_field.len() - final_field.trim_start().len());
+    Some((payload_offset, hex_bytes(&hex)?))
+}
+
 fn candidate_runs(line: &str) -> Vec<(usize, usize)> {
     let mut runs = Vec::new();
     let mut start = None;
     for (index, character) in line.char_indices() {
         let allowed = character.is_ascii_hexdigit()
             || character.is_ascii_whitespace()
-            || matches!(character, ':' | ',' | '_' | '|' | '.' | '-');
+            || matches!(character, ':' | ',' | '_' | '.' | '-');
         match (start, allowed) {
             (None, true) if character.is_ascii_hexdigit() => start = Some(index),
             (Some(run_start), false) => {
@@ -123,6 +156,34 @@ mod tests {
         assert!(lines[0].starts_with("radio rx frame aa 55 payload [CoAP] t:CON c:GET"));
         assert!(!lines[0].contains("40 01 12 34"));
         assert!(!lines[0].contains("suffix"));
+    }
+
+    #[test]
+    fn pipe_delimited_capture_uses_only_final_hex_payload() {
+        let mut parser = HexCoapParser::new();
+        let earlier_coap = "40011234b3666f6f03626172";
+        let payload = "480212340102030405060708";
+        // The metadata deliberately contains a valid CoAP GET. Only the final
+        // synthetic POST payload may be decoded.
+        let line = format!(
+            "2026-01-02 03:04:05.006 | udp | {earlier_coap} | tx | 49152 | 5683 | {payload}\n"
+        );
+        let lines = parser.feed(line.as_bytes());
+        assert!(
+            lines[0].starts_with(&format!(
+                "2026-01-02 03:04:05.006 | udp | {earlier_coap} | tx | 49152 | 5683 | [CoAP] t:CON c:POST i:1234"
+            )),
+            "{}",
+            lines[0]
+        );
+        assert!(!lines[0].contains("c:GET"), "{}", lines[0]);
+    }
+
+    #[test]
+    fn pipe_delimited_capture_does_not_fallback_to_metadata_for_invalid_payload() {
+        let mut parser = HexCoapParser::new();
+        let line = "meta | 40011234b3666f6f03626172 | deadbeef\n";
+        assert_eq!(parser.feed(line.as_bytes()), vec![line.trim_end()]);
     }
 
     #[test]
