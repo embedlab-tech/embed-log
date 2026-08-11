@@ -1,8 +1,7 @@
-version: 1
-baudrate: 115200
+# Canonical version 2 configuration with the retained reusable settings.
+version: 2
 server:
-  host: 127.0.0.1
-  ws_port: 8080
+  listen: 127.0.0.1:18080
   app_name: embed-log reference
   verbosity: events
   default_light_theme: whitesand
@@ -11,39 +10,17 @@ server:
   control_api: true
 logs:
   dir: logs
-frontend_plugins:
-  hex-coap:
-    builtin: hex-coap
 sources:
-  - name: DUT_UART
+  DUT_UART:
     label: DUT UART
     type: uart
-    port: /dev/ttyUSB0
-    baudrate: 115200
-  - name: HOST_UDP
+    path: /dev/ttyUSB0
+    baud: 115200
+  HOST_UDP:
     label: Host UDP
     type: udp
     port: 6000
-  - name: SENSOR_CBOR
-    label: Sensor CBOR
-    type: udp
-    port: 6001
-    parser:
-      type: cbor-datagram
-  - name: NET_CAPTURE
-    label: Network capture
-    type: network_capture
-    interface: lo
-    network_backend: mock
-    mock_interval: 0.5
-    bpf_filter: udp
-tabs:
-  - label: Device
-    panes:
-      - source: DUT_UART
-        plugins: [hex-coap]
-      - HOST_UDP
-  - label: Sensors
-    panes: [SENSOR_CBOR]
-  - label: Network
-    panes: [NET_CAPTURE]
+ui:
+  tabs:
+    - title: Device
+      sources: [DUT_UART, HOST_UDP]

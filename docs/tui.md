@@ -10,9 +10,8 @@ Start the server and TUI in one process:
 # Fast path: no YAML required
 embed-log run /dev/ttyUSB0 --tui
 
-# Saved configuration or demo
+# Saved configuration
 embed-log run --config embed-log.yml --tui
-embed-log demo --tui
 ```
 
 The quick form accepts multiple UARTs and watched files too:
@@ -24,9 +23,9 @@ embed-log run -s /dev/ttyUSB0 -s /dev/ttyUSB1 -f ./device.log --tui
 Connect the standalone TUI to an already-running server:
 
 ```bash
-embed-log-tui connect ws://127.0.0.1:8080/ws
+embed-log-tui connect ws://127.0.0.1:18080/ws
 # equivalent shorthand
-embed-log-tui --url ws://127.0.0.1:8080/ws
+embed-log-tui --url ws://127.0.0.1:18080/ws
 ```
 
 The standalone `embed-log-tui` binary is a client only. It does not load YAML configs or start a server; use `embed-log run --tui` for that.
@@ -39,8 +38,7 @@ The standalone `embed-log-tui` binary is a client only. It does not load YAML co
 - absolute/relative timestamp toggle
 - selection and clipboard copy
 - per-pane regex filtering (`/`)
-- user/event markers and marker navigation
-- events timeline tab when event rules are configured
+- user markers and marker navigation
 - clear active pane
 - export the current session as self-contained HTML (`x`)
 - UART TX input for writable UART sources
@@ -49,7 +47,7 @@ The standalone `embed-log-tui` binary is a client only. It does not load YAML co
 ## Limitations
 
 - The TUI does not run browser JavaScript plugins. Plugin configuration is visible as metadata, but plugin-rendered browser UI is not reproduced.
-- The TUI does not provide onboarding. Create a config with `embed-log onboard`, `embed-log init`, or by editing YAML first.
+- Create a config by editing or copying a YAML sample before starting config-based TUI mode.
 - The TUI can request an HTML export, but opening and browsing the exported HTML remains a browser workflow.
 
 ## Keybindings
@@ -73,13 +71,11 @@ Press `?` inside the TUI to show the built-in help overlay.
 | `/` | Filter active pane with a regex; empty filter clears |
 | `m` | Toggle marker on current line |
 | `[`, `]` | Previous/next marker |
-| `M` | Include/exclude event markers in marker navigation |
 | `t` | Toggle absolute/relative timestamps |
 | `u` | Toggle unwrap mode |
 | `x` | Export the current session as self-contained HTML |
 | `C` | Clear active pane in the UI |
 | `:`, `i` | Open TX input for writable UART panes |
-| `e` | Open Events tab when event rules are configured |
 | `?` | Show/close help overlay |
 
 ## Related CLI commands
@@ -90,6 +86,5 @@ Inspect recorded sessions from the terminal:
 embed-log sessions list --dir logs
 embed-log sessions combined <SESSION_ID> --dir logs --lines 100
 embed-log sessions tail-combined <SESSION_ID> --dir logs --follow
-embed-log sessions events <SESSION_ID> --dir logs --severity fatal
 embed-log sessions search --dir logs --contains panic
 ```

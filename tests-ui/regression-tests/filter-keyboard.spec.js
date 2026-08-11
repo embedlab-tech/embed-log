@@ -77,6 +77,64 @@ test.describe('filter and keyboard UX', () => {
 //   When  the filter is changed to an invalid regex
 //   Then  the input shows invalid class but the previous valid filter continues to apply; fixing the regex removes the error
 
+  test('held keys from before a click do not leak into the focused filter', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    const input = page.locator('.filter-input[data-pane="SENSOR_A"]');
+
+    const prevented = await page.evaluate(() => {
+      const target = document.querySelector('.filter-input[data-pane="SENSOR_A"]');
+      target.focus();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', code: 'KeyD', bubbles: true }));
+      const repeat = new KeyboardEvent('keydown', {
+        key: 'd', code: 'KeyD', bubbles: true, cancelable: true, repeat: true,
+      });
+      target.dispatchEvent(repeat);
+      const ordinary = new KeyboardEvent('keydown', {
+        key: 'd', code: 'KeyD', bubbles: true, cancelable: true, repeat: false,
+      });
+      target.dispatchEvent(ordinary);
+      document.dispatchEvent(new KeyboardEvent('keyup', { key: 'd', code: 'KeyD', bubbles: true }));
+      return { repeat: repeat.defaultPrevented, ordinary: ordinary.defaultPrevented };
+    });
+    expect(prevented).toEqual({ repeat: true, ordinary: true });
+    await expect(input).toHaveValue('');
+  });
+
+  test('filter text selection remains highlighted after pointer release', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    const input = page.locator('.filter-input[data-pane="SENSOR_A"]');
+    await input.fill('select-me');
+    await input.selectText();
+    await expect.poll(async () => input.evaluate(el => [el.selectionStart, el.selectionEnd]))
+      .toEqual([0, 'select-me'.length]);
+    await page.waitForTimeout(1_100);
+    await expect(input).toBeFocused();
+    await expect.poll(async () => input.evaluate(el => [el.selectionStart, el.selectionEnd]))
+      .toEqual([0, 'select-me'.length]);
+  });
+
+  test('filter keeps focus and accepts keyboard input while logs arrive', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    const input = page.locator('.filter-input[data-pane="SENSOR_A"]');
+
+    await input.click();
+    await page.keyboard.type('kind=filter-alpha');
+    await expect(input).toHaveValue('kind=filter-alpha');
+    await expect(input).toBeFocused();
+
+    // Incoming records must not replace the control or steal focus.
+    await expect.poll(async () => page.locator('#log-SENSOR_A .log-line').count())
+      .toBeGreaterThan(0);
+    await expect(input).toBeFocused();
+    await page.keyboard.press('End');
+    await page.keyboard.type('|filter-beta');
+    await expect(input).toHaveValue('kind=filter-alpha|filter-beta');
+  });
+
+// Scenario: Invalid regex preserves the previous valid filter while showing error state
   test('invalid regex preserves previous valid filter', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });

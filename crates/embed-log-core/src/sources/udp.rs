@@ -132,34 +132,4 @@ mod tests {
 
         handle.abort();
     }
-
-    #[tokio::test]
-    async fn cbor_udp_datagram_decodes_to_key_value_line() {
-        let port = free_udp_port();
-        let (tx, mut rx) = mpsc::channel(4);
-        let handle = tokio::spawn(async move {
-            let source = UdpSource::new_with_parser("sensors", port, "cbor-datagram");
-            let _ = Box::new(source).run(tx).await;
-        });
-        tokio::time::sleep(Duration::from_millis(20)).await;
-
-        let value = ciborium::Value::Map(vec![(
-            ciborium::Value::Text("temp".to_string()),
-            ciborium::Value::Integer(25.into()),
-        )]);
-        let mut encoded = Vec::new();
-        ciborium::into_writer(&value, &mut encoded).unwrap();
-
-        let sender = UdpSocket::bind(("127.0.0.1", 0)).await.unwrap();
-        sender.send_to(&encoded, ("127.0.0.1", port)).await.unwrap();
-
-        let entry = timeout(Duration::from_secs(2), rx.recv())
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(entry.source, "sensors");
-        assert!(entry.message.contains("temp=25"));
-
-        handle.abort();
-    }
 }

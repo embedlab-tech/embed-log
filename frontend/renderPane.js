@@ -1,6 +1,6 @@
 // Shared pane shell renderer.
 // Used by tabcreate.js (live mode) and export.js (runtime export).
-// merge_logs.py produces the same structure in Python.
+// The Rust session exporter emits the same structure for static reports.
 
 export function _escHtml(str) {
     return str
@@ -12,10 +12,10 @@ export function _escHtml(str) {
 
 export function renderPaneShell(paneId, label, { showTx = false, paneKind = "" } = {}) {
     const safeLabel = _escHtml(label);
-    const filterPlaceholder = paneKind === "network_capture" ? "Filter (BPF)…" : "Filter (regex)…";
+    const filterPlaceholder = "Filter (regex)…";
     const txRow = [
         '            <div class="input-row"' + (showTx ? '' : ' style="display:none"') + '>',
-        '                <input class="serial-input" id="input-' + paneId + '" autocomplete="off"' + (showTx ? ' placeholder="Serial TX — press Enter to send"' : '') + '>',
+        '                <input type="text" class="serial-input" id="input-' + paneId + '" autocomplete="off" autocapitalize="none" spellcheck="false"' + (showTx ? ' placeholder="Serial TX — press Enter to send"' : '') + '>',
         '                <button class="send-btn" data-pane="' + paneId + '">Send</button>',
         '            </div>',
     ].join('\n');
@@ -29,7 +29,7 @@ export function renderPaneShell(paneId, label, { showTx = false, paneKind = "" }
         '                <button class="pane-download-btn" title="Download raw .log for this pane">Download</button>',
         '            </div>',
         '            <div class="filter-bar">',
-        '                <input class="filter-input" data-pane="' + paneId + '" placeholder="' + filterPlaceholder + '">',
+        '                <input type="text" class="filter-input" data-pane="' + paneId + '" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="' + filterPlaceholder + '">',
         '            </div>',
         '            <div class="pane-body">',
 '                <div class="log-area" id="log-' + paneId + '"><div class="log-spacer"><div class="log-window"></div></div></div>',

@@ -11,7 +11,10 @@ use chrono::{DateTime, FixedOffset, Local, NaiveDate, NaiveDateTime, NaiveTime, 
 use regex::Regex;
 
 /// A parsed log entry with timestamp variants.
+#[derive(Clone)]
 pub(super) struct LogEntry {
+    pub(super) source_id: Option<String>,
+    pub(super) sequence: Option<u64>,
     pub(super) ts: String,
     pub(super) text: String,
     pub(super) is_tx: bool,
@@ -47,6 +50,8 @@ pub(super) fn parse_log_file(
             };
 
             pending = Some(LogEntry {
+                source_id: pane_id.map(str::to_string),
+                sequence: None,
                 ts,
                 text: clean_text,
                 is_tx,

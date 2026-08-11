@@ -4,7 +4,6 @@ import { createTabWithPanes } from './tabcreate.js';
 import { configurePanePlugins, resetPanePlugins } from './pluginRuntime.js';
 
 import { switchTab } from './tabs.js';
-import { initEventsTab, addEvent, destroyEventsTab, renderTimeline } from './events.js';
 
 let ws = null;
 let wsRetryDelay = 1000;
@@ -14,6 +13,7 @@ let currentSessionId = null;
 let pendingLogMessages = [];
 let pendingLogFlush = false;
 let configReady = false;
+let virtualMerges = [];
 const LOG_FLUSH_MAX_LINES = 1000;
 
 function resetLayoutForNewSession() {
@@ -35,12 +35,6 @@ function resetLayoutForNewSession() {
     state.selected = {};
     Object.keys(PANE_LABELS).forEach(key => delete PANE_LABELS[key]);
     resetPanePlugins();
-
-    // Tear down events timeline — recreated if the new config has rules.
-    destroyEventsTab();
-    state.events = [];
-    state.eventsEnabled = false;
-    state.eventRules = {};
 }
 
 function wsSetStatus(cls, text) {
@@ -128,26 +122,14 @@ async function _handleConfigMessage(msg) {
     window.__embedLogUpdateTimestampModeUi?.();
 
     window.__embedLogSetSession?.(msg.session || null);
-    window.__embedLogOnSessionHtmlStatus?.({
-        ...msg.session,
-        type: "session_html_status",
-    });
     const paneLabels = msg.pane_labels && typeof msg.pane_labels === "object" ? msg.pane_labels : {};
     window.__embedLogPaneKinds = msg.pane_kinds && typeof msg.pane_kinds === "object" ? msg.pane_kinds : {};
     window.__embedLogPaneCommands = msg.pane_commands && typeof msg.pane_commands === "object" ? msg.pane_commands : {};
+    virtualMerges = Array.isArray(msg.merges) ? msg.merges : [];
+    window.__embedLogMerges = virtualMerges;
     Object.keys(PANE_LABELS).forEach(key => delete PANE_LABELS[key]);
     Object.assign(PANE_LABELS, paneLabels);
 
-    // Event detection — initialize before tab creation so the Events button
-    // is appended on the first renderTabBar() pass. Pane labels are already
-    // assigned so source filters use user-facing names.
-    const eventRules = msg.event_rules && typeof msg.event_rules === "object" ? msg.event_rules : {};
-    state.eventRules = eventRules;
-    state.eventsEnabled = Object.values(eventRules).some(rules => Array.isArray(rules) && rules.length > 0);
-    if (state.eventsEnabled) {
-        state.events = [];
-        initEventsTab();
-    }
     if (TABS.length === 0 && msg.tabs && msg.tabs.length > 0) {
         msg.tabs.forEach(tab =>
             createTabWithPanes(tab.label, tab.panes, { switchTo: false, paneLabels: tab.pane_labels || paneLabels })
@@ -226,17 +208,10 @@ function wsConnect() {
             window.__embedLogUpdateTimestampModeUi?.();
             return;
         }
-        if (msg.type === "session_html_status") {
-            window.__embedLogOnSessionHtmlStatus?.(msg);
-            return;
-        }
-
         if (msg.type === "session_rotated") {
             currentSessionId = msg.session?.id || currentSessionId;
             state.syncTs = null;
             state.syncTabSwitch = false;
-            state.events = [];
-            renderTimeline();
             clearAllPaneContents();
             setTimestampContext({
                 mode: msg.session?.timestamp_mode || "absolute",
@@ -246,10 +221,6 @@ function wsConnect() {
             setTimestampMode(state.timestampMode);
             window.__embedLogUpdateTimestampModeUi?.();
             window.__embedLogSetSession?.(msg.session || null);
-            window.__embedLogOnSessionHtmlStatus?.({
-                ...msg.session,
-                type: "session_html_status",
-            });
             window.__embedLogSchedulePersist?.();
             return;
         }
@@ -266,18 +237,6 @@ function wsConnect() {
             return;
         }
 
-        if (msg.type === "filter_result") {
-            const input = document.querySelector(`.filter-input[data-pane="${msg.id}"]`);
-            if (input && msg.error) {
-                input.classList.add("invalid");
-                input.title = msg.error;
-            } else if (input) {
-                input.classList.remove("invalid");
-                input.title = "";
-            }
-            return;
-        }
-
         if (msg.type === "clear_logs") {
             const pane = typeof msg.pane === "string" && msg.pane ? msg.pane : null;
             if (pane && pane !== "all") {
@@ -290,33 +249,31 @@ function wsConnect() {
             return;
         }
 
-        if (typeof msg.type === "string" && msg.type.startsWith("event_rule.")) {
-            window.dispatchEvent(new CustomEvent("embed-log-event-rule", { detail: msg }));
-            return;
-        }
-
-        if (msg.type === "event") {
-            addEvent(msg);
-            return;
-        }
-
         if (msg.type !== "rx" && msg.type !== "tx") return;
 
         const { type, data, timestamp, timestamp_iso, timestamp_num, source_id,
-                absTs, absNum, relTs, relNum, line_idx } = msg;
+                absTs, absNum, relTs, relNum, line_idx, sequence, session_id } = msg;
         if (!source_id) return;
 
-        // Unknown source_id — server has no --tab for it; ignore with a warning.
-        if (!PANES.includes(source_id)) {
-            console.warn("embed-log: dropping message for unknown source_id:", source_id);
+        const destinations = [];
+        if (PANES.includes(source_id)) destinations.push({ paneId: source_id, virtual: false });
+        virtualMerges.forEach(merge => {
+            if (PANES.includes(merge?.name) && Array.isArray(merge.of) && merge.of.includes(source_id)) {
+                destinations.push({ paneId: merge.name, virtual: true });
+            }
+        });
+        if (destinations.length === 0) {
+            console.warn("embed-log: dropping message for source not used by any pane:", source_id);
             return;
         }
-        enqueueLogMessage({
-            paneId: source_id,
+        const sourceLabel = PANE_LABELS[source_id] || source_id;
+        destinations.forEach(({ paneId, virtual }) => enqueueLogMessage({
+            paneId,
             ts: timestamp || "",
-            rawText: data || "",
+            rawText: virtual ? `${sourceLabel}: ${data || ""}` : (data || ""),
             isTx: type === "tx",
             meta: {
+                sourceId: source_id,
                 timestampIso: timestamp_iso,
                 numTs: timestamp_num,
                 absTs: absTs,
@@ -324,8 +281,10 @@ function wsConnect() {
                 relTs: relTs,
                 relNum: relNum,
                 lineIdx: line_idx,
+                ...(Number.isFinite(sequence) ? { sequence } : {}),
+                ...(session_id ? { sessionId: session_id } : {}),
             },
-        });
+        }));
     });
 
     ws.addEventListener("close", () => {

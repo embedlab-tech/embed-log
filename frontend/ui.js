@@ -1,5 +1,5 @@
 import { state, TABS, PANES, paneLabel } from './state.js';
-import { clearPane, rerenderPane, reanalyzePanePlugins, setTimestampMode, canDisplayTimestampMode, hidePluginOverlays } from './lines.js';
+import { rerenderPane, reanalyzePanePlugins, setTimestampMode, canDisplayTimestampMode, hidePluginOverlays } from './lines.js';
 import { rebuildLayout } from './tabcreate.js';
 import { getPanePluginSettings, setPanePluginSetting } from './pluginRuntime.js';
 
@@ -25,27 +25,29 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Toolbar — timestamp mode toggle (switches between relative/absolute)
+// Toolbar — timestamp mode toggle (cycles absolute/relative/hidden)
 // ---------------------------------------------------------------------------
 (function () {
     const btn = document.getElementById("btn-timestamp-mode");
     if (!btn) return;
 
     function update() {
-        const current = state.timestampMode === "relative" ? "relative" : "absolute";
-        const other = current === "relative" ? "absolute" : "relative";
+        const current = state.timestampMode;
+        const next = current === "absolute" ? "relative" : current === "relative" ? "hidden" : "absolute";
         const hasLines = PANES.some(id => (state.rawLines[id] || []).length > 0);
-        const canSwitch = canDisplayTimestampMode(other) || !hasLines;
-        btn.textContent = current === "relative" ? "Relative" : "Absolute";
+        const canSwitch = canDisplayTimestampMode(next) || !hasLines;
+        btn.textContent = current === "hidden" ? "No time" : current === "relative" ? "Relative" : "Absolute";
         btn.title = canSwitch
-            ? `Switch timestamps to ${other}`
-            : `${other} timestamps are unavailable for the current data`;
+            ? `Switch timestamps to ${next === "hidden" ? "No time" : next}`
+            : `${next} timestamps are unavailable for the current data`;
         btn.disabled = !canSwitch;
         btn.classList.toggle("active", current === "relative");
     }
 
     btn.addEventListener("click", () => {
-        setTimestampMode(state.timestampMode === "relative" ? "absolute" : "relative");
+        const next = state.timestampMode === "absolute" ? "relative"
+            : state.timestampMode === "relative" ? "hidden" : "absolute";
+        setTimestampMode(next);
         update();
     });
 
@@ -100,313 +102,6 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
 
     panel.appendChild(sep);
     panel.appendChild(btn);
-})();
-
-// ---------------------------------------------------------------------------
-// Settings panel — sessions list popup + current session links
-// Save HTML action is in the main toolbar (reused former Sync button).
-// ---------------------------------------------------------------------------
-(function () {
-    if (!window.__embedLogProfile?.capabilities?.sessionApi) return;
-    
-    const panel = document.getElementById("settings-panel");
-    if (!panel) return;
-
-    // Create panel buttons for server-side actions (formerly in toolbar)
-    const btnSave = document.createElement("button");
-    btnSave.id = "btn-save-to-server";
-    btnSave.title = "Generate/refresh session HTML on the backend";
-    btnSave.textContent = "Save HTML";
-
-    const sep1 = document.createElement("span");
-    sep1.className = "set-sep";
-    sep1.textContent = "|";
-
-    const btnCleanSession = document.createElement("button");
-    btnCleanSession.id = "btn-clean-session";
-    btnCleanSession.title = "Save current session and start a new one";
-    btnCleanSession.textContent = "New session";
-
-    const sep2 = document.createElement("span");
-    sep2.className = "set-sep";
-    sep2.textContent = "|";
-
-    const btnCurrent = document.createElement("button");
-    btnCurrent.id = "btn-current-session";
-    btnCurrent.title = "Open server-generated session HTML";
-    btnCurrent.textContent = "Open HTML";
-
-    const btn = document.createElement("button");
-    btn.id = "btn-sessions";
-    btn.title = "Browse saved sessions";
-    btn.textContent = "Sessions";
-
-    panel.appendChild(btnSave);
-    panel.appendChild(sep1);
-    panel.appendChild(btnCleanSession);
-    panel.appendChild(sep2);
-    panel.appendChild(btnCurrent);
-    panel.appendChild(btn);
-
-    const menu = document.createElement("div");
-    menu.id = "sessions-menu";
-    menu.innerHTML = `<div class="sessions-head">Saved sessions</div><div class="sessions-body">Loading…</div>`;
-    document.body.appendChild(menu);
-
-    let currentSession = null;
-
-    function tauriInvoke() {
-        return window.__TAURI__?.core?.invoke || null;
-    }
-
-    async function openSessionUrl(url) {
-        if (!url) return;
-        const invoke = tauriInvoke();
-        if (invoke) {
-            try {
-                await invoke("open_external_url", { url });
-                return;
-            } catch (_) {
-                // Fall back to browser behavior below.
-            }
-        }
-        window.open(url, "_blank", "noopener");
-    }
-
-    function updateCurrentButtons() {
-        const status = currentSession?.html_status || (currentSession?.html_ready ? "ready" : "pending");
-
-        if (btnSave) {
-            if (status === "updating") {
-                btnSave.disabled = true;
-                btnSave.textContent = "Saving…";
-            } else {
-                btnSave.disabled = false;
-                btnSave.textContent = "Save HTML";
-            }
-        }
-
-        if (btnCleanSession) {
-            btnCleanSession.disabled = status === "updating";
-            btnCleanSession.textContent = status === "updating" ? "Rotating…" : "New session";
-        }
-
-        if (currentSession?.html_ready && currentSession?.html) {
-            btnCurrent.disabled = false;
-            btnCurrent.textContent = "Open HTML";
-            btnCurrent.title = currentSession?.html_updated_at
-                ? `Open server session HTML (updated ${currentSession.html_updated_at})`
-                : "Open server session HTML";
-        } else {
-            btnCurrent.disabled = true;
-            btnCurrent.textContent = status === "error" ? "HTML error" : "No HTML yet";
-            btnCurrent.title = status === "error"
-                ? (currentSession?.html_error || "Last HTML export failed")
-                : "Generate HTML first";
-        }
-    }
-
-    async function refreshCurrentSession() {
-        try {
-            const res = await fetch("/api/session/current", { cache: "no-store" });
-            if (!res.ok) throw new Error(String(res.status));
-            currentSession = await res.json();
-            updateCurrentButtons();
-        } catch {
-            currentSession = null;
-            if (btnSave) btnSave.disabled = true;
-            btnCurrent.disabled = true;
-        }
-    }
-
-    async function saveCurrentSessionHtml() {
-        if (btnSave) {
-            btnSave.disabled = true;
-            btnSave.textContent = "Saving…";
-        }
-        try {
-            const res = await fetch("/api/session/export", {
-                method: "POST",
-                cache: "no-store",
-            });
-            if (!res.ok) throw new Error(String(res.status));
-            const data = await res.json();
-            if (data?.session) {
-                currentSession = data.session;
-            }
-        } catch {
-            const prev = btnSave ? btnSave.textContent : "Save HTML";
-            if (btnSave) btnSave.textContent = "Save failed";
-            setTimeout(() => {
-                if (btnSave) btnSave.textContent = prev;
-                updateCurrentButtons();
-            }, 1200);
-            return;
-        }
-        updateCurrentButtons();
-        if (menu.classList.contains("open")) loadSessions();
-    }
-
-    function openCurrentSessionHtml() {
-        if (!currentSession?.html_ready || !currentSession?.html) return;
-        openSessionUrl(currentSession.html);
-    }
-
-    async function createCleanSession() {
-        if (!window.confirm("Save current session and start a new one?")) return;
-        if (btnCleanSession) {
-            btnCleanSession.disabled = true;
-            btnCleanSession.textContent = "Rotating…";
-        }
-        try {
-            const res = await fetch("/api/session/rotate", {
-                method: "POST",
-                cache: "no-store",
-            });
-            if (!res.ok) throw new Error(String(res.status));
-            const data = await res.json();
-            if (data?.session) currentSession = data.session;
-            PANES.forEach(paneId => clearPane(paneId));
-            state.syncTs = null;
-            state.syncTabSwitch = false;
-            window.__embedLogSetSession?.(data?.session || null);
-            window.__embedLogSchedulePersist?.();
-            updateCurrentButtons();
-            if (menu.classList.contains("open")) loadSessions();
-        } catch {
-            if (btnCleanSession) {
-                btnCleanSession.textContent = "Rotate failed";
-                setTimeout(updateCurrentButtons, 1200);
-            }
-        }
-    }
-
-    btnSave?.addEventListener("click", saveCurrentSessionHtml);
-    btnCleanSession?.addEventListener("click", createCleanSession);
-    btnCurrent.addEventListener("click", openCurrentSessionHtml);
-    document.getElementById("btn-new-session")?.addEventListener("click", createCleanSession);
-
-    async function loadSessions() {
-        const body = menu.querySelector(".sessions-body");
-        body.textContent = "Loading…";
-        try {
-            const res = await fetch("/api/sessions", { cache: "no-store" });
-            if (!res.ok) throw new Error(String(res.status));
-            const data = await res.json();
-            const sessions = Array.isArray(data.sessions) ? data.sessions : [];
-            const current = data.current || null;
-
-            if (!sessions.length) {
-                body.textContent = "No sessions found.";
-                return;
-            }
-
-            body.innerHTML = "";
-            sessions.forEach(s => {
-                const row = document.createElement("div");
-                row.className = "session-row";
-
-                const meta = document.createElement("div");
-                meta.className = "session-meta";
-                meta.textContent = s.started_at || s.id;
-
-                const tags = document.createElement("div");
-                tags.className = "session-tags";
-                if (s.id === current) {
-                    const tag = document.createElement("span");
-                    tag.className = "session-tag current";
-                    tag.textContent = "current";
-                    tags.appendChild(tag);
-                }
-                if (s.html_status && s.html_status !== "ready") {
-                    const tag = document.createElement("span");
-                    tag.className = "session-tag pending";
-                    tag.textContent = `html ${s.html_status}`;
-                    tags.appendChild(tag);
-                }
-
-                const actions = document.createElement("div");
-                actions.className = "session-actions";
-
-                const htmlLink = document.createElement("a");
-                htmlLink.target = "_blank";
-                htmlLink.rel = "noopener";
-                htmlLink.textContent = "open html";
-                if (s.html_ready && s.html) {
-                    htmlLink.href = s.html;
-                    htmlLink.addEventListener("click", ev => {
-                        ev.preventDefault();
-                        openSessionUrl(s.html);
-                    });
-                } else {
-                    htmlLink.href = "#";
-                    htmlLink.classList.add("disabled");
-                    htmlLink.addEventListener("click", ev => ev.preventDefault());
-                }
-
-                const manifestLink = document.createElement("a");
-                manifestLink.target = "_blank";
-                manifestLink.rel = "noopener";
-                manifestLink.textContent = "manifest";
-                manifestLink.href = s.manifest || "#";
-                manifestLink.addEventListener("click", ev => {
-                    ev.preventDefault();
-                    openSessionUrl(manifestLink.href);
-                });
-
-                actions.appendChild(htmlLink);
-                actions.appendChild(manifestLink);
-
-                row.appendChild(meta);
-                row.appendChild(tags);
-                row.appendChild(actions);
-                body.appendChild(row);
-            });
-        } catch {
-            body.textContent = "Sessions API unavailable.";
-        }
-    }
-
-    function openMenu() {
-        loadSessions();
-        const rect = btn.getBoundingClientRect();
-        menu.style.left = `${Math.max(8, rect.left)}px`;
-        menu.style.top = `${rect.bottom + 6}px`;
-        menu.classList.add("open");
-    }
-
-    function closeMenu() {
-        menu.classList.remove("open");
-    }
-
-    btn.addEventListener("click", ev => {
-        ev.stopPropagation();
-        if (menu.classList.contains("open")) closeMenu();
-        else openMenu();
-    });
-
-    document.addEventListener("click", ev => {
-        if (!menu.classList.contains("open")) return;
-        if (menu.contains(ev.target) || ev.target === btn) return;
-        closeMenu();
-    });
-
-    document.addEventListener("keydown", ev => {
-        if (ev.key === "Escape") closeMenu();
-    });
-
-    window.__embedLogOnSessionHtmlStatus = function (msg) {
-        if (!msg) return;
-        currentSession = {
-            ...(currentSession || {}),
-            ...msg,
-        };
-        updateCurrentButtons();
-        if (menu.classList.contains("open")) loadSessions();
-    };
-
-
-    refreshCurrentSession();
 })();
 
 // ---------------------------------------------------------------------------
@@ -629,14 +324,6 @@ export function _uiSetupPane(id) {
     if (input) {
         input.addEventListener("input", () => {
             const val = input.value.trim();
-            const panekind = window.__embedLogPaneKinds?.[id] || "";
-            if (panekind === "network_capture") {
-                // For network_capture, treat the filter as a BPF expression.
-                // Send it to the backend and clear client-side filter.
-                state.filters[id] = null;
-                window.wsSend?.({ cmd: "set_filter", id, filter: val });
-                return;
-            }
             if (!val) {
                 state.filters[id] = null;
                 input.classList.remove("invalid");

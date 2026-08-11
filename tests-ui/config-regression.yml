@@ -6,10 +6,6 @@ server:
   app_name: embed-log e2e
   timestamp_mode: relative
 
-frontend_plugins:
-  hex-coap:
-    builtin: hex-coap
-
 logs:
   dir: .tmp/logs
 
@@ -18,6 +14,8 @@ sources:
     label: DEVICE_A
     type: udp
     port: 6000
+    parser:
+      type: hex-coap
 
   - name: SENSOR_B
     label: HOST
@@ -38,13 +36,8 @@ sources:
     label: CoAP
     type: udp
     port: 6005
-
-  - name: SENSOR_CBOR
-    label: CBOR
-    type: udp
-    port: 6003
     parser:
-      type: cbor-datagram
+      type: hex-coap
 
   # UART sources (silent — no PTY fds in test harness)
   - name: UART_DUT
@@ -57,20 +50,10 @@ sources:
     type: udp
     port: 6101
 
-  # Network tab (mock capture)
-  - name: NET_CAPTURE
-    label: Net
-    type: network_capture
-    network_backend: mock
-    interface: mock0
-    mock_interval: 1.0
-    bpf_filter: ""
-
 tabs:
   - label: DevA
     panes:
-      - source: SENSOR_A
-        plugins: [hex-coap]
+      - SENSOR_A
       - SENSOR_B
 
   - label: DevB
@@ -79,16 +62,8 @@ tabs:
   - label: PYTEST
     panes: [SENSOR_D]
 
-  - label: cbor-tab
-    panes: [SENSOR_CBOR]
-
   - label: CoAP
-    panes:
-      - source: SENSOR_COAP
-        plugins: [hex-coap]
+    panes: [SENSOR_COAP]
 
   - label: UART
     panes: [UART_DUT, UART_DEBUG]
-
-  - label: Network
-    panes: [NET_CAPTURE]

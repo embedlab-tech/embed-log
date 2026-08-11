@@ -1,10 +1,10 @@
 import { state, TABS, PANES, paneLabel, unwrapPaneLabel } from './state.js';
 import { onLineClick, hidePluginOverlays, ensureLineVisible, getLine } from './lines.js';
 import { exportHtmlSnapshot } from './export.js';
-import { can } from './profile.js';
 import { switchTab } from './tabs.js';
 import { _escHtml } from './renderPane.js';
-import { denoiseMessage, elapsedTime, ShortcodeTable, estimateTokens } from './postprocess.js';
+import { estimateTokens } from './postprocess.js';
+import { isEditableTarget, isComposingEvent } from './keyboard.js';
 // Line selection + copy / export actions
 //
 // Two explicit scopes (toggled per-pane overlay):
@@ -63,28 +63,6 @@ export function _selectionSetupPane(id) {
     scopeRow.appendChild(scopeContext);
     scopeRow.appendChild(scopeSel);
 
-    // Copy format toggle — "Full" (default, unchanged today's behavior) vs
-    // the CLI-mirroring "Compact" compaction level (postprocess.js).
-    const formatRow = document.createElement("div");
-    formatRow.className = "format-row";
-
-    const formatFull = document.createElement("button");
-    formatFull.className = "format-btn active";
-    formatFull.id = "format-full-" + id;
-    formatFull.textContent = "Full";
-    formatFull.title = "Full timestamp and source name (today's default)";
-    formatFull.addEventListener("click", e => { e.stopPropagation(); _setCopyFormat(id, "full"); });
-
-    const formatCompact = document.createElement("button");
-    formatCompact.className = "format-btn";
-    formatCompact.id = "format-compact-" + id;
-    formatCompact.textContent = "Compact";
-    formatCompact.title = "Elapsed time + source shortcode + denoised message — most token-efficient for pasting to an agent";
-    formatCompact.addEventListener("click", e => { e.stopPropagation(); _setCopyFormat(id, "compact"); });
-
-    formatRow.appendChild(formatFull);
-    formatRow.appendChild(formatCompact);
-
     // Pane selector (lazily rebuilt when scope becomes context-selected)
     const paneSelector = document.createElement("div");
     paneSelector.className = "pane-selector";
@@ -130,29 +108,11 @@ export function _selectionSetupPane(id) {
     rawBtn.addEventListener("click", e => { e.stopPropagation(); _downloadRaw(id); });
     moreDropdown.appendChild(rawBtn);
 
-    const eventRuleBtn = document.createElement("button");
-    eventRuleBtn.className = "copy-btn";
-    eventRuleBtn.id = "create-event-rule-" + id;
-    eventRuleBtn.textContent = "✨ Remember this pattern";
-    eventRuleBtn.title = "Watch for similar messages and add future occurrences to Events";
-    eventRuleBtn.addEventListener("click", e => { e.stopPropagation(); _createEventRule(id); });
-    moreDropdown.appendChild(eventRuleBtn);
     actionRow.appendChild(copyBtn);
-    // Marker toggle (runtime only) — in the main action row
-    if (can('markers')) {
-        const markerBtn = document.createElement("button");
-        markerBtn.className = "copy-btn";
-        markerBtn.id = "marker-toggle-" + id;
-        markerBtn.textContent = "Add Note";
-        markerBtn.title = "Add a note to the selected/sync-highlighted line(s)";
-        markerBtn.addEventListener("click", e => { e.stopPropagation(); _toggleMarker(id); });
-        actionRow.appendChild(markerBtn);
-    }
     actionRow.appendChild(moreToggle);
     actionRow.appendChild(moreDropdown);
 
     wrap.appendChild(scopeRow);
-    wrap.appendChild(formatRow);
     wrap.appendChild(paneSelector);
     wrap.appendChild(actionRow);
     body.appendChild(wrap);
@@ -209,17 +169,6 @@ function _setScope(paneId, scope) {
     _syncSelectionActions(paneId);
 }
 
-function _setCopyFormat(paneId, format) {
-    state.copyFormat = format;
-    PANES.forEach(id => {
-        ['full', 'compact'].forEach(f => {
-            const btn = document.getElementById(`format-${f}-${id}`);
-            if (btn) btn.classList.toggle('active', format === f);
-        });
-    });
-    _syncSelectionActions(paneId);
-}
-
 function _toggleMore(paneId) {
     const dd = document.getElementById("more-dropdown-" + paneId);
     if (!dd) return;
@@ -247,7 +196,7 @@ function _syncSelectionActions(paneId) {
         ? selectedCount
         : _countRangeEntries(paneId);
     wrap.classList.toggle("visible", visible);
-    wrap.querySelectorAll(".copy-btn, .scope-btn, .format-btn, .more-toggle").forEach(el =>
+    wrap.querySelectorAll(".copy-btn, .scope-btn, .more-toggle").forEach(el =>
         el.classList.toggle("visible", visible)
     );
 
@@ -257,21 +206,16 @@ function _syncSelectionActions(paneId) {
         const tok = estimateTokens(_pendingCopyText(paneId));
         copyBtn.textContent = `Copy (${displayCount}, ~${tok} tok)`;
     }
-    // Scope-gate secondary actions: marker only in Exact, Export HTML only outside Exact
+    // Scope-gate secondary actions: Export HTML only outside Exact
     const htmlBtn = document.getElementById("export-html-" + paneId);
     if (htmlBtn) {
         htmlBtn.style.display = state.selectionScope === "exact" ? "none" : "";
-    }
-    const markerBtn = document.getElementById("marker-toggle-" + paneId);
-    if (markerBtn) {
-        markerBtn.style.display = state.selectionScope === "exact" ? "" : "none";
     }
 }
 function _flatMarkerList() {
     const all = [];
     Object.keys(state.markers).forEach(paneId => {
         (state.markers[paneId] || []).forEach(m => {
-            if ((m.kind || "user") === "event" && !state.includeEventMarkers) return;
             all.push({ paneId, ...m });
         });
     });
@@ -280,136 +224,13 @@ function _flatMarkerList() {
 }
 
 function _markerMatchesRawIndex(paneId, marker, rawIdx) {
-    const line = getLine(paneId, rawIdx);
-    const isEvent = (marker.kind || "user") === "event";
-    const lineKey = isEvent && Number.isFinite(line?.serverLineIdx) ? line.serverLineIdx : rawIdx;
     const end = marker.endIdx ?? marker.lineIdx;
-    return lineKey >= marker.lineIdx && lineKey <= end;
+    return rawIdx >= marker.lineIdx && rawIdx <= end;
 }
 
 function _markerRawIndex(marker) {
-    const paneId = marker.paneId;
-    if ((marker.kind || "user") !== "event") return marker.lineIdx;
-    const lines = state.rawLines[paneId] || [];
-    for (let i = 0; i < lines.length; i++) {
-        if (_markerMatchesRawIndex(paneId, marker, i)) return i;
-    }
     return marker.lineIdx;
 }
-
-function _markerLineIdx(paneId) {
-    const idx = state.highlightedIdx[paneId];
-    if (Number.isFinite(idx)) return idx;
-    const div = state.highlighted[paneId];
-    if (div) return parseInt(div.dataset.idx, 10);
-    const sel = state.selected[paneId];
-    if (sel?.size === 1) return [...sel][0];
-    return -1;
-}
-
-function _toggleMarker(paneId) {
-    // Get indices to mark: selected lines, or fall back to highlighted line
-    const sel = state.selected[paneId];
-    const indices = sel?.size > 0
-        ? Array.from(sel)
-        : (() => {
-            const idx = _markerLineIdx(paneId);
-            return idx >= 0 ? [idx] : [];
-          })();
-    if (!indices.length) return;
-
-    const markers = state.markers[paneId] = state.markers[paneId] || [];
-    const lines = state.rawLines[paneId] || [];
-
-    // If any indices are not yet marked, show the input to add/overwrite
-    _showMarkerInput(paneId, indices, lines);
-    // We don't handle "remove existing" here anymore — the save/commit
-    // in _showMarkerInput replaces any overlapping markers.
-}
-
-
-function _showMarkerInput(paneId, indices, lines) {
-    const body = document.querySelector(`#pane-${paneId} .pane-body`);
-    if (!body) return;
-
-    // Remove any existing marker input overlay
-    document.querySelectorAll(".marker-input-overlay").forEach(el => el.remove());
-
-    const overlay = document.createElement("div");
-    overlay.className = "marker-input-overlay";
-    overlay.innerHTML =
-        '<span class="marker-input-label">Marker:</span>' +
-        '<input class="marker-input" type="text" placeholder="Describe this marker…" autofocus>' +
-        '<button class="marker-input-save">Save</button>' +
-        '<button class="marker-input-cancel">✕</button>';
-
-    const input = overlay.querySelector(".marker-input");
-    const saveBtn = overlay.querySelector(".marker-input-save");
-    const cancelBtn = overlay.querySelector(".marker-input-cancel");
-
-    const candidates = indices.map(i => ({ lineIdx: i, numTs: lines[i]?.numTs ?? 0 }));
-    // Single marker for the entire range (first → last)
-    const rangeStart = Math.min(...indices);
-    const rangeEnd = Math.max(...indices);
-    let inputActive = true;
-
-    function commit() {
-        if (!inputActive) return;
-        inputActive = false;
-        const desc = (input.value || "").trim() || "(no description)";
-        const markers = state.markers[paneId] = state.markers[paneId] || [];
-        const keep = markers.filter(m => m.lineIdx < rangeStart || m.lineIdx > rangeEnd);
-        state.markers[paneId] = keep;
-        keep.push({
-            lineIdx: rangeStart,
-            endIdx: rangeEnd,
-            numTs: lines[rangeStart]?.numTs ?? 0,
-            description: desc,
-            createdAt: new Date().toISOString(),
-        });
-        overlay.remove();
-        applyMarkers();
-        _updateMarkerNav();
-        wsSend({ cmd: "save_markers", markers: _flatMarkerList() });
-    }
-
-    function cancel() {
-        if (!inputActive) return;
-        inputActive = false;
-        overlay.remove();
-    }
-
-    saveBtn.addEventListener("click", e => { e.stopPropagation(); commit(); });
-    cancelBtn.addEventListener("click", e => { e.stopPropagation(); cancel(); });
-    input.addEventListener("keydown", e => {
-        if (e.key === "Enter") commit();
-        if (e.key === "Escape") cancel();
-    });
-
-    // Show which lines are being marked
-    const label = overlay.querySelector(".marker-input-label");
-    const count = rangeEnd - rangeStart + 1;
-    if (count > 1) label.textContent = `Marker (${count} lines):`;
-
-    // Position overlay near the copy-actions
-    const actions = body.querySelector(".copy-actions");
-    if (actions) {
-        const rect = actions.getBoundingClientRect();
-        overlay.style.position = "fixed";
-        overlay.style.left = rect.left + "px";
-        overlay.style.top = (rect.bottom + 4) + "px";
-        // Clamp so overlay doesn't extend past right edge
-        requestAnimationFrame(() => {
-            const ow = overlay.offsetWidth;
-            if (rect.left + ow > window.innerWidth) {
-                overlay.style.left = Math.max(8, window.innerWidth - ow - 8) + "px";
-                }
-            });
-        }
-    body.appendChild(overlay);
-    setTimeout(() => input.focus(), 50);
-}
-
 
 export function applyMarkers() {
     const byPane = state.markers;
@@ -426,12 +247,8 @@ export function applyMarkers() {
             div.classList.toggle("has-marker", hasMarker);
             if (hasMarker) {
                 div.dataset.markerTooltip = m.description || "";
-                div.dataset.kind = m.kind || "user";
-                div.dataset.severity = m.severity || "";
             } else {
                 delete div.dataset.markerTooltip;
-                delete div.dataset.kind;
-                delete div.dataset.severity;
             }
         });
     });
@@ -463,24 +280,12 @@ function _hideMarkerTooltip({ force = false } = {}) {
     _tooltipEl.classList.remove("visible", "actionable");
 }
 
-function _showMarkerTooltip(line, { action = false } = {}) {
+function _showMarkerTooltip(line) {
     const desc = line.dataset.markerTooltip || "";
     if (!desc) return;
-    const marker = _markerForLine(line);
-    const isEvent = (marker?.kind || line.dataset.kind) === "event";
-    _markerTooltipPinned = action;
-    const jump = action && isEvent
-        ? '<div class="mt-actions"><button type="button" class="marker-jump-event-btn">Jump to event</button></div>'
-        : '';
-    _tooltipEl.innerHTML = '<span class="mt-label">' + (isEvent ? "Event" : "Marker") + '</span>' + _escHtml(desc) + jump;
-    _tooltipEl.classList.toggle("actionable", action && isEvent);
-    if (action && isEvent) {
-        _tooltipEl.querySelector('.marker-jump-event-btn')?.addEventListener('click', ev => {
-            ev.stopPropagation();
-            _hideMarkerTooltip({ force: true });
-            window.__embedLogJumpToEvent?.(marker);
-        });
-    }
+    _markerTooltipPinned = false;
+    _tooltipEl.innerHTML = '<span class="mt-label">Marker</span>' + _escHtml(desc);
+    _tooltipEl.classList.remove("actionable");
     const rect = line.getBoundingClientRect();
     // Position above the line so it doesn't cover log text below.
     _tooltipEl.style.left = Math.max(4, rect.left) + "px";
@@ -496,12 +301,7 @@ document.addEventListener("mouseover", e => {
 });
 
 document.addEventListener("click", e => {
-    const line = e.target.closest(".log-line.has-marker[data-kind='event']");
-    if (!line) {
-        if (!_tooltipEl.contains(e.target)) _hideMarkerTooltip({ force: true });
-        return;
-    }
-    _showMarkerTooltip(line, { action: true });
+    if (!_tooltipEl.contains(e.target)) _hideMarkerTooltip({ force: true });
 });
 
 
@@ -730,30 +530,6 @@ function _escapeRegExp(str) {
     return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// "HH:MM:SS.mmm" for a line, mirroring the CLI's `clock_time()` — derived
-// from `absTs` ("MM-DD HH:MM:SS.mmm", the same field format used everywhere
-// else in this codebase), not from `line.ts` (which can already be showing
-// relative time depending on the display's timestamp mode).
-function _clockTimeOf(line) {
-    const absTs = line?.absTs;
-    if (typeof absTs === "string" && absTs.includes(" ")) {
-        return absTs.split(" ").pop();
-    }
-    return line?.ts || "";
-}
-
-// One line in the "compact" copy format (state.copyFormat === "compact") —
-// mirrors format_compact_entry in crates/embed-log-cli/src/commands/sessions.rs.
-// `codes` is shared across an entire copy/download action so the same source
-// gets the same shortcode throughout one block.
-function _formatCompactedLine(line, paneId, idx, rawMessage, codes) {
-    const clock = _clockTimeOf(line);
-    const ts = elapsedTime(line, clock);
-    const code = codes.codeFor(paneId);
-    const message = denoiseMessage(rawMessage, clock);
-    return `${ts} ${code}#${idx} ${message}`;
-}
-
 // The text that _copy()/_copyContext() would actually produce right now —
 // used both for the real copy and for the live token estimate, so the
 // estimate can never drift from what's actually copied.
@@ -762,9 +538,9 @@ function _pendingCopyText(paneId) {
         const sel = state.selected[paneId];
         if (!sel?.size) return "";
         const indices = Array.from(sel).sort((a, b) => a - b);
-        return _formatSelectionBlock(paneId, indices, true) || "";
+        return _formatSelectionBlock(paneId, indices, true, state.timestampMode !== "hidden") || "";
     }
-    return _formatRangeRaw(_collectRangeEntries(paneId), true) || "";
+    return _formatRangeRaw(_collectRangeEntries(paneId), true, state.timestampMode !== "hidden") || "";
 }
 
 function _selectionMessageText(entry, useRendered = false) {
@@ -805,11 +581,7 @@ function _applyMarkerAnnotations(paneId, items) {
 }
 
 
-function _formatRangeRaw(entries, useRendered = false) {
-    // One shared table across the whole (possibly multi-pane) block, so a
-    // source keeps the same shortcode throughout — matches the CLI's
-    // per-invocation ShortcodeTable.
-    const codes = state.copyFormat !== "full" ? new ShortcodeTable() : null;
+function _formatRangeRaw(entries, useRendered = false, includeTimestamp = true) {
     const parts = [];
     let currentPane = null;
     let paneItems = [];
@@ -823,9 +595,9 @@ function _formatRangeRaw(entries, useRendered = false) {
         if (e.paneId !== currentPane) flushPane();
         currentPane = e.paneId;
         const rawMessage = _selectionMessageText(e, useRendered);
-        const text = codes
-            ? _formatCompactedLine(e.line, e.paneId, e.idx, rawMessage, codes)
-            : `[${e.line.ts}] [${e.paneId}] ${rawMessage}`;
+        const text = includeTimestamp
+            ? `[${e.line.ts}] [${e.paneId}] ${rawMessage}`
+            : `[${e.paneId}] ${rawMessage}`;
         paneItems.push({ idx: e.idx, text });
     });
     flushPane();
@@ -851,16 +623,15 @@ function _buildRangeLogData(entries) {
     return logData;
 }
 
-function _formatSelectionBlock(paneId, indices, useRendered = false) {
-    const codes = state.copyFormat !== "full" ? new ShortcodeTable() : null;
+function _formatSelectionBlock(paneId, indices, useRendered = false, includeTimestamp = true) {
     const items = indices
         .map(idx => {
             const line = _selectionLine(paneId, idx);
             if (!line) return null;
             const raw = useRendered ? _lineRenderedPlain(line) : _linePlain(line);
-            const text = codes
-                ? _formatCompactedLine(line, paneId, idx, raw, codes)
-                : `${line.ts}  [${paneId}] ${raw}`;
+            const text = includeTimestamp
+                ? `${line.ts}  [${paneId}] ${raw}`
+                : `[${paneId}] ${raw}`;
             return { idx, text };
         })
         .filter(Boolean);
@@ -906,31 +677,6 @@ function _flashButton(id, text, restoreMs = 900) {
 // ---------------------------------------------------------------------------
 // Copy — scope-aware
 // ---------------------------------------------------------------------------
-function _createEventRule(paneId) {
-    const selected = [...(state.selected[paneId] || [])];
-    if (selected.length !== 1) {
-        window.alert("Select exactly one log line to create an event rule.");
-        return;
-    }
-    const line = getLine(paneId, selected[0]);
-    const message = line?.rawText?.trim();
-    if (!message) return;
-    // Generalize changing numbers so a line such as "reset after 5s" also
-    // catches future "reset after 10s" messages. Advanced regex editing stays
-    // in the Rules panel rather than interrupting this common workflow.
-    const placeholder = "__EMBED_LOG_NUMBER__";
-    const escaped = message.replace(/\d+/g, placeholder).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const pattern = escaped.replace(placeholder, "\\d+");
-    window.wsSend?.({
-        cmd: "event_rule.create",
-        source_id: paneId,
-        name: `remembered-${Date.now()}`,
-        pattern,
-        severity: "info",
-    });
-    _flashButton("create-event-rule-" + paneId, "Watching");
-}
-
 function _copy(paneId) {
     if (state.selectionScope !== "exact") return _copyContext(paneId);
     return _copyExact(paneId);
@@ -940,7 +686,7 @@ function _copyExact(paneId) {
     const sel = state.selected[paneId];
     if (!sel.size) return;
     const indices = Array.from(sel).sort((a, b) => a - b);
-    const text = _formatSelectionBlock(paneId, indices, true);
+    const text = _formatSelectionBlock(paneId, indices, true, state.timestampMode !== "hidden");
     if (!text) return;
     _copyText(text).then(() => {
         const btn = document.getElementById("copy-" + paneId);
@@ -953,7 +699,7 @@ function _copyExact(paneId) {
 
 function _copyContext(paneId) {
     const entries = _collectRangeEntries(paneId);
-    const text = _formatRangeRaw(entries, true);
+    const text = _formatRangeRaw(entries, true, state.timestampMode !== "hidden");
     if (!text) return;
     _copyText(text).then(() => {
         const btn = document.getElementById("copy-" + paneId);
@@ -1093,7 +839,11 @@ document.addEventListener("pointermove", e => {
     _applySelection(_drag.paneId);
 });
 
-document.addEventListener("pointerup", () => {
+document.addEventListener("pointerup", e => {
+    if (isEditableTarget(e.target)) {
+        _drag = null;
+        return;
+    }
     if (_altSelection) {
         _altSelection = false;
         const text = window.getSelection()?.toString();
@@ -1157,6 +907,8 @@ document.addEventListener("click", e => {
 // Keyboard
 // ---------------------------------------------------------------------------
 document.addEventListener("keydown", e => {
+    if (isComposingEvent(e)) return;
+    if (isEditableTarget(e.target)) return;
     if ((e.ctrlKey || e.metaKey) && e.key === "c") {
         const pane = PANES.find(id => state.selected[id].size > 0);
         if (pane) { _copyExact(pane); e.preventDefault(); return; }
@@ -1168,7 +920,7 @@ document.addEventListener("keydown", e => {
                 ? state.highlightedIdx[hlPane]
                 : parseInt(div?.dataset.idx, 10);
             if (Number.isFinite(idx)) {
-                const text = _formatSelectionBlock(hlPane, [idx], !!div);
+                const text = _formatSelectionBlock(hlPane, [idx], !!div, state.timestampMode !== "hidden");
                 if (text) { _copyText(text); e.preventDefault(); return; }
             }
         }
@@ -1181,20 +933,17 @@ document.addEventListener("keydown", e => {
 });
 // ── Alt key: hold to enable native text selection on log lines ──
 document.addEventListener("keydown", e => {
+    if (isComposingEvent(e) || isEditableTarget(e.target)) return;
     if (e.key === "Alt" && !e.ctrlKey && !e.metaKey) {
         document.body.classList.add("alt-held");
     }
 });
 document.addEventListener("keyup", e => {
+    if (isEditableTarget(e.target)) return;
     if (e.key === "Alt") document.body.classList.remove("alt-held");
 });
 window.addEventListener("blur", () => document.body.classList.remove("alt-held"));
 // Update marker nav when markers arrive from server
 window.__embedLogOnMarkers = () => {
-    _updateMarkerNav();
-};
-// Events tab calls this to toggle event-marker inclusion in navigation.
-window.__embedLogToggleEventMarkers = function () {
-    state.includeEventMarkers = !state.includeEventMarkers;
     _updateMarkerNav();
 };

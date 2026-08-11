@@ -5,14 +5,12 @@
 - Rust toolchain compatible with workspace `rust-version = 1.77`
 - `just` for convenience recipes
 - Node/npm only for UI tests under `tests-ui/`
-- Platform dependencies for Tauri when working on the desktop app
 
 ## Common commands
 
 ```bash
 just --list
 just build
-just build-desktop
 just test
 just verify
 ```
@@ -20,20 +18,10 @@ just verify
 Run the app:
 
 ```bash
-just run                 # browser UI with demo.yml
+just run                 # browser UI with embed-log.yml
 just run web app.yml
-just run headless app.yml
+just run no-browser app.yml
 just run tui app.yml
-just run desktop app.yml
-```
-
-Run demos:
-
-```bash
-just demo
-just demo headless
-just demo tui
-just demo desktop
 ```
 
 Tests:
@@ -47,7 +35,6 @@ just test regression     # broader Playwright regression suite
 just test all            # Rust + ui-unit + ui
 cargo test -p embed-log-tui
 python scripts/test_tui_integration.py --binary target/release/embed-log
-python scripts/test_update_integration.py --binary target/release/embed-log
 ```
 
 Install the CLI from the release build:
@@ -64,7 +51,6 @@ Cargo.toml
 │   └── src
 │       ├── clock.rs
 │       ├── config/
-│       ├── demo.rs
 │       ├── frontend_assets.rs
 │       ├── models.rs
 │       ├── naming.rs
@@ -75,9 +61,8 @@ Cargo.toml
 │       └── sources/
 ├── crates/embed-log-cli
 │   └── src/main.rs
-├── crates/embed-log-tauri
-│   ├── src/
-│   └── tauri.conf.json
+├── crates/embed-log-tui
+│   └── src/
 ├── frontend/
 ├── tests-ui/
 ├── scripts/
@@ -145,22 +130,6 @@ just test ui
 just test regression
 ```
 
-## Tauri development
-
-Build the desktop app:
-
-```bash
-just build-desktop
-```
-
-Run desktop demo:
-
-```bash
-just demo desktop
-```
-
-On first run without a config, the Tauri app shows onboarding and writes an `embed-log.yml` to the app config directory. With a valid config, Tauri starts `LogServer` and navigates the webview to the local HTTP server.
-
 ## Generated files and ignored outputs
 
 Ignored outputs include:
@@ -170,4 +139,4 @@ Ignored outputs include:
 - `logs/`
 - `.tmp/`
 - Playwright/test reports
-- generated static exports such as `session.html`, `merged.html`, `parsed/`
+- generated static exports such as `session.html`

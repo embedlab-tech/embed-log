@@ -2,40 +2,45 @@ use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::Duration;
 
 use axum::extract::ws::{Message, WebSocket};
-use axum::extract::{Path as AxumPath, State, WebSocketUpgrade};
+use axum::extract::{Path as AxumPath, Query, State, WebSocketUpgrade};
 use axum::http::{header, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::Router;
 use futures::StreamExt;
+use serde::Deserialize;
 use tokio::sync::{broadcast, mpsc};
 use tower_http::services::ServeDir;
 use tracing::{info, warn};
 
 use crate::frontend_assets::FrontendAssets;
-use crate::net::control_ws::{
-    control_ws_handler, handle_event_rule_create, handle_event_rule_delete,
-    handle_event_rule_export, handle_event_rule_list, handle_event_rule_promote, SourceInfo,
-};
+use crate::net::control_ws::{control_ws_handler, SourceInfo};
 use crate::session::SessionManager;
 use crate::sources::TxCommand;
 
 /// Callback type for session export requests.
 pub type ExportCallback = Arc<dyn Fn() -> Result<String, String> + Send + Sync>;
-pub type RotateCallback =
-    Arc<dyn Fn() -> Result<(serde_json::Value, serde_json::Value), String> + Send + Sync>;
+pub type RotateCallback = Arc<
+    dyn Fn(Option<String>) -> Result<(serde_json::Value, serde_json::Value), String> + Send + Sync,
+>;
 
 #[derive(Default)]
 pub struct SourceRuntimeStats {
     dequeued: AtomicU64,
     bytes: AtomicU64,
+    first_seen_ms: AtomicU64,
+    last_seen_ms: AtomicU64,
 }
 
 impl SourceRuntimeStats {
     pub fn record_dequeued(&self, bytes: usize) {
+        let now = unix_millis();
+        self.first_seen_ms
+            .compare_exchange(0, now, Ordering::Relaxed, Ordering::Relaxed)
+            .ok();
+        self.last_seen_ms.store(now, Ordering::Relaxed);
         self.dequeued.fetch_add(1, Ordering::Relaxed);
         self.bytes.fetch_add(bytes as u64, Ordering::Relaxed);
     }
@@ -44,12 +49,27 @@ impl SourceRuntimeStats {
     // would need the producer side wired in too; add those back if a consumer
     // needs real backpressure telemetry.
     fn snapshot(&self, maxsize: usize) -> serde_json::Value {
+        let dequeued = self.dequeued.load(Ordering::Relaxed);
+        let first = self.first_seen_ms.load(Ordering::Relaxed);
+        let last = self.last_seen_ms.load(Ordering::Relaxed);
+        let elapsed_s = (last.saturating_sub(first) as f64 / 1000.0).max(0.001);
         serde_json::json!({
             "maxsize": maxsize,
-            "dequeued": self.dequeued.load(Ordering::Relaxed),
+            "dequeued": dequeued,
             "bytes": self.bytes.load(Ordering::Relaxed),
+            "record_rate": if dequeued == 0 { 0.0 } else { dequeued as f64 / elapsed_s },
+            "queue_pressure": null,
+            "stream_gaps": 0,
+            "firmware_drop_markers": 0,
         })
     }
+}
+
+fn unix_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or_default()
 }
 
 pub struct RuntimeStats {
@@ -106,8 +126,6 @@ pub struct ServerState {
     pub broadcast_tx: broadcast::Sender<String>,
     /// Replay buffer for late-connecting clients (log entries).
     pub replay: Arc<Mutex<VecDeque<String>>>,
-    /// Replay buffer for events, sent to late-connecting clients.
-    pub events_replay: Arc<Mutex<VecDeque<String>>>,
     /// Callback to trigger HTML export.
     pub on_export: Option<ExportCallback>,
     /// Callback to rotate to a new session.
@@ -118,10 +136,6 @@ pub struct ServerState {
     pub logs_root: PathBuf,
     /// Live WebSocket client count.
     pub ws_client_count: Arc<AtomicUsize>,
-    /// Generation used to cancel pending no-client exports when a new client connects.
-    pub no_client_export_generation: Arc<AtomicU64>,
-    /// Delay before exporting after the final WebSocket client disconnects.
-    pub no_client_export_delay: Duration,
     /// Runtime queue/source counters.
     pub stats: Arc<RuntimeStats>,
     /// Per-source input channels for synthetic TX/inject entries (LogEntry pipeline).
@@ -132,12 +146,12 @@ pub struct ServerState {
     pub source_metadata: Arc<HashMap<String, SourceInfo>>,
     /// Per-source line counters for stable `line_idx` in log entries.
     pub line_counters: Arc<HashMap<String, Arc<std::sync::atomic::AtomicU64>>>,
-    /// Rules loaded from the companion event YAML file at server startup.
-    pub static_event_rules: Arc<HashMap<String, Vec<crate::config::EventRule>>>,
-    /// Preferred companion YAML path for persisting promoted runtime rules.
-    pub event_rules_path: PathBuf,
-    /// Event rules added for the lifetime of this server/session.
-    pub runtime_event_rules: Arc<RwLock<HashMap<String, Vec<crate::config::EventRule>>>>,
+    /// Presentation-only virtual source name to physical member source ids.
+    pub virtual_sources: Arc<HashMap<String, Vec<String>>>,
+    /// Temporary process-local watches and their retained match state.
+    pub watches: Arc<RwLock<HashMap<String, crate::net::watch::TemporaryWatch>>>,
+    /// Monotonic watch identifier allocator for this process.
+    pub watch_counter: Arc<AtomicU64>,
     /// Whether the /api/v1/control WebSocket endpoint is enabled.
     pub control_api: bool,
 }
@@ -179,6 +193,10 @@ pub async fn start_server(
         .route(
             "/api/session/export",
             axum::routing::post(api_export_handler),
+        )
+        .route(
+            "/api/session/marker",
+            axum::routing::post(api_marker_handler),
         )
         .route(
             "/api/session/rotate",
@@ -267,15 +285,8 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<ServerState>) -> i
 
 async fn handle_ws_client(mut socket: WebSocket, state: ServerState) {
     state.ws_client_count.fetch_add(1, Ordering::Relaxed);
-    state
-        .no_client_export_generation
-        .fetch_add(1, Ordering::Relaxed);
     let _client_count_guard = WsClientCountGuard {
         count: state.ws_client_count.clone(),
-        generation: state.no_client_export_generation.clone(),
-        delay: state.no_client_export_delay,
-        on_export: state.on_export.clone(),
-        broadcast_tx: state.broadcast_tx.clone(),
     };
 
     // 1. Send the config message immediately.
@@ -288,14 +299,6 @@ async fn handle_ws_client(mut socket: WebSocket, state: ServerState) {
     // 2. Send replay buffer so the client catches up.
     let replay_msgs = drain_replay(&state.replay);
     for msg in replay_msgs {
-        if socket.send(Message::Text(msg.into())).await.is_err() {
-            return;
-        }
-    }
-
-    // 2b. Send events replay buffer so late-connecting clients catch up.
-    let events_replay_msgs = drain_replay(&state.events_replay);
-    for msg in events_replay_msgs {
         if socket.send(Message::Text(msg.into())).await.is_err() {
             return;
         }
@@ -348,53 +351,11 @@ async fn handle_ws_client(mut socket: WebSocket, state: ServerState) {
 
 struct WsClientCountGuard {
     count: Arc<AtomicUsize>,
-    generation: Arc<AtomicU64>,
-    delay: Duration,
-    on_export: Option<ExportCallback>,
-    broadcast_tx: broadcast::Sender<String>,
 }
 
 impl Drop for WsClientCountGuard {
     fn drop(&mut self) {
-        let previous = self.count.fetch_sub(1, Ordering::Relaxed);
-        if previous != 1 {
-            return;
-        }
-
-        let generation = self.generation.fetch_add(1, Ordering::Relaxed) + 1;
-        let generation_counter = self.generation.clone();
-        let count = self.count.clone();
-        let delay = self.delay;
-        let on_export = self.on_export.clone();
-        let broadcast_tx = self.broadcast_tx.clone();
-
-        tokio::spawn(async move {
-            tokio::time::sleep(delay).await;
-            if count.load(Ordering::Relaxed) != 0
-                || generation_counter.load(Ordering::Relaxed) != generation
-            {
-                return;
-            }
-
-            let Some(export_fn) = on_export else {
-                return;
-            };
-            let payload = match export_fn() {
-                Ok(path) => serde_json::json!({
-                    "type": "session_html_status",
-                    "html_status": "ready",
-                    "html_path": path,
-                    "reason": "no_clients",
-                }),
-                Err(error) => serde_json::json!({
-                    "type": "session_html_status",
-                    "html_status": "error",
-                    "html_error": error,
-                    "reason": "no_clients",
-                }),
-            };
-            let _ = broadcast_tx.send(payload.to_string());
-        });
+        self.count.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
@@ -413,40 +374,29 @@ async fn handle_client_command(text: &str, state: &ServerState) -> Option<String
 
     match cmd_type {
         "export_session_html" => {
-            let status = do_export(state);
+            let status = do_export_async(state).await;
             let status_str = status.to_string();
             let _ = state.broadcast_tx.send(status_str.clone());
             Some(status_str)
         }
         "save_markers" => Some(handle_save_markers(&cmd, state).to_string()),
         "clear_logs" => Some(handle_clear_logs(&cmd, state).to_string()),
-        "set_filter" => Some(handle_set_filter(&cmd).to_string()),
         "send_raw" => Some(handle_send_raw(&cmd, state).await.to_string()),
-        "event_rule.create" => Some(handle_event_rule_create(
-            &cmd,
-            state,
-            cmd.get("id").and_then(|value| value.as_str()),
-        )),
-        "event_rule.list" => Some(handle_event_rule_list(
-            state,
-            cmd.get("id").and_then(|value| value.as_str()),
-        )),
-        "event_rule.export" => Some(handle_event_rule_export(
-            state,
-            cmd.get("id").and_then(|value| value.as_str()),
-        )),
-        "event_rule.promote" => Some(handle_event_rule_promote(
-            &cmd,
-            state,
-            cmd.get("id").and_then(|value| value.as_str()),
-        )),
-        "event_rule.delete" => Some(handle_event_rule_delete(
-            &cmd,
-            state,
-            cmd.get("id").and_then(|value| value.as_str()),
-        )),
         _ => None,
     }
+}
+
+async fn do_export_async(state: &ServerState) -> serde_json::Value {
+    let state = state.clone();
+    tokio::task::spawn_blocking(move || do_export(&state))
+        .await
+        .unwrap_or_else(|error| {
+            serde_json::json!({
+                "type": "session_html_status",
+                "html_status": "error",
+                "html_error": format!("export task failed: {error}"),
+            })
+        })
 }
 
 fn do_export(state: &ServerState) -> serde_json::Value {
@@ -454,11 +404,17 @@ fn do_export(state: &ServerState) -> serde_json::Value {
         match export_fn() {
             Ok(path) => {
                 info!("session HTML exported: {path}");
+                let session = current_session_value(state);
+                let download_url = session
+                    .get("id")
+                    .and_then(|value| value.as_str())
+                    .map(|id| format!("/sessions/{id}/session.html"));
                 serde_json::json!({
                     "type": "session_html_status",
                     "html_status": "ready",
                     "html_path": path,
-                    "session": current_session_value(state),
+                    "download_url": download_url,
+                    "session": session,
                 })
             }
             Err(err) => {
@@ -568,6 +524,7 @@ async fn handle_send_raw(cmd: &serde_json::Value, state: &ServerState) -> serde_
         let cmd = TxCommand {
             data: data.as_bytes().to_vec(),
             origin: origin.to_string(),
+            line_ending: true,
             ack: None,
         };
         match tx_sender.send(cmd).await {
@@ -599,36 +556,6 @@ async fn handle_send_raw(cmd: &serde_json::Value, state: &ServerState) -> serde_
             "source_id": source,
             "error": "unknown source",
         })
-    }
-}
-
-fn handle_set_filter(cmd: &serde_json::Value) -> serde_json::Value {
-    let source = cmd
-        .get("source_id")
-        .or_else(|| cmd.get("source"))
-        .and_then(|v| v.as_str());
-    let filter = cmd.get("filter").and_then(|v| v.as_str()).unwrap_or("");
-    // Empty/clear filter means unfiltered.
-    if filter.is_empty() || filter == "null" || filter == "undefined" {
-        return serde_json::json!({
-            "type": "filter_result",
-            "ok": true,
-            "id": source,
-        });
-    }
-    // Validate the regex and return result.
-    match regex::Regex::new(filter) {
-        Ok(_) => serde_json::json!({
-            "type": "filter_result",
-            "ok": true,
-            "id": source,
-        }),
-        Err(e) => serde_json::json!({
-            "type": "filter_result",
-            "ok": false,
-            "id": source,
-            "error": e.to_string(),
-        }),
     }
 }
 
@@ -664,6 +591,8 @@ async fn api_status_handler(State(state): State<ServerState>) -> impl IntoRespon
                     "label": source.label,
                     "writable": source.writable,
                     "available": true,
+                    "virtual": state.virtual_sources.contains_key(name),
+                    "members": state.virtual_sources.get(name),
                     "stats": stats,
                 }),
             )
@@ -694,31 +623,85 @@ async fn api_current_session_handler(State(state): State<ServerState>) -> impl I
     }
 }
 
-/// POST /api/session/export — trigger HTML export (HTTP alternative to WS command).
-async fn api_export_handler(State(state): State<ServerState>) -> impl IntoResponse {
-    let status_payload = do_export(&state);
+#[derive(Debug, Default, Deserialize)]
+struct ExportQuery {
+    #[serde(default)]
+    download: bool,
+}
+
+/// POST /api/session/export — atomically publish canonical HTML. JSON callers
+/// receive metadata; `?download=true` receives those exact published bytes.
+async fn api_export_handler(
+    State(state): State<ServerState>,
+    Query(query): Query<ExportQuery>,
+) -> Response {
+    let status_payload = do_export_async(&state).await;
     let ok = status_payload.get("html_status").and_then(|s| s.as_str()) == Some("ready");
+    let _ = state.broadcast_tx.send(status_payload.to_string());
+
+    if query.download && ok {
+        let path = status_payload
+            .get("html_path")
+            .and_then(|value| value.as_str())
+            .map(PathBuf::from);
+        let session_id = status_payload
+            .pointer("/session/id")
+            .and_then(|value| value.as_str())
+            .unwrap_or("session");
+        match path.and_then(|path| std::fs::read(path).ok()) {
+            Some(bytes) => {
+                return Response::builder()
+                    .status(StatusCode::OK)
+                    .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+                    .header(
+                        header::CONTENT_DISPOSITION,
+                        format!("attachment; filename=\"embed-log-{session_id}.html\""),
+                    )
+                    .header("x-embed-log-session", session_id)
+                    .body(axum::body::Body::from(bytes))
+                    .unwrap();
+            }
+            None => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    axum::Json(serde_json::json!({
+                        "ok": false,
+                        "html_status": "error",
+                        "html_error": "published session HTML could not be read",
+                    })),
+                )
+                    .into_response();
+            }
+        }
+    }
+
     let body = serde_json::json!({
         "ok": ok,
         "session": current_session_value(&state),
         "html_status": status_payload.get("html_status").cloned().unwrap_or(serde_json::Value::Null),
         "html_path": status_payload.get("html_path").cloned().unwrap_or(serde_json::Value::Null),
+        "download_url": status_payload.get("download_url").cloned().unwrap_or(serde_json::Value::Null),
         "html_error": status_payload.get("html_error").cloned().unwrap_or(serde_json::Value::Null),
     });
-    let _ = state.broadcast_tx.send(status_payload.to_string());
     let status = if ok {
         StatusCode::OK
     } else {
         StatusCode::INTERNAL_SERVER_ERROR
     };
-    (status, axum::Json(body))
+    (status, axum::Json(body)).into_response()
 }
 
 async fn api_stats_handler(State(state): State<ServerState>) -> impl IntoResponse {
-    let session_id = state
+    let (session_id, session_records) = state
         .session_manager
         .as_ref()
-        .and_then(|manager| manager.lock().ok().map(|mgr| mgr.session_id().to_string()));
+        .and_then(|manager| {
+            manager
+                .lock()
+                .ok()
+                .map(|mgr| (Some(mgr.session_id().to_string()), mgr.record_count()))
+        })
+        .unwrap_or((None, 0));
 
     let replay_depth = state
         .replay
@@ -728,6 +711,10 @@ async fn api_stats_handler(State(state): State<ServerState>) -> impl IntoRespons
 
     axum::Json(serde_json::json!({
         "session_id": session_id,
+        "scopes": {
+            "process_lifetime": {"sources": state.stats.snapshot(), "records": null},
+            "current_session": {"sources": null, "records": session_records},
+        },
         "ws_clients": state.ws_client_count.load(Ordering::Relaxed),
         "replay_depth": replay_depth,
         "sources": state.stats.snapshot(),
@@ -737,7 +724,74 @@ async fn api_stats_handler(State(state): State<ServerState>) -> impl IntoRespons
     }))
 }
 
-async fn api_rotate_handler(State(state): State<ServerState>) -> impl IntoResponse {
+#[derive(serde::Deserialize)]
+struct MarkerRequest {
+    action: String,
+    label: Option<String>,
+}
+
+async fn api_marker_handler(
+    State(state): State<ServerState>,
+    axum::Json(request): axum::Json<MarkerRequest>,
+) -> impl IntoResponse {
+    if request.action.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({"ok": false, "error": "action must not be empty"})),
+        )
+            .into_response();
+    }
+    let Some(manager) = state.session_manager.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({"ok": false, "error": "session unavailable"})),
+        )
+            .into_response();
+    };
+    let manager = match manager.lock() {
+        Ok(manager) => manager,
+        Err(_) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                axum::Json(serde_json::json!({"ok": false, "error": "session lock unavailable"})),
+            )
+                .into_response()
+        }
+    };
+    let mut markers = manager.load_markers();
+    let marker = serde_json::json!({
+        "type": "timeline",
+        "action": request.action.trim(),
+        "label": request.label,
+        "sequence": manager.record_count(),
+        "created_at_ms": unix_millis(),
+    });
+    markers.push(marker.clone());
+    if let Err(error) = manager.save_markers(&markers) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            axum::Json(serde_json::json!({"ok": false, "error": error.to_string()})),
+        )
+            .into_response();
+    }
+    let _ = state
+        .broadcast_tx
+        .send(serde_json::json!({"type": "timeline_marker", "marker": marker}).to_string());
+    axum::Json(
+        serde_json::json!({"ok": true, "session_id": manager.session_id(), "marker": marker}),
+    )
+    .into_response()
+}
+
+#[derive(serde::Deserialize)]
+struct RotateRequest {
+    title: Option<String>,
+}
+
+async fn api_rotate_handler(
+    State(state): State<ServerState>,
+    request: Option<axum::Json<RotateRequest>>,
+) -> impl IntoResponse {
     let Some(rotate_fn) = &state.on_rotate else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -750,7 +804,8 @@ async fn api_rotate_handler(State(state): State<ServerState>) -> impl IntoRespon
         );
     };
 
-    match rotate_fn() {
+    let title = request.and_then(|axum::Json(request)| request.title);
+    match rotate_fn(title) {
         Ok((old_session, session)) => {
             let payload = serde_json::json!({
                 "type": "session_rotated",
@@ -972,6 +1027,7 @@ mod tests {
             None,
             "absolute",
             None,
+            json!([]),
         )))
     }
 
@@ -982,22 +1038,19 @@ mod tests {
             config_msg: Arc::new(Mutex::new(json!({ "type": "config" }).to_string())),
             broadcast_tx,
             replay: Arc::new(Mutex::new(VecDeque::new())),
-            events_replay: Arc::new(Mutex::new(VecDeque::new())),
             on_export: Some(Arc::new(|| Ok("/tmp/session.html".to_string()))),
             on_rotate: None,
             session_manager: Some(manager),
             logs_root: dir,
             ws_client_count: Arc::new(AtomicUsize::new(0)),
-            no_client_export_generation: Arc::new(AtomicU64::new(0)),
-            no_client_export_delay: Duration::from_secs(3600),
             stats: Arc::new(RuntimeStats::empty()),
             source_txs: Arc::new(HashMap::new()),
             source_tx_senders: Arc::new(HashMap::new()),
             source_metadata: Arc::new(HashMap::new()),
             line_counters: Arc::new(HashMap::new()),
-            static_event_rules: Arc::new(HashMap::new()),
-            event_rules_path: std::env::temp_dir().join("embed-log.events.yml"),
-            runtime_event_rules: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            virtual_sources: Arc::new(HashMap::new()),
+            watches: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            watch_counter: Arc::new(AtomicU64::new(1)),
             control_api: true,
         };
         (state, rx)
@@ -1041,6 +1094,7 @@ mod tests {
         let response: serde_json::Value = serde_json::from_str(&response).unwrap();
         assert_eq!(response["type"], "session_html_status");
         assert_eq!(response["html_status"], "ready");
+        assert_eq!(response["download_url"], "/sessions/session-1/session.html");
 
         let broadcast: serde_json::Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
         assert_eq!(broadcast["type"], "session_html_status");
@@ -1227,107 +1281,14 @@ mod tests {
         assert_eq!(snapshot["dut"]["bytes"], 42);
     }
 
-    #[tokio::test]
-    async fn final_client_disconnect_schedules_no_client_export() {
+    #[test]
+    fn final_client_disconnect_only_updates_client_count() {
         let count = Arc::new(AtomicUsize::new(1));
-        let generation = Arc::new(AtomicU64::new(0));
-        let exports = Arc::new(AtomicUsize::new(0));
-        let (broadcast_tx, mut rx) = broadcast::channel(4);
-        let exports_for_callback = exports.clone();
-
         {
             let _guard = WsClientCountGuard {
                 count: count.clone(),
-                generation: generation.clone(),
-                delay: Duration::from_millis(1),
-                on_export: Some(Arc::new(move || {
-                    exports_for_callback.fetch_add(1, Ordering::Relaxed);
-                    Ok("/tmp/session.html".to_string())
-                })),
-                broadcast_tx,
             };
         }
-
-        tokio::time::sleep(Duration::from_millis(20)).await;
-        assert_eq!(exports.load(Ordering::Relaxed), 1);
-        let payload: serde_json::Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
-        assert_eq!(payload["type"], "session_html_status");
-        assert_eq!(payload["reason"], "no_clients");
-    }
-
-    #[tokio::test]
-    async fn reconnect_generation_cancels_pending_no_client_export() {
-        let count = Arc::new(AtomicUsize::new(1));
-        let generation = Arc::new(AtomicU64::new(0));
-        let exports = Arc::new(AtomicUsize::new(0));
-        let (broadcast_tx, _rx) = broadcast::channel(4);
-        let exports_for_callback = exports.clone();
-
-        {
-            let _guard = WsClientCountGuard {
-                count: count.clone(),
-                generation: generation.clone(),
-                delay: Duration::from_millis(20),
-                on_export: Some(Arc::new(move || {
-                    exports_for_callback.fetch_add(1, Ordering::Relaxed);
-                    Ok("/tmp/session.html".to_string())
-                })),
-                broadcast_tx,
-            };
-        }
-
-        count.fetch_add(1, Ordering::Relaxed);
-        generation.fetch_add(1, Ordering::Relaxed);
-
-        tokio::time::sleep(Duration::from_millis(40)).await;
-        assert_eq!(exports.load(Ordering::Relaxed), 0);
-    }
-
-    #[test]
-    fn events_replay_drain_returns_messages_in_order() {
-        let buf = Arc::new(Mutex::new(VecDeque::new()));
-        {
-            let mut b = buf.lock().unwrap();
-            b.push_back(r#"{"type":"rx","data":"boot complete","line_idx":0}"#.to_string());
-            b.push_back(r#"{"type":"event","event_id":"boot","severity":"info"}"#.to_string());
-            b.push_back(r#"{"type":"rx","data":"FATAL ERROR","line_idx":1}"#.to_string());
-        }
-
-        let msgs = drain_replay(&buf);
-        assert_eq!(msgs.len(), 3);
-        assert_eq!(
-            msgs[0],
-            r#"{"type":"rx","data":"boot complete","line_idx":0}"#
-        );
-        assert_eq!(
-            msgs[1],
-            r#"{"type":"event","event_id":"boot","severity":"info"}"#
-        );
-        assert_eq!(
-            msgs[2],
-            r#"{"type":"rx","data":"FATAL ERROR","line_idx":1}"#
-        );
-    }
-
-    #[test]
-    fn events_replay_drain_empty_returns_empty() {
-        let buf = Arc::new(Mutex::new(VecDeque::new()));
-        let msgs = drain_replay(&buf);
-        assert!(msgs.is_empty());
-    }
-
-    #[test]
-    fn events_replay_drain_does_not_clear_buffer() {
-        let buf = Arc::new(Mutex::new(VecDeque::new()));
-        {
-            let mut b = buf.lock().unwrap();
-            b.push_back(r#"{"type":"event","event_id":"e1"}"#.to_string());
-        }
-
-        let first = drain_replay(&buf);
-        let second = drain_replay(&buf);
-        assert_eq!(first.len(), 1);
-        assert_eq!(second.len(), 1, "buffer should be intact after drain");
-        assert_eq!(first[0], second[0]);
+        assert_eq!(count.load(Ordering::Relaxed), 0);
     }
 }

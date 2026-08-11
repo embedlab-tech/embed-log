@@ -1,14 +1,20 @@
 use std::collections::HashMap;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
+use fs2::FileExt;
 use regex::Regex;
 use serde_json::json;
 use tracing::info;
 
 use super::log_parse::{enrich_timestamps, parse_log_file, LogEntry};
 use crate::frontend_assets::FrontendAssets;
+
+static EXPORT_TEMP_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// Generates a self-contained HTML file from session log files.
 ///
@@ -27,8 +33,8 @@ pub struct SessionExporter {
     frontend_plugins: serde_json::Value,
     plugin_scripts: serde_json::Value,
     markers: Vec<serde_json::Value>,
-    events: Vec<serde_json::Value>,
-    event_rules: serde_json::Value,
+    merges: Vec<crate::config::MergeConfig>,
+    combined_file: Option<PathBuf>,
 }
 
 impl SessionExporter {
@@ -54,9 +60,22 @@ impl SessionExporter {
             frontend_plugins: json!({}),
             plugin_scripts: json!({}),
             markers: vec![],
-            events: vec![],
-            event_rules: json!({}),
+            merges: vec![],
+            combined_file: None,
         }
+    }
+
+    /// Use the canonical combined stream so exported virtual panes preserve
+    /// original source ids and global sequence values.
+    pub fn with_combined_file(mut self, path: PathBuf) -> Self {
+        self.combined_file = Some(path);
+        self
+    }
+
+    /// Set virtual merge definitions used to construct presentation-only panes.
+    pub fn with_merges(mut self, merges: serde_json::Value) -> Self {
+        self.merges = serde_json::from_value(merges).unwrap_or_default();
+        self
     }
 
     /// Set plugin data from the server's loaded plugins.
@@ -78,19 +97,34 @@ impl SessionExporter {
         self
     }
 
-    /// Set detected events and event rules for the exported session.
-    pub fn with_events(
-        mut self,
-        events: Vec<serde_json::Value>,
-        event_rules: serde_json::Value,
-    ) -> Self {
-        self.events = events;
-        self.event_rules = event_rules;
-        self
+    /// Generate and atomically publish the self-contained session HTML file.
+    /// All producers use the same per-directory advisory lock, so daemon and
+    /// recorded-session CLI exports cannot overwrite one another concurrently.
+    pub fn export(&self) -> Result<PathBuf> {
+        if let Some(parent) = self.html_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let lock_path = self
+            .html_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(".session-html.lock");
+        let lock = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .with_context(|| format!("open export lock {}", lock_path.display()))?;
+        lock.lock_exclusive()
+            .with_context(|| format!("lock export {}", lock_path.display()))?;
+        let result = self.export_locked();
+        let unlock_result = FileExt::unlock(&lock)
+            .with_context(|| format!("unlock export {}", lock_path.display()));
+        result.and(unlock_result.map(|()| self.html_path.clone()))
     }
 
-    /// Generate the self-contained session HTML file.
-    pub fn export(&self) -> Result<PathBuf> {
+    fn export_locked(&self) -> Result<()> {
         let css = self.read_frontend_asset("viewer.css").unwrap_or_default();
         let css = self.inline_font_urls(&css);
 
@@ -101,13 +135,105 @@ impl SessionExporter {
             if !log_path.exists() {
                 continue;
             }
-            let content = std::fs::read_to_string(log_path).unwrap_or_default();
+            let content = std::fs::read_to_string(log_path)
+                .with_context(|| format!("read source log {}", log_path.display()))?;
             let entries = parse_log_file(
                 &content,
                 Some(source_name.as_str()),
                 self.source_labels.get(source_name).map(|s| s.as_str()),
             );
             log_data.insert(source_name.clone(), entries);
+        }
+
+        // New sessions use combined.jsonl as the single canonical export input
+        // whether or not virtual merges are configured. Physical .log files are
+        // retained only as a compatibility fallback for older sessions.
+        if let Some(combined_file) = self.combined_file.as_ref().filter(|path| path.exists()) {
+            let mut combined_data: HashMap<String, Vec<LogEntry>> = HashMap::new();
+            let combined = read_complete_jsonl(combined_file)?;
+            for (line_idx, line) in combined.lines().enumerate() {
+                let record =
+                    serde_json::from_str::<serde_json::Value>(line).with_context(|| {
+                        format!(
+                            "parse combined JSONL {} line {}",
+                            combined_file.display(),
+                            line_idx + 1
+                        )
+                    })?;
+                if record.get("source_kind").and_then(|value| value.as_str()) == Some("merge") {
+                    continue;
+                }
+                let Some(source_id) = record
+                    .get("source_id")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string)
+                else {
+                    continue;
+                };
+                let number = |name: &str| {
+                    record
+                        .get(name)
+                        .and_then(|value| value.as_f64())
+                        .map(|value| value as i64)
+                };
+                combined_data
+                    .entry(source_id.clone())
+                    .or_default()
+                    .push(LogEntry {
+                        source_id: Some(source_id),
+                        sequence: record.get("sequence").and_then(|value| value.as_u64()),
+                        ts: record
+                            .get("timestamp")
+                            .or_else(|| record.get("absTs"))
+                            .and_then(|value| value.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        text: record
+                            .get("message")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        is_tx: record.get("type").and_then(|value| value.as_str()) == Some("tx")
+                            || record.get("is_tx").and_then(|value| value.as_bool()) == Some(true),
+                        abs_ts: record
+                            .get("absTs")
+                            .and_then(|value| value.as_str())
+                            .map(str::to_string),
+                        abs_num: number("absNum"),
+                        rel_ts: record
+                            .get("relTs")
+                            .and_then(|value| value.as_str())
+                            .map(str::to_string),
+                        rel_num: number("relNum"),
+                    });
+            }
+            log_data = combined_data;
+        }
+
+        // Build presentation-only merge panes from original source entries.
+        // These clones exist only in the exported HTML and retain source_id.
+        for merge in &self.merges {
+            let mut entries = Vec::new();
+            for member in &merge.of {
+                let label = self
+                    .source_labels
+                    .get(member)
+                    .map(String::as_str)
+                    .unwrap_or(member);
+                if let Some(member_entries) = log_data.get(member) {
+                    entries.extend(member_entries.iter().cloned().map(|mut entry| {
+                        entry.text = format!("{label}: {}", entry.text);
+                        entry
+                    }));
+                }
+            }
+            entries.sort_by(|left, right| {
+                left.sequence
+                    .cmp(&right.sequence)
+                    .then(left.abs_num.cmp(&right.abs_num))
+                    .then(left.rel_num.cmp(&right.rel_num))
+            });
+            log_data.insert(merge.name.clone(), entries);
         }
 
         // Enrich timestamp variants (compute rel from abs or vice versa).
@@ -147,21 +273,18 @@ impl SessionExporter {
         let pane_plugins_json = serde_json::to_string(&self.pane_plugins)?;
         let plugin_scripts_json = serde_json::to_string(&self.plugin_scripts)?;
         let markers_json = serde_json::to_string(&self.markers)?;
-        let events_json = serde_json::to_string(&self.events)?;
-        let event_rules_json = serde_json::to_string(&self.event_rules)?;
+        let merges_json = serde_json::to_string(&self.merges)?;
 
         // Build static profile.
         let static_profile = json!({
             "kind": "static",
             "capabilities": {
-                "clearAll": false,
                 "downloadRaw": true,
                 "exportHtml": false,
                 "fontSize": true,
                 "paneSwap": true,
                 "persistCache": false,
                 "selectionExportHtml": true,
-                "sessionApi": false,
                 "themeToggle": true,
                 "tx": false,
                 "unwrap": true,
@@ -181,13 +304,12 @@ impl SessionExporter {
              window.__embedLogFrontendPlugins = {frontend_plugins_json};\n\
              window.__embedLogPanePlugins = {pane_plugins_json};\n\
              window.__embedLogPluginScripts = {plugin_scripts_json};\n\
+             window.__embedLogMerges = {merges_json};\n\
              window.__embedLogInitialPanePluginUiState = {{}};\n\
              window.__embedLogInitialThemeState = {{\"mode\":\"light\",\"lightKey\":\"whitesand\",\"darkKey\":\"one-dark\"}};\n\
              window.__embedLogInitialTimestampMode = {tm};\n\
              window.__embedLogFirstLogAt = {fla};\n\
-             window.__embedLogInitialFontSize = 14;\n\
-             window.__embedLogEventRules = {event_rules_json};\n\
-             window.__embedLogEvents = {events_json};",
+             window.__embedLogInitialFontSize = 14;",
             tm = json!(self.timestamp_mode),
             fla = json!(effective_first_log_at),
         ));
@@ -212,6 +334,12 @@ impl SessionExporter {
                             }
                             if let Some(rel_num) = e.rel_num {
                                 meta["relNum"] = json!(rel_num);
+                            }
+                            if let Some(source_id) = &e.source_id {
+                                meta["sourceId"] = json!(source_id);
+                            }
+                            if let Some(sequence) = e.sequence {
+                                meta["sequence"] = json!(sequence);
                             }
                             let meta_val =
                                 if meta.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
@@ -253,22 +381,13 @@ impl SessionExporter {
                  if (typeof applyMarkers === \"function\") applyMarkers();\n\
                  if (typeof window.__embedLogOnMarkers === \"function\") window.__embedLogOnMarkers();\n\
              }}\n\
-             var _eventRules = window.__embedLogEventRules || {{}};\n\
-             var _events = window.__embedLogEvents || [];\n\
-             var _hasRules = Object.values(_eventRules).some(function (r) {{ return Array.isArray(r) && r.length > 0; }});\n\
-             if (_hasRules || _events.length) {{\n\
-                 state.eventRules = _eventRules;\n\
-                 state.eventsEnabled = true;\n\
-                 if (typeof initEventsTab === \"function\") initEventsTab();\n\
-                 _events.forEach(function (ev) {{ if (typeof addEvent === \"function\") addEvent(ev); }});\n\
-                 if (typeof renderTabBar === \"function\") renderTabBar();\n\
-             }}\n\
              }})();"
         ));
 
         // Read and strip frontend JS files.
         let js_files = [
             "profile.js",
+            "keyboard.js",
             "renderPane.js",
             "renderToolbar.js",
             "pluginRuntime.js",
@@ -284,7 +403,6 @@ impl SessionExporter {
             "export.js",
             "postprocess.js",
             "selection.js",
-            "events.js",
             "tsparse.js",
             "import.js",
         ];
@@ -378,14 +496,14 @@ impl SessionExporter {
         html.push_str("</body>\n");
         html.push_str("</html>\n");
 
-        // Write.
-        if let Some(parent) = self.html_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&self.html_path, &html)
+        anyhow::ensure!(
+            html.starts_with("<!DOCTYPE html>") && html.ends_with("</html>\n"),
+            "generated session HTML is incomplete"
+        );
+        atomic_write(&self.html_path, html.as_bytes())
             .with_context(|| format!("write session HTML {}", self.html_path.display()))?;
         info!("session HTML exported: {}", self.html_path.display());
-        Ok(self.html_path.clone())
+        Ok(())
     }
 
     /// Read a frontend asset from embedded assets or filesystem.
@@ -548,6 +666,53 @@ fn html_escape(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
+fn read_complete_jsonl(path: &Path) -> Result<String> {
+    let mut bytes =
+        std::fs::read(path).with_context(|| format!("read combined JSONL {}", path.display()))?;
+    let complete_len = bytes
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(0, |idx| idx + 1);
+    bytes.truncate(complete_len);
+    String::from_utf8(bytes).context("combined JSONL is not UTF-8")
+}
+
+fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("session.html");
+    let nonce = EXPORT_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_path = parent.join(format!(".{file_name}.tmp-{}-{nonce}", std::process::id()));
+
+    let result = (|| -> Result<()> {
+        let mut temp = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temp_path)
+            .with_context(|| format!("create temporary export {}", temp_path.display()))?;
+        temp.write_all(bytes)?;
+        temp.sync_all()?;
+        std::fs::rename(&temp_path, path).with_context(|| {
+            format!(
+                "publish temporary export {} as {}",
+                temp_path.display(),
+                path.display()
+            )
+        })?;
+        if let Ok(parent_file) = File::open(parent) {
+            let _ = parent_file.sync_all();
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp_path);
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -567,6 +732,70 @@ mod tests {
         let escaped = esc_script_text(src);
         assert!(escaped.contains("<\\/script"));
         assert!(!escaped.contains("</script>"));
+    }
+
+    #[test]
+    fn incomplete_trailing_jsonl_record_is_not_published() {
+        let dir = std::env::temp_dir().join(format!(
+            "embed-log-export-tail-{}-{}",
+            std::process::id(),
+            EXPORT_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let combined = dir.join("combined.jsonl");
+        std::fs::write(
+            &combined,
+            "{\"sequence\":1,\"source_id\":\"DUT\",\"message\":\"COMMITTED_LINE_7a1\"}\n{\"sequence\":2,\"source_id\":\"DUT\",\"message\":\"UNCOMMITTED_TAIL_9f2",
+        )
+        .unwrap();
+        let html_path = dir.join("session.html");
+        SessionExporter::new(
+            html_path.clone(),
+            HashMap::new(),
+            vec![json!({"label":"Main","panes":["DUT"]})],
+            HashMap::new(),
+            PathBuf::from("frontend"),
+            "absolute".to_string(),
+            None,
+        )
+        .with_combined_file(combined)
+        .export()
+        .unwrap();
+        let html = std::fs::read_to_string(html_path).unwrap();
+        assert!(html.contains("COMMITTED_LINE_7a1"));
+        assert!(!html.contains("UNCOMMITTED_TAIL_9f2"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn malformed_complete_jsonl_keeps_previous_html() {
+        let dir = std::env::temp_dir().join(format!(
+            "embed-log-export-invalid-{}-{}",
+            std::process::id(),
+            EXPORT_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let combined = dir.join("combined.jsonl");
+        std::fs::write(&combined, "{not-json}\n").unwrap();
+        let html_path = dir.join("session.html");
+        std::fs::write(&html_path, "previous complete report").unwrap();
+        let result = SessionExporter::new(
+            html_path.clone(),
+            HashMap::new(),
+            vec![],
+            HashMap::new(),
+            PathBuf::from("frontend"),
+            "absolute".to_string(),
+            None,
+        )
+        .with_combined_file(combined)
+        .export();
+        assert!(result.is_err());
+        assert_eq!(
+            std::fs::read_to_string(html_path).unwrap(),
+            "previous complete report"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

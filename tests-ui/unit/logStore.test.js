@@ -45,7 +45,10 @@ test('appendBatch stores compact tuples and ignores unknown panes', () => {
 
 test('getLine lazily hydrates tuple once and preserves cached line', () => {
   const { state, store, analyzed } = createTestStore();
-  store.appendBatch([{ paneId: 'A', ts: 't1', rawText: 'one', isTx: true, meta: { numTs: 1 } }]);
+  store.appendBatch([{
+    paneId: 'A', ts: 't1', rawText: 'one', isTx: true,
+    meta: { numTs: 1, lineIdx: 42, sequence: 719, sessionId: 'session-a' },
+  }]);
 
   const first = store.getLine('A', 0);
   const second = store.getLine('A', 0);
@@ -57,6 +60,9 @@ test('getLine lazily hydrates tuple once and preserves cached line', () => {
     ts: 't1',
     numTs: 1,
     absTs: null,
+    serverLineIdx: 42,
+    sequence: 719,
+    sessionId: 'session-a',
     html: 'html:one',
     rawText: 'one',
     isTx: true,

@@ -1,256 +1,68 @@
 # embed-log
 
-`embed-log` collects UART, UDP, file-tail, and network-capture logs, stores them as session artifacts, and serves a browser/Tauri UI for live viewing and static HTML exports.
-
-The current workspace contains:
-
-- `embed-log` CLI: run the log server, inspect sessions, export/merge logs.
-- `embed-log-tauri` desktop app: wraps the same server in a Tauri shell with onboarding helpers.
-- `embed-log-core`: shared config, sources, parsers, runtime, HTTP/WebSocket server, and session export logic.
-- `frontend/`: browser UI assets embedded into release binaries.
+Capture UART, UDP, and file-tail logs in a browser or terminal UI. Sessions are saved locally and can be exported as self-contained HTML.
 
 ## Install
 
-macOS/Linux latest release:
+macOS/Linux:
 
 ```bash
 curl -fsSL https://github.com/embedlab-tech/embed-log/releases/latest/download/install.sh | sh
 ```
 
-Windows PowerShell latest release:
+Windows PowerShell:
 
 ```powershell
 irm https://github.com/embedlab-tech/embed-log/releases/latest/download/install.ps1 | iex
 ```
 
-Release binaries include embedded frontend assets, so users do **not** need Rust, Cargo, or a separate `frontend/` directory.
+Release binaries include the web UI; Rust and a separate frontend checkout are not required.
 
-See [docs/releasing.md](docs/releasing.md) for release and installer details.
+## Run
 
-## Fast start
-
-Connect one UART without creating YAML:
+Open one serial device:
 
 ```bash
-embed-log run /dev/ttyUSB0
+embed-log run /dev/ttyUSB0 --baud 115200
 ```
 
-Multiple UARTs, a watched file, or the terminal UI:
+Run a saved configuration:
 
 ```bash
-embed-log run -s /dev/ttyUSB0 -s /dev/ttyUSB1 -f ./device.log --baud 115200
-embed-log run /dev/ttyUSB0 --tui
+embed-log doctor --config embed-log.yml
+embed-log run --config embed-log.yml
 ```
 
-This creates an in-memory configuration, opens the web UI (or TUI), and saves a normal session under `./logs/`. Each source gets its own tab. Persist the generated configuration only when you need a custom layout or parser:
+The web server and browser UI start automatically. Use `--no-open-browser` for headless use or `--tui` for the terminal UI instead. Sessions are written under `./logs/` by default.
+
+## Agent use
+
+The binary contains the version-matched agent skill:
 
 ```bash
-embed-log run /dev/ttyUSB0 --save-config embed-log.yml
+embed-log skill
 ```
 
-See the [quick-start guide](docs/quickstart.md) for all fast-run options, session locations, and when to switch to YAML. Run `embed-log doctor` if a serial device cannot be opened.
+It directs agents to use the CLI only: discover sources with `doctor`, inspect bounded session evidence with `summary`, `read`, `search`, and `around`, then act through the daemon. Do not open configured UARTs or read session files directly.
 
-## Claude Code plugin
-
-This repo bundles a [Claude Code](https://claude.com/claude-code) skill that teaches an AI
-agent to inspect `embed-log` sessions via the CLI (`sessions summary`/`search`/...) instead of
-grepping raw log files. Install it once, in any Claude Code session:
-
-```
-/plugin marketplace add embedlab-tech/embed-log
-/plugin install embed-log@embed-log-tools
-```
-
-It's then available in every project on your machine, not just this repo. Source: `skills/embed-log/SKILL.md`, `.claude-plugin/`.
-
-## Build from source
+For a persistent capture, start a named daemon and read only new records by cursor:
 
 ```bash
-just build
-just demo headless
+embed-log run --daemon --instance bench-a --config embed-log.yml
+embed-log sessions summary latest --dir ./logs
+embed-log sessions read latest --dir ./logs --after "$CURSOR" --limit 100
+embed-log tx --instance bench-a --source DUT_UART --line "status"
 ```
 
-Then open:
+Evidence is concise text (`+time seq=N src=SOURCE#INDEX | message`). Set `CURSOR` to the final returned sequence number and use `sessions around` for context. Run `embed-log schema` when an agent needs the machine-readable CLI contract.
 
-```text
-http://127.0.0.1:8080/
-```
+Ask your coding agent to create its project skill from the output of `embed-log skill`; this keeps its instructions matched to the installed CLI version.
 
-Generate a starter config:
+## More documentation
 
-```bash
-cargo run --package embed-log-cli --bin embed-log -- init --output embed-log.yml
-```
-
-Validate and run with a config:
-
-```bash
-cargo run --package embed-log-cli --bin embed-log -- validate --config embed-log.yml
-cargo run --package embed-log-cli --bin embed-log -- run --config embed-log.yml
-```
-
-## Control API
-
-Embed-log exposes a single structured JSON WebSocket endpoint for SDK and automation:
-
-```text
-ws://127.0.0.1:8080/api/v1/control
-```
-
-### Commands
-
-| Command | Purpose |
-|---------|---------|
-| `hello` | Get sources, labels, types, writability, session id |
-| `subscribe` | Subscribe to log entries by source name |
-| `unsubscribe` | Remove source subscriptions |
-| `log.inject` | Inject a log entry into the source pipeline and UI |
-| `tx.write` | Write bytes to a writable source (UART) |
-| `marker.create` | Create a marker on a log line |
-
-### `subscribe` / `log.entry`
-
-Subscribe to sources and receive structured events replacing the legacy per-source forward ports:
-
-```json
-{
-  "type": "log.entry",
-  "source_id": "DUT_UART",
-  "origin": "SERIAL",
-  "message": "boot complete",
-  "timestamp_iso": "2026-06-14T12:00:00.123Z",
-  "line_idx": 42,
-  "color": null,
-  "is_tx": false
-}
-```
-
-Source-name routing replaces the old `InjectClient`/`ForwardClient` per-port model.
-
-## Python SDK
-
-A synchronous Python SDK is available at `sdk/python/`:
-
-```python
-from embed_log_sdk import EmbedLogClient
-
-with EmbedLogClient.from_config("embed-log.yml", origin="pytest") as client:
-    client.inject_log("DUT_UART", "test: assertion passed", color="cyan")
-    client.tx_write("DUT_UART", "version\r\n")
-    client.subscribe(["DUT_UART"])
-    for entry in client.entries(timeout=5.0):
-        print(entry.source_id, entry.message)
-```
-
-## Watcher
-
-The watcher (`embed_log_sdk.watcher`) observes log entries matching regex patterns, writes JSONL evidence, and optionally creates UI markers:
-
-```bash
-python sdk/python/examples/watcher_run.py --config watcher.yml --timeout 30
-```
-
-## Companion UART command files
-
-Place a `<config-stem>.commands.yml` alongside your config to provide Tab-cycling command suggestions:
-
-```yaml
-sources:
-  DUT_UART:
-    - "help\r\n"
-    - "version\r\n"
-    - "status\r\n"
-```
-
-The fallback `embed-log.commands.yml` is checked in the config directory and current working directory.
-
-## Marker CLI inspection
-
-List and inspect markers created by the watcher or UI:
-
-```bash
-embed-log sessions marker list <session-id>
-embed-log sessions marker show <session-id> <marker-index>
-embed-log sessions marker list <session-id> --search fatal --json
-embed-log sessions marker show <session-id> 1 --json
-```
-
-## Terminal UI
-
-Run the server and terminal UI together:
-
-```bash
-embed-log run --config embed-log.yml --tui
-embed-log demo --tui
-```
-
-Or connect the standalone TUI to an already-running server:
-
-```bash
-embed-log-tui connect ws://127.0.0.1:8080/ws
-```
-
-See [docs/tui.md](docs/tui.md) for keybindings and limitations.
-
-## Real network packet capture (pcap)
-
-Plain `type: udp` sources (bind a UDP socket on a port and read datagrams) work out of the box, no setup below needed.
-
-For `type: network_capture` sources with `network_backend: pcap` — sniffing UDP traffic straight off a network interface, filtered to specific ports via `udp.ports` — you need the native pcap library, a special build, and interface-open permissions. See [docs/configuration.md](docs/configuration.md) for the full field reference.
-
-1. Install the native capture library:
-   - Linux: `libpcap-dev` (Debian/Ubuntu) or `libpcap-devel` (Fedora/RHEL)
-   - macOS: libpcap ships with the OS, nothing to install
-   - Windows: install [Npcap](https://npcap.com/) (in WinPcap API-compatible mode)
-
-2. Build with the `pcap-capture` feature (disabled by default):
-
-   ```bash
-   cargo build --release -p embed-log-cli --features pcap-capture
-   ```
-
-3. Grant the binary permission to open network interfaces, instead of running the whole app as root:
-
-   ```bash
-   sudo setcap cap_net_raw,cap_net_admin+eip target/release/embed-log
-   ```
-
-   Then run `embed-log` normally as your own user — no `sudo` needed at runtime. (macOS/Windows don't support setcap; run elevated once, or add your user to the OS's packet-capture group per the Npcap/libpcap docs.)
-
-4. Verify readiness:
-
-   ```bash
-   embed-log doctor --config embed-log.yml
-   ```
-
-   Reports whether this binary was built with `pcap-capture`, whether libpcap/Npcap is installed, and whether the given config actually has `network_backend: pcap` sources.
-
-## Legacy inject/forward ports removed
-
-The old per-source TCP `inject_port`, `forward_port`, and `forward_ports` config fields have been removed. Use the single control WebSocket endpoint (`/api/v1/control`) instead. All automation (log injection, subscription/forwarding, TX, markers) goes through one connection, routed by configured source name.
-
-## Documentation
-
-- [Getting up to speed](docs/getting-up-to-speed.md)
 - [Quick start](docs/quickstart.md)
-- [Architecture](docs/architecture.md)
 - [Configuration](docs/configuration.md)
 - [CLI reference](docs/cli.md)
-- [Development](docs/development.md)
 - [Terminal UI](docs/tui.md)
-- [Tauri desktop app](docs/tauri.md)
+- [Development](docs/development.md)
 - [Releasing](docs/releasing.md)
-
-## Repository layout
-
-```text
-crates/embed-log-core/     Shared runtime, config, sources, parsers, HTTP/WS, sessions
-crates/embed-log-cli/      CLI binary named `embed-log`
-crates/embed-log-tauri/    Tauri desktop binary
-frontend/                  Live/static viewer UI, embedded into release binaries
-sdk/python/                Python SDK, watcher, examples
-config-samples/            Example YAML configs (no legacy fields)
-scripts/                   Release packaging helpers
-docs/                      Current docs
-justfile                   Common development/release commands
-```

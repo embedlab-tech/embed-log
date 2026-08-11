@@ -9,18 +9,32 @@ import { openHtmlFile } from './helpers.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../..');
-function runRustMerge(args) {
+function runRecordedExport({ tmpDir, logPath, htmlPath, firstLogAt = null }) {
+  const logsDir = path.join(tmpDir, 'sessions');
+  const sessionId = 'relative-replay';
+  const sessionDir = path.join(logsDir, sessionId);
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.writeFileSync(path.join(sessionDir, 'manifest.json'), JSON.stringify({
+    session_id: sessionId,
+    session_dir: sessionDir,
+    timestamp_mode: 'relative',
+    first_log_at: firstLogAt,
+    tabs: [{ label: 'Demo', panes: ['SENSOR_A'] }],
+    pane_labels: { SENSOR_A: 'SENSOR' },
+    source_files: { SENSOR_A: logPath },
+    combined_file: path.join(sessionDir, 'combined.jsonl'),
+  }, null, 2));
   execFileSync('cargo', [
     'run', '--quiet', '--package', 'embed-log-cli', '--bin', 'embed-log', '--',
-    'merge',
-    ...args,
+    'sessions', 'export', sessionId, '--dir', logsDir,
+    '--format', 'html', '--output', htmlPath,
   ], { cwd: repoRoot });
 }
 
-// Scenario: Merged static replay toggles between T+... and MM-DD... timestamps
+// Scenario: Merged static replay cycles relative, hidden, and absolute timestamps
 //   Given a static replay with merged log data and a known absolute origin
 //   When  the user clicks the timestamp mode toggle
-//   Then  timestamps switch between relative (T+...) and absolute (MM-DD...) formats
+//   Then  timestamps cycle relative → hidden → absolute → relative
 //
 test('merged static replay toggles between relative and absolute timestamps', async ({ browser }) => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'embed-log-relative-'));
@@ -37,12 +51,12 @@ test('merged static replay toggles between relative and absolute timestamps', as
     'utf-8',
   );
 
-  runRustMerge([
-    '--timestamp-mode', 'relative',
-    '--first-log-at', '2026-01-01T12:00:00.000+00:00',
-    '--tab', 'Demo', 'SENSOR_A=SENSOR', logPath,
-    '--output', htmlPath,
-  ]);
+  runRecordedExport({
+    tmpDir,
+    logPath,
+    htmlPath,
+    firstLogAt: '2026-01-01T12:00:00.000+00:00',
+  });
 
   const page = await openHtmlFile(browser, htmlPath);
   try {
@@ -56,11 +70,16 @@ test('merged static replay toggles between relative and absolute timestamps', as
     await expect(page.locator('#btn-timestamp-mode')).toHaveText('Relative');
 
     await page.locator('#btn-timestamp-mode').click();
+    await expect(page.locator('#btn-timestamp-mode')).toHaveText('No time');
+    await expect(page.locator('#log-SENSOR_A .log-line').first().locator('.ts')).toBeHidden();
+
+    await page.locator('#btn-timestamp-mode').click();
     await expect(page.locator('#btn-timestamp-mode')).toHaveText('Absolute');
     await expect(page.locator('#log-SENSOR_A .log-line').first().locator('.ts')).toHaveText('01-01 12:00:00.000');
     await expect(page.locator('#log-SENSOR_A .log-line').nth(1).locator('.ts')).toHaveText('01-01 12:00:01.250');
 
     await page.locator('#btn-timestamp-mode').click();
+    await expect(page.locator('#btn-timestamp-mode')).toHaveText('Relative');
     await expect(page.locator('#log-SENSOR_A .log-line').first().locator('.ts')).toHaveText('T+00:00:00.000');
   } finally {
     await page.close();
@@ -68,9 +87,9 @@ test('merged static replay toggles between relative and absolute timestamps', as
   }
 });
 
-// Scenario: Relative-only static replay shows hint when absolute origin is unavailable
+// Scenario: Relative-only static replay can hide timestamps but cannot switch to absolute
 //   Given a static replay with relative timestamps but no --first-log-at origin
-//   When  the user inspects the timestamp mode button
+//   When  the user switches to No time
 //   Then  the button is disabled with a title explaining absolute mode is unavailable
 //
 test('relative-only static replay shows hint when absolute origin is unavailable', async ({ browser }) => {
@@ -87,14 +106,14 @@ test('relative-only static replay shows hint when absolute origin is unavailable
     'utf-8',
   );
 
-  runRustMerge([
-    '--timestamp-mode', 'relative',
-    '--tab', 'Demo', 'SENSOR_A=SENSOR', logPath,
-    '--output', htmlPath,
-  ]);
+  runRecordedExport({ tmpDir, logPath, htmlPath });
 
   const page = await openHtmlFile(browser, htmlPath);
   try {
+    await expect(page.locator('#btn-timestamp-mode')).toHaveText('Relative');
+    await expect(page.locator('#btn-timestamp-mode')).toBeEnabled();
+    await page.locator('#btn-timestamp-mode').click();
+    await expect(page.locator('#btn-timestamp-mode')).toHaveText('No time');
     await expect(page.locator('#btn-timestamp-mode')).toBeDisabled();
     await expect(page.locator('#btn-timestamp-mode')).toHaveAttribute('title', 'absolute timestamps are unavailable for the current data');
   } finally {

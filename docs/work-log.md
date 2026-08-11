@@ -931,3 +931,1403 @@ Future entries must include this per-file added/removed-line summary.
 | File | Added | Removed | Summary |
 | --- | ---: | ---: | --- |
 | `docs/non-session-roadmap.md` | 1 | 1 | Replaces the internal transport name with neutral custom-transport wording. |
+
+## 2026-08-03 16:21:21 UTC / 2026-08-03 18:21:21 CEST (Warsaw)
+
+- **Commit:** `230a3e3` — `Document Embed-log MVP overhaul`
+- **Task:** Capture the agreed Embed-log MVP overhaul and Linux acceptance plan in an implementer handoff.
+- **Started:** 2026-08-03 16:20:08 UTC / 2026-08-03 18:20:08 CEST (+0200) (Warsaw)
+- **Completed:** 2026-08-03 16:21:21 UTC / 2026-08-03 18:21:21 CEST (+0200) (Warsaw)
+- **Validation:** `git diff --check`; `wc -l -w mvp-embed-log-todo.md`; heading inventory with `rg -n '^## ' mvp-embed-log-todo.md` — passed (668 lines, 2,083 words, all planned sections present).
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`230a3e3`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `mvp-embed-log-todo.md` | 668 | 0 | Documents the MVP scope, retained and removed features, daemon/instance/session CLI, config v2, parser migration, and Linux/agent validation plans. |
+
+## 2026-08-03 16:30:40 UTC / 2026-08-03 18:30:40 CEST (Warsaw)
+
+- **Commit:** `c267f0f` — `Remove Tauri desktop surface`
+- **Task:** Remove the Tauri desktop application, launch path, frontend bridge, CI/release surface, and current documentation while retaining browser and TUI modes.
+- **Started:** 2026-08-03 16:24:50 UTC / 2026-08-03 18:24:50 CEST (+0200) (Warsaw)
+- **Completed:** 2026-08-03 16:30:40 UTC / 2026-08-03 18:30:40 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli --package embed-log-tui` — passed (88 CLI, 225 core, and 74 TUI tests); `cargo clippy --locked --package embed-log-core --package embed-log-cli --package embed-log-tui --all-targets -- -D warnings` — passed; `npm --prefix tests-ui run test:unit` — passed (19 tests); locked workspace metadata and rebuilt CLI `--ui` rejection checks — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`c267f0f`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 0 | 57 | Removes the disabled Tauri Linux CI job. |
+| `Cargo.lock` | 185 | 3033 | Prunes the Tauri desktop dependency graph while retaining locked active dependencies. |
+| `Cargo.toml` | 1 | 2 | Removes the Tauri crate from the workspace. |
+| `README.md` | 4 | 5 | Describes browser and TUI products without the desktop app. |
+| `RELEASE_AND_UPDATE.md` | 0 | 2 | Removes obsolete Tauri updater notes. |
+| `crates/embed-log-cli/src/commands/mod.rs` | 0 | 1 | Removes the UI launcher module. |
+| `crates/embed-log-cli/src/commands/run.rs` | 3 | 3 | Removes Tauri-specific onboarding comments. |
+| `crates/embed-log-cli/src/commands/ui.rs` | 0 | 139 | Deletes Tauri binary discovery and launch behavior. |
+| `crates/embed-log-cli/src/main.rs` | 3 | 15 | Removes `--ui` and adds a regression test that rejects it. |
+| `crates/embed-log-core/src/config/paths.rs` | 2 | 2 | Makes config path documentation frontend-neutral. |
+| `crates/embed-log-core/src/onboarding.rs` | 7 | 17 | Removes desktop-specific onboarding contracts and comments. |
+| `crates/embed-log-tauri/Cargo.toml` | 0 | 22 | Deletes the desktop crate manifest. |
+| `crates/embed-log-tauri/build.rs` | 0 | 3 | Deletes the Tauri build script. |
+| `crates/embed-log-tauri/gen/schemas/acl-manifests.json` | 0 | 1 | Deletes generated desktop ACL data. |
+| `crates/embed-log-tauri/gen/schemas/capabilities.json` | 0 | 1 | Deletes generated desktop capability data. |
+| `crates/embed-log-tauri/gen/schemas/desktop-schema.json` | 0 | 2612 | Deletes generated desktop schema data. |
+| `crates/embed-log-tauri/gen/schemas/macOS-schema.json` | 0 | 2612 | Deletes generated macOS schema data. |
+| `crates/embed-log-tauri/gen/schemas/windows-schema.json` | 0 | 2612 | Deletes generated Windows schema data. |
+| `crates/embed-log-tauri/icons/128x128.png` | binary | binary | Deletes a Tauri application icon. |
+| `crates/embed-log-tauri/icons/256x256.png` | binary | binary | Deletes a Tauri application icon. |
+| `crates/embed-log-tauri/icons/32x32.png` | binary | binary | Deletes a Tauri application icon. |
+| `crates/embed-log-tauri/src/lib.rs` | 0 | 544 | Deletes the desktop application runtime. |
+| `crates/embed-log-tauri/src/main.rs` | 0 | 5 | Deletes the desktop binary entry point. |
+| `crates/embed-log-tauri/tauri.conf.json` | 0 | 35 | Deletes desktop packaging configuration. |
+| `crates/embed-log-tui/src/lib.rs` | 3 | 3 | Describes the TUI directly against the browser-compatible server. |
+| `demo.sh` | 10 | 22 | Removes desktop demo mode. |
+| `docs/architecture.md` | 12 | 27 | Removes the desktop shell from architecture and documents TUI instead. |
+| `docs/cli.md` | 3 | 14 | Removes `--ui`, desktop launch, and desktop environment variables. |
+| `docs/configuration.md` | 1 | 3 | Removes desktop-specific config path behavior. |
+| `docs/development.md` | 4 | 25 | Removes desktop prerequisites, recipes, and workspace entries. |
+| `docs/index.md` | 1 | 2 | Removes the desktop documentation link. |
+| `docs/non-session-roadmap.md` | 0 | 1 | Removes deferred desktop packaging work. |
+| `docs/releasing.md` | 0 | 10 | Removes the desktop release section. |
+| `docs/tauri.md` | 0 | 146 | Deletes desktop application documentation. |
+| `frontend/onboarding.js` | 1 | 4 | Removes Tauri invocation fallback from onboarding. |
+| `frontend/ui.js` | 1 | 14 | Opens session URLs with browser behavior only. |
+| `justfile` | 8 | 18 | Removes desktop build/run/demo recipes and clarifies no-browser mode. |
+| `tui-frontend-plan.md` | 0 | 419 | Deletes the completed plan containing obsolete desktop integration assumptions. |
+
+## 2026-08-03 16:37:40 UTC / 2026-08-03 18:37:40 CEST (Warsaw)
+
+- **Commit:** `f6867e8` — `Remove production demo and init modes`
+- **Task:** Remove production demo/init commands and embedded traffic generation while moving browser coverage onto a test-owned fixture that launches the normal run path.
+- **Started:** 2026-08-03 16:30:40 UTC / 2026-08-03 18:30:40 CEST (+0200) (Warsaw)
+- **Completed:** 2026-08-03 16:37:40 UTC / 2026-08-03 18:37:40 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli --package embed-log-tui` — passed (86 CLI, 220 core, and 74 TUI tests); `cargo clippy --locked --package embed-log-core --package embed-log-cli --package embed-log-tui --all-targets -- -D warnings` — passed; `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e` — passed twice, including after fixture/spec renames (4 tests); rebuilt CLI rejection and run-based fixture checks — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`f6867e8`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 2 | 2 | Renames the browser fixture traffic interval variable. |
+| `README.md` | 2 | 9 | Removes demo/init instructions and points to normal run/config samples. |
+| `crates/embed-log-cli/src/commands/misc.rs` | 1 | 11 | Removes the embedded-config init implementation. |
+| `crates/embed-log-cli/src/commands/run.rs` | 1 | 53 | Removes demo server startup and generated traffic wiring. |
+| `crates/embed-log-cli/src/demo_config.rs` | 0 | 143 | Deletes the embedded production demo configuration. |
+| `crates/embed-log-cli/src/main.rs` | 9 | 45 | Removes demo/init command definitions and tests their rejection. |
+| `crates/embed-log-core/src/demo.rs` | 0 | 475 | Deletes production synthetic traffic generation. |
+| `crates/embed-log-core/src/lib.rs` | 0 | 1 | Removes the demo module export. |
+| `crates/embed-log-tui/src/draw.rs` | 2 | 2 | Renames test fixture application labels. |
+| `crates/embed-log-tui/src/lib.rs` | 3 | 5 | Removes demo-mode references and a deleted planning link. |
+| `crates/embed-log-tui/src/main.rs` | 3 | 3 | Documents only the retained run-based integrated mode. |
+| `crates/embed-log-tui/src/protocol.rs` | 2 | 2 | Renames protocol test fixture labels. |
+| `demo.events.yml` | 0 | 23 | Deletes demo event rules. |
+| `demo.sh` | 0 | 23 | Deletes the production demo launcher. |
+| `demo.yml` | 0 | 90 | Deletes the production demo config. |
+| `demo_traffic.py` | 0 | 240 | Deletes the external demo traffic generator. |
+| `docs/architecture.md` | 1 | 2 | Removes the demo module and commands from architecture. |
+| `docs/cli.md` | 0 | 22 | Removes demo and init command documentation. |
+| `docs/configuration.md` | 1 | 1 | Uses a neutral application name in the example. |
+| `docs/development.md` | 1 | 10 | Removes demo recipes and module layout. |
+| `docs/getting-up-to-speed.md` | 1 | 1 | Directs users to a checked-in config sample instead of init. |
+| `docs/tui.md` | 1 | 2 | Removes demo/init launch guidance. |
+| `embed-log.yml` | 1 | 1 | Uses a neutral application name. |
+| `event-detection-plan.md` | 2 | 2 | Points event validation at test-owned regression fixtures. |
+| `justfile` | 2 | 23 | Removes the demo recipe and defaults run to `embed-log.yml`. |
+| `tests-ui/playwright.config.js` | 3 | 3 | Starts the renamed ordinary-run browser fixture. |
+| `tests-ui/playwright.regression.config.js` | 3 | 3 | Starts the renamed ordinary-run regression fixture. |
+| `tests-ui/regression-inventory.json` | 2 | 2 | Tracks the renamed test spec and test-owned traffic. |
+| `tests-ui/rust-test-server.mjs` | 5 | 5 | Renames and reframes the fixture as test infrastructure using `embed-log run`. |
+| `tests-ui/tests/rust-server.spec.js` | 0 | 0 | Renames the browser backend test away from demo terminology. |
+
+## 2026-08-03 16:41:34 UTC / 2026-08-03 18:41:34 CEST (Warsaw)
+
+- **Commit:** `543b85e` — `Remove interactive onboarding`
+- **Task:** Remove automatic and explicit browser onboarding and replace missing-config interaction with a direct actionable CLI error.
+- **Started:** 2026-08-03 16:38:29 UTC / 2026-08-03 18:38:29 CEST (+0200) (Warsaw)
+- **Completed:** 2026-08-03 16:41:34 UTC / 2026-08-03 18:41:34 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli --package embed-log-tui` — passed (87 CLI, 216 core, and 74 TUI tests); `cargo clippy --locked --package embed-log-core --package embed-log-cli --package embed-log-tui --all-targets -- -D warnings` — passed; `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e` — passed (4 tests); rebuilt CLI missing-config hint and removed `onboard` rejection checks — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`543b85e`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-cli/src/commands/run.rs` | 22 | 64 | Removes onboarding startup and adds tested non-interactive missing-config guidance. |
+| `crates/embed-log-cli/src/main.rs` | 2 | 26 | Removes the onboard command and extends removed-surface regression coverage. |
+| `crates/embed-log-core/src/lib.rs` | 0 | 1 | Removes the onboarding module export. |
+| `crates/embed-log-core/src/onboarding.rs` | 0 | 659 | Deletes quick-config generation and the onboarding HTTP server. |
+| `crates/embed-log-tui/src/lib.rs` | 2 | 2 | Removes onboarding-specific TUI wording. |
+| `docs/architecture.md` | 0 | 3 | Removes onboarding modules, behavior, and frontend assets. |
+| `docs/cli.md` | 2 | 35 | Documents direct missing-config failure and removes onboarding reference. |
+| `docs/getting-up-to-speed.md` | 1 | 1 | Uses a copied checked-in sample instead of browser setup. |
+| `docs/non-session-roadmap.md` | 1 | 1 | Keeps quick-run parity without onboarding scope. |
+| `docs/quickstart.md` | 1 | 1 | Directs advanced setup to saved YAML samples. |
+| `docs/tui.md` | 1 | 1 | Directs config-based TUI users to YAML samples. |
+| `frontend/onboarding.js` | 0 | 336 | Deletes the browser setup frontend. |
+
+## 2026-08-03 16:56:43 UTC / 2026-08-03 18:56:43 CEST (Warsaw)
+
+- **Commit:** `b60b9ee` — `Remove network capture and pcap support`
+- **Task:** Remove network-capture/pcap sources, dependencies, diagnostics, packet-search/UI behavior, fixtures, and documentation while retaining explicit UDP sources.
+- **Started:** 2026-08-03 16:43:53 UTC / 2026-08-03 18:43:53 CEST (+0200) (Warsaw)
+- **Completed:** 2026-08-03 16:56:43 UTC / 2026-08-03 18:56:43 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli --package embed-log-tui` — passed (84 CLI, 207 core, and 73 TUI tests); `cargo clippy --locked --package embed-log-core --package embed-log-cli --package embed-log-tui --all-targets -- -D warnings` — passed; `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e` — passed (4 tests); `npm --prefix tests-ui run test:regression:data` — passed (5 tests); `PYTHONPATH=sdk/python python3 -m pytest sdk/python/tests -q` — passed (53 passed, 2 skipped); rebuilt CLI root-config validation, removed network-source rejection, removed packet-filter rejection, and lockfile checks — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`b60b9ee`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `Cargo.lock` | 3 | 94 | Prunes pcap and dynamic-library dependency entries. |
+| `README.md` | 1 | 34 | Limits sources to UART/UDP/file and removes pcap setup. |
+| `config-samples/reference_full_annotated.yml` | 0 | 9 | Removes the network-capture source and tab. |
+| `config-samples/single_network_single_tab.yml` | 0 | 17 | Deletes the mock network source sample. |
+| `config-samples/single_pcap_udp_single_tab.yml` | 0 | 22 | Deletes the pcap source sample. |
+| `crates/embed-log-cli/Cargo.toml` | 0 | 2 | Removes libloading and the pcap feature. |
+| `crates/embed-log-cli/src/commands/misc.rs` | 1 | 196 | Removes packet-capture validation and doctor diagnostics. |
+| `crates/embed-log-cli/src/commands/run.rs` | 0 | 9 | Removes obsolete network fields from generated sources. |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 13 | 88 | Removes packet-specific search filters and mini output fields. |
+| `crates/embed-log-core/Cargo.toml` | 0 | 5 | Removes the pcap dependency and feature. |
+| `crates/embed-log-core/src/config/loader.rs` | 34 | 127 | Rejects removed network configs and removes backend validation. |
+| `crates/embed-log-core/src/config/models.rs` | 1 | 59 | Removes network, pcap, UDP-filter, and payload config models. |
+| `crates/embed-log-core/src/net/ws_server.rs` | 0 | 31 | Removes the network filter WebSocket command. |
+| `crates/embed-log-core/src/runtime/server.rs` | 1 | 26 | Removes network source resolution. |
+| `crates/embed-log-core/src/sources/mod.rs` | 0 | 2 | Removes the network source module/export. |
+| `crates/embed-log-core/src/sources/network.rs` | 0 | 541 | Deletes mock and pcap packet-capture implementations. |
+| `crates/embed-log-tui/src/app.rs` | 0 | 3 | Removes filter-result handling. |
+| `crates/embed-log-tui/src/protocol.rs` | 1 | 20 | Removes network filter protocol messages and tests. |
+| `docs/api-status.md` | 1 | 1 | Lists only retained source kinds. |
+| `docs/architecture.md` | 2 | 4 | Removes network source and filter architecture. |
+| `docs/automation-agent-plan.md` | 0 | 1 | Removes optional pcap scope. |
+| `docs/cli.md` | 3 | 6 | Removes packet diagnostics and search examples. |
+| `docs/configuration.md` | 3 | 58 | Removes network-capture schema and examples. |
+| `docs/getting-up-to-speed.md` | 0 | 2 | Removes pcap setup guidance. |
+| `embed-log.yml` | 0 | 13 | Removes the obsolete network source/tab and invalid browser field. |
+| `frontend/renderPane.js` | 1 | 1 | Uses regex filtering for every retained pane. |
+| `frontend/ui.js` | 0 | 8 | Removes BPF filter dispatch. |
+| `frontend/ws.js` | 0 | 12 | Removes filter-result handling. |
+| `justfile` | 0 | 6 | Removes the pcap build recipe. |
+| `sdk/python/embed_log_sdk/config.py` | 1 | 1 | Documents retained SDK source kinds. |
+| `sdk/python/embed_log_sdk/models.py` | 1 | 1 | Documents retained API source kinds. |
+| `skills/embed-log/SKILL.md` | 1 | 1 | Uses a retained UDP search example. |
+| `tests-ui/config-regression.yml` | 0 | 12 | Removes the mock network fixture/tab. |
+| `tests-ui/regression-categories.mjs` | 0 | 1 | Removes the network regression spec from the data group. |
+| `tests-ui/regression-inventory.json` | 0 | 6 | Removes network-capture test inventory. |
+| `tests-ui/regression-tests/network-capture.spec.js` | 0 | 186 | Deletes BPF/network UI regression scenarios. |
+
+## 2026-08-03 17:19:30 UTC / 2026-08-03 19:19:30 CEST (Warsaw)
+
+- **Commit:** `af0655c` — `Remove CBOR datagram parser`
+- **Task:** Remove the CBOR datagram parser, dependency, configurations, fixtures, tests, and documentation while retaining text and protocol-specific parsers.
+- **Started:** 2026-08-03 16:57:30 UTC / 2026-08-03 18:57:30 CEST (+0200) (Warsaw)
+- **Completed:** 2026-08-03 17:19:30 UTC / 2026-08-03 19:19:30 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli --package embed-log-tui` — passed (84 CLI, 201 core, and 73 TUI tests); `cargo clippy --locked --package embed-log-core --package embed-log-cli --package embed-log-tui --all-targets -- -D warnings` — passed; `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (4 tests); `npm --prefix tests-ui run test:regression -- --workers=1` — 72 passed and 4 skipped, with one known timing-sensitive sync-highlight failure; isolated rerun of that test passed; root config doctor validation, removed-CBOR diagnostic, and lockfile dependency checks — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`af0655c`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `Cargo.lock` | 0 | 28 | Removes ciborium and its transitive lockfile entries. |
+| `config-samples/reference_full_annotated.yml` | 0 | 8 | Removes the CBOR source and sensor tab. |
+| `config-samples/three_udp_cbor_two_tabs.yml` | 0 | 28 | Deletes the CBOR-focused sample configuration. |
+| `crates/embed-log-core/Cargo.toml` | 0 | 1 | Removes the ciborium dependency. |
+| `crates/embed-log-core/src/config/loader.rs` | 31 | 43 | Rejects removed CBOR parser configs and updates parser/sample validation. |
+| `crates/embed-log-core/src/parsers/cbor.rs` | 0 | 153 | Deletes CBOR datagram decoding and unit tests. |
+| `crates/embed-log-core/src/parsers/mod.rs` | 0 | 3 | Removes CBOR parser registration and export. |
+| `crates/embed-log-core/src/parsers/traits.rs` | 1 | 1 | Generalizes stream-buffering documentation. |
+| `crates/embed-log-core/src/sources/udp.rs` | 0 | 30 | Removes the UDP CBOR integration test. |
+| `docs/architecture.md` | 3 | 4 | Documents only retained parser behavior. |
+| `docs/configuration.md` | 1 | 24 | Removes CBOR schema, examples, and reference configuration. |
+| `docs/getting-up-to-speed.md` | 1 | 1 | Lists only retained parsers. |
+| `embed-log.yml` | 0 | 11 | Removes the CBOR source and tab from the root configuration. |
+| `tests-ui/config-regression.yml` | 0 | 10 | Removes the browser CBOR fixture source and tab. |
+| `tests-ui/regression-categories.mjs` | 0 | 1 | Removes the deleted CBOR regression from the data category. |
+| `tests-ui/regression-inventory.json` | 0 | 6 | Removes CBOR browser-test inventory. |
+| `tests-ui/regression-tests/cbor-decoder.spec.js` | 0 | 83 | Deletes CBOR browser regression scenarios. |
+| `tests-ui/regression-tests/copy-format.spec.js` | 3 | 1 | Ignores marker delimiters when checking compact log formatting. |
+| `tests-ui/regression-tests/demo-smoke.spec.js` | 13 | 12 | Updates selection checks and stabilizes virtual-history assertions. |
+| `tests-ui/regression-tests/export-replay.spec.js` | 2 | 2 | Updates unwrapped tab traversal for the retained seven panes. |
+| `tests-ui/regression-tests/layout-sync.spec.js` | 3 | 3 | Updates unwrapped tab traversal for the retained seven panes. |
+| `tests-ui/regression-tests/scope-selection.spec.js` | 8 | 9 | Removes CBOR pane assumptions from selection and export checks. |
+| `tests-ui/rust-test-server.mjs` | 1 | 46 | Replaces synthetic CBOR encoding/traffic with plain UDP text. |
+| `tests-ui/tests/rust-server.spec.js` | 2 | 20 | Replaces CBOR browser coverage with retained UDP text coverage. |
+
+## 2026-08-03 17:35:59 UTC / 2026-08-03 19:35:59 CEST (Warsaw)
+
+- **Commit:** `a2cf3fb` — `Remove self-update command`
+- **Task:** Remove the obsolete `embed-log update` command, updater implementation/dependencies/tests, and self-update release and documentation surfaces while retaining installer checksum verification.
+- **Started:** 2026-08-03 17:32:15 UTC / 2026-08-03 19:32:15 CEST (+0200) (Warsaw; measured from the first implementation file write)
+- **Completed:** 2026-08-03 17:35:59 UTC / 2026-08-03 19:35:59 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli --package embed-log-tui` — passed (78 CLI, 201 core, and 73 TUI tests); `cargo clippy --locked --package embed-log-core --package embed-log-cli --package embed-log-tui --all-targets -- -D warnings` — passed; `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (4 tests); release CLI build and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged `version --json`, removed-command rejection, workflow YAML parsing, stale-reference search, and lockfile dependency checks — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`a2cf3fb`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 0 | 8 | Removes installed-binary self-update setup and integration steps. |
+| `.github/workflows/release-cli.yml` | 0 | 23 | Removes Unix updater and Windows updater-guidance release checks. |
+| `Cargo.lock` | 4 | 538 | Prunes updater HTTP, TLS, semantic-version, hashing, and transitive dependencies. |
+| `Cargo.toml` | 0 | 3 | Removes updater-only workspace dependencies. |
+| `RELEASE_AND_UPDATE.md` | 0 | 523 | Deletes the obsolete built-in self-update plan. |
+| `crates/embed-log-cli/Cargo.toml` | 1 | 4 | Removes updater dependencies and corrects retained-source package metadata. |
+| `crates/embed-log-cli/src/commands/misc.rs` | 0 | 350 | Removes release lookup, download, verification, replacement, and updater tests. |
+| `crates/embed-log-cli/src/main.rs` | 1 | 26 | Removes the update command/dispatch and adds rejection regression coverage. |
+| `docs/cli.md` | 1 | 13 | Removes self-update usage and corrects stale doctor wording. |
+| `docs/development.md` | 0 | 1 | Removes the deleted updater integration-test command. |
+| `docs/getting-up-to-speed.md` | 1 | 10 | Removes the self-update workflow and renumbers the team workflow. |
+| `docs/non-session-roadmap.md` | 1 | 8 | Removes deferred built-in updater work. |
+| `docs/releasing.md` | 1 | 1 | Removes self-update fixture claims from release validation. |
+| `scripts/test_update_integration.py` | 0 | 135 | Deletes the fake GitHub Release self-update integration fixture. |
+
+## 2026-08-03 17:47:36 UTC / 2026-08-03 19:47:36 CEST (Warsaw)
+
+- **Commit:** `e1243fa` — `Remove raw log merge command`
+- **Task:** Remove the obsolete top-level `embed-log merge` command, raw-log merge implementation/tests, and its documentation while preserving session export and config-level merged sources.
+- **Started:** 2026-08-03 17:45:36 UTC / 2026-08-03 19:45:36 CEST (+0200) (Warsaw)
+- **Completed:** 2026-08-03 17:47:36 UTC / 2026-08-03 19:47:36 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli --package embed-log-tui` — passed (72 CLI, 201 core, and 73 TUI tests); `cargo clippy --locked --package embed-log-core --package embed-log-cli --package embed-log-tui --all-targets -- -D warnings` — passed; `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (4 tests); release CLI build and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged merge-command rejection, stale-reference search, and retained `sessions export`/`parse` help checks — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`e1243fa`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 1 | 1 | Removes raw-log merge from the CLI capability summary. |
+| `crates/embed-log-cli/src/commands/misc.rs` | 0 | 177 | Removes merge export construction, argument grouping, and unit tests. |
+| `crates/embed-log-cli/src/main.rs` | 1 | 35 | Removes merge arguments/dispatch and adds command-rejection coverage. |
+| `docs/architecture.md` | 1 | 1 | Removes merge from the top-level CLI utility list. |
+| `docs/cli.md` | 0 | 26 | Removes raw-log merge usage and timestamp examples. |
+| `docs/development.md` | 1 | 1 | Removes `merged.html` from generated artifact examples. |
+
+## 2026-08-03 17:59:31 UTC / 2026-08-03 19:59:31 CEST (Warsaw)
+
+- **Commit:** `266047f` — `Remove HTML parse command`
+- **Task:** Remove the obsolete top-level `embed-log parse` command, exported-HTML extraction implementation/tests, and documentation while preserving session read and export operations.
+- **Started:** 2026-08-03 17:57:44 UTC / 2026-08-03 19:57:44 CEST (+0200) (Warsaw)
+- **Completed:** 2026-08-03 17:59:31 UTC / 2026-08-03 19:59:31 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli --package embed-log-tui` — passed (68 CLI, 201 core, and 73 TUI tests); `cargo clippy --locked --package embed-log-core --package embed-log-cli --package embed-log-tui --all-targets -- -D warnings` — passed; `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (4 tests); release CLI build and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged parse-command rejection, stale-reference search, and retained `sessions export`/`sessions combined` help checks — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`266047f`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-cli/src/commands/misc.rs` | 2 | 97 | Removes HTML extraction/grouping code and four parse-specific unit tests. |
+| `crates/embed-log-cli/src/main.rs` | 2 | 14 | Removes parse arguments/dispatch, adds rejection coverage, and narrows the validate parser test. |
+| `docs/architecture.md` | 1 | 1 | Removes parse from the top-level CLI utility list. |
+| `docs/cli.md` | 0 | 8 | Removes exported-HTML parse usage and behavior. |
+| `docs/development.md` | 1 | 1 | Removes the parsed-output directory from generated artifact examples. |
+
+## 2026-08-03 18:14:26 UTC / 2026-08-03 20:14:26 CEST (Warsaw)
+
+- **Commit:** `63091d2` — `Remove session import command`
+- **Task:** Remove `embed-log sessions import`, its RFC3339 external-log mutation logic/tests, and documentation while retaining file/UDP capture and session export.
+- **Started:** 2026-08-03 18:11:44 UTC / 2026-08-03 20:11:44 CEST (+0200) (Warsaw)
+- **Completed:** 2026-08-03 18:14:26 UTC / 2026-08-03 20:14:26 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli --package embed-log-tui` — passed (67 CLI, 201 core, and 73 TUI tests); `cargo clippy --locked --package embed-log-core --package embed-log-cli --package embed-log-tui --all-targets -- -D warnings` — passed; `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (4 tests); release CLI build and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged import-command rejection, stale-reference search, and retained file-capture/session-export help checks — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`63091d2`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 0 | 155 | Removes import arguments/dispatch, timestamp parsing, session mutation, and parser test. |
+| `crates/embed-log-cli/src/main.rs` | 1 | 0 | Adds nested removed-command regression coverage for `sessions import`. |
+| `docs/cli.md` | 0 | 9 | Removes external timestamped-log import usage. |
+| `docs/getting-up-to-speed.md` | 1 | 17 | Replaces post-capture import guidance with configured file/UDP capture. |
+
+## 2026-08-03 18:33:41 UTC / 2026-08-03 20:33:41 CEST (Warsaw)
+
+- **Commit:** `40b06b2` — `Remove session bundle command`
+- **Task:** Remove `embed-log sessions bundle`, archive generation/tests, support-bundle documentation, and direct archive dependencies while preserving HTML/raw/JSONL session exports.
+- **Started:** 2026-08-03 18:31:01 UTC / 2026-08-03 20:31:01 CEST (+0200) (Warsaw)
+- **Completed:** 2026-08-03 18:33:41 UTC / 2026-08-03 20:33:41 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli --package embed-log-tui` — passed (66 CLI, 201 core, and 73 TUI tests); `cargo clippy --locked --package embed-log-core --package embed-log-cli --package embed-log-tui --all-targets -- -D warnings` — passed; `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (4 tests); release CLI build and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged bundle-command rejection, stale-reference search, retained export-format help, and direct archive-dependency checks — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`40b06b2`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `Cargo.lock` | 0 | 23 | Removes the direct CLI archive dependency edges and unused tar/xattr packages. |
+| `Cargo.toml` | 0 | 2 | Removes direct workspace archive dependencies. |
+| `crates/embed-log-cli/Cargo.toml` | 0 | 2 | Removes direct CLI flate2 and tar dependencies. |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 0 | 71 | Removes bundle arguments/dispatch, tarball generation, diagnostics injection, and archive test. |
+| `crates/embed-log-cli/src/main.rs` | 1 | 1 | Moves bundle from accepted session commands to removed-command regression coverage. |
+| `docs/automation-agent-plan.md` | 1 | 1 | Replaces stale import/bundle wording with current mutation safeguards. |
+| `docs/cli.md` | 0 | 7 | Removes support-bundle usage and behavior. |
+| `docs/getting-up-to-speed.md` | 1 | 4 | Uses retained session exports for sharing and diagnosis. |
+
+## 2026-08-03 18:41:52 UTC / 2026-08-03 20:41:52 CEST (Warsaw)
+
+- **Commit:** `f48c155` — `Remove session prune command`
+- **Task:** Remove `embed-log sessions prune`, recursive retention/deletion logic/tests, and prune documentation while preserving explicit session listing and exports.
+- **Started:** 2026-08-03 18:39:54 UTC / 2026-08-03 20:39:54 CEST (+0200) (Warsaw)
+- **Completed:** 2026-08-03 18:41:52 UTC / 2026-08-03 20:41:52 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli --package embed-log-tui` — passed (65 CLI, 201 core, and 73 TUI tests); `cargo clippy --locked --package embed-log-core --package embed-log-cli --package embed-log-tui --all-targets -- -D warnings` — passed; `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (4 tests); release CLI build and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged prune-command rejection, stale-reference search, and retained session-list/export help checks — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`f48c155`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 0 | 83 | Removes prune arguments/dispatch, recursive size/deletion logic, and retention test. |
+| `crates/embed-log-cli/src/main.rs` | 1 | 9 | Moves prune from accepted session commands to removed-command regression coverage. |
+| `docs/agent-capabilities.md` | 1 | 1 | Replaces stale prune/import guardrails with general session-data safeguards. |
+| `docs/cli.md` | 0 | 7 | Removes prune usage and behavior. |
+| `docs/getting-up-to-speed.md` | 1 | 10 | Removes built-in retention workflow and points to project retention tooling. |
+| `docs/non-session-roadmap.md` | 1 | 1 | Removes obsolete retention backlog wording. |
+
+## 2026-08-03 19:22:54 UTC / 2026-08-03 21:22:54 CEST (Warsaw)
+
+- **Commit:** `a0b98cf` — `Remove session marker inspection command`
+- **Task:** Remove the offline `embed-log sessions marker list/show` CLI surface, dedicated filtering/formatting code, tests, and documentation while retaining marker persistence, browser/TUI marker behavior, control API creation, exports, and session marker counts.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-03 19:22:54 UTC / 2026-08-03 21:22:54 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --workspace` — passed (59 CLI, 201 core, and 73 TUI tests); `cargo clippy --locked --workspace --all-targets -- -D warnings` — passed; `PYTHONPATH=sdk/python python3 -m pytest sdk/python/tests -q` — passed (52 tests, 2 skipped); `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui test` — passed sequentially (4 Playwright tests with 1 worker); `cargo build --locked --release` and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged `sessions marker` rejection and stale CLI-reference search — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`a0b98cf`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 0 | 11 | Removes marker inspection command examples. |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 6 | 287 | Removes marker list/show arguments, dispatch, rendering/filtering helpers, and dedicated tests while retaining marker artifact loading for exports and counts. |
+| `crates/embed-log-cli/src/main.rs` | 1 | 0 | Adds removed-command regression coverage for `sessions marker`. |
+| `sdk-control-api-summary.md` | 1 | 17 | Removes claims that the retired marker inspection CLI remains available. |
+| `sdk/python/tests/test_e2e.py` | 0 | 76 | Removes end-to-end assertions that invoke the retired CLI; existing marker persistence and broadcast coverage remains. |
+| `skills/embed-log/SKILL.md` | 1 | 1 | Removes `marker` from accepted `latest` session commands. |
+
+## 2026-08-03 19:35:56 UTC / 2026-08-03 21:35:56 CEST (Warsaw)
+
+- **Commit:** `3aa8fce` — `Introduce YAML config v2 and port 18080`
+- **Task:** Introduce canonical YAML config v2 with `server.listen`, named source mappings, source-local UART baud/path fields, optional `ui.tabs`, v2 config generation, and the new `127.0.0.1:18080` default while retaining temporary v1 read compatibility for frontend-plugin migration.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-03 19:35:56 UTC / 2026-08-03 21:35:56 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --workspace` — passed (59 CLI, 207 core, and 73 TUI tests); `cargo clippy --locked --workspace --all-targets -- -D warnings` — passed; `PYTHONPATH=sdk/python python3 -m pytest sdk/python/tests -q` — passed (53 tests, 2 skipped), including a real backend/PTTY v2 configuration flow; `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (4 browser tests against a v2 server config); `cargo build --locked --release` and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged binary validation of `embed-log.yml` confirmed host `127.0.0.1` and port `18080`.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`3aa8fce`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 3 | 3 | Updates default browser, control, and TUI endpoints to port 18080. |
+| `config-samples/double_uart_udp_two_tabs.yml` | 15 | 15 | Migrates the multi-source sample to canonical v2. |
+| `config-samples/dual_uart_zephyr_dict.yml` | 17 | 23 | Migrates dictionary UART paths, baud, and UI layout to v2. |
+| `config-samples/reference_full_annotated.yml` | 11 | 17 | Replaces the plugin-oriented v1 reference with retained v2 settings. |
+| `config-samples/single_file_single_tab.yml` | 8 | 8 | Migrates file `path` and UI keys to v2. |
+| `config-samples/single_uart_single_tab.yml` | 9 | 9 | Migrates UART `path`/`baud` and UI keys to v2. |
+| `crates/embed-log-cli/src/commands/run.rs` | 3 | 3 | Writes saved quick-run configurations through the canonical v2 serializer. |
+| `crates/embed-log-cli/src/main.rs` | 2 | 2 | Makes `--port` canonical while retaining `--ws-port` as an alias. |
+| `crates/embed-log-core/src/config/loader.rs` | 452 | 21 | Adds strict v2 parsing/normalization, v2 serialization, actionable validation, generated tabs, and unit coverage. |
+| `crates/embed-log-core/src/config/mod.rs` | 1 | 1 | Exports v2 configuration serialization. |
+| `crates/embed-log-core/src/config/models.rs` | 2 | 2 | Changes runtime defaults to config version 2 and port 18080. |
+| `crates/embed-log-tui/src/main.rs` | 1 | 1 | Updates standalone TUI endpoint help. |
+| `docs/agent-capabilities.md` | 2 | 2 | Updates status and control endpoint examples. |
+| `docs/api-status.md` | 2 | 2 | Updates status API examples. |
+| `docs/automation-agent-plan.md` | 1 | 1 | Updates the documented control endpoint. |
+| `docs/cli.md` | 4 | 4 | Documents `server.listen` and canonical `--port` overrides. |
+| `docs/configuration.md` | 93 | 309 | Rewrites configuration documentation around the concise v2 schema and migration table. |
+| `docs/getting-up-to-speed.md` | 11 | 10 | Replaces the old UART example with v2 and updates the control endpoint. |
+| `docs/tui.md` | 2 | 2 | Updates standalone TUI endpoint examples. |
+| `embed-log.yml` | 19 | 43 | Replaces the checked-in root configuration with valid v2. |
+| `sdk/python/embed_log_sdk/config.py` | 31 | 10 | Parses v2 listen/source mappings and defaults SDK discovery to port 18080. |
+| `sdk/python/embed_log_sdk/watcher.py` | 1 | 1 | Updates the watcher default control endpoint. |
+| `sdk/python/examples/watcher.yml` | 1 | 1 | Updates the watcher example endpoint. |
+| `sdk/python/tests/test_backend_hardware_stm32g0_multi_uart.py` | 1 | 1 | Uses canonical `--port` in hardware integration startup. |
+| `sdk/python/tests/test_backend_hardware_uart.py` | 1 | 1 | Uses canonical `--port` in hardware integration startup. |
+| `sdk/python/tests/test_client.py` | 14 | 14 | Updates mocked client endpoints to the new default. |
+| `sdk/python/tests/test_config.py` | 22 | 1 | Adds SDK v2 mapping/listen coverage and updates the default-port assertion. |
+| `sdk/python/tests/test_e2e.py` | 10 | 9 | Runs the real backend/PTTY SDK integration fixture from a v2 config. |
+| `sdk/python/tests/test_events.py` | 6 | 6 | Updates event client endpoint fixtures. |
+| `sdk/python/tests/test_watcher.py` | 6 | 6 | Updates watcher endpoint fixtures and expectations. |
+| `test-mvp.yml` | 10 | 16 | Migrates the checked-in MVP fixture to v2. |
+| `tests-ui/rust-test-server.mjs` | 11 | 17 | Starts browser E2E tests from a generated v2 configuration. |
+
+## 2026-08-03 19:47:14 UTC / 2026-08-03 21:47:14 CEST (Warsaw)
+
+- **Commit:** `6fb9306` — `Add named daemon lifecycle`
+- **Task:** Add config-based background daemons with named instance registration/discovery, automatic port selection, readiness polling, direct or registered status queries, stale PID cleanup, safe graceful stop, diagnostics, and daemon-specific HTML shutdown policy.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-03 19:47:14 UTC / 2026-08-03 21:47:14 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --workspace` plus the final daemon-focused rerun — passed (62 CLI unit tests, 2 Linux process integration tests, 207 core tests, and 73 TUI tests); `cargo clippy --locked --workspace --all-targets -- -D warnings` — passed; `PYTHONPATH=sdk/python python3 -m pytest sdk/python/tests -q` — passed (53 tests, 2 skipped); `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (4 tests); `cargo build --locked --release` and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged daemon start/status/stop lifecycle passed and confirmed daemon shutdown produced no automatic HTML.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`6fb9306`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 12 | 0 | Adds concise named-daemon startup, status, stop, and selection usage. |
+| `crates/embed-log-cli/src/commands/daemon.rs` | 518 | 0 | Implements registry records, stale cleanup, free-port selection, child startup/readiness, HTTP status, instance resolution, safe signaling, and stop cleanup. |
+| `crates/embed-log-cli/src/commands/mod.rs` | 1 | 0 | Registers the daemon command implementation module. |
+| `crates/embed-log-cli/src/commands/run.rs` | 4 | 1 | Passes daemon shutdown policy into the core server. |
+| `crates/embed-log-cli/src/main.rs` | 65 | 2 | Adds `run --daemon --instance`, `status`, `stop`, JSON flags, and hidden child dispatch. |
+| `crates/embed-log-cli/tests/daemon_lifecycle.rs` | 204 | 0 | Adds Linux process E2E coverage for readiness, status paths, stale/duplicate records, ambiguity, distinct ports, clean stop, and skipped daemon HTML. |
+| `crates/embed-log-core/src/runtime/server.rs` | 16 | 5 | Makes clean-shutdown HTML export configurable and disables it for daemon children. |
+| `docs/cli.md` | 21 | 0 | Documents registry location, resolution order, direct URLs, auto ports, diagnostics, and stop safety. |
+
+## 2026-08-04 07:23:46 UTC / 2026-08-04 09:23:46 CEST (Warsaw)
+
+- **Commit:** `ee6b360` — `Add titled session rotation`
+- **Task:** Add instance-aware `sessions new --title` rotation that preserves source tasks/UART ownership, stores the original title, creates slugged session IDs, updates browser/TUI clients, and applies foreground-versus-daemon HTML policy.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 07:23:46 UTC / 2026-08-04 09:23:46 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --workspace` plus final focused title/daemon tests — passed (63 CLI unit tests, 2 Linux process integration tests, 208 core tests, and 73 TUI tests); `cargo clippy --locked --workspace --all-targets -- -D warnings` — passed; `PYTHONPATH=sdk/python python3 -m pytest sdk/python/tests -q` — passed (53 tests, 2 skipped); `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (4 tests), including titled browser rotation and post-rotation log routing; release build and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged daemon start/titled-rotate/status/stop verified stable PID, current session, title manifest, slug, and no automatic daemon HTML.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`ee6b360`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 2 | 1 | Adds titled experiment rotation to the daemon workflow. |
+| `crates/embed-log-cli/src/commands/daemon.rs` | 34 | 9 | Exposes instance endpoint resolution and adds reusable JSON POST support. |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 91 | 0 | Adds `sessions new`, title validation, instance/URL targeting, and bounded JSON/text results. |
+| `crates/embed-log-cli/src/main.rs` | 11 | 0 | Adds parser regression coverage for the new session command surface. |
+| `crates/embed-log-cli/tests/daemon_lifecycle.rs` | 90 | 5 | Extends process E2E coverage with titled rotation, title manifest/slug, stable PID, continued source routing, and failure cleanup guards. |
+| `crates/embed-log-core/src/net/ws_server.rs` | 14 | 4 | Accepts optional rotation titles and passes them through the broadcast/API path. |
+| `crates/embed-log-core/src/runtime/server.rs` | 142 | 75 | Validates titles, allocates titled IDs, rotates shared writers/session state, and skips rotation HTML for daemons. |
+| `crates/embed-log-core/src/session/manager.rs` | 10 | 0 | Persists and exposes the original session title in manifests and session APIs. |
+| `docs/cli.md` | 15 | 0 | Documents titled rotation, validation, client continuity, and HTML behavior. |
+| `tests-ui/tests/rust-server.spec.js` | 7 | 1 | Verifies titled HTTP rotation, slug/title response, pane clearing, and subsequent live routing. |
+
+## 2026-08-04 07:53:21 UTC / 2026-08-04 09:53:21 CEST (Warsaw)
+
+- **Commit:** `740fcfa` — `Make daemon targeting explicit`
+- **Task:** Replace hidden daemon port/target policies with required config, instance, and port inputs; add verified idempotent reuse; require explicit mutation targets; surface registry cleanup/errors; remove disconnect-triggered export; and propagate foreground bind failures.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 07:53:21 UTC / 2026-08-04 09:53:21 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --workspace` plus final daemon-focused reruns — passed (63 CLI unit tests, 3 Linux process integration tests, 207 core tests, and 73 TUI tests); `cargo clippy --locked --workspace --all-targets -- -D warnings` — passed; `PYTHONPATH=sdk/python python3 -m pytest sdk/python/tests -q` — passed (53 tests, 2 skipped); `npm --prefix tests-ui run test:unit` — passed (19 tests); final `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (5 tests), including no export after final-browser disconnect; release build and packaging passed; packaged checks verified missing-port rejection, explicit start, verified reuse with stable PID, implicit-mutation rejection, and explicit stop.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`740fcfa`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 2 | 2 | Replaces automatic port/instance wording with explicit idempotent daemon usage. |
+| `crates/embed-log-cli/src/commands/daemon.rs` | 108 | 32 | Requires an explicit port, fingerprints requested identity, reuses exact instances, rejects conflicts, requires mutation targets, and surfaces registry actions/errors. |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 2 | 2 | Makes titled rotation use explicit mutating endpoint resolution. |
+| `crates/embed-log-cli/src/main.rs` | 6 | 2 | Requires daemon config, instance, and port through CLI argument constraints. |
+| `crates/embed-log-cli/tests/daemon_lifecycle.rs` | 90 | 8 | Covers missing/occupied ports, idempotent reuse, changed-config conflict, endpoint ownership, explicit mutations, malformed registry, and foreground bind exit. |
+| `crates/embed-log-core/src/net/control_ws.rs` | 1 | 8 | Removes obsolete no-client-export state from control API test fixtures. |
+| `crates/embed-log-core/src/net/ws_server.rs` | 4 | 105 | Removes browser-disconnect export scheduling and leaves client-count tracking side-effect free. |
+| `crates/embed-log-core/src/runtime/server.rs` | 14 | 11 | Propagates HTTP server/bind failure instead of waiting indefinitely and removes obsolete export state. |
+| `docs/cli.md` | 5 | 5 | Documents explicit targeting, verified reuse, visible registry handling, and no disconnect export. |
+| `mvp-embed-log-todo.md` | 8 | 6 | Updates the implementation contract to the reviewed explicit policy. |
+| `tests-ui/tests/rust-server.spec.js` | 12 | 0 | Adds browser E2E proof that final-client disconnect does not export HTML. |
+
+## 2026-08-04 08:18:31 UTC / 2026-08-04 10:18:31 CEST (Warsaw)
+
+- **Commit:** `8b40c24` — `Add atomic UART transmit command`
+- **Task:** Add explicit top-level UART TX with line/raw/file/stdin input, arm-before-write substring or regex expectations, bounded live evidence, timeout JSON, exact write acknowledgements, and Linux PTY process coverage.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 08:18:31 UTC / 2026-08-04 10:18:31 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; final `cargo test --locked --workspace` — passed (67 CLI unit tests, 3 daemon process tests, 1 TX/PTY process test, 207 core tests, and 73 TUI tests); `cargo clippy --locked --workspace --all-targets -- -D warnings` — passed; `PYTHONPATH=sdk/python python3 -m pytest sdk/python/tests -q` — passed (53 tests, 2 skipped); `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (5 tests); `cargo build --locked --release` and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged binary PTY check verified daemon startup, `tx --line probe --expect 'packaged ready'`, bounded JSON, actual byte count, and explicit stop.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`8b40c24`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `Cargo.lock` | 2 | 0 | Records the CLI's existing workspace WebSocket dependencies. |
+| `README.md` | 3 | 1 | Adds the atomic TX/expect daemon workflow. |
+| `crates/embed-log-cli/Cargo.toml` | 2 | 0 | Adds futures and Tokio Tungstenite client dependencies. |
+| `crates/embed-log-cli/src/commands/daemon.rs` | 0 | 2 | Removes a racy post-release port assertion found during parallel validation. |
+| `crates/embed-log-cli/src/commands/mod.rs` | 1 | 0 | Registers the TX command module. |
+| `crates/embed-log-cli/src/commands/tx.rs` | 522 | 0 | Implements explicit WebSocket TX, exact inputs, atomic expectations, bounded context, timeout evidence, and protocol guards. |
+| `crates/embed-log-cli/src/main.rs` | 123 | 0 | Defines and dispatches the top-level `tx` CLI with exclusive input and expectation options. |
+| `crates/embed-log-cli/tests/tx_cli.rs` | 320 | 0 | Exercises line/raw/file/stdin TX, matching, timeout, target/writability rejection, wire bytes, and persistence through a PTY daemon. |
+| `crates/embed-log-core/src/net/control_ws.rs` | 38 | 9 | Accepts exact byte arrays, explicit line normalization, and reports actual acknowledged wire bytes. |
+| `crates/embed-log-core/src/net/ws_server.rs` | 1 | 0 | Preserves browser UART line-normalization behavior explicitly. |
+| `crates/embed-log-core/src/sources/traits.rs` | 4 | 2 | Extends TX commands with line-ending policy and byte-count acknowledgements. |
+| `crates/embed-log-core/src/sources/uart.rs` | 8 | 2 | Writes exact or normalized payloads and acknowledges the actual byte count. |
+| `docs/agent-capabilities.md` | 12 | 0 | Documents authorized atomic UART experiments and bounded evidence. |
+| `docs/cli.md` | 20 | 0 | Documents all TX inputs, matching, timeout, gap, output, and targeting semantics. |
+| `mvp-embed-log-todo.md` | 3 | 1 | Marks the UART experiment milestone implemented and clarifies line behavior. |
+| `sdk/python/tests/test_e2e.py` | 2 | 2 | Expects the actual normalized wire-byte count from TX acknowledgement. |
+| `skills/embed-log/SKILL.md` | 12 | 0 | Teaches agents the guarded, token-bounded TX/expect workflow. |
+
+## 2026-08-04 08:38:21 UTC / 2026-08-04 10:38:21 CEST (Warsaw)
+
+- **Commit:** `0ee3a49` — `Add retained temporary watches`
+- **Task:** Add explicit temporary watch add/wait/remove commands with runtime event-rule integration, literal/regex matching, one-shot TTL deactivation, retained pre-wait matches, standard event persistence, stable wait failures, and Linux process coverage.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 08:38:21 UTC / 2026-08-04 10:38:21 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --workspace` — passed (68 CLI unit tests, 3 daemon process tests, 1 TX/PTY process test, 1 watch process test, 210 core tests, and 73 TUI tests); `cargo clippy --locked --workspace --all-targets -- -D warnings` — passed; `PYTHONPATH=sdk/python python3 -m pytest sdk/python/tests -q` — passed (53 tests, 2 skipped); `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (5 tests); `cargo build --locked --release` and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged binary file-tail check verified explicit add, match retention, wait, remove, and stop.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`0ee3a49`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 5 | 1 | Adds the retained-watch daemon workflow. |
+| `crates/embed-log-cli/src/commands/mod.rs` | 1 | 0 | Registers the watch command module. |
+| `crates/embed-log-cli/src/commands/watch.rs` | 458 | 0 | Implements explicit add/wait/remove clients, polling without log streaming, TTL validation, and stable JSON outcomes. |
+| `crates/embed-log-cli/src/main.rs` | 8 | 0 | Adds the top-level `watch` command group and dispatch. |
+| `crates/embed-log-cli/tests/watch_cli.rs` | 273 | 0 | Covers retained pre-wait matches, literal/regex captures, expiry, local timeout, missing watches, removal, persistence, and targeting. |
+| `crates/embed-log-core/src/net/control_ws.rs` | 324 | 3 | Adds watch control operations, TTL scheduling, runtime-rule lifecycle, temporary-rule isolation, and unit coverage. |
+| `crates/embed-log-core/src/net/mod.rs` | 1 | 0 | Exposes the watch-state module. |
+| `crates/embed-log-core/src/net/watch.rs` | 229 | 0 | Defines bounded process-local watch state, expiration, retained matching, and one-shot rule removal. |
+| `crates/embed-log-core/src/net/ws_server.rs` | 6 | 0 | Stores shared watch registry and identifier allocation in server state. |
+| `crates/embed-log-core/src/runtime/server.rs` | 30 | 0 | Routes runtime event matches into retained watches while ignoring TX/expired matches. |
+| `docs/agent-capabilities.md` | 11 | 0 | Documents token-efficient external-trigger watches. |
+| `docs/cli.md` | 19 | 0 | Documents watch matching, TTL, retention, persistence, targeting, and JSON failures. |
+| `mvp-embed-log-todo.md` | 2 | 1 | Marks the temporary-watch milestone implemented. |
+| `sdk-control-api-summary.md` | 10 | 0 | Records the watch create/get/delete control protocol. |
+| `skills/embed-log/SKILL.md` | 11 | 0 | Teaches agents to use short-lived retained watches instead of streaming logs. |
+
+## 2026-08-04 09:23:16 UTC / 2026-08-04 11:23:16 CEST (Warsaw)
+
+- **Commit:** `ba2b38f` — `Add global sequence and bounded cursors`
+- **Task:** Add authoritative session-global ordering, sequence-bearing log/event/TX/watch streams, atomic rotation reset, bounded cursor reads, deterministic event/sequence context, and compact agent output with selectable relative/none/absolute time.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 09:23:16 UTC / 2026-08-04 11:23:16 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --workspace` plus final sequence/TX/watch focused reruns — passed (70 CLI unit tests, 3 daemon process tests, 1 sequence/cursor process test, 1 TX/PTY process test, 1 watch process test, 211 core tests, and 73 TUI tests); `cargo clippy --locked --workspace --all-targets -- -D warnings` — passed; `PYTHONPATH=sdk/python python3 -m pytest sdk/python/tests -q` — passed (53 tests, 2 skipped); `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (5 tests); `cargo build --locked --release` and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged functional checks verified multi-source sequence pagination, relative compact tuples, sequence context, and full JSON, followed by a final packaged CLI-surface check.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`ba2b38f`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 8 | 1 | Adds bounded cursor and selectable-time examples. |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 609 | 0 | Implements bounded read/around, pagination, validation, compact tuples/text, full JSON, event resolution, and time selection. |
+| `crates/embed-log-cli/src/commands/tx.rs` | 2 | 0 | Exposes matched/context sequence as the next cursor. |
+| `crates/embed-log-cli/src/commands/watch.rs` | 1 | 0 | Exposes retained match sequence as the next cursor. |
+| `crates/embed-log-cli/src/main.rs` | 29 | 0 | Adds parser coverage for read and around command surfaces. |
+| `crates/embed-log-cli/tests/daemon_lifecycle.rs` | 17 | 0 | Verifies sequence and source-local line reset on rotation. |
+| `crates/embed-log-cli/tests/sequence_cursor.rs` | 419 | 0 | Covers multi-source ordering, pagination, time modes, filtering, full JSON, sequence/event context, invalid cursors, and rotation. |
+| `crates/embed-log-cli/tests/tx_cli.rs` | 7 | 0 | Verifies TX expectations carry sequence and next cursor. |
+| `crates/embed-log-cli/tests/watch_cli.rs` | 2 | 1 | Verifies retained watch matches carry sequence and next cursor. |
+| `crates/embed-log-core/src/net/control_ws.rs` | 14 | 0 | Preserves sequence/session identity in control `log.entry` messages and tests. |
+| `crates/embed-log-core/src/net/watch.rs` | 1 | 3 | Retains the real event sequence instead of replacing it with null. |
+| `crates/embed-log-core/src/runtime/server.rs` | 156 | 9 | Serializes cross-source commits, assigns/publishes sequence, resets rotation state, and proves concurrent ordering. |
+| `crates/embed-log-core/src/session/manager.rs` | 26 | 7 | Owns per-session sequence allocation and atomic sequenced combined append. |
+| `crates/embed-log-tui/src/protocol.rs` | 10 | 0 | Accepts sequence and session identity on live logs/events. |
+| `docs/agent-capabilities.md` | 10 | 1 | Documents bounded cursor and timestamp-selection workflows. |
+| `docs/architecture.md` | 4 | 0 | Documents the serialized ordering invariant. |
+| `docs/cli.md` | 42 | 3 | Defines compact/full output, time modes, pagination, context, limits, and compatibility behavior. |
+| `frontend/kernel/logStore.js` | 3 | 0 | Retains sequence/session identity through lazy line hydration. |
+| `frontend/lines.js` | 2 | 0 | Stores sequence/session identity on hydrated browser lines. |
+| `frontend/ws.js` | 3 | 1 | Passes live sequence/session metadata into browser storage. |
+| `mvp-embed-log-todo.md` | 4 | 2 | Marks global sequence/cursor work complete and leaves atomic live replay as future work. |
+| `sdk/python/embed_log_sdk/models.py` | 9 | 0 | Adds optional sequence/session fields to log and event models. |
+| `sdk/python/tests/test_models.py` | 4 | 0 | Verifies Python log sequence/session parsing. |
+| `skills/embed-log/SKILL.md` | 10 | 3 | Teaches agents bounded cursor reads, exact context, and time selection. |
+| `tests-ui/unit/logStore.test.js` | 7 | 1 | Verifies browser hydration preserves global and local identity. |
+
+## 2026-08-04 09:59:16 UTC / 2026-08-04 11:59:16 CEST (Warsaw)
+
+- **Commit:** `2a2ba4a` — `Add machine-readable CLI discovery`
+- **Task:** Add compact, versioned `embed-log schema` discovery generated from the real Clap graph and augmented with agent-relevant command semantics, progressive command/config/error selectors, CLI-first architecture guidance, and process coverage.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 09:59:16 UTC / 2026-08-04 11:59:16 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --workspace` — passed (76 CLI unit tests, 3 daemon process tests, 2 schema process tests, 1 sequence/cursor process test, 1 TX/PTY process test, 1 watch process test, 211 core tests, and 73 TUI tests); final `cargo test --locked -p embed-log-cli --test schema_cli` rerun — passed (2 tests); `cargo clippy --locked --workspace --all-targets -- -D warnings` — passed; `PYTHONPATH=sdk/python python3 -m pytest sdk/python/tests -q` — passed (53 tests, 2 skipped); `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (5 tests); `cargo build --locked --release` and `scripts/package-cli.sh x86_64-unknown-linux-gnu` — passed; packaged-binary checks verified compact and explicit-`--json` indexes, dotted/split command selectors, command targeting/cursor metadata, and config discovery. The packaged compact index was 999 bytes and the targeted `sessions.read` descriptor was 3024 bytes.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`2a2ba4a`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 11 | 0 | Introduces progressive schema discovery and optional familiar `--json` spelling. |
+| `crates/embed-log-cli/src/commands/mod.rs` | 1 | 0 | Registers the schema command module. |
+| `crates/embed-log-cli/src/commands/schema.rs` | 620 | 0 | Renders deterministic capability, command, error, and config descriptors from Clap plus semantic metadata. |
+| `crates/embed-log-cli/src/main.rs` | 34 | 1 | Adds the `schema` command, selectors, compact/pretty JSON controls, dispatch, and parser coverage. |
+| `crates/embed-log-cli/tests/schema_cli.rs` | 89 | 0 | Adds packaged-style process coverage for discovery, targeting, limits, selectors, pretty output, and unknown selectors. |
+| `docs/agent-capabilities.md` | 15 | 0 | Separates static CLI discovery from dynamic daemon status. |
+| `docs/automation-agent-plan.md` | 15 | 0 | Records the CLI-first “agents speak CLI” architecture principle and consequences. |
+| `docs/cli.md` | 20 | 0 | Documents schema selectors, cache/version behavior, contents, and partial error coverage. |
+| `mvp-embed-log-todo.md` | 4 | 1 | Adds schema to the primary surface and marks discovery complete ahead of remaining JSON normalization. |
+| `skills/embed-log/SKILL.md` | 13 | 4 | Teaches agents progressive schema discovery instead of parsing help. |
+
+## 2026-08-04 10:27:34 UTC / 2026-08-04 12:27:34 CEST (Warsaw)
+
+- **Commit:** `5002ae9` — `Normalize machine-readable CLI failures`
+- **Task:** Normalize every JSON-requesting CLI failure into one stable nested error envelope on stdout with a nonzero exit status, preserve structured TX/watch evidence, classify common agent failures, and publish the complete contract through schema discovery.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 10:27:34 UTC / 2026-08-04 12:27:34 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked --workspace` — passed (77 CLI unit tests, 3 daemon process tests, 1 JSON-error process test, 2 schema process tests, 1 sequence/cursor process test, 1 TX/PTY process test, 1 watch process test, 211 core tests, and 73 TUI tests); `cargo clippy --locked --workspace --all-targets -- -D warnings` — passed; `PYTHONPATH=sdk/python python3 -m pytest sdk/python/tests -q` — passed (53 tests, 2 skipped); `npm --prefix tests-ui run test:unit` — passed (19 tests); `npm --prefix tests-ui run test:e2e -- --workers=1` — passed (5 tests); release build, Linux packaging, and packaged `CLI_USAGE`/`INSTANCE_REQUIRED`/schema-error-contract checks — passed with empty stderr and expected nonzero exit statuses.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`5002ae9`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 1 | 1 | Documents the normalized JSON failure envelope. |
+| `crates/embed-log-cli/src/commands/schema.rs` | 16 | 5 | Publishes all-JSON-invocation coverage and stable error catalog. |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 19 | 0 | Identifies session commands that request machine output. |
+| `crates/embed-log-cli/src/commands/tx.rs` | 12 | 14 | Moves timeout evidence into the common nested error contract. |
+| `crates/embed-log-cli/src/commands/watch.rs` | 15 | 7 | Moves watch failures into the common contract and reports output mode. |
+| `crates/embed-log-cli/src/main.rs` | 69 | 3 | Handles Clap/runtime failures explicitly with JSON or human output and stable exits. |
+| `crates/embed-log-cli/src/output.rs` | 84 | 0 | Implements one-document JSON failures, reported-error suppression, and stable classification. |
+| `crates/embed-log-cli/tests/daemon_lifecycle.rs` | 40 | 22 | Verifies normalized daemon/target/usage failures. |
+| `crates/embed-log-cli/tests/json_errors.rs` | 63 | 0 | Adds process coverage for JSON usage/runtime envelopes and human stderr behavior. |
+| `crates/embed-log-cli/tests/schema_cli.rs` | 8 | 2 | Verifies normalized unknown-selector errors and complete catalog coverage. |
+| `crates/embed-log-cli/tests/sequence_cursor.rs` | 7 | 1 | Verifies structured invalid-cursor failures. |
+| `crates/embed-log-cli/tests/tx_cli.rs` | 18 | 5 | Verifies nested targeting and expectation-timeout evidence. |
+| `crates/embed-log-cli/tests/watch_cli.rs` | 13 | 6 | Verifies nested watch error details and empty stderr. |
+| `docs/agent-capabilities.md` | 1 | 1 | Defines code-based handling for every JSON failure. |
+| `docs/cli.md` | 1 | 1 | Defines stdout envelope, exit, fallback, and human-mode behavior. |
+| `mvp-embed-log-todo.md` | 1 | 1 | Marks JSON failure normalization complete. |
+| `skills/embed-log/SKILL.md` | 1 | 1 | Teaches agents to branch on stable error codes. |
+
+## 2026-08-04 10:40:20 UTC / 2026-08-04 12:40:20 CEST (Warsaw)
+
+- **Commit:** `e933688` — `Add backend textual CoAP parser`
+- **Task:** Add source-attached backend `hex-coap` parsing that keeps a textual log prefix, replaces bytes from the first valid compact/separated CoAP header with a readable shared decode, passes non-CoAP lines through, and works before persistence/live publication.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 10:40:20 UTC / 2026-08-04 12:40:20 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; focused parser tests — passed (38 parser tests, including compact/separated/prefixed/partial/pass-through/request/response/content-format/block cases); `cargo test --locked --workspace` — passed (77 CLI unit tests, 3 daemon tests, 1 hex-CoAP source process test, 1 JSON-error test, 2 schema tests, sequence/TX/watch tests, 217 core tests, and 73 TUI tests); `cargo clippy --locked --workspace --all-targets -- -D warnings` — passed; Python SDK tests — passed (53, 2 skipped); frontend unit tests — passed (19); sequential Playwright tests — passed (5); release build, Linux package, and packaged daemon/file-source `hex-coap` persistence check — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`e933688`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 1 | 1 | Documents source-attached textual CoAP replacement behavior. |
+| `crates/embed-log-cli/src/commands/schema.rs` | 2 | 2 | Advertises `hex-coap` in binary/config capabilities. |
+| `crates/embed-log-cli/tests/hex_coap_cli.rs` | 118 | 0 | Verifies configured file-source decoding before persisted bounded reads. |
+| `crates/embed-log-cli/tests/schema_cli.rs` | 5 | 0 | Verifies parser discovery. |
+| `crates/embed-log-core/src/config/loader.rs` | 23 | 2 | Accepts and validates `hex-coap` for textual source types. |
+| `crates/embed-log-core/src/parsers/hex_coap.rs` | 156 | 0 | Implements buffered line scanning, first-header replacement, and parity-focused tests. |
+| `crates/embed-log-core/src/parsers/mod.rs` | 3 | 0 | Registers and constructs the new parser. |
+| `crates/embed-log-core/src/parsers/slip_coap.rs` | 68 | 11 | Shares CoAP decode logic and improves response, content-format, block, token, and payload rendering. |
+| `docs/architecture.md` | 1 | 1 | Marks the frontend CoAP plugin as legacy config-v1 compatibility. |
+| `docs/configuration.md` | 16 | 1 | Documents `hex-coap` YAML and exact replacement/pass-through semantics. |
+| `mvp-embed-log-todo.md` | 9 | 8 | Records backend textual CoAP completion and separates legacy plugin cleanup. |
+
+## 2026-08-04 11:06:02 UTC / 2026-08-04 13:06:02 CEST (Warsaw)
+
+- **Commit:** `33893c3` — `Simplify browser to experiment viewing`
+- **Task:** Remove the built-in frontend CoAP plugin now replaced by backend `hex-coap`, reject stale configs with migration guidance, and apply YAGNI to remove browser Clear/New session/server-session-management controls while preserving external rotation continuity and focused viewing/export/TX behavior.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 11:06:02 UTC / 2026-08-04 13:06:02 CEST (+0200) (Warsaw)
+- **Validation:** formatting/diff checks — passed; `cargo test --locked --workspace` — passed (77 CLI, daemon/hex-CoAP/JSON/schema/sequence/TX/watch process tests, 218 core, 73 TUI); strict workspace Clippy — passed; Python SDK — 53 passed, 2 skipped; frontend units — 19 passed; required sequential browser E2E — 5 passed including absent management controls and external rotation continuity; sequential backend-CoAP/custom-plugin regression subset — 2 passed. One mistakenly parallel Playwright attempt raced the shared `.tmp` server config and was discarded; sequential reruns passed. Release build/package and packaged removed-plugin migration check — passed; packaged frontend source has no removed controls/plugin file.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`33893c3`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-core/src/config/loader.rs` | 30 | 0 | Rejects removed built-in CoAP plugin with parser migration guidance and tests. |
+| `crates/embed-log-core/src/runtime/server.rs` | 3 | 3 | Rewords remaining plugin data as optional custom compatibility. |
+| `crates/embed-log-core/src/session/exporter.rs` | 0 | 2 | Removes obsolete browser-management capabilities from static profiles. |
+| `crates/embed-log-tui/src/protocol.rs` | 4 | 4 | Uses a neutral custom plugin fixture instead of removed CoAP UI. |
+| `docs/architecture.md` | 4 | 23 | Replaces built-in plugin flow with backend parsing/custom compatibility description. |
+| `docs/configuration.md` | 1 | 1 | Documents removed-plugin migration failure. |
+| `frontend/export.js` | 1 | 1 | Removes dead sessions-menu cleanup. |
+| `frontend/index.html` | 0 | 2 | Removes Clear and New session buttons. |
+| `frontend/lines.js` | 1 | 12 | Removes browser clear action while keeping internal rotation clearing. |
+| `frontend/main.js` | 1 | 1 | Removes obsolete session capability comment. |
+| `frontend/plugin-hex-coap.js` | 0 | 342 | Deletes frontend protocol decoder. |
+| `frontend/profile.js` | 0 | 4 | Removes clear/session-management capability flags. |
+| `frontend/renderToolbar.js` | 0 | 2 | Removes Clear and New session static actions. |
+| `frontend/ui.js` | 1 | 295 | Removes server save/open/list/rotate session UI. |
+| `frontend/viewer.css` | 0 | 74 | Removes sessions popup styling. |
+| `frontend/ws.js` | 0 | 13 | Removes dead HTML-status UI callbacks while retaining rotation handling. |
+| `mvp-embed-log-todo.md` | 4 | 1 | Records viewer-focused browser policy and plugin removal. |
+| `tests-ui/config-regression.yml` | 6 | 9 | Migrates regression sources from pane plugins to backend parser. |
+| `tests-ui/regression-categories.mjs` | 0 | 1 | Removes deleted session-workflow suite. |
+| `tests-ui/regression-inventory.json` | 2 | 18 | Removes obsolete plugin/session UI inventory. |
+| `tests-ui/regression-tests/deterministic-demo-coap.spec.js` | 17 | 34 | Verifies backend-decoded CoAP text in the browser. |
+| `tests-ui/regression-tests/pane-plugin-coap.spec.js` | 0 | 249 | Deletes obsolete frontend decoder/settings/export scenarios. |
+| `tests-ui/regression-tests/session-workflows.spec.js` | 0 | 133 | Deletes removed browser session-management scenarios. |
+| `tests-ui/tests/rust-server.spec.js` | 4 | 0 | Verifies management controls stay absent. |
+
+## 2026-08-04 11:13:09 UTC / 2026-08-04 13:13:09 CEST (Warsaw)
+
+- **Commit:** `590e318` — `Define essential Embed-log agent skill`
+- **Task:** Consolidate the completed MVP automation contract into one concise canonical agent skill covering discovery, safety, explicit daemon lifecycle, titled rotations, bounded sequence analysis, UART expectations, retained watches, normalized errors, textual CoAP, and evidence reporting.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 11:13:09 UTC / 2026-08-04 13:13:09 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo test --locked -p embed-log-cli --bin embed-log` — passed (77 tests); strict CLI all-target Clippy — passed; release schema index assertion verified every command referenced by the skill and the advertised `hex-coap` parser. No executable/package contents changed in this documentation-only milestone; the immediately preceding packaged release checks remain applicable.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`590e318`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 4 | 2 | Describes the skill as the complete safe CLI workflow rather than session search only. |
+| `skills/embed-log/SKILL.md` | 185 | 123 | Rewrites the canonical skill around discovery, safety, experiments, bounded evidence, TX/watch, errors, CoAP, and completion discipline. |
+
+## 2026-08-04 11:18:00 UTC / 2026-08-04 13:18:00 CEST (Warsaw)
+
+- **Commit:** `2b3a74b` — `Condense Embed-log agent skill`
+- **Task:** Reduce the canonical agent skill to essential operational and safety data while preserving discovery, explicit lifecycle, bounded cursor analysis, UART TX, watches, errors, CoAP, and reporting contracts.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 11:18:00 UTC / 2026-08-04 13:18:00 CEST (+0200) (Warsaw)
+- **Validation:** `git diff --check` — passed; CLI unit suite — 77 passed; release schema assertion verified every referenced command and `hex-coap`. Skill size decreased from 6,904 bytes / 957 words / 210 lines to 4,612 bytes / 628 words / 146 lines.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`2b3a74b`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `skills/embed-log/SKILL.md` | 56 | 120 | Removes repetition and legacy detail while retaining the essential safe workflow. |
+
+## 2026-08-04 11:42:24 UTC / 2026-08-04 13:42:24 CEST (Warsaw)
+
+- **Commit:** `cfdce72` — `Embed agent skill in CLI`
+- **Task:** Add zero-setup `embed-log skill` discovery that prints the exact version-matched canonical Markdown embedded in the release binary, with optional structured JSON and schema advertisement.
+- **Started:** unavailable; `/worklog-start` was unavailable in this API session.
+- **Completed:** 2026-08-04 11:42:24 UTC / 2026-08-04 13:42:24 CEST (+0200) (Warsaw)
+- **Validation:** format/diff checks passed; workspace tests passed (79 CLI, 218 core, 73 TUI plus process suites); strict workspace Clippy passed; Python SDK 53 passed/2 skipped; frontend units 19 passed; sequential Playwright 5 passed; release build/package passed; packaged raw skill matched `SKILL.md` byte-for-byte and packaged JSON/schema assertions passed.
+- **Model-token delta:** unavailable; `/worklog-start` was unavailable in this API session.
+
+### File changes (`cfdce72`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 8 | 5 | Documents zero-setup skill discovery. |
+| `crates/embed-log-cli/src/commands/mod.rs` | 1 | 0 | Registers the skill module. |
+| `crates/embed-log-cli/src/commands/schema.rs` | 9 | 0 | Advertises and describes the skill command. |
+| `crates/embed-log-cli/src/commands/skill.rs` | 42 | 0 | Embeds and emits canonical Markdown or JSON. |
+| `crates/embed-log-cli/src/main.rs` | 16 | 0 | Adds CLI parsing and dispatch. |
+| `crates/embed-log-cli/tests/schema_cli.rs` | 2 | 0 | Verifies schema discovery. |
+| `crates/embed-log-cli/tests/skill_cli.rs` | 32 | 0 | Verifies exact raw and structured output. |
+| `docs/agent-capabilities.md` | 7 | 1 | Adds skill-first integration guidance. |
+| `docs/automation-agent-plan.md` | 1 | 1 | Records the three-layer discovery model. |
+| `docs/cli.md` | 9 | 0 | Documents command contract. |
+| `mvp-embed-log-todo.md` | 2 | 1 | Adds skill to the MVP CLI surface. |
+
+## 2026-08-04 12:42:45 UTC / 2026-08-04 14:42:45 CEST (Warsaw)
+
+- **Commit:** `5024473` — `Split live and recorded agent skills`
+- **Task:** Replace the broad Embed-log agent skill with compact live-debugging and recorded-session skills, expose both through the CLI/schema, source daemon endpoints from YAML by default, remove separate UART TX authorization guidance, and install the rebuilt binary.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 12:42:45 UTC / 2026-08-04 14:42:45 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo clippy --locked --workspace --all-targets -- -D warnings` — passed; `cargo test --locked --workspace` — passed (79 CLI unit tests, 12 CLI process tests, 218 core tests, and 73 TUI tests); `cargo build --locked --release -p embed-log-cli` — passed; installed `target/release/embed-log` to `~/.local/bin/embed-log`, verified version 1.2.1, both embedded skill selectors/schema v2, and byte identity with `cmp`.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`5024473`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.claude-plugin/marketplace.json` | 1 | 1 | Describes the focused live and retrospective skill pair. |
+| `.claude-plugin/plugin.json` | 1 | 1 | Updates plugin activation language for both investigation modes. |
+| `README.md` | 9 | 8 | Documents selected skills, YAML-derived daemon endpoints, and generic firmware TX values. |
+| `crates/embed-log-cli/src/commands/daemon.rs` | 1 | 3 | Uses the configured server port when no runtime override is supplied. |
+| `crates/embed-log-cli/src/commands/schema.rs` | 9 | 3 | Advertises both skill selectors and the revised daemon endpoint contract in schema v2. |
+| `crates/embed-log-cli/src/commands/skill.rs` | 44 | 10 | Embeds and emits the selected live or recorded skill. |
+| `crates/embed-log-cli/src/main.rs` | 11 | 11 | Requires a skill mode while making daemon port overrides optional. |
+| `crates/embed-log-cli/tests/daemon_lifecycle.rs` | 12 | 21 | Verifies YAML ports, explicit overrides, collision handling, and multi-instance selection. |
+| `crates/embed-log-cli/tests/schema_cli.rs` | 6 | 2 | Verifies schema v2 skill discovery. |
+| `crates/embed-log-cli/tests/skill_cli.rs` | 39 | 24 | Verifies exact raw/JSON output for both skills and rejects missing/unknown modes. |
+| `docs/agent-capabilities.md` | 8 | 5 | Documents focused skill loading and task-relevant UART TX without separate confirmation. |
+| `docs/automation-agent-plan.md` | 4 | 4 | Aligns the automation model with split skills and live-investigation TX autonomy. |
+| `docs/cli.md` | 6 | 5 | Documents skill selectors and YAML-first daemon endpoint resolution. |
+| `skills/embed-log-live/SKILL.md` | 81 | 0 | Adds concise live daemon, reproduction, bounded evidence, TX, and watch guidance. |
+| `skills/embed-log-recorded/SKILL.md` | 68 | 0 | Adds concise bounded saved-session analysis guidance. |
+| `skills/embed-log/SKILL.md` | 0 | 146 | Removes the former broad combined skill. |
+
+## 2026-08-04 14:32:53 UTC / 2026-08-04 16:32:53 CEST (Warsaw)
+
+- **Commit:** `33bf36b` — `Remove durable event detection`
+- **Task:** Remove durable event rules, persistence, timelines, severity UI, event-specific CLI/SDK surfaces, and obsolete plans while preserving daemon lifecycle, source-filtered live subscriptions, UART TX/expectations, user markers, sequence-based session analysis, and process-local retained watches.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 14:32:53 UTC / 2026-08-04 16:32:53 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` — passed; `cargo test --locked --workspace` — passed (79 CLI unit, 12 CLI integration, 183 core, and 59 TUI tests); `cd sdk/python && python3 -m pytest tests/test_client.py tests/test_config.py tests/test_e2e.py tests/test_models.py` — 34 passed; `npm run test:unit --prefix tests-ui` — 19 passed; categorized browser smoke/data/interaction regressions — 41 passed and 3 skipped; the sessions category still has three unrelated tests invoking the already-removed `merge` command; full Python collection had one hardware UART fixture failure because no device RX sequence was produced (34 software tests passed, 1 hardware test failed, 1 skipped); `cargo build --locked --workspace --release` — passed; atomically installed both release binaries, verified installed version 1.2.1 at commit `33bf36b`, schema includes `watch`/`sessions.around` but not `sessions.events`, removed command returns `CLI_USAGE`, and installed/release SHA-256 hashes match.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`33bf36b`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 1 | 9 | Removes the deleted Python watcher workflow and clarifies log-entry subscriptions. |
+| `agent_benchmark_plan.md` | 0 | 750 | Deletes the obsolete event-centric benchmark plan. |
+| `agents_improvement_plan.md` | 0 | 564 | Deletes the obsolete event-first agent roadmap. |
+| `crates/embed-log-cli/src/commands/schema.rs` | 1 | 1 | Removes the durable-event command surface from capability descriptors. |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 12 | 365 | Removes persisted-event loading, filtering, summaries, and event-based context lookup. |
+| `crates/embed-log-cli/src/commands/watch.rs` | 1 | 1 | Describes watches as standalone temporary matchers. |
+| `crates/embed-log-cli/src/main.rs` | 0 | 9 | Removes the sessions events subcommand. |
+| `crates/embed-log-cli/tests/sequence_cursor.rs` | 0 | 22 | Removes persisted-event sequence-context coverage. |
+| `crates/embed-log-cli/tests/watch_cli.rs` | 4 | 5 | Verifies retained watches without creating events.jsonl. |
+| `crates/embed-log-core/src/config/events.rs` | 0 | 662 | Deletes event-rule configuration and matching. |
+| `crates/embed-log-core/src/config/mod.rs` | 0 | 2 | Removes event configuration exports. |
+| `crates/embed-log-core/src/config/models.rs` | 0 | 13 | Removes event rules from loaded configuration. |
+| `crates/embed-log-core/src/net/control_ws.rs` | 13 | 759 | Removes event subscriptions and rule CRUD while retaining source subscriptions and watches. |
+| `crates/embed-log-core/src/net/watch.rs` | 68 | 117 | Matches and retains temporary watches directly against committed non-TX records. |
+| `crates/embed-log-core/src/net/ws_server.rs` | 1 | 95 | Removes event-rule and event-replay server state. |
+| `crates/embed-log-core/src/runtime/server.rs` | 15 | 549 | Removes event matching, persistence, markers, replay, and runtime rule registries. |
+| `crates/embed-log-core/src/session/exporter.rs` | 1 | 31 | Removes event data and assets from static session exports. |
+| `crates/embed-log-core/src/session/manager.rs` | 5 | 126 | Stops creating or advertising event artifacts and keeps user markers only. |
+| `crates/embed-log-tui/src/app.rs` | 0 | 1 | Stops handling durable event messages. |
+| `crates/embed-log-tui/src/client.rs` | 1 | 1 | Updates replay documentation after event removal. |
+| `crates/embed-log-tui/src/draw.rs` | 4 | 67 | Removes the Events tab, status, help, and rendering paths. |
+| `crates/embed-log-tui/src/events.rs` | 0 | 580 | Deletes the event timeline implementation. |
+| `crates/embed-log-tui/src/keys.rs` | 2 | 85 | Removes Events-tab controls and event-marker navigation mode. |
+| `crates/embed-log-tui/src/lib.rs` | 1 | 2 | Removes the events module. |
+| `crates/embed-log-tui/src/lines.rs` | 3 | 32 | Keeps one user-marker gutter style and removes severity styling. |
+| `crates/embed-log-tui/src/protocol.rs` | 9 | 101 | Removes event payloads/rules while tolerating legacy marker extras. |
+| `crates/embed-log-tui/src/state.rs` | 7 | 64 | Removes event collections/view state and simplifies user-marker navigation. |
+| `docs/agent-capabilities.md` | 8 | 75 | Documents source-filtered subscriptions and process-local retained watches. |
+| `docs/architecture.md` | 1 | 1 | Describes direct temporary-watch matching in the serialized commit path. |
+| `docs/automation-agent-plan.md` | 0 | 216 | Deletes the obsolete durable-event automation plan. |
+| `docs/cli.md` | 6 | 17 | Removes event commands/artifacts and documents sequence-only context. |
+| `docs/getting-up-to-speed.md` | 5 | 6 | Removes event UI, artifact, and watcher guidance. |
+| `docs/index.md` | 0 | 1 | Removes the deleted event-centric plan link. |
+| `docs/non-session-roadmap.md` | 1 | 1 | Removes events from UI parity scope. |
+| `docs/quickstart.md` | 2 | 2 | Describes sessions and configuration without durable events. |
+| `docs/tui.md` | 1 | 5 | Removes Events-tab and event-marker documentation. |
+| `event-detection-plan.md` | 0 | 460 | Deletes the event-detection implementation plan. |
+| `frontend/events.js` | 0 | 1021 | Deletes the browser event timeline and rule UI. |
+| `frontend/export.js` | 2 | 15 | Removes event assets and data from static exports. |
+| `frontend/lines.js` | 1 | 7 | Removes event kind/severity marker attributes. |
+| `frontend/main.js` | 0 | 1 | Stops importing the Events UI. |
+| `frontend/selection.js` | 6 | 74 | Keeps marker behavior user-only and removes event-rule creation. |
+| `frontend/state.js` | 0 | 7 | Removes event state and filters. |
+| `frontend/tabs.js` | 1 | 14 | Removes Events-tab creation and activation. |
+| `frontend/viewer.css` | 0 | 216 | Deletes Events-tab, timeline, severity, and rule-panel styles. |
+| `frontend/ws.js` | 0 | 29 | Removes event config, replay, and live message handling. |
+| `mvp-embed-log-todo.md` | 8 | 8 | Updates MVP guidance for direct watches and sequence-only context. |
+| `sdk-control-api-summary.md` | 8 | 23 | Documents process-local watches and removes Python watcher claims. |
+| `sdk/python/embed_log_sdk/__init__.py` | 1 | 2 | Removes the durable Event model export. |
+| `sdk/python/embed_log_sdk/client.py` | 9 | 83 | Removes event subscriptions/iteration while retaining source-filtered entries. |
+| `sdk/python/embed_log_sdk/models.py` | 1 | 41 | Deletes the durable Event model. |
+| `sdk/python/embed_log_sdk/watcher.py` | 0 | 143 | Deletes the superseded client-side watcher implementation. |
+| `sdk/python/examples/watcher.yml` | 0 | 21 | Deletes the watcher configuration example. |
+| `sdk/python/examples/watcher_run.py` | 0 | 47 | Deletes the watcher runner example. |
+| `sdk/python/tests/test_e2e.py` | 0 | 108 | Removes client-side watcher evidence and marker scenarios. |
+| `sdk/python/tests/test_events.py` | 0 | 178 | Deletes SDK durable-event tests. |
+| `sdk/python/tests/test_watcher.py` | 0 | 222 | Deletes client-side watcher tests. |
+| `tests-ui/config-regression.events.yml` | 0 | 28 | Deletes event regression rules. |
+| `tests-ui/package.json` | 0 | 1 | Removes the Events regression script. |
+| `tests-ui/regression-categories.mjs` | 1 | 4 | Removes the Events regression category. |
+| `tests-ui/regression-tests/demo-smoke.spec.js` | 1 | 3 | Removes event-marker assumptions from marker tests. |
+| `tests-ui/regression-tests/events.spec.js` | 0 | 450 | Deletes browser durable-event regression coverage. |
+
+## 2026-08-04 15:00:27 UTC / 2026-08-04 17:00:27 CEST (Warsaw)
+
+- **Commit:** `df855ee` — `Make merged views presentation-only`
+- **Task:** Convert configured merges from materialized duplicate writer streams into presentation-only virtual sources while preserving original source identity/global sequence across live browser/TUI views, control subscriptions, recorded CLI reads, and HTML exports; hide legacy materialized merge records by default with explicit compatibility flags.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-04 15:00:27 UTC / 2026-08-04 17:00:27 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` — passed; `cargo test --locked --workspace` — passed (80 CLI unit tests, 14 CLI integration tests including two virtual/legacy merge process tests, 183 core tests, and 60 TUI tests); `npm run test:unit --prefix tests-ui` — 19 passed; `npm run test:regression:smoke --prefix tests-ui` — 12 passed; `cd sdk/python && python3 -m pytest tests/test_client.py tests/test_config.py tests/test_e2e.py tests/test_models.py` — 34 passed; `cargo build --locked --workspace --release` — passed; atomically installed CLI/TUI release binaries, verified installed version 1.2.1 at commit `df855ee`, matching installed/release SHA-256, and schema exposure of `--include-materialized-merges`.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`df855ee`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 284 | 40 | Expands virtual source filters, excludes legacy merge copies by default, adds compatibility flags, and reconstructs exports from original records. |
+| `crates/embed-log-cli/tests/virtual_merge_cli.rs` | 302 | 0 | Verifies no merge file/records are created, virtual reads retain physical identities, exports reconstruct panes, and legacy filtering is opt-in. |
+| `crates/embed-log-core/src/config/models.rs` | 3 | 3 | Defines merges as presentation-only virtual sources. |
+| `crates/embed-log-core/src/net/control_ws.rs` | 55 | 3 | Expands virtual subscriptions into physical members and advertises virtual metadata. |
+| `crates/embed-log-core/src/net/ws_server.rs` | 6 | 0 | Stores virtual-source mappings and exposes members through status. |
+| `crates/embed-log-core/src/runtime/server.rs` | 78 | 193 | Removes merge writers/relays/files and carries virtual definitions through config, rotation, and export. |
+| `crates/embed-log-core/src/session/exporter.rs` | 114 | 0 | Reconstructs virtual panes from canonical combined records with original source IDs and sequences. |
+| `crates/embed-log-core/src/session/log_parse.rs` | 5 | 0 | Carries source and sequence identity into exported records. |
+| `crates/embed-log-core/src/session/manager.rs` | 12 | 0 | Persists merge definitions in session metadata. |
+| `crates/embed-log-tui/src/app.rs` | 2 | 10 | Routes physical payloads through virtual-pane projection. |
+| `crates/embed-log-tui/src/protocol.rs` | 18 | 1 | Parses merge definitions and clarifies physical source identity. |
+| `crates/embed-log-tui/src/state.rs` | 71 | 1 | Projects member records into virtual panes while preserving source, sequence, and line index. |
+| `docs/agent-capabilities.md` | 1 | 1 | Documents virtual-source expansion and legacy filtering. |
+| `docs/architecture.md` | 1 | 6 | Replaces materialized merge pipeline documentation with the virtual model. |
+| `docs/cli.md` | 2 | 2 | Documents dynamic source expansion and compatibility output. |
+| `docs/configuration.md` | 2 | 2 | Documents non-persisted presentation-only merges. |
+| `frontend/ws.js` | 18 | 7 | Projects live/replayed physical messages into browser virtual panes. |
+| `sdk/python/embed_log_sdk/models.py` | 1 | 1 | Recognizes merge as a presentation-only discovered source type. |
+| `skills/embed-log-recorded/SKILL.md` | 1 | 0 | Guides agents to use virtual source filters without duplicate legacy records. |
+
+## 2026-08-05 07:48:26 UTC / 2026-08-05 09:48:26 CEST (Warsaw)
+
+- **Commit:** `1084b95` — `Unify and harden session HTML exports`
+- **Task:** Make browser, daemon/TUI, active CLI, and recorded-session CLI full-session exports use one canonical Rust HTML renderer; serialize competing producers, publish HTML/metadata atomically, derive new reports from complete `combined.jsonl` records, preserve the previous complete report on failure, and make the browser download the exact file saved in the session directory.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 07:48:26 UTC / 2026-08-05 09:48:26 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check` and `git diff --check` — passed; `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` — passed; `cargo test --locked --workspace` — passed (82 CLI unit tests, 14 CLI integration tests, 185 core tests, and 60 TUI tests); `npm run test:unit --prefix tests-ui` — 19 passed; `npm run test:regression --prefix tests-ui` — 50 passed, 4 intentionally skipped; `npm run test:e2e --prefix tests-ui -- --workers=1` — 5 passed; `cd sdk/python && python3 -m pytest tests/test_client.py tests/test_config.py tests/test_e2e.py tests/test_models.py -q` — 34 passed; `cargo build --locked --workspace --release` — passed; atomically installed CLI/TUI, verified installed version 1.2.1 at `1084b95`, export schema, and matching release/installed SHA-256 hashes.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`1084b95`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `Cargo.lock` | 11 | 0 | Locks the advisory file-lock dependency. |
+| `Cargo.toml` | 1 | 0 | Adds the shared `fs2` dependency. |
+| `README.md` | 3 | 0 | Documents canonical active/browser/recorded export behavior. |
+| `crates/embed-log-cli/src/commands/daemon.rs` | 19 | 3 | Adds a long-timeout daemon request helper for HTML generation. |
+| `crates/embed-log-cli/src/commands/export.rs` | 54 | 0 | Implements `embed-log export` for active daemon sessions. |
+| `crates/embed-log-cli/src/commands/mod.rs` | 1 | 0 | Registers the active export command module. |
+| `crates/embed-log-cli/src/commands/schema.rs` | 13 | 2 | Advertises active export targeting, mutation, and atomic semantics. |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 69 | 3 | Refreshes reports on open and atomically records successful offline canonical exports. |
+| `crates/embed-log-cli/src/main.rs` | 35 | 0 | Adds and tests the top-level active export CLI surface. |
+| `crates/embed-log-cli/tests/virtual_merge_cli.rs` | 26 | 6 | Proves daemon and recorded CLI exports are byte-identical for one snapshot. |
+| `crates/embed-log-core/Cargo.toml` | 1 | 0 | Enables cross-process advisory export locking. |
+| `crates/embed-log-core/src/net/ws_server.rs` | 77 | 8 | Runs exports off the async hot path and serves exact published HTML bytes in one POST. |
+| `crates/embed-log-core/src/runtime/server.rs` | 13 | 53 | Removes mtime freshness shortcuts and always uses the canonical atomic exporter. |
+| `crates/embed-log-core/src/session/exporter.rs` | 213 | 67 | Reads complete canonical JSONL, validates output, serializes producers, atomically publishes, and preserves old HTML on failure. |
+| `crates/embed-log-core/src/session/manager.rs` | 34 | 3 | Atomically writes manifests and markers. |
+| `docs/architecture.md` | 5 | 4 | Documents lock, atomic publication, exact download, and failure behavior. |
+| `docs/cli.md` | 16 | 2 | Documents active and post-factum canonical export commands. |
+| `frontend/export.js` | 42 | 5 | Delegates full-session export to one server POST while retaining selection-only snapshots. |
+| `frontend/renderPane.js` | 1 | 1 | Removes stale Python exporter terminology. |
+| `skills/embed-log-live/SKILL.md` | 2 | 0 | Guides agents to the active canonical export command. |
+| `tests-ui/regression-tests/export-replay.spec.js` | 23 | 4 | Verifies downloaded bytes equal session HTML and replaces obsolete merge-command fixture generation. |
+| `tests-ui/regression-tests/relative-time-replay.spec.js` | 24 | 14 | Migrates static replay fixtures to recorded-session export. |
+
+## 2026-08-05 09:23:26 UTC / 2026-08-05 11:23:26 CEST (Warsaw)
+
+- **Commit:** `64350ff` — `Document frontend overhaul plan`
+- **Task:** Record the authoritative frontend overhaul plan covering Edge keyboard reliability, shared live/static layout, Full-only selection copy, removal of the selection Add note action, presentation-only No time behavior, canonical HTML export safeguards, and Chromium/Edge acceptance coverage.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 09:23:26 UTC / 2026-08-05 11:23:26 CEST (+0200) (Warsaw)
+- **Validation:** repository-relative Markdown link validation for `docs/frontend-overhaul-plan.md`, `docs/index.md`, and `copy-compact-mode-plan.md` — passed; requirement search for Edge, Full-only copy, Add note, No time, retained HTML timestamps, and canonical export — passed; `git diff --check` — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`64350ff`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `copy-compact-mode-plan.md` | 2 | 0 | Marks the obsolete browser multi-format copy proposal as superseded. |
+| `docs/frontend-overhaul-plan.md` | 290 | 0 | Defines agreed requirements, implementation order, non-goals, and browser/mode acceptance matrix. |
+| `docs/index.md` | 1 | 0 | Links the authoritative frontend overhaul plan from the documentation index. |
+
+## 2026-08-05 09:35:54 UTC / 2026-08-05 11:35:54 CEST (Warsaw)
+
+- **Commit:** `3e32966` — `Harden frontend keyboard input across browsers`
+- **Task:** Implement the first frontend-overhaul workstream: protect editable controls from global keyboard shortcuts and composition handling, make filter/TX inputs explicit text controls, include the keyboard helper in static HTML exports, add Microsoft Edge projects, and cover filter focus retention during incoming logs.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 09:35:54 UTC / 2026-08-05 11:35:54 CEST (+0200) (Warsaw)
+- **Validation:** `npm run test:regression --prefix tests-ui -- --project=edge tests/filter-keyboard.spec.js` — 5 passed; same Chromium command — 5 passed; `npm run test:e2e --prefix tests-ui -- --workers=1` — 10 passed (5 Chromium, 5 Edge); `npm run test:unit --prefix tests-ui` — 19 passed; `cargo fmt --all -- --check` — passed; `cargo test --locked -p embed-log-core session::exporter --lib` — 5 passed; `git diff --check` — passed. Full regression matrix — 99 passed, 8 skipped, and 3 unrelated existing timing/drag/synchronization failures (`drag-selection` in Chromium and Edge, `layout-sync` in Edge).
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`3e32966`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-core/src/session/exporter.rs` | 1 | 0 | Embeds the shared keyboard helper in static HTML exports. |
+| `frontend/export.js` | 2 | 0 | Prevents static export menu shortcuts from consuming editable input events. |
+| `frontend/keyboard.js` | 11 | 0 | Provides shared editable-target and IME/composition guards. |
+| `frontend/lines.js` | 3 | 2 | Protects global Live/plugin shortcuts from input and composition events. |
+| `frontend/renderPane.js` | 2 | 2 | Makes filter and Serial TX controls explicit, non-spellchecking text inputs. |
+| `frontend/selection.js` | 5 | 0 | Prevents selection copy/Alt-mode shortcuts from interrupting editable controls. |
+| `tests-ui/playwright.config.js` | 1 | 0 | Adds a Microsoft Edge browser project to backend E2E tests. |
+| `tests-ui/playwright.regression.config.js` | 1 | 0 | Adds a Microsoft Edge browser project to regression tests. |
+| `tests-ui/regression-tests/filter-keyboard.spec.js` | 20 | 0 | Verifies filter typing and focus survive incoming live records. |
+| `tests-ui/regression-tests/helpers.js` | 3 | 1 | Ignores the known missing-favicon 404 in Edge console-error assertions. |
+| `tests-ui/tests/helpers.js` | 3 | 1 | Applies the same harmless 404 filtering to backend E2E assertions. |
+
+## 2026-08-05 09:49:02 UTC / 2026-08-05 11:49:02 CEST (Warsaw)
+
+- **Commit:** `d98c15c` — `Prevent Edge key repeat leaking into inputs`
+- **Task:** Address the reported Edge behavior where a key held before clicking a filter or Serial TX input can continue auto-repeating into the newly focused control. Track key origins and suppress only repeats that began outside editable controls, while preserving normal key holding after focus is already in an input.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 09:49:02 UTC / 2026-08-05 11:49:02 CEST (+0200) (Warsaw)
+- **Validation:** Edge keyboard regression — 6 passed; Chromium keyboard regression — 6 passed; frontend unit tests — 19 passed; Rust exporter tests — 5 passed; `cargo fmt --all -- --check` — passed; `git diff --check` — passed; release CLI/TUI rebuilt and installed atomically, installed CLI reports SHA `d98c15c`.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`d98c15c`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `frontend/keyboard.js` | 26 | 0 | Tracks key origins, suppresses only cross-focus auto-repeat, and clears state on keyup/window blur. |
+| `tests-ui/regression-tests/filter-keyboard.spec.js` | 20 | 0 | Reproduces a pre-focus key followed by a repeated key in Edge and verifies the input remains empty. |
+
+## 2026-08-05 10:28:11 UTC / 2026-08-05 12:28:11 CEST (Warsaw)
+
+- **Commit:** `dfff6a4` — `Preserve text selection inside frontend inputs`
+- **Task:** Preserve browser text selection in Filter and Serial TX inputs instead of clearing it from the document-level pointer cleanup used for log-line selection.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 10:28:11 UTC / 2026-08-05 12:28:11 CEST (+0200) (Warsaw)
+- **Validation:** Edge focused-input selection regression — 1 passed; release workspace rebuilt and installed atomically.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`dfff6a4`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `frontend/selection.js` | 5 | 1 | Leaves native input selections intact on pointer release. |
+| `tests-ui/regression-tests/filter-keyboard.spec.js` | 20 | 2 | Verifies Filter text remains selected after pointer release and a delay. |
+
+## 2026-08-05 10:28:42 UTC / 2026-08-05 12:28:42 CEST (Warsaw)
+
+- **Commit:** `ace1f22` — `Block non-repeat key batches after focus handoff`
+- **Task:** Extend the Edge focus-handoff keyboard guard to block both repeat-marked and ordinary keydown batches until a key pressed outside an editable control is released.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 10:28:42 UTC / 2026-08-05 12:28:42 CEST (+0200) (Warsaw)
+- **Validation:** Edge and Chromium focused-input keyboard regressions — passed before the final pointer-selection-only change; release workspace rebuilt and installed atomically; installed CLI reports clean SHA `ace1f22`.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`ace1f22`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `frontend/keyboard.js` | 7 | 7 | Blocks ordinary as well as repeat keydowns after a key-origin focus handoff. |
+
+## 2026-08-05 10:40:01 UTC / 2026-08-05 12:40:01 CEST (Warsaw)
+
+- **Commit:** `d5d568e` — `Simplify browser selection actions`
+- **Task:** Remove browser selection Full/Compact format controls and state, make clipboard selection always use Full formatting, remove the selection-bar Add note creation flow and its CSS, and retain marker rendering/navigation through the control protocol.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 10:40:01 UTC / 2026-08-05 12:40:01 CEST (+0200) (Warsaw)
+- **Validation:** `node --check frontend/selection.js` and `node --check frontend/state.js` — passed; `cargo fmt --all -- --check` — passed; `cargo test --locked -p embed-log-core session::exporter --lib` — 5 passed; `git diff --check` — passed; backend browser E2E — 10 passed across Chromium and Edge. The focused regression selection/marker tests could not receive traffic because the existing live daemon occupied the regression fixture UDP ports; failures were fixture startup/traffic failures before assertions, not frontend assertion failures.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`d5d568e`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `frontend/selection.js` | 5 | 201 | Removes browser copy-format controls/state and selection Add note creation while retaining marker rendering and Full clipboard formatting. |
+| `frontend/state.js` | 0 | 1 | Removes obsolete browser copy-format state. |
+| `frontend/viewer.css` | 0 | 89 | Removes format-toggle and marker-input-overlay styling. |
+| `tests-ui/regression-tests/copy-format.spec.js` | 9 | 44 | Replaces Compact behavior coverage with Full-only and absent-control assertions. |
+| `tests-ui/regression-tests/demo-smoke.spec.js` | 15 | 15 | Creates the marker through the control protocol now that browser selection no longer exposes Add note. |
+
+## 2026-08-05 12:11:09 UTC / 2026-08-05 14:11:09 CEST (Warsaw)
+
+- **Commit:** `2e89cc8` — `Keep exported settings button in toolbar`
+- **Task:** Inspect the two latest screenshots from `~/Pictures/Screenshots` and fix the exported HTML Settings/Options button wrapping onto a second row. Static exports now place the button inside the existing right toolbar group, matching the live layout.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 12:11:09 UTC / 2026-08-05 14:11:09 CEST (+0200) (Warsaw)
+- **Validation:** inspected `Screenshot from 2026-08-05 14-08-35.png` and `Screenshot from 2026-08-05 14-08-42.png`; `node --check frontend/settings.js` — passed; `git diff --check` — passed; backend browser E2E — 10 passed across Chromium and Edge; release workspace rebuilt and installed atomically, installed CLI reports SHA `2e89cc8`.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`2e89cc8`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `frontend/settings.js` | 5 | 1 | Places Settings in `.toolbar-right` for static exports instead of creating a new grid item/row. |
+| `tests-ui/regression-tests/export-replay.spec.js` | 6 | 0 | Asserts exported Settings remains vertically inside the toolbar bounds. |
+
+## 2026-08-05 12:14:42 UTC / 2026-08-05 14:14:42 CEST (Warsaw)
+
+- **Commit:** `3a01fc7` — `Add presentation-only no-time mode`
+- **Task:** Add the third timestamp presentation mode, cycling Absolute → Relative → No time → Absolute. No time hides timestamp spans and omits timestamps from browser clipboard selection only; line metadata, raw downloads, selection HTML, canonical exports, ordering, and synchronization retain timestamps.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 12:14:42 UTC / 2026-08-05 14:14:42 CEST (+0200) (Warsaw)
+- **Validation:** JavaScript syntax checks for changed frontend modules — passed; `npm run test:unit --prefix tests-ui` — 19 passed; `cargo fmt --all -- --check` — passed; `cargo test --locked -p embed-log-core session::exporter --lib` — 5 passed; `git diff --check` — passed; release workspace rebuilt and installed atomically, installed CLI reports SHA `3a01fc7`. The focused timestamp Playwright test was not run because the existing live daemon occupied the regression fixture UDP ports.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`3a01fc7`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `frontend/export.js` | 1 | 1 | Keeps selection HTML exports initially on the configured Absolute/Relative mode when the live viewer is in No time. |
+| `frontend/lines.js` | 3 | 1 | Adds hidden mode to timestamp switching while keeping line timestamp values intact. |
+| `frontend/persist.js` | 1 | 1 | Restores the presentation-only hidden mode from viewer state. |
+| `frontend/selection.js` | 13 | 9 | Omits timestamps from clipboard copy in No time while retaining timestamps for raw downloads and HTML data. |
+| `frontend/state.js` | 3 | 0 | Treats No time as presentation-only and avoids mutating line timestamp metadata. |
+| `frontend/ui.js` | 10 | 8 | Cycles and labels Absolute, Relative, and No time. |
+| `tests-ui/regression-tests/timestamp-toggle.spec.js` | 19 | 2 | Verifies No time display and timestamp-free clipboard selection, then restoration to Absolute. |
+
+## 2026-08-05 12:18:03 UTC / 2026-08-05 14:18:03 CEST (Warsaw)
+
+- **Commit:** `e584d03` — `Stabilize narrow frontend toolbar layout`
+- **Task:** Complete the responsive toolbar part of the frontend overhaul. At narrow widths, keep live and exported toolbar controls in one controlled horizontal row with scrolling instead of allowing Settings/Options or other controls to auto-wrap onto an orphan second row. Add exported HTML narrow-viewport alignment coverage.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 12:18:03 UTC / 2026-08-05 14:18:03 CEST (+0200) (Warsaw)
+- **Validation:** `git diff --check` — passed; backend browser E2E — 10 passed across Chromium and Edge; `npm run test:unit --prefix tests-ui` — 19 passed; `cargo fmt --all -- --check` — passed; release workspace rebuilt and installed atomically, installed CLI reports SHA `e584d03`.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`e584d03`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `frontend/viewer.css` | 24 | 0 | Adds a narrow single-row, horizontal-overflow toolbar layout. |
+| `tests-ui/regression-tests/export-replay.spec.js` | 10 | 0 | Verifies exported Settings remains inside the toolbar at a 700px viewport. |
+
+## 2026-08-05 13:09:40 UTC / 2026-08-05 15:09:40 CEST (Warsaw)
+
+- **Commit:** `913322c` — `Simplify agent session workflows`
+- **Task:** Establish the agent-focused CLI defaults and reliability improvements: reduce `sessions read`, `around`, and `search` to concise text or one compact `--json` envelope; add daemon registration repair/adoption and URL-targeted stop; add repeated UART TX and prompt-bounded response capture; add concise/source-filtered status and separate statistics; expose source rate/pressure/gap/drop telemetry fields; and add persisted external timeline markers while preserving HTML/session exports.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 13:09:40 UTC / 2026-08-05 15:09:40 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all` — passed; `cargo test --locked -p embed-log-core --lib` — 185 passed; `cargo test --locked -p embed-log-cli -- --nocapture` — passed (82 unit tests plus all CLI integration suites); `cargo check -p embed-log-cli` — passed; `git diff --check` — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`913322c`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 4 | 2 | Updates agent reader examples and documents the two reader modes. |
+| `crates/embed-log-cli/src/commands/daemon.rs` | 131 | 11 | Adds URL stop, live-record adoption, concise status/stats, and timeline marker commands. |
+| `crates/embed-log-cli/src/commands/schema.rs` | 13 | 5 | Advertises the simplified readers, stats, and lifecycle semantics. |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 69 | 122 | Replaces reader format variants with concise text and fixed tuple envelopes. |
+| `crates/embed-log-cli/src/commands/tx.rs` | 31 | 7 | Adds prompt termination and repeated TX count/interval handling. |
+| `crates/embed-log-cli/src/main.rs` | 86 | 6 | Adds Mark/Stats commands and new TX/status/stop options. |
+| `crates/embed-log-cli/tests/hex_coap_cli.rs` | 2 | 3 | Migrates reader assertions to the structured tuple envelope. |
+| `crates/embed-log-cli/tests/sequence_cursor.rs` | 13 | 47 | Covers the new reader fields and concise text shape. |
+| `crates/embed-log-cli/tests/virtual_merge_cli.rs` | 7 | 11 | Migrates virtual-merge reader coverage to the new envelope. |
+| `crates/embed-log-core/src/net/ws_server.rs` | 98 | 3 | Adds timeline marker API, session/process stats separation, and source telemetry fields. |
+| `crates/embed-log-core/src/session/manager.rs` | 5 | 0 | Exposes current-session record count for statistics. |
+| `docs/cli.md` | 24 | 52 | Rewrites reader, lifecycle, TX, stats, and marker guidance. |
+| `skills/embed-log-live/SKILL.md` | 1 | 1 | Updates bounded reader usage. |
+| `skills/embed-log-recorded/SKILL.md` | 2 | 2 | Removes obsolete reader format/time options. |
+
+## 2026-08-05 13:33:41 UTC / 2026-08-05 15:33:41 CEST (Warsaw)
+
+- **Commit:** `c833425` — `Compact source indexes in reader text`
+- **Task:** Refine the concise reader format from `src=SOURCE idx=42` to the more compact and readable `src=SOURCE#42`, while retaining explicit sequence and structured JSON fields.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 13:33:41 UTC / 2026-08-05 15:33:41 CEST (+0200) (Warsaw)
+- **Validation:** focused CLI formatter unit test — passed; sequence/cursor integration test — passed; `cargo check -p embed-log-cli` — passed; `cargo fmt --all` — passed; `git diff --check` — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`c833425`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 1 | 1 | Updates the concise reader example. |
+| `crates/embed-log-cli/src/commands/schema.rs` | 2 | 2 | Updates discovery text for the source/index notation. |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 6 | 6 | Renders concise source-local indexes as `SOURCE#INDEX`. |
+| `docs/cli.md` | 2 | 2 | Updates CLI documentation and examples. |
+
+## 2026-08-05 13:48:30 UTC / 2026-08-05 15:48:30 CEST (Warsaw)
+
+- **Commit:** `81056cc` — `Align agent skills with concise readers`
+- **Task:** Align the live and recorded agent skills, README, and agent-capability guidance with the new default-concise reader workflow. Reader examples no longer pass `--json` by default; guidance now reserves `--json` for scripts that need tuple fields or cursor metadata and documents the `src=SOURCE#INDEX` notation.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 13:48:30 UTC / 2026-08-05 15:48:30 CEST (+0200) (Warsaw)
+- **Validation:** `cargo test --locked -p embed-log-cli --test skill_cli -- --nocapture` — 2 passed; `cargo fmt --all -- --check` — passed; `git diff --check` — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`81056cc`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 2 | 2 | Removes default reader JSON usage and documents when JSON is appropriate. |
+| `docs/agent-capabilities.md` | 4 | 6 | Updates agent workflow examples and concise output guidance. |
+| `skills/embed-log-live/SKILL.md` | 3 | 3 | Makes live bounded reads/context default to concise text. |
+| `skills/embed-log-recorded/SKILL.md` | 3 | 3 | Makes recorded bounded reads/context default to concise text. |
+
+## 2026-08-05 13:54:16 UTC / 2026-08-05 15:54:16 CEST (Warsaw)
+
+- **Commit:** `575e680` — `Use one canonical format for agent log input`
+- **Task:** Make the canonical concise log-record format the single format promoted for agent reasoning, including real-time UART expectation responses: `+time seq=N src=SOURCE#INDEX | message`. Live and recorded skills now avoid JSON for log-bearing commands; JSON is reserved for orchestration metadata or explicit script needs.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 13:54:16 UTC / 2026-08-05 15:54:16 CEST (+0200) (Warsaw)
+- **Validation:** `cargo test --locked -p embed-log-cli --test skill_cli -- --nocapture` — 2 passed; `cargo fmt --all -- --check` — passed; `git diff --check` — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`575e680`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `crates/embed-log-cli/src/commands/tx.rs` | 45 | 5 | Prints matched human-mode TX response records in the canonical concise format. |
+| `docs/agent-capabilities.md` | 8 | 0 | Defines the single log-record input format for agents. |
+| `docs/cli.md` | 1 | 1 | Documents concise real-time TX response output. |
+| `skills/embed-log-live/SKILL.md` | 4 | 3 | Removes default TX JSON and mandates canonical text for live log evidence. |
+| `skills/embed-log-recorded/SKILL.md` | 2 | 1 | Mandates canonical text for recorded log evidence. |
+
+## 2026-08-05 14:06:01 UTC / 2026-08-05 16:06:01 CEST (Warsaw)
+
+- **Commit:** `cbf1d82` — `Consolidate agent guidance into one skill`
+- **Task:** Replace the separate live and recorded agent skills with one concise `embed-log` investigation skill. The skill uses session summary/read/search/around as the sole evidence interfaces, promotes the canonical concise log format, omits watch functionality, and describes daemon/TX/marker/export capabilities only as minimal actions. Simplify the embedded `embed-log skill` CLI surface accordingly.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 14:06:01 UTC / 2026-08-05 16:06:01 CEST (+0200) (Warsaw)
+- **Validation:** `cargo test --locked -p embed-log-cli --test skill_cli --test schema_cli` — 4 passed; `cargo test --locked -p embed-log-cli --bin embed-log tests::skill_command_accepts_raw_or_json_output -- --nocapture` — passed; `cargo check -p embed-log-cli` — passed; `cargo fmt --all` — passed; `git diff --check` — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`cbf1d82`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.claude-plugin/marketplace.json` | 1 | 1 | Describes the single investigation skill. |
+| `.claude-plugin/plugin.json` | 1 | 1 | Describes the single investigation skill. |
+| `README.md` | 4 | 5 | Documents `embed-log skill` and the consolidated plugin. |
+| `crates/embed-log-cli/src/commands/schema.rs` | 2 | 3 | Advertises one investigation skill and current reader modes. |
+| `crates/embed-log-cli/src/commands/skill.rs` | 11 | 46 | Embeds and serves one canonical skill. |
+| `crates/embed-log-cli/src/main.rs` | 8 | 11 | Removes the skill-mode argument. |
+| `crates/embed-log-cli/tests/schema_cli.rs` | 1 | 5 | Verifies one advertised skill. |
+| `crates/embed-log-cli/tests/skill_cli.rs` | 30 | 30 | Verifies `skill`/`skill --json` and rejects removed modes. |
+| `docs/agent-capabilities.md` | 2 | 3 | References the consolidated skill. |
+| `docs/cli.md` | 3 | 4 | Documents the simplified skill command. |
+| `skills/embed-log-live/SKILL.md` | 0 | 84 | Removes superseded live-specific guidance. |
+| `skills/embed-log-recorded/SKILL.md` | 0 | 70 | Removes superseded recorded-specific guidance. |
+| `skills/embed-log/SKILL.md` | 78 | 0 | Adds concise session-reader-first investigation guidance. |
+
+## 2026-08-05 14:22:16 UTC / 2026-08-05 16:22:16 CEST (Warsaw)
+
+- **Commit:** `263eef8` — `Consolidate config inspection in doctor`
+- **Task:** Remove the redundant `validate` command and make `doctor` the single config preflight. Doctor now validates the resolved YAML and reports endpoint, logs root, and physical configured sources with type, parser, writability, endpoint, baud rate, and UART accessibility. It deliberately omits UI tabs and virtual merges so agents discover only evidence-producing sources.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 14:22:16 UTC / 2026-08-05 16:22:16 CEST (+0200) (Warsaw)
+- **Validation:** `cargo test --locked -p embed-log-cli --bin embed-log commands::misc::tests -- --nocapture` — 6 passed; `cargo test --locked -p embed-log-cli --no-run` — passed; `cargo fmt --all` — passed; `git diff --check` — passed; manual `doctor --config embed-log.yml` and removed-command rejection — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`263eef8`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 2 | 2 | Replaces config validation guidance with doctor. |
+| `crates/embed-log-cli/src/commands/misc.rs` | 72 | 83 | Removes validate and expands doctor with physical-source diagnostics. |
+| `crates/embed-log-cli/src/commands/schema.rs` | 3 | 3 | Removes validate discovery/error references and points diagnostics to doctor. |
+| `crates/embed-log-cli/src/main.rs` | 2 | 28 | Removes validate command parsing and dispatch. |
+| `crates/embed-log-cli/tests/json_errors.rs` | 0 | 13 | Removes obsolete validate JSON-error coverage. |
+| `docs/cli.md` | 2 | 11 | Documents doctor as the single configuration preflight. |
+| `docs/configuration.md` | 1 | 1 | Uses doctor for configuration inspection. |
+| `docs/getting-up-to-speed.md` | 1 | 2 | Uses doctor in setup examples. |
+| `mvp-embed-log-todo.md` | 0 | 1 | Removes validate from the CLI list. |
+| `skills/embed-log/SKILL.md` | 1 | 1 | Begins investigations with doctor source discovery. |
+
+## 2026-08-05 14:24:24 UTC / 2026-08-05 16:24:24 CEST (Warsaw)
+
+- **Commit:** `e862599` — `Reduce agent skill to essential workflow`
+- **Task:** Reduce the unified Embed-log skill to essential agent guidance only: canonical concise evidence format, doctor preflight, bounded session readers, cursor progression, and minimal daemon/TX actions. Remove nonessential explanation, marker/export/reporting guidance, and mode-specific detail.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-05 14:24:24 UTC / 2026-08-05 16:24:24 CEST (+0200) (Warsaw)
+- **Validation:** `cargo test --locked -p embed-log-cli --test skill_cli` — 2 passed; `cargo fmt --all -- --check` — passed; `git diff --check` — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`e862599`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `skills/embed-log/SKILL.md` | 17 | 33 | Reduces the canonical agent skill to the essential session-reader-first workflow. |
+
+## 2026-08-06 10:47:53 UTC / 2026-08-06 12:47:53 CEST (Warsaw)
+
+- **Commit:** `7e7fc47` — `Fix CI lint and Edge browser setup`
+- **Task:** Repair the Unit tests Clippy failure and install every browser configured for UI E2E tests.
+- **Started:** 2026-08-06 10:46:59 UTC / 2026-08-06 12:46:59 CEST (+0200) (Warsaw)
+- **Completed:** 2026-08-06 10:47:53 UTC / 2026-08-06 12:47:53 CEST (+0200) (Warsaw)
+- **Validation:** `cargo fmt --all -- --check && cargo clippy --locked --package embed-log-core --package embed-log-cli --all-targets -- -D warnings` — passed; `cargo test --locked --package embed-log-core --package embed-log-cli` — 281 tests passed; `npm --prefix tests-ui run test:e2e` — 10 tests passed (Chromium and Edge); `git diff --check` — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`7e7fc47`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 4 | 4 | Installs Chromium and Microsoft Edge before both source-build and installed-binary E2E suites. |
+| `crates/embed-log-cli/src/commands/sessions.rs` | 4 | 12 | Initializes the compact JSON tuple with `vec![]`, satisfying Clippy's `vec_init_then_push` lint. |
+| `tests-ui/tests/rust-server.spec.js` | 1 | 1 | Initializes page-error collection so fixture setup failures do not cause a misleading teardown assertion. |
+
+## 2026-08-07 07:37:34 UTC / 2026-08-07 09:37:34 CEST (Warsaw)
+
+- **Commit:** `db10da1` — `Use pre-installed Edge in CI`
+- **Task:** Make self-hosted UI E2E jobs use the runner's pre-provisioned Microsoft Edge rather than attempting a password-protected system installation during CI.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-07 07:37:34 UTC / 2026-08-07 09:37:34 CEST (+0200) (Warsaw)
+- **Validation:** `git diff --check` — passed; workflow review confirms both E2E jobs install only Playwright Chromium and explicitly require `/opt/microsoft/msedge/msedge`.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`db10da1`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 10 | 4 | Installs Playwright Chromium without sudo and verifies the runner-provisioned Edge executable in both E2E jobs. |
+
+## 2026-08-07 07:52:06 UTC / 2026-08-07 09:52:06 CEST (Warsaw)
+
+- **Commit:** `f8ed56c` — `Stabilize timestamp and history regression tests`
+- **Task:** Align the timestamp-toggle regression with the current Relative → No time → Absolute cycle and wait for virtual-scroll rendering before asserting retained live history.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-07 07:52:06 UTC / 2026-08-07 09:52:06 CEST (+0200) (Warsaw)
+- **Validation:** `CI=true TEST_TRAFFIC_TICK_MS=250 npm --prefix tests-ui run test:regression:smoke` — 24 passed (Chromium and Edge); `git diff --check` — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`f8ed56c`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `tests-ui/regression-tests/demo-smoke.spec.js` | 3 | 1 | Waits two animation frames for the virtualized pane after programmatic scrolling. |
+| `tests-ui/regression-tests/timestamp-toggle.spec.js` | 5 | 0 | Tests the implemented timestamp-mode cycle, including presentation-only No time mode. |
+
+## 2026-08-07 10:02:52 UTC / 2026-08-07 12:02:52 CEST (Warsaw)
+
+- **Commit:** `a1d770e` — `Align UI regression jobs with test categories`
+- **Task:** Remove the obsolete event-regression CI step, reconcile the category manifest with the remaining test files, and update static replay assertions for the No time timestamp mode.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-07 10:02:52 UTC / 2026-08-07 12:02:52 CEST (+0200) (Warsaw)
+- **Validation:** `CI=true TEST_TRAFFIC_TICK_MS=250 npm --prefix tests-ui run test:regression:categorized` — smoke, data, and interaction categories passed before stale session assertions were found; `CI=true TEST_TRAFFIC_TICK_MS=250 npm --prefix tests-ui run test:regression:sessions` — 12 passed, 2 skipped (Chromium and Edge); `git diff --check` — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`a1d770e`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 0 | 3 | Removes the CI invocation of the deleted event-regression script. |
+| `tests-ui/regression-categories.mjs` | 1 | 1 | Removes a deleted CoAP spec and places copy-format coverage in interaction tests. |
+| `tests-ui/regression-tests/relative-time-replay.spec.js` | 13 | 4 | Tests the current static replay timestamp cycle and no-absolute-origin behavior. |
+
+## 2026-08-11 07:05:32 UTC / 2026-08-11 09:05:32 CEST (Warsaw)
+
+- **Commit:** `54945f0` — `Condense README to essential workflows`
+- **Task:** Replace the expansive root README with a concise installation, run, agent-use, canonical-skill, and documentation entry point.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-11 07:05:32 UTC / 2026-08-11 09:05:32 CEST (+0200) (Warsaw)
+- **Validation:** `cargo test --locked --package embed-log-cli --test skill_cli` — 2 passed; Markdown documentation-link existence check — passed; `git diff --check` — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`54945f0`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 25 | 195 | Keeps only install, direct/configured run, agent and skill workflow, Claude Code plugin, and reference links. |
+
+## 2026-08-11 07:13:46 UTC / 2026-08-11 09:13:46 CEST (Warsaw)
+
+- **Commit:** `f7fd8e9` — `Clarify browser and agent skill setup`
+- **Task:** Remove marketplace instructions from the concise README, direct users to create a project skill from `embed-log skill`, and explicitly describe automatic browser startup.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-11 07:13:46 UTC / 2026-08-11 09:13:46 CEST (+0200) (Warsaw)
+- **Validation:** `git diff --check` — passed; verified `run` opens the browser unless `--no-open-browser` or `--tui` is selected.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`f7fd8e9`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 2 | 7 | Replaces marketplace setup with CLI-derived project-skill guidance and states browser-start behavior. |
+
+## 2026-08-11 07:18:35 UTC / 2026-08-11 09:18:35 CEST (Warsaw)
+
+- **Commit:** `25b7a78` — `Prune stale documentation and agent integrations`
+- **Task:** Retain concise current documentation, remove completed plans and duplicate guides, add the two-UART side-by-side layout recipe, and delete obsolete Pi/Claude integration metadata.
+- **Started:** unavailable; the `/worklog-start` extension command was removed as part of this cleanup.
+- **Completed:** 2026-08-11 07:18:35 UTC / 2026-08-11 09:18:35 CEST (+0200) (Warsaw)
+- **Validation:** `cargo test --locked --package embed-log-core config::loader::tests::parse_all_sample_configs` — passed (1 test); local Markdown-link existence check — passed; `git diff --check` — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was removed as part of this cleanup.
+
+### File changes (`25b7a78`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.claude-plugin/marketplace.json` | 0 | 14 | Removes obsolete Claude marketplace metadata. |
+| `.claude-plugin/plugin.json` | 0 | 8 | Removes obsolete Claude plugin metadata. |
+| `.pi/extensions/README.md` | 0 | 18 | Removes retired repository-local Pi extension documentation. |
+| `.pi/extensions/worklog-checkpoint.ts` | 0 | 152 | Removes the retired Pi work-log extension. |
+| `copy-compact-mode-plan.md` | 0 | 558 | Removes the superseded browser compact-copy plan. |
+| `docs/agent-capabilities.md` | 0 | 129 | Removes duplicate agent guidance superseded by `embed-log skill` and CLI reference. |
+| `docs/api-status.md` | 2 | 2 | Uses a version-neutral status response example. |
+| `docs/architecture.md` | 9 | 8 | Removes deleted mock-source references and lists the hex-CoAP parser. |
+| `docs/configuration.md` | 13 | 4 | Adds a concise two-UART side-by-side browser-layout example. |
+| `docs/frontend-overhaul-plan.md` | 0 | 290 | Removes the completed frontend overhaul plan. |
+| `docs/getting-up-to-speed.md` | 0 | 201 | Removes the stale, duplicative onboarding guide. |
+| `docs/index.md` | 9 | 12 | Keeps a concise index of maintained documents. |
+| `docs/non-session-roadmap.md` | 0 | 46 | Removes the stale deferred-product roadmap. |
+| `docs/tui.md` | 1 | 1 | Removes the deleted demo-mode reference. |
+
+## 2026-08-11 07:23:09 UTC / 2026-08-11 09:23:09 CEST (Warsaw)
+
+- **Commit:** `55ee384` — `Refresh architecture documentation`
+- **Task:** Verify the architecture reference against the current runtime and release workflow, then correct browser/TUI boundaries, active API routes, parser inventory, artifact naming, and runner description.
+- **Started:** unavailable; the repository-local `/worklog-start` extension was removed in the preceding documentation cleanup.
+- **Completed:** 2026-08-11 07:23:09 UTC / 2026-08-11 09:23:09 CEST (+0200) (Warsaw)
+- **Validation:** `cargo test --locked --package embed-log-core net::ws_server::tests::embedded_fallback_keeps_css_and_js_content_types` — passed (1 test); local Markdown-link existence check — passed; `git diff --check` — passed.
+- **Model-token delta:** unavailable; the repository-local `/worklog-start` extension was removed in the preceding documentation cleanup.
+
+### File changes (`55ee384`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `docs/architecture.md` | 14 | 9 | Aligns browser/TUI roles, routes, parsers, session artifacts, and hosted release runner architecture with implementation. |
+
+## 2026-08-11 07:34:46 UTC / 2026-08-11 09:34:46 CEST (Warsaw)
+
+- **Commit:** `db101ea` — `Temporarily disable STM32G0 CI jobs`
+- **Task:** Exclude both STM32G0 hardware integration jobs from CI while the shared hardware rig is repaired.
+- **Started:** unavailable; the repository-local `/worklog-start` extension was removed in the preceding documentation cleanup.
+- **Completed:** 2026-08-11 07:34:46 UTC / 2026-08-11 09:34:46 CEST (+0200) (Warsaw)
+- **Validation:** `git diff --check` — passed; PyYAML workflow parse — passed.
+- **Model-token delta:** unavailable; the repository-local `/worklog-start` extension was removed in the preceding documentation cleanup.
+
+### File changes (`db101ea`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `.github/workflows/ci.yml` | 4 | 4 | Sets both STM32G0 hardware jobs to `if: ${{ false }}` with temporary-repair comments. |

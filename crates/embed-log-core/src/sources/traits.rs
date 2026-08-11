@@ -7,10 +7,12 @@ use crate::models::LogEntry;
 pub struct TxCommand {
     pub data: Vec<u8>,
     pub origin: String,
+    /// Normalize the payload to one trailing carriage return before writing.
+    pub line_ending: bool,
     /// Optional oneshot channel to acknowledge the write result.
-    /// When set, the source sends `Ok(())` after a successful write
+    /// When set, the source sends the number of bytes written after success
     /// or `Err(reason)` on failure.
-    pub ack: Option<tokio::sync::oneshot::Sender<Result<(), String>>>,
+    pub ack: Option<tokio::sync::oneshot::Sender<Result<usize, String>>>,
 }
 
 /// A source of log entries (UART, UDP, file, etc.).

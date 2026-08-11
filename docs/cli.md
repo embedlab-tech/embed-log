@@ -6,6 +6,35 @@ The CLI binary is named `embed-log`.
 embed-log --help
 ```
 
+## Embedded agent skill
+
+```bash
+embed-log skill
+embed-log skill --json
+```
+
+`skill` prints the canonical investigation skill embedded at build time, so an agent can load version-matched guidance without locating this repository or installing a plugin. It uses concise session readers as the sole log-evidence interface for both active capture and saved-session analysis. Raw Markdown is the token-efficient default. `--json` returns the skill name, `schema_version`, `embed_log_version`, `format`, and escaped `content` in one document. The command needs no config, daemon, network access, or machine-specific paths.
+
+## Machine-readable capability discovery
+
+`schema` is the agent/wrapper discovery interface. It does not require a config or running daemon and writes exactly one JSON document:
+
+```bash
+embed-log schema                         # compact capability index
+embed-log schema sessions.read           # one command's actual Clap arguments plus semantics
+embed-log schema sessions around         # split and dotted paths are equivalent
+embed-log schema tx --json               # optional familiar spelling; JSON is already the default
+embed-log schema tx --pretty             # indented JSON for human inspection
+embed-log schema errors                  # currently stable machine error codes
+embed-log schema config                  # compact config capabilities
+```
+
+The index advertises `schema_version`, `embed_log_version`, commands, interfaces, source/parser types, defaults, and hard limits. A command descriptor adds usage, options, types, enums, defaults, conflicts, known numeric constraints, mutation status, execution mode, targeting requirements, output behavior, stable errors, and semantic notes. Arguments are read from the built Clap command graph so hidden/internal commands are excluded and public option changes are reflected automatically.
+
+Discovery is progressive and token-bounded: call bare `schema` first, then request only the relevant command. Static output contains no daemon state or machine-specific paths and can be cached by the pair `(schema_version, embed_log_version)`. Continue using `status --json` for current instances, sessions, sources, and write capabilities.
+
+`schema errors` reports `"coverage":"all_json_invocations"`. A failed invocation requesting JSON writes exactly one `{ "ok": false, "error": { "code", "message", "details" } }` document to stdout and exits nonzero; `COMMAND_FAILED` is the stable fallback when no narrower classification applies. Human-mode failures remain concise stderr text. `schema config` is a compact capability descriptor, not yet a formal JSON Schema document.
+
 Global options:
 
 | Option | Meaning |
@@ -13,7 +42,6 @@ Global options:
 | `-c, --config <PATH>` | Config file. Falls back to `EMBED_LOG_CONFIG_YML_PATH`, then `embed-log.yml`. |
 | `--frontend-dir <PATH>` | Filesystem frontend directory for development. Defaults to `frontend`. Release binaries can use embedded assets. |
 | `--tui` | Launch the terminal UI instead of the browser UI. |
-| `--ui` | Launch the beta Tauri desktop UI instead of the browser UI. |
 | `--no-open-browser` | Do not open the default browser. |
 
 ## Run server
@@ -35,7 +63,7 @@ embed-log run -s /dev/ttyUSB0 -s /dev/ttyUSB1 -f ./device.log --baud 115200
 
 `-s` / `--serial` adds a UART, `-f` / `--file` watches an appended file, and `--baud` applies to every quick-run UART (default: `115200`). Each source gets its own tab. The generated configuration is in memory: no YAML is read or written, and `--config` cannot be combined with quick-run sources. Use `--save-config embed-log.yml` to persist it for later customization.
 
-Quick runs create the same session artifacts as config-based runs, under `./logs/` by default or the `--log-dir` path when supplied. All normal run flags work in this mode, including `--tui`, `--no-open-browser`, `--log-dir`, `--host`, and `--ws-port`. See [Quick start](quickstart.md) for the shortest examples.
+Quick runs create the same session artifacts as config-based runs, under `./logs/` by default or the `--log-dir` path when supplied. All normal run flags work in this mode, including `--tui`, `--no-open-browser`, `--log-dir`, `--host`, and `--port`. See [Quick start](quickstart.md) for the shortest examples.
 
 ### Config-based run
 
@@ -59,92 +87,116 @@ embed-log run --config embed-log.yml --no-open-browser
 
 Current behavior:
 
-- if no config exists at the resolved path, automatically runs **onboarding** first (see [Onboarding](#onboarding)), then starts `LogServer` from the generated config
+- fails with config/quick-run guidance if the resolved config does not exist
 - starts `LogServer`
-- serves UI/API on `server.host:server.ws_port`
-- opens the browser unless `--no-open-browser` is passed (skipped when onboarding ran, since the onboarding page redirects to the live server)
+- serves UI/API on the configured `server.listen` endpoint
+- opens the browser unless `--no-open-browser` is passed
 - writes session artifacts under `logs.dir`
 - exports `session.html` on Ctrl-C shutdown
 
 Useful runtime overrides:
 
 ```bash
-embed-log run --config embed-log.yml --host 0.0.0.0 --ws-port 9090 --log-dir /tmp/embed-log-runs
+embed-log run --config embed-log.yml --host 0.0.0.0 --port 9090 --log-dir /tmp/embed-log-runs
 ```
 
-`--host` and `--ws-port` override `server.host` / `server.ws_port` in memory. `--log-dir` overrides `logs.dir` and is resolved relative to the current working directory.
+`--host` and `--port` override the host and port from `server.listen` in memory. `--log-dir` overrides `logs.dir` and is resolved relative to the current working directory.
 
-## Onboarding
+### Daemon instances
 
-`embed-log` and the Tauri desktop app share the **same** first-run onboarding page (`frontend/onboarding.js`) and the same onboarding HTTP server (`embed_log_core::onboarding::OnboardingServer`). There is no separate web UI for setup.
-
-Onboarding runs automatically when `embed-log run` (or the default command) finds no config file. You can also trigger it explicitly:
+Start a named config-based daemon and wait for its status API to become ready:
 
 ```bash
-embed-log onboard
+embed-log run --daemon --instance bench-a --config embed-log.yml --json
 ```
 
-or writing to a specific path:
+Daemon startup requires explicit `--config` and `--instance`. Its endpoint uses `--host`/`--port` overrides, then `server.listen` from YAML, then the default `127.0.0.1:18080`; it never scans for or selects another port. Repeating the same instance, endpoint, and unchanged config is idempotent and returns `reused: true`; endpoint/config conflicts fail. Instance records contain the PID, endpoint, config path and fingerprint, logs directory, diagnostic log, executable, and start time. They live under `$XDG_RUNTIME_DIR/embed-log`, with a user-state fallback; tests may override this with `EMBED_LOG_RUNTIME_DIR`.
+
+Inspect or stop it:
 
 ```bash
-embed-log onboard --config ~/projects/lab-a/embed-log.yml
+embed-log status --instance bench-a --brief
+embed-log stats --instance bench-a --brief
+embed-log status --instance bench-a --source DUT_UART --json
+embed-log stop --instance bench-a --json
+embed-log stop --url http://127.0.0.1:18080 --json
 ```
 
-What happens:
+Read-only `status` resolves `--instance`, then `EMBED_LOG_INSTANCE`, then the only running instance. Mutating commands such as `stop` and `sessions new` require `--instance`, `EMBED_LOG_INSTANCE`, or an explicit URL where supported. Query an unregistered or remote server directly with `embed-log status --url http://127.0.0.1:18080 --json`.
 
-1. a small setup server starts on a random localhost port
-2. your browser opens the setup page (unless `--no-open-browser`)
-3. you pick sources, tabs, parser, and logs directory
-4. on **Start logging**, the config is written to the resolved path, validated, and the CLI transitions to the real `LogServer` on the configured `ws_port`
-
-The setup server exposes the same HTTP endpoints used by the page in both browser and Tauri mode:
-
-| Endpoint | Purpose |
-| --- | --- |
-| `GET /` | the onboarding page |
-| `GET /api/serial_ports` | discovered serial ports |
-| `GET /api/server_status` | resolved config path + ws port |
-| `POST /api/save_config` | persist the draft config |
-
-
-## Desktop UI
+`status --brief` is a one-line readiness check; `--source NAME` limits source details. `stats` is deliberately separate from status and distinguishes process-lifetime source counters from current-session record totals. Record external experiment boundaries without altering log records:
 
 ```bash
-embed-log --ui --config embed-log.yml
+embed-log mark --instance bench-a --action power-cycle --label "cycled DUT supply" --json
 ```
 
-The CLI tries to launch the Tauri app directly or through Cargo during development. `EMBED_LOG_TAURI_BIN` can point at a specific Tauri binary.
+Timeline markers are persisted with the session and included by the existing HTML/session export paths. `stop` verifies that the recorded PID still refers to the same executable before signaling it, waits for clean shutdown, and removes the registry record. If a binary was replaced while a daemon stayed alive, lifecycle commands repair/adopt the live PID and endpoint record. `stop --url` targets a registered daemon by endpoint. Daemon shutdown does not automatically export HTML. CLI-only source definitions are not yet accepted with `--daemon`.
 
-## Validate config
+### UART TX and atomic expectations
+
+Write a line through a UART already owned by the daemon:
 
 ```bash
-embed-log validate --config embed-log.yml
-embed-log validate --config embed-log.yml --json
+embed-log tx --instance bench-a --source DUT_UART --line status --json
 ```
 
-Loads the config, runs validation, and prints the resolved server/log/source/tab summary. For packet-capture configs, follow with `embed-log doctor --config <file>` to check the native pcap dependency.
+`--line` strips existing CR/LF terminators and writes one trailing carriage return. Use `--raw TEXT`, `--file PATH`, or `--stdin` to send exact bytes without line-ending normalization. Exactly one input mode is required. Use `--count N --interval 250ms` for repeated experiments. `--until-prompt PROMPT` waits for the terminating prompt and returns the bounded response context instead of stopping at an arbitrary first matching line.
 
-## Init config
+Arm an RX expectation before writing and return bounded live context:
 
 ```bash
-embed-log init --output embed-log.yml
+embed-log tx --instance bench-a --source DUT_UART \
+  --line reset --expect "boot complete" \
+  --timeout 30s --context 20 --json
 ```
 
-Writes the embedded demo config. Edit it before using with real devices.
+Substring matching is the default; `--expect-regex` enables a regular expression. TX entries never satisfy an expectation. Human-mode matched RX records use the same concise reader format (`+time seq=... src=SOURCE#INDEX | message`); use `--json` when a script needs the structured response envelope. A timeout exits unsuccessfully and, with `--json`, emits an `EXPECT_TIMEOUT` object containing the successful byte count and bounded context observed after the command was armed. A control-stream gap fails instead of claiming a potentially unsafe result. Successful expectations expose the match sequence as `next_cursor`. TX requires `--instance`, `EMBED_LOG_INSTANCE`, or `--url http://host:port`; it never infers the sole daemon.
 
-## Demo
+### Temporary watches
+
+Use a watch when the trigger is external to UART TX:
 
 ```bash
-embed-log demo
+watch_id=$(embed-log watch add --instance bench-a \
+  --source DUT_UART --contains "session established" \
+  --ttl 30s --json | jq -r '.watch.id')
+
+embed-log watch wait "$watch_id" \
+  --instance bench-a --timeout 30s --json
+
+embed-log watch remove "$watch_id" --instance bench-a --json
 ```
 
-or without opening the browser:
+`watch add` accepts exactly one of literal `--contains` or `--regex`. Watches are server-side, process-local, temporary, one-shot conditions. They match committed RX records directly and do not stream ordinary logs to the waiting CLI. A match is retained in memory, so `watch wait` still succeeds if the record arrived before it connected. Watch state is never persisted to the session.
+
+`--ttl` controls how long the server actively matches; it defaults to 30 seconds and is capped at 24 hours. Matched or expired state remains queryable until `watch remove` or process shutdown. `watch wait --timeout` only limits that CLI invocation and does not alter server TTL. JSON failures use `WATCH_EXPIRED`, `WATCH_WAIT_TIMEOUT`, or `WATCH_NOT_FOUND`. All watch mutations require `--instance`, `EMBED_LOG_INSTANCE`, or `--url`; they never infer the sole daemon. Matched watch output includes the triggering record's session-global `sequence` and exposes it as `next_cursor` for bounded follow-up reads.
+
+### Export the active session
+
+Generate the daemon's canonical `session.html`:
 
 ```bash
-embed-log demo --no-open-browser
+embed-log export --instance bench-a --json
+# or target an unregistered daemon explicitly
+embed-log export --url http://127.0.0.1:18080 --json
 ```
 
-The demo uses an embedded config unless `--config` is supplied. It prepares demo file sources, starts generated traffic, and runs the normal server.
+The command returns after the complete report has been atomically published in the session directory. The browser's full-session Export button invokes the same daemon endpoint and downloads that exact file.
+
+### Create an experiment session
+
+Rotate a running server without restarting source tasks or releasing UARTs:
+
+```bash
+embed-log sessions new \
+  --instance bench-a \
+  --title "EDHOC reconnect attempt 3" \
+  --json
+```
+
+The original title is stored in `manifest.json` and returned by the session APIs. The directory/session ID includes a filesystem-safe slug, for example `2026-08-03_14-22-10_edhoc-reconnect-attempt-3`. Titles must be non-empty, contain a letter or number, and be at most 120 characters. Use `--url http://host:port` instead of `--instance` for an unregistered server.
+
+Rotation broadcasts `session_rotated`; connected browser and TUI clients clear their old panes and continue on the new session. Foreground rotation exports the completed session HTML. Daemon rotation leaves raw artifacts only unless export is explicitly requested. Disconnecting the final browser never triggers an export.
 
 ## Diagnostics
 
@@ -167,29 +219,14 @@ embed-log doctor --config embed-log.yml
 embed-log doctor --serial /dev/ttyUSB0
 ```
 
-`doctor` reports the binary version, host system info, config resolution, and packet-capture readiness:
+`doctor` validates the resolved YAML and reports the binary version, host system info, and config resolution:
 - which OS / architecture the binary is running on
 - `config env: EMBED_LOG_CONFIG_YML_PATH=...` — shown whenever that env var is set, so you can tell why a given config got picked
 - `resolved config: <path>` — always shown; the exact config path `run` would load (`--config` → `EMBED_LOG_CONFIG_YML_PATH` → `embed-log.yml`), even if you didn't pass `--config` to `doctor` itself
-- config summary (sources/tabs/pcap sources) if the resolved config file exists and loads; a missing config is reported as normal, not a warning
-- whether the binary was built with the `pcap-capture` feature
-- whether the native packet-capture library is installed (`libpcap` on Unix-like systems, `Npcap`/`WinPcap` on Windows)
-- whether the inspected config contains `network_capture` sources using `network_backend: pcap`
+- resolved server endpoint, logs directory, and every configured physical source (name, type, parser, writability, source endpoint, and UART baud rate when applicable); UI tabs and virtual merges are intentionally omitted
 - configured UART paths, plus explicitly requested repeatable `--serial <path>` checks
 
 Serial checks only test filesystem-level readability/writability and never configure or reset an attached UART. A missing path or permission denial produces an actionable warning.
-
-Check for updates:
-
-```bash
-embed-log update --check
-embed-log update --check --json
-embed-log update --yes
-embed-log update --version v1.2.0 --yes
-embed-log update --version v0.9.0 --yes --allow-downgrade
-```
-
-`--check` reports the latest stable GitHub Release without changing the system. `--yes` downloads the target-matching archive, verifies it against the release `SHA256SUMS`, stages the executable beside the current binary, and replaces it with a rollback backup if replacement fails. Self-update rejects same-version and downgrade installs by default; `--allow-downgrade --yes` is the explicit escape hatch. It currently supports Linux x86_64 and macOS Apple Silicon/Intel. On Windows, use the PowerShell installer again or your package manager: replacing a running `.exe` requires a dedicated updater helper that is not shipped yet. Package-managed or read-only installations should use their package manager instead.
 
 Serial ports:
 
@@ -238,42 +275,21 @@ embed-log sessions info <SESSION_ID> --dir logs
 embed-log sessions info latest --dir logs --json
 ```
 
-Import an external text log into an existing session. Lines must start with RFC3339 timestamps in UTC or another explicit offset; imported records are merged into `combined.jsonl` in timestamp order:
-
-```bash
-embed-log sessions import latest ./pytest.log --source PYTEST
-embed-log sessions import latest ./pytest.log --source PYTEST --dry-run
-# 2026-07-11T11:21:47.123Z test started
-# [2026-07-11T11:21:48+00:00] assertion passed
-```
-
-Create a portable support bundle. It includes all session artifacts plus `embed-log-version.json` build diagnostics:
-
-```bash
-embed-log sessions bundle latest --dir logs
-embed-log sessions bundle latest --output ./support.tar.gz
-```
-
-Prune older sessions while retaining the newest N. Always preview first:
-
-```bash
-embed-log sessions prune --dir logs --keep 20 --dry-run
-embed-log sessions prune --dir logs --keep 20
-```
-
-Open a session report in the default browser. If the HTML export is missing, it is generated first:
+Open a session report in the default browser. The canonical HTML export is refreshed first, repairing stale or legacy partially written reports:
 
 ```bash
 embed-log sessions open latest --dir logs
 ```
 
-Export a recorded session:
+Export a recorded session from its manifest, markers, and canonical `combined.jsonl`:
 
 ```bash
 embed-log sessions export <SESSION_ID> --dir logs --format html --output session.html
 embed-log sessions export <SESSION_ID> --dir logs --format raw --output merged.txt
 embed-log sessions export <SESSION_ID> --dir logs --format jsonl-deduped --output session.jsonl
 ```
+
+Given the same input snapshot and Embed-log build, the HTML path produces the same bytes as `embed-log export` and the browser full-session export. Prefer `embed-log export --instance NAME` while capture is active so the daemon owns the snapshot.
 
 Formats:
 
@@ -297,62 +313,53 @@ Formats:
   rendering for reading a handful of matched lines — `jsonl-deduped` is a lossless, whole-session
   export.
 
-### Output format: `--format`
+### Global sequence, bounded reads, and context
 
-`sessions search`, `sessions combined`, and `sessions events` all take `--format`, useful for keeping agent/script output small:
+Every record captured by the current version receives a session-global `sequence` in the same serialized order used by `combined.jsonl`, replay, and live publication. `line_idx` remains source-local. A compact line therefore identifies both positions:
 
-| Format | What it looks like | Size vs. `jsonl`\* |
-| --- | --- | --- |
-| `jsonl` (default) | The full JSONL record, byte-for-byte as stored. | baseline |
-| `compact` | One human-readable line: `1:23.644 D#1234 panic: watchdog reset`. | ~81% smaller |
-| `mini-jsonl` | Small JSON object with short keys: `{"t":"1:23.644","s":"D","i":1234,"m":"panic: watchdog reset"}` (adds `src`/`dst`/`len` for packet entries, `sev`/`ev` for events). | ~77% smaller |
-
-\* Measured on a real 43k-line session. `compact`/`mini-jsonl` apply two layers on top of the raw
-record:
-
-- **Denoised** (always): ANSI/terminal control sequences, a message's duplicate leading timestamp
-  (when it repeats the record's own timestamp — common in pytest output), padded log-level
-  brackets (`[   ERROR]` → `[ERROR]`), and redundant device uptime counters
-  (`[00000002] <inf> ...` → `<inf> ...`, keeping the level tag) are all stripped.
-- **Compacted further** (always): the timestamp shown is elapsed time since *that entry's own
-  session start* (`1:23.644` = 1 minute 23.644s in), not wall-clock time — shorter for typical
-  session lengths since it never encodes hour-of-day, and it directly answers "how far into the
-  run is this." The absolute anchor isn't lost — `sessions summary <id>` shows it. Source names
-  are shortcoded rather than spelled out — derived from the source's own name (initials of its
-  `_`/`-`-separated words: `COUNTER` → `C`, `MCU_LINK_RX` → `MLR`, `NODE-RED-COAP` → `NRC`),
-  falling back to a longer prefix on a rare collision, so codes stay mnemonic instead of arbitrary
-  and mostly stable across runs. The first time each timestamp convention or source code is used
-  in a given command's output, a one-line explanation is printed to **stderr** (never stdout, so
-  scripts/agents parsing output see only clean data) — e.g. `sessions: source code C = COUNTER`.
-  If a search spans multiple sessions, elapsed times are relative to each entry's *own* session
-  start — scope with `--session <id>` for unambiguous
-  elapsed times across a single run.
-
-Both layers are on by default for `compact`/`mini-jsonl` — `jsonl` remains the untouched,
-byte-exact format (original wall-clock timestamps, full source names) for anyone who needs it.
-
-```bash
-embed-log sessions search --dir logs --regex 'panic|fatal' --format compact
-embed-log sessions combined latest --lines 50 --format mini-jsonl
-embed-log sessions events latest --severity fatal --format compact
+```text
++12.453 seq=719 src=DUT_UART#428 | boot complete
 ```
 
+Read only a bounded page:
+
+```bash
+embed-log sessions read latest --dir logs --limit 100
+embed-log sessions read latest --dir logs --after 100 --limit 50 --json
+embed-log sessions read latest --dir logs --source DUT_UART --last 20 --json
+```
+
+Forward reads default to 100 records and all limits are capped at 1000. `--after` is the global cursor even when `--source` filters the returned records. Selecting a configured virtual merge dynamically expands to its member sources while returned records retain their physical source, source-local index, and global sequence. Readers have exactly two output modes: concise text by default, or one compact structured envelope with `--json`:
+
+```json
+{"session_id":"...","fields":["time","sequence","source","index","message"],"records":[["+12.453",719,"DUT_UART",428,"boot complete"]],"next_cursor":719,"truncated":false,"invalid_records":0}
+```
+
+Use `--time absolute` when wall-clock timestamps are required; relative time is the default. Raw stored objects are available through export/diagnostic paths, not reader format switches. Sessions captured before global sequencing fail with an actionable compatibility error instead of inventing cursors.
+
+Fetch deterministic cross-source context by sequence:
+
+```bash
+embed-log sessions around latest --sequence 719 --before 10 --after 20 --json
+```
+
+The total around window is capped at 1000 records. Sequence and source-local line counters reset to 1 and 0 respectively on titled rotation. Materialized merge records from older sessions are excluded from combined output, bounded reads/context, search, summaries, and exports by default; pass `--include-materialized-merges` to the applicable read command only when the redundant compatibility records are specifically required. TX expectations, watch matches, browser records, and TUI records carry the same sequence.
+
+### Reader output
+
+`sessions read`, `sessions around`, and `sessions search` intentionally expose only two formats:
+
+- default concise text: `+0.123 seq=1234 src=UART#42 | message`;
+- `--json`: one compact envelope with `session_id`, fixed `fields`, tuple `records`, cursor, truncation, and invalid-record metadata.
+
+The stored `combined.jsonl` stream remains available through `sessions combined` and session export; it is not a reader format selector.
 Read the session-wide combined JSONL stream:
 
 ```bash
 embed-log sessions combined <SESSION_ID> --dir logs
 embed-log sessions combined <SESSION_ID> --dir logs --lines 50
 embed-log sessions tail-combined <SESSION_ID> --dir logs --follow
-embed-log sessions combined latest --follow --format compact
-```
-
-Read event-detection hits from a session:
-
-```bash
-embed-log sessions events <SESSION_ID> --dir logs
-embed-log sessions events <SESSION_ID> --dir logs --severity fatal
-embed-log sessions events <SESSION_ID> --dir logs --source DUT --contains watchdog
-embed-log sessions events <SESSION_ID> --dir logs --json
+embed-log sessions combined latest --follow
 ```
 
 Show a token-efficient overview of one session — the recommended first call before searching, especially for agents:
@@ -362,17 +369,17 @@ embed-log sessions summary latest
 embed-log sessions summary latest --json
 ```
 
-Prints per-source line counts and first/last timestamps, event severity counts, session duration, and the last 5 combined-log lines — a small, bounded summary instead of scanning the full log.
+Prints per-source line counts and first/last timestamps, session duration, and the last 5 combined-log lines — a small, bounded summary instead of scanning the full log.
 
 Search across session combined streams:
 
 ```bash
 embed-log sessions search --dir logs --source DUT
 embed-log sessions search --dir logs --source DUT --from 2026-07-03T09:00:00 --to 2026-07-03T15:00:00
-embed-log sessions search --dir logs --job nightly-42 --kind network_capture --dst-port 5683
+embed-log sessions search --dir logs --job nightly-42 --kind udp --contains timeout
 embed-log sessions search --dir logs --contains panic --regex 'ERROR|WARN'
 embed-log sessions search --dir logs --source DUT --count
-embed-log sessions search --session latest --regex 'timeout' --format compact
+embed-log sessions search --session latest --regex 'timeout'
 ```
 
 `search` scans `combined.jsonl` files under the selected log directory and prints matching entries. It can filter by session id/prefix (including `latest`), job id, source id, source kind, time window, message substring/regex, and packet fields such as source/destination UDP port or IP address.
@@ -404,45 +411,9 @@ embed-log sessions search --dir logs --regex panic -B 20 -A 40       # different
 
 Each match prints a `# match N session=... source=... line=...` header, the surrounding lines, and `<< MATCH` on the matching line. Context flags conflict with `--count` and with `--last` (not supported together yet).
 
-## Merge raw logs into static HTML
-
-```bash
-embed-log merge \
-  --tab Device DUT logs/dut.log HOST logs/host.log \
-  --output merged.html
-```
-
-Pane labels can be supplied as `PANE_ID=Friendly Label`:
-
-```bash
-embed-log merge \
-  --tab Device DUT='DUT Device' logs/dut.log \
-  --output merged.html
-```
-
-Timestamp options:
-
-```bash
-embed-log merge \
-  --tab Device DUT logs/dut.log \
-  --timestamp-mode relative \
-  --first-log-at 2026-06-14T09:00:00+02:00 \
-  --output merged.html
-```
-
-## Parse exported HTML back to logs
-
-```bash
-embed-log parse session.html --output parsed/
-```
-
-Extracts embedded `logData` from a session HTML file and writes per-pane raw log files.
-
 ## Environment variables
 
 | Variable | Used by | Meaning |
 | --- | --- | --- |
-| `EMBED_LOG_CONFIG_YML_PATH` | CLI/Tauri | Config path fallback. |
-| `EMBED_LOG_TAURI_BIN` | CLI `--ui` | Explicit Tauri app binary path. |
-| `EMBED_LOG_DEMO_TRAFFIC` | Tauri/dev | Enables generated demo traffic when starting the Tauri server. |
+| `EMBED_LOG_CONFIG_YML_PATH` | CLI | Config path fallback. |
 | `RUST_LOG` | tracing | Log filtering, e.g. `RUST_LOG=debug`. |

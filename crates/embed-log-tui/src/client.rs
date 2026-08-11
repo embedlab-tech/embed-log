@@ -1,6 +1,6 @@
 //! WebSocket client for the embed-log `/ws` endpoint.
 //!
-//! Connects, reads the config → log replay → events replay → live broadcast
+//! Connects, reads the config → log replay → live broadcast
 //! sequence, and forwards parsed [`ServerMessage`]s to the app via an
 //! `mpsc<ServerEvent>` channel. The app sends [`ClientCommand`]s back over a
 //! second channel. Reconnects with exponential backoff (1s → 16s), mirroring

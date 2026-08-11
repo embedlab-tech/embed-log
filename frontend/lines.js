@@ -1,9 +1,10 @@
 import {
     state, TABS, PANES, buildTimestampInfo, applyTimestampModeToLine,
-    lineHasTimestampMode, resetRelativeTimestampBase, noteRelativeTimestampCandidate,
+    lineHasTimestampMode, noteRelativeTimestampCandidate,
 } from './state.js';
 import { parseAnsi } from './ansi.js';
 import { analyzeLinePlugins, getLinePluginTooltip, getConfiguredPanePlugins, getPanePluginSettings, setPanePluginSetting } from './pluginRuntime.js';
+import { isEditableTarget, isComposingEvent } from './keyboard.js';
 
 // ---------------------------------------------------------------------------
 // Line rendering
@@ -54,6 +55,8 @@ export function buildStoredLine(paneId, ts, rawText, isTx, meta = null) {
         paneId,
         ...buildTimestampInfo(ts, lineMeta),
         serverLineIdx: Number.isFinite(lineMeta.lineIdx) ? lineMeta.lineIdx : null,
+        sequence: Number.isFinite(lineMeta.sequence) ? lineMeta.sequence : null,
+        sessionId: lineMeta.sessionId || null,
         html,
         rawText,
         isTx,
@@ -284,6 +287,7 @@ window.addEventListener("resize", () => {
     _scheduleVirtualResizeRefresh();
 });
 document.addEventListener("keydown", ev => {
+    if (isComposingEvent(ev) || isEditableTarget(ev.target)) return;
     if (ev.key === "Escape") _hidePluginInfo();
 });
 
@@ -311,12 +315,8 @@ export function applyLineDom(div, line, paneId, idx, filterRx) {
     div.classList.toggle("has-marker", marker !== null);
     if (marker !== null) {
         div.dataset.markerTooltip = marker.description || "";
-        div.dataset.kind = marker.kind || "user";
-        div.dataset.severity = marker.severity || "";
     } else {
         delete div.dataset.markerTooltip;
-        delete div.dataset.kind;
-        delete div.dataset.severity;
     }
     if (!matchesFilter(line, filterRx)) {
         div.style.display = "none";
@@ -488,10 +488,8 @@ function _markerAt(paneId, idx, line = null) {
     const markers = state.markers[paneId];
     if (!markers) return null;
     for (const m of markers) {
-        const isEvent = (m.kind || "user") === "event";
-        const lineKey = isEvent && Number.isFinite(line?.serverLineIdx) ? line.serverLineIdx : idx;
         const end = m.endIdx ?? m.lineIdx;
-        if (lineKey >= m.lineIdx && lineKey <= end) return m;
+        if (idx >= m.lineIdx && idx <= end) return m;
     }
     return null;
 }
@@ -898,10 +896,11 @@ export function reanalyzePanePlugins(paneId) {
     rerenderPane(paneId);
 }
 export function setTimestampMode(mode) {
-    const nextMode = mode === "relative" ? "relative" : "absolute";
+    const nextMode = mode === "relative" || mode === "hidden" ? mode : "absolute";
     if (state.timestampMode === nextMode) return;
 
     state.timestampMode = nextMode;
+    state.showTs = nextMode !== "hidden";
     state.syncTs = null;
     state.syncTabSwitch = false;
 
@@ -920,6 +919,7 @@ export function setTimestampMode(mode) {
     window.__embedLogUpdateTimestampModeUi?.();
 }
 export function canDisplayTimestampMode(mode) {
+    if (mode === "hidden") return true;
     for (const paneId of PANES) {
         const lines = state.rawLines[paneId] || [];
         for (const entry of lines) {
@@ -1162,23 +1162,11 @@ document.getElementById("btn-jump-all")?.addEventListener("click", () => {
 // Shift+L: same as clicking Live. Use e.code (physical key) rather than
 // e.key so it fires regardless of Caps Lock state.
 document.addEventListener("keydown", ev => {
+    if (isComposingEvent(ev) || isEditableTarget(ev.target)) return;
     if (!ev.shiftKey || ev.ctrlKey || ev.altKey || ev.metaKey || ev.code !== "KeyL") return;
-    const tag = ev.target?.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA" || ev.target?.isContentEditable) return;
     ev.preventDefault();
     document.getElementById("btn-jump-all")?.click();
 });
-
-document.getElementById("btn-clear")?.addEventListener("click", () => {
-    window.wsSend?.({ cmd: "clear_logs", scope: "all" });
-    window.__embedLogDiscardPendingLogMessages?.();
-    resetRelativeTimestampBase();
-    state.syncTs = null;
-    state.syncTabSwitch = false;
-    PANES.forEach(clearPane);
-    _updateToolbarStats();
-});
-
 
 // Rebuild DOM for a pane from stored state — used after layout rebuild (UNWRAP toggle)
 export function repopulatePaneLogs(paneId) {

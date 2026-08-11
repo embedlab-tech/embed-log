@@ -101,7 +101,7 @@ class E2eServer:
              "--frontend-dir", str(self.frontend),
              "--no-open-browser",
              "--host", self.host,
-             "--ws-port", str(self.port)],
+             "--port", str(self.port)],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         )
         deadline = time.time() + 15
@@ -143,16 +143,17 @@ def e2e_server(embed_log_binary: Path, frontend_dir: Path, temp_dir: Path,
     port = free_port()
 
     config = {
-        "version": 1,
-        "server": {"host": "127.0.0.1", "ws_port": port,
+        "version": 2,
+        "server": {"listen": f"127.0.0.1:{port}",
                     "app_name": "embed-log-e2e", "timestamp_mode": "absolute"},
         "logs": {"dir": str(temp_dir / "logs")},
-        "baudrate": 115200,
-        "sources": [
-            {"name": "DUT_UART", "label": "DUT", "type": "uart", "port": slave_name},
-            {"name": "PYTEST", "label": "Pytest", "type": "udp", "port": 0},
-        ],
-        "tabs": [{"label": "Main", "panes": ["DUT_UART", "PYTEST"]}],
+        "sources": {
+            "DUT_UART": {"label": "DUT", "type": "uart",
+                         "path": slave_name, "baud": 115200},
+            "PYTEST": {"label": "Pytest", "type": "udp", "port": 0},
+        },
+        "ui": {"tabs": [{"title": "Main",
+                           "sources": ["DUT_UART", "PYTEST"]}]},
     }
     config_path = temp_dir / "embed-log-e2e.yml"
     config_path.write_text(yaml.dump(config))
@@ -237,12 +238,12 @@ class TestE2eSdkConnect:
         with EmbedLogClient(e2e_server.ws_url(), origin="e2e") as client:
             client.subscribe(["DUT_UART"])
             written = client.tx_write("DUT_UART", "version\r\n")
-            assert written == 9
+            assert written == 8
 
             # Read from the master side of the PTY
             deadline = time.time() + 3.0
             data = b""
-            while time.time() < deadline and len(data) < 9:
+            while time.time() < deadline and len(data) < 8:
                 r, _, _ = select.select([master_fd], [], [], 0.5)
                 if r:
                     chunk = os.read(master_fd, 32)
@@ -286,187 +287,3 @@ class TestE2eSdkConnect:
             f"pane_commands missing DUT_UART: {pane_commands}"
         assert any("help" in c for c in pane_commands["DUT_UART"]), \
             f"help command not found: {pane_commands['DUT_UART']}"
-
-
-class TestE2eWatcher:
-    """Phase 8 E2E — watcher observes logs, creates markers, CLI."""
-
-    def test_watcher_writes_evidence(self, e2e_server: E2eServer, temp_dir: Path):
-        """Watcher observes injected log and writes JSONL evidence."""
-        from embed_log_sdk import EmbedLogClient
-        from embed_log_sdk.watcher import Watcher, WatcherConfig, WatchRule
-
-        evidence = temp_dir / "evidence.jsonl"
-        wconfig = WatcherConfig(
-            server_url=e2e_server.ws_url(), output_path=evidence,
-            rules=[WatchRule(name="detect", sources=["PYTEST"],
-                             pattern="e2e-watch-evidence", marker=False)])
-        wclient = EmbedLogClient(e2e_server.ws_url(), origin="watcher")
-        watcher = Watcher(wconfig, wclient)
-
-        results: list[int] = []
-        t = threading.Thread(target=lambda: results.append(
-            watcher.run(timeout=5.0)), daemon=True)
-        t.start()
-        time.sleep(0.5)
-
-        ic = EmbedLogClient(e2e_server.ws_url(), origin="e2e")
-        ic.inject_log("PYTEST", "e2e-watch-evidence matched!")
-        ic.close()
-
-        t.join(timeout=6)
-        watcher.close()
-        assert results[0] >= 1
-
-        lines = evidence.read_text().strip().split("\n")
-        assert len(lines) >= 1
-        ev = json.loads(lines[0])
-        assert ev["watch"] == "detect"
-        assert ev["source_id"] == "PYTEST"
-
-    def test_watcher_marker_in_markers_json_and_broadcast(
-            self, e2e_server: E2eServer):
-        """Watcher with marker:true creates a marker visible in markers.json.
-        Also verify a frontend-compatible markers_update event is broadcast
-        by connecting a raw WebSocket listener before the watcher runs."""
-        import websocket
-        from embed_log_sdk import EmbedLogClient
-        from embed_log_sdk.watcher import Watcher, WatcherConfig, WatchRule
-
-        # Open a raw WebSocket to capture the broadcast.
-        # The control endpoint does not send anything on connect; the
-        # server's broadcast loop polls both client commands and the
-        # broadcast channel simultaneously, so markers_update will be
-        # forwarded when the watcher creates a marker.
-        broadcast_ws = websocket.WebSocket()
-        broadcast_ws.connect(e2e_server.ws_url(), timeout=10)
-        broadcast_ws.settimeout(8.0)
-
-        wconfig = WatcherConfig(
-            server_url=e2e_server.ws_url(),
-            rules=[WatchRule(name="fatal", sources=["PYTEST"],
-                             pattern="FATAL ERROR", marker=True)])
-        wclient = EmbedLogClient(e2e_server.ws_url(), origin="watcher")
-        watcher = Watcher(wconfig, wclient)
-
-        results: list[int] = []
-        t = threading.Thread(target=lambda: results.append(
-            watcher.run(timeout=5.0)), daemon=True)
-        t.start()
-        time.sleep(0.5)
-
-        ic = EmbedLogClient(e2e_server.ws_url(), origin="e2e")
-        ic.inject_log("PYTEST", "FATAL ERROR: something broke")
-        ic.close()
-        t.join(timeout=6)
-        watcher.close()
-        assert results[0] >= 1
-
-        # Verify markers.json
-        log_dirs = sorted(e2e_server.log_dir.iterdir())
-        assert log_dirs
-        markers_path = log_dirs[0] / "markers.json"
-        assert markers_path.exists()
-        raw = json.loads(markers_path.read_text())
-        markers = raw.get("markers", [])
-        assert len(markers) >= 1
-        marker = markers[0]
-        assert marker["paneId"] == "PYTEST"
-        assert marker["description"] == "fatal"
-
-        # Verify the markers_update broadcast was emitted
-        broadcast_ws.settimeout(5.0)
-        broadcast_found = False
-        deadline = time.time() + 5.0
-        while time.time() < deadline:
-            try:
-                frame = broadcast_ws.recv()
-            except Exception:
-                break
-            if not frame:
-                break
-            parsed = json.loads(frame)
-            if parsed.get("type") == "markers_update":
-                assert len(parsed["markers"]) >= 1
-                assert parsed["markers"][0]["paneId"] == "PYTEST"
-                assert parsed["markers"][0]["description"] == "fatal"
-                broadcast_found = True
-                break
-        broadcast_ws.close()
-        assert broadcast_found, "markers_update broadcast was not received"
-
-    def test_watcher_marker_list_and_show_via_cli(
-            self, e2e_server: E2eServer, embed_log_binary: Path):
-        """CLI sessions marker list/show verify watcher-created markers."""
-        from embed_log_sdk import EmbedLogClient
-        from embed_log_sdk.watcher import Watcher, WatcherConfig, WatchRule
-
-        wconfig = WatcherConfig(
-            server_url=e2e_server.ws_url(),
-            rules=[WatchRule(name="cli-test", sources=["PYTEST"],
-                             pattern="CLI MARKER", marker=True)])
-        wclient = EmbedLogClient(e2e_server.ws_url(), origin="watcher")
-        watcher = Watcher(wconfig, wclient)
-
-        results: list[int] = []
-        t = threading.Thread(target=lambda: results.append(
-            watcher.run(timeout=5.0)), daemon=True)
-        t.start()
-        time.sleep(0.5)
-
-        ic = EmbedLogClient(e2e_server.ws_url(), origin="e2e")
-        ic.inject_log("PYTEST", "CLI MARKER test")
-        ic.close()
-        t.join(timeout=6)
-        watcher.close()
-        assert results[0] >= 1
-
-        session_id = sorted(e2e_server.log_dir.iterdir())[0].name
-
-        # ---- sessions marker list --json ----
-        list_result = subprocess.run(
-            [str(embed_log_binary), "sessions", "marker", "list", session_id,
-             "--log-dir", str(e2e_server.log_dir), "--json"],
-            capture_output=True, text=True, timeout=10,
-        )
-        assert list_result.returncode == 0, f"list failed: {list_result.stderr}"
-        data = json.loads(list_result.stdout)
-        markers = data.get("markers", [])
-        # Search for our marker by description rather than assuming index 0
-        our_markers = [m for m in markers
-                       if m.get("description") == "cli-test"
-                       and m.get("paneId") == "PYTEST"]
-        assert len(our_markers) >= 1, \
-            f"marker cli-test not found in {markers}"
-        marker = our_markers[0]
-        assert marker["paneId"] == "PYTEST"
-        assert marker["lineIdx"] >= 0
-
-        # ---- sessions marker show N --json ----
-        # Find the original 1-based index from the list output
-        # (the --json output includes an "index" field when filtered)
-        list_all_result = subprocess.run(
-            [str(embed_log_binary), "sessions", "marker", "list", session_id,
-             "--log-dir", str(e2e_server.log_dir), "--json"],
-            capture_output=True, text=True, timeout=10,
-        )
-        all_data = json.loads(list_all_result.stdout)
-        all_markers = all_data.get("markers", [])
-        for i, m in enumerate(all_markers):
-            if m.get("description") == "cli-test" and m.get("paneId") == "PYTEST":
-                cli_index = i + 1  # 1-based
-                break
-        else:
-            pytest.fail("could not find marker index")
-
-        show_result = subprocess.run(
-            [str(embed_log_binary), "sessions", "marker", "show", session_id,
-             str(cli_index),
-             "--log-dir", str(e2e_server.log_dir), "--json"],
-            capture_output=True, text=True, timeout=10,
-        )
-        assert show_result.returncode == 0, f"show failed: {show_result.stderr}"
-        shown = json.loads(show_result.stdout)
-        assert shown.get("paneId") == "PYTEST"
-        assert shown.get("description") == "cli-test"
-        assert shown.get("lineIdx") is not None

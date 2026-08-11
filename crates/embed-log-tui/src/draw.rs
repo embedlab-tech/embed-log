@@ -2,7 +2,7 @@
 //!
 //! The layout is a compact terminal equivalent of the browser viewer: tabs at
 //! the top, one or two log panes in the middle, and connection/session/status
-//! hints at the bottom. Events use a dedicated tab when configured.
+//! hints at the bottom.
 
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -51,12 +51,11 @@ fn draw_help_overlay(f: &mut Frame, area: Rect) {
         Line::from("Enter            sync panes to current line timestamp"),
         Line::from("Space, v, Esc    select line, visual range, clear selection"),
         Line::from("c / y            toggle exact/context, copy selection"),
-        Line::from("m, [, ], M       marker toggle/nav/event-marker toggle"),
+        Line::from("m, [, ]          marker toggle/navigation"),
         Line::from("t / u / C        timestamp mode, unwrap, clear active pane"),
         Line::from("/                filter active pane (empty input clears)"),
         Line::from("x                export current session as HTML"),
         Line::from(": or i           TX mode for writable UART panes"),
-        Line::from("e                events tab when event rules are configured"),
         Line::from("? / Esc          close this help"),
     ];
     f.render_widget(Clear, popup);
@@ -78,9 +77,6 @@ pub struct PaneHit {
 /// Returns the pane under `(column,row)` and, when the click lands on a visible
 /// log line, the raw line index of that row.
 pub fn hit_test_pane(state: &State, area: Rect, column: u16, row: u16) -> Option<PaneHit> {
-    if state.events_tab_active() {
-        return None;
-    }
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -152,7 +148,7 @@ pub fn hit_test_pane(state: &State, area: Rect, column: u16, row: u16) -> Option
 
 /// Render the tab bar (or pane list in unwrap mode).
 fn draw_tab_bar(f: &mut Frame, state: &State, area: Rect) {
-    let mut titles: Vec<Line> = if state.unwrap {
+    let titles: Vec<Line> = if state.unwrap {
         state
             .panes
             .iter()
@@ -165,17 +161,6 @@ fn draw_tab_bar(f: &mut Frame, state: &State, area: Rect) {
             .map(|t| Line::from(t.label.clone()))
             .collect()
     };
-    // Append Events tab when enabled (non-unwrap mode).
-    if state.events_enabled && !state.unwrap {
-        let count = state.events.len();
-        let label = if count > 0 {
-            format!("⚡ Events ({count})")
-        } else {
-            "⚡ Events".to_string()
-        };
-        titles.push(Line::from(label));
-    }
-
     let tab_count = state.tab_count();
     let active = state.active_tab.min(tab_count.saturating_sub(1));
 
@@ -193,12 +178,6 @@ fn draw_tab_bar(f: &mut Frame, state: &State, area: Rect) {
 
 /// Render the active tab's panes (1 or 2 side by side).
 fn draw_pane_content(f: &mut Frame, state: &State, area: Rect) {
-    // Events tab: render the event timeline instead of panes.
-    if state.events_tab_active() {
-        crate::events::draw_events(f, state, &state.events_view, area);
-        return;
-    }
-
     let panes = state.active_tab_panes();
     if panes.is_empty() {
         let msg = if state.conn == ConnState::Connected {
@@ -409,11 +388,6 @@ fn draw_status_bar(f: &mut Frame, state: &State, area: Rect) {
         crate::state::SelectionScope::Context => "context",
     };
     let unwrap = if state.unwrap { " │ UNWRAP" } else { "" };
-    let events_hint = if state.events_enabled {
-        format!(" │ events:{} │ e=events", state.events.len())
-    } else {
-        String::new()
-    };
     let tx_hint = state
         .tx_status
         .as_ref()
@@ -440,7 +414,7 @@ fn draw_status_bar(f: &mut Frame, state: &State, area: Rect) {
         Span::raw(" │ session "),
         Span::styled(session, Style::default().fg(Color::Cyan)),
         Span::raw(format!(
-            " │ {ts_mode} │ {active_label} │ {scope}{unwrap}{events_hint}{tx_hint} │ ?:help q=quit "
+            " │ {ts_mode} │ {active_label} │ {scope}{unwrap}{tx_hint} │ ?:help q=quit "
         )),
     ]);
     f.render_widget(
@@ -459,7 +433,7 @@ mod tests {
     use std::collections::HashMap;
     fn populated_state() -> State {
         let mut cfg = ConfigMessage {
-            app_name: "embed-log demo".into(),
+            app_name: "embed-log test".into(),
             tabs: vec![
                 TabDef {
                     label: "Device".into(),
@@ -502,7 +476,7 @@ mod tests {
         });
 
         let mut s = State {
-            app_name: "embed-log demo".into(),
+            app_name: "embed-log test".into(),
             ..Default::default()
         };
         s.apply_config(&cfg);
@@ -594,42 +568,5 @@ mod tests {
         let out = render(&s, 80, 24);
         assert!(out.contains("UART Main"), "missing UART pane title: {out}");
         assert!(out.contains("uart"), "missing uart kind: {out}");
-    }
-
-    #[test]
-    fn events_tab_appears_when_enabled() {
-        let mut s = populated_state();
-        s.events_enabled = true;
-        let out = render(&s, 120, 24);
-        assert!(
-            out.contains("⚡ Events") || out.contains("Events"),
-            "missing Events tab: {out}"
-        );
-    }
-
-    #[test]
-    fn events_tab_renders_header_and_list() {
-        let mut s = populated_state();
-        s.events_enabled = true;
-        s.events.push(crate::protocol::EventPayload {
-            event_id: "fatal_error".into(),
-            source_id: "DUT".into(),
-            severity: "error".into(),
-            timestamp: "06-14 09:30:45.123".into(),
-            timestamp_num: 1718347845123.0,
-            message: "ZEPHYR FATAL ERROR".into(),
-            ..Default::default()
-        });
-        // Events tab sits at index tabs.len().
-        s.active_tab = s.tabs.len();
-        let out = render(&s, 120, 24);
-        assert!(
-            out.contains("Event Timeline") || out.contains("Events (1)"),
-            "missing events header: {out}"
-        );
-        assert!(
-            out.contains("fatal_error") || out.contains("ZEPHYR FATAL ERROR"),
-            "missing event item: {out}"
-        );
     }
 }

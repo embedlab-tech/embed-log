@@ -11,11 +11,23 @@ async function openMore(page, paneId) {
 
 function generateMergedHtml(htmlPath, logPath) {
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+  const logsDir = path.join(path.dirname(htmlPath), 'recorded-sessions');
+  const sessionId = 'large-export';
+  const sessionDir = path.join(logsDir, sessionId);
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.writeFileSync(path.join(sessionDir, 'manifest.json'), JSON.stringify({
+    session_id: sessionId,
+    session_dir: sessionDir,
+    timestamp_mode: 'absolute',
+    tabs: [{ label: 'Large', panes: ['A'] }],
+    pane_labels: { A: 'SENSOR' },
+    source_files: { A: logPath },
+    combined_file: path.join(sessionDir, 'combined.jsonl'),
+  }, null, 2));
   execFileSync('cargo', [
     'run', '--quiet', '--package', 'embed-log-cli', '--bin', 'embed-log', '--',
-    'merge',
-    '--tab', 'Large', 'A=SENSOR', logPath,
-    '--output', htmlPath,
+    'sessions', 'export', sessionId, '--dir', logsDir,
+    '--format', 'html', '--output', htmlPath,
   ], { cwd: repoRoot });
 }
 
@@ -84,13 +96,20 @@ test.describe('HTML export replay', () => {
     await waitForSourceTestLine(page, 'SENSOR_B');
     await waitForLineContaining(page, 'SENSOR_A', 'kind=filter-alpha');
 
+    const sessionResponse = await page.request.get('/api/session/current');
+    expect(sessionResponse.ok()).toBe(true);
+    const session = await sessionResponse.json();
+
     const downloadPromise = page.waitForEvent('download');
     await page.locator('#btn-export').click();
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toMatch(/^embed-log-.*\.html$/);
     const htmlPath = await saveDownload(download, testInfo);
 
-    const html = fs.readFileSync(htmlPath, 'utf-8');
+    const downloadedBytes = fs.readFileSync(htmlPath);
+    const canonicalBytes = fs.readFileSync(path.join(session.dir, 'session.html'));
+    expect(downloadedBytes).toEqual(canonicalBytes);
+    const html = downloadedBytes.toString('utf-8');
     expect(html).toContain('hydratePanesFromJson');
     expect(html).toContain('kind=filter-alpha');
 
@@ -188,11 +207,27 @@ test.describe('HTML export replay', () => {
       await expect(exported.locator('#btn-unwrap')).toBeVisible();
       await expect(exported.locator('#btn-theme')).toBeVisible();
       await expect(exported.locator('#btn-settings')).toBeVisible();
+      const toolbarBox = await exported.locator('#toolbar').boundingBox();
+      const settingsBox = await exported.locator('#btn-settings').boundingBox();
+      expect(toolbarBox).toBeTruthy();
+      expect(settingsBox).toBeTruthy();
+      expect(settingsBox.y).toBeGreaterThanOrEqual(toolbarBox.y);
+      expect(settingsBox.y + settingsBox.height).toBeLessThanOrEqual(toolbarBox.y + toolbarBox.height);
+
+      await exported.setViewportSize({ width: 700, height: 600 });
+      const narrowToolbarBox = await exported.locator('#toolbar').boundingBox();
+      const narrowTops = await exported.locator('#toolbar > button, #toolbar .toolbar-left > button, #toolbar .toolbar-right > button').evaluateAll(buttons => {
+        return buttons.filter(button => getComputedStyle(button).display !== 'none')
+          .map(button => Math.round(button.getBoundingClientRect().top));
+      });
+      expect(narrowToolbarBox).toBeTruthy();
+      expect(narrowTops.length).toBeGreaterThan(0);
+      expect(Math.max(...narrowTops) - Math.min(...narrowTops)).toBeLessThanOrEqual(1);
 
       await exported.locator('#btn-unwrap').click();
       await expect(exported.locator('#btn-unwrap')).toHaveClass(/active/);
-      await expect(exported.locator('#tab-bar .tab-btn')).toHaveText(['DEVICE_A-DevA', 'HOST-DevA', 'AUX-DevB', 'PYTEST-PYTEST', 'CBOR-cbor-tab', 'CoAP-CoAP', 'DUT-UART', 'DEBUG-UART', 'Net-Network']);
-      for (let i = 0; i < 9; i++) {
+      await expect(exported.locator('#tab-bar .tab-btn')).toHaveText(['DEVICE_A-DevA', 'HOST-DevA', 'AUX-DevB', 'PYTEST-PYTEST', 'CoAP-CoAP', 'DUT-UART', 'DEBUG-UART']);
+      for (let i = 0; i < 7; i++) {
         await exported.locator('#tab-bar .tab-btn').nth(i).click();
       }
 

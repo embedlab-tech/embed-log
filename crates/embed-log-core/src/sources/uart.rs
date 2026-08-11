@@ -202,7 +202,11 @@ impl LogSource for UartSource {
             tokio::spawn(async move {
                 while let Some(cmd) = cmd_rx.recv().await {
                     let origin = cmd.origin;
-                    let data = normalize_uart_shell_tx(&cmd.data);
+                    let data = if cmd.line_ending {
+                        normalize_uart_shell_tx(&cmd.data)
+                    } else {
+                        cmd.data
+                    };
                     let data_len = data.len();
                     let data_for_write = data.clone();
 
@@ -222,7 +226,7 @@ impl LogSource for UartSource {
                                     .await;
 
                             let ack_result = match &result {
-                                Ok(Ok(())) => Ok(()),
+                                Ok(Ok(())) => Ok(data_len),
                                 Ok(Err(e)) => Err(format!("write error: {e}")),
                                 Err(e) => Err(format!("spawn error: {e}")),
                             };
@@ -484,6 +488,7 @@ mod tests {
             .send(TxCommand {
                 data: b"version\r\n".to_vec(),
                 origin: "ui".to_string(),
+                line_ending: true,
                 ack: None,
             })
             .await
@@ -574,6 +579,7 @@ mod tests {
             .send(TxCommand {
                 data: b"status\n".to_vec(),
                 origin: "pytest".to_string(),
+                line_ending: true,
                 ack: None,
             })
             .await

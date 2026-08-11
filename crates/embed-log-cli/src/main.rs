@@ -6,18 +6,24 @@
 
 mod commands;
 mod config;
-mod demo_config;
+mod output;
 mod util;
 
 use std::path::PathBuf;
+use std::process::ExitCode;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 
+use commands::daemon::{cmd_mark, cmd_start_daemon, cmd_stats, cmd_status, cmd_stop};
+use commands::export::cmd_export;
 use commands::misc;
-use commands::run::{cmd_demo, cmd_onboard, cmd_run, cmd_run_quick, RunOverrides};
+use commands::run::{cmd_run, cmd_run_quick, RunOverrides};
+use commands::schema::cmd_schema;
 use commands::sessions::{cmd_sessions, SessionsCommand};
-use commands::ui::cmd_ui;
+use commands::skill::cmd_skill;
+use commands::tx::{cmd_tx, parse_duration, TxInput, TxOptions};
+use commands::watch::{cmd_watch, WatchCommand};
 
 #[derive(Parser)]
 #[command(
@@ -26,7 +32,7 @@ use commands::ui::cmd_ui;
     version
 )]
 struct Cli {
-    /// YAML config file for default browser mode or --ui. Defaults to EMBED_LOG_CONFIG_YML_PATH, then embed-log.yml.
+    /// YAML config file for browser or TUI mode. Defaults to EMBED_LOG_CONFIG_YML_PATH, then embed-log.yml.
     #[arg(short, long)]
     config: Option<PathBuf>,
 
@@ -37,10 +43,6 @@ struct Cli {
     /// Launch the terminal UI (ratatui) instead of the default browser UI.
     #[arg(long)]
     tui: bool,
-
-    /// Launch the Tauri desktop UI instead of the default browser UI.
-    #[arg(long)]
-    ui: bool,
 
     /// Do not open the default browser after starting the web server.
     #[arg(long)]
@@ -99,27 +101,174 @@ enum Command {
         host: Option<String>,
 
         /// Override HTTP/WebSocket port from config.
-        #[arg(long)]
+        #[arg(long = "port", alias = "ws-port")]
         ws_port: Option<u16>,
+
+        /// Start as a background daemon.
+        #[arg(long, conflicts_with = "tui", requires_all = ["instance", "config"])]
+        daemon: bool,
+
+        /// Name used to discover and control this daemon.
+        #[arg(long, requires = "daemon")]
+        instance: Option<String>,
+
+        /// Machine-readable daemon startup result.
+        #[arg(long, requires = "daemon")]
+        json: bool,
+
+        /// Internal foreground mode used by the daemon launcher.
+        #[arg(long, hide = true)]
+        daemon_child: bool,
     },
 
-    /// Run first-run onboarding to build a config interactively in the browser.
-    ///
-    /// Starts a small setup page, lets you pick sources/tabs, saves the config
-    /// to the resolved path, then launches the log server from it. Also runs
-    /// automatically when `run` (or the default command) finds no config.
-    Onboard {
-        /// YAML config file to write. Defaults to EMBED_LOG_CONFIG_YML_PATH, then embed-log.yml.
-        #[arg(short, long)]
-        config: Option<PathBuf>,
-
-        /// Path to the frontend directory (default: ./frontend)
-        #[arg(long, default_value = "frontend")]
-        frontend_dir: PathBuf,
-
-        /// Do not open the default browser for the setup page.
+    /// Discover commands, options, limits, outputs, and stable errors as JSON.
+    Schema {
+        /// Command or topic to describe, for example `sessions.read`, `sessions read`, `errors`, or `config`.
+        #[arg(value_name = "SELECTOR", num_args = 0..=2)]
+        selector: Vec<String>,
+        /// Explicitly request JSON output; schema is JSON by default.
         #[arg(long)]
-        no_open_browser: bool,
+        json: bool,
+        /// Indent the JSON document for human inspection.
+        #[arg(long)]
+        pretty: bool,
+    },
+
+    /// Print the version-matched investigation skill embedded in this binary.
+    Skill {
+        /// Wrap the Markdown skill and version metadata in one JSON document.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Show readiness and source status for a running daemon or URL.
+    Status {
+        /// Registered daemon name. Defaults to EMBED_LOG_INSTANCE or the only running instance.
+        #[arg(long, conflicts_with = "url")]
+        instance: Option<String>,
+        /// Explicit unregistered HTTP endpoint.
+        #[arg(long)]
+        url: Option<String>,
+        /// Machine-readable JSON output.
+        #[arg(long)]
+        json: bool,
+        /// Print only a one-line readiness summary.
+        #[arg(long)]
+        brief: bool,
+        /// Restrict source details to these names.
+        #[arg(long = "source")]
+        sources: Vec<String>,
+    },
+
+    /// Record an external timeline action in the active session.
+    Mark {
+        #[arg(long, conflicts_with = "url")]
+        instance: Option<String>,
+        #[arg(long)]
+        url: Option<String>,
+        /// Action name such as erase, flash, power-cycle, or reset.
+        #[arg(long)]
+        action: String,
+        /// Optional human-readable detail.
+        #[arg(long)]
+        label: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Show process-lifetime and current-session statistics.
+    Stats {
+        #[arg(long, conflicts_with = "url")]
+        instance: Option<String>,
+        #[arg(long)]
+        url: Option<String>,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        brief: bool,
+        #[arg(long = "source")]
+        sources: Vec<String>,
+    },
+
+    /// Generate the active daemon session's canonical HTML report.
+    Export {
+        /// Registered daemon name. Defaults to EMBED_LOG_INSTANCE; never inferred.
+        #[arg(long, conflicts_with = "url")]
+        instance: Option<String>,
+        /// Explicit unregistered HTTP endpoint.
+        #[arg(long)]
+        url: Option<String>,
+        /// Machine-readable JSON output.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Write to a daemon-owned UART, optionally waiting for an RX match.
+    Tx {
+        /// Registered daemon name. Defaults to EMBED_LOG_INSTANCE; never inferred.
+        #[arg(long, conflicts_with = "url")]
+        instance: Option<String>,
+        /// Explicit unregistered HTTP endpoint.
+        #[arg(long)]
+        url: Option<String>,
+        /// Writable source name.
+        #[arg(long)]
+        source: String,
+        /// Send a line, normalizing its ending to one carriage return.
+        #[arg(long, conflicts_with_all = ["raw", "file", "stdin"], required_unless_present_any = ["raw", "file", "stdin"])]
+        line: Option<String>,
+        /// Send this UTF-8 text exactly, without line-ending normalization.
+        #[arg(long, allow_hyphen_values = true, conflicts_with_all = ["line", "file", "stdin"], required_unless_present_any = ["line", "file", "stdin"])]
+        raw: Option<String>,
+        /// Send the file's bytes exactly.
+        #[arg(long, value_name = "PATH", conflicts_with_all = ["line", "raw", "stdin"], required_unless_present_any = ["line", "raw", "stdin"])]
+        file: Option<PathBuf>,
+        /// Read exact bytes from stdin.
+        #[arg(long, conflicts_with_all = ["line", "raw", "file"], required_unless_present_any = ["line", "raw", "file"])]
+        stdin: bool,
+        /// Wait for an RX message containing this text.
+        #[arg(long, conflicts_with = "expect_regex")]
+        expect: Option<String>,
+        /// Wait for an RX message matching this regular expression.
+        #[arg(long)]
+        expect_regex: Option<String>,
+        /// Wait until an RX line containing this prompt arrives, returning the bounded response context.
+        #[arg(long, conflicts_with_all = ["expect", "expect_regex"])]
+        until_prompt: Option<String>,
+        /// Repeat the TX request this many times.
+        #[arg(long, default_value_t = 1)]
+        count: usize,
+        /// Delay between repeated TX requests.
+        #[arg(long, default_value = "1ms", value_parser = parse_duration)]
+        interval: std::time::Duration,
+        /// Maximum wait for the expectation.
+        #[arg(long, default_value = "30s", value_parser = parse_duration)]
+        timeout: std::time::Duration,
+        /// Maximum live entries returned as bounded context.
+        #[arg(long, default_value_t = 20)]
+        context: usize,
+        /// Machine-readable JSON output.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Manage temporary server-side log watches.
+    Watch {
+        #[command(subcommand)]
+        command: WatchCommand,
+    },
+
+    /// Gracefully stop a registered daemon.
+    Stop {
+        /// Registered daemon name. Defaults to EMBED_LOG_INSTANCE or the only running instance.
+        #[arg(long, conflicts_with = "url")]
+        instance: Option<String>,
+        /// Stop the daemon serving this explicit endpoint, even if registration is missing.
+        #[arg(long)]
+        url: Option<String>,
+        /// Machine-readable JSON output.
+        #[arg(long)]
+        json: bool,
     },
 
     /// Show version and environment information
@@ -145,25 +294,6 @@ enum Command {
         json: bool,
     },
 
-    /// Check GitHub Releases for a newer CLI version
-    Update {
-        /// Only check and report; do not download or replace the binary.
-        #[arg(long, conflicts_with = "yes")]
-        check: bool,
-        /// Install this release tag instead of the latest stable release.
-        #[arg(long, value_name = "TAG")]
-        version: Option<String>,
-        /// Confirm executable replacement without prompting.
-        #[arg(long)]
-        yes: bool,
-        /// Permit installing an older release. Requires --yes.
-        #[arg(long, requires = "yes", conflicts_with = "check")]
-        allow_downgrade: bool,
-        /// Machine-readable JSON output.
-        #[arg(long, conflicts_with = "yes")]
-        json: bool,
-    },
-
     /// List detected serial ports
     Ports {
         /// Machine-readable JSON output
@@ -179,74 +309,10 @@ enum Command {
     /// Print a greeting (smoke-test target)
     #[command(hide = true)]
     Hello,
-
-    /// Start the demo server with the embedded demo config.
-    Demo {
-        /// YAML config file (uses embedded demo config by default).
-        #[arg(short, long)]
-        config: Option<PathBuf>,
-
-        /// Path to the frontend directory.
-        #[arg(long, default_value = "frontend")]
-        frontend_dir: PathBuf,
-
-        /// Do not open the browser.
-        #[arg(long)]
-        no_open_browser: bool,
-
-        /// Launch the terminal UI (ratatui) instead of the browser.
-        #[arg(long)]
-        tui: bool,
-    },
-
-    /// Validate a config file and print the resolved runtime summary.
-    Validate {
-        /// YAML config file. Defaults to EMBED_LOG_CONFIG_YML_PATH, then embed-log.yml.
-        #[arg(short, long)]
-        config: Option<PathBuf>,
-        /// Machine-readable JSON output.
-        #[arg(long)]
-        json: bool,
-    },
-
-    /// Generate a sample embed-log.yml config file.
-    Init {
-        /// Output path (default: embed-log.yml).
-        #[arg(short, long, default_value = "embed-log.yml")]
-        output: PathBuf,
-    },
-
-    /// Merge raw log files into a static HTML file.
-    Merge {
-        /// Repeatable: --tab "LABEL" PANE FILE [PANE FILE]
-        #[arg(short, long = "tab", num_args = 1..)]
-        tabs: Vec<String>,
-
-        /// Output HTML path (default: merged.html).
-        #[arg(short, long, default_value = "merged.html")]
-        output: PathBuf,
-        /// Timestamp mode for static replay.
-        #[arg(long, default_value = "absolute")]
-        timestamp_mode: String,
-
-        /// Absolute timestamp origin used when replay logs contain relative timestamps.
-        #[arg(long)]
-        first_log_at: Option<String>,
-    },
-
-    /// Parse an exported session.html back into raw log files.
-    Parse {
-        /// Path to the session.html file.
-        html: PathBuf,
-
-        /// Output directory (default: parsed/).
-        #[arg(short, long, default_value = "parsed")]
-        output: PathBuf,
-    },
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> ExitCode {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -254,12 +320,75 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    let cli = Cli::parse();
-
-    if cli.ui {
-        return cmd_ui(cli.config.as_ref());
+    let args = std::env::args_os().collect::<Vec<_>>();
+    let json_hint =
+        args.iter().any(|arg| arg == "--json") || args.get(1).is_some_and(|arg| arg == "schema");
+    let cli = match Cli::try_parse_from(args) {
+        Ok(cli) => cli,
+        Err(error)
+            if matches!(
+                error.kind(),
+                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+            ) =>
+        {
+            let _ = error.print();
+            return ExitCode::SUCCESS;
+        }
+        Err(error) => {
+            if json_hint {
+                let _ = crate::output::report_json_failure(
+                    "CLI_USAGE",
+                    error.to_string(),
+                    serde_json::json!({"exit_code": error.exit_code()}),
+                );
+            } else {
+                let _ = error.print();
+            }
+            return ExitCode::from(2);
+        }
+    };
+    let machine_output = cli.machine_output();
+    match dispatch(cli).await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            if !crate::output::is_json_failure_reported(&error) {
+                if machine_output {
+                    let message = format!("{error:#}");
+                    let code = crate::output::generic_error_code(&message);
+                    let _ =
+                        crate::output::report_json_failure(code, message, serde_json::Value::Null);
+                } else {
+                    eprintln!("Error: {error:#}");
+                }
+            }
+            ExitCode::FAILURE
+        }
     }
+}
 
+impl Cli {
+    fn machine_output(&self) -> bool {
+        match self.command.as_ref() {
+            Some(Command::Schema { .. }) => true,
+            Some(Command::Skill { json }) => *json,
+            Some(Command::Run { json, .. })
+            | Some(Command::Status { json, .. })
+            | Some(Command::Stats { json, .. })
+            | Some(Command::Mark { json, .. })
+            | Some(Command::Export { json, .. })
+            | Some(Command::Tx { json, .. })
+            | Some(Command::Stop { json, .. })
+            | Some(Command::Version { json, .. })
+            | Some(Command::Doctor { json, .. })
+            | Some(Command::Ports { json }) => *json,
+            Some(Command::Watch { command }) => command.machine_output(),
+            Some(Command::Sessions { command }) => command.machine_output(),
+            Some(Command::Hello) | None => false,
+        }
+    }
+}
+
+async fn dispatch(cli: Cli) -> Result<()> {
     match cli.command {
         Some(Command::Run {
             serial_paths,
@@ -274,6 +403,10 @@ async fn main() -> Result<()> {
             log_dir,
             host,
             ws_port,
+            daemon,
+            instance,
+            json,
+            daemon_child,
         }) => {
             let open_browser = !no_open_browser;
             let overrides = RunOverrides {
@@ -281,12 +414,24 @@ async fn main() -> Result<()> {
                 host,
                 ws_port,
             };
-            if serial_paths.is_empty() && serial.is_empty() && file.is_empty() {
+            if daemon && !daemon_child {
+                if !serial_paths.is_empty() || !serial.is_empty() || !file.is_empty() {
+                    anyhow::bail!("--daemon currently requires --config; CLI-only daemon sources are a later milestone");
+                }
+                cmd_start_daemon(
+                    instance.as_deref().expect("clap requires --instance"),
+                    config.as_ref(),
+                    &frontend_dir,
+                    &overrides,
+                    json,
+                )
+            } else if serial_paths.is_empty() && serial.is_empty() && file.is_empty() {
                 cmd_run(
                     config.as_ref(),
                     &frontend_dir,
-                    open_browser,
+                    open_browser && !daemon_child,
                     tui,
+                    daemon_child,
                     &overrides,
                 )
                 .await
@@ -305,50 +450,99 @@ async fn main() -> Result<()> {
                 .await
             }
         }
+        Some(Command::Schema {
+            selector,
+            json: _,
+            pretty,
+        }) => cmd_schema(Cli::command(), &selector, pretty),
+        Some(Command::Skill { json }) => cmd_skill(json),
+        Some(Command::Status {
+            instance,
+            url,
+            json,
+            brief,
+            sources,
+        }) => cmd_status(instance.as_deref(), url.as_deref(), json, brief, &sources),
+        Some(Command::Mark {
+            instance,
+            url,
+            action,
+            label,
+            json,
+        }) => cmd_mark(
+            instance.as_deref(),
+            url.as_deref(),
+            &action,
+            label.as_deref(),
+            json,
+        ),
+        Some(Command::Stats {
+            instance,
+            url,
+            json,
+            brief,
+            sources,
+        }) => cmd_stats(instance.as_deref(), url.as_deref(), json, brief, &sources),
+        Some(Command::Export {
+            instance,
+            url,
+            json,
+        }) => cmd_export(instance.as_deref(), url.as_deref(), json),
+        Some(Command::Tx {
+            instance,
+            url,
+            source,
+            line,
+            raw,
+            file,
+            stdin,
+            expect,
+            expect_regex,
+            until_prompt,
+            count,
+            interval,
+            timeout,
+            context,
+            json,
+        }) => {
+            let input = match (line, raw, file, stdin) {
+                (Some(value), None, None, false) => TxInput::Line(value),
+                (None, Some(value), None, false) => TxInput::Raw(value),
+                (None, None, Some(path), false) => TxInput::File(path),
+                (None, None, None, true) => TxInput::Stdin,
+                _ => unreachable!("clap enforces exactly one TX input"),
+            };
+            cmd_tx(TxOptions {
+                instance,
+                url,
+                source,
+                input,
+                expect,
+                expect_regex,
+                until_prompt,
+                count,
+                interval,
+                timeout,
+                context,
+                json,
+            })
+            .await
+        }
+        Some(Command::Watch { command }) => cmd_watch(command).await,
+        Some(Command::Stop {
+            instance,
+            url,
+            json,
+        }) => cmd_stop(instance.as_deref(), url.as_deref(), json),
         Some(Command::Version { config, json }) => misc::cmd_version(config.as_deref(), json),
         Some(Command::Doctor {
             config,
             serial,
             json,
         }) => misc::cmd_doctor(config.as_deref(), &serial, json),
-        Some(Command::Update {
-            check,
-            version,
-            yes,
-            allow_downgrade,
-            json,
-        }) => misc::cmd_update(check, version.as_deref(), yes, allow_downgrade, json).await,
         Some(Command::Ports { json }) => misc::cmd_ports(json),
         Some(Command::Hello) => misc::cmd_hello(),
         Some(Command::Sessions { command }) => cmd_sessions(*command),
-        Some(Command::Demo {
-            config,
-            frontend_dir,
-            no_open_browser,
-            tui,
-        }) => {
-            let config_path = config.as_deref().map(PathBuf::from);
-            cmd_demo(config_path.as_ref(), &frontend_dir, !no_open_browser, tui).await
-        }
-
-        Some(Command::Onboard {
-            config,
-            frontend_dir,
-            no_open_browser,
-        }) => cmd_onboard(config.as_ref(), &frontend_dir, !no_open_browser).await,
-
-        Some(Command::Validate { config, json }) => {
-            let path = crate::config::resolve_config_path(config.as_ref());
-            misc::cmd_validate(&path, json)
-        }
-        Some(Command::Init { output }) => misc::cmd_init(&output),
-        Some(Command::Merge {
-            tabs,
-            output,
-            timestamp_mode,
-            first_log_at,
-        }) => misc::cmd_merge(&tabs, &output, &timestamp_mode, first_log_at),
-        Some(Command::Parse { html, output }) => misc::cmd_parse(&html, &output),
         None => {
             let open_browser = !cli.no_open_browser;
             cmd_run(
@@ -356,6 +550,7 @@ async fn main() -> Result<()> {
                 &cli.frontend_dir,
                 open_browser,
                 cli.tui,
+                false,
                 &RunOverrides::default(),
             )
             .await
@@ -420,16 +615,28 @@ mod tests {
         ]);
 
         assert!(cli.command.is_none());
-        assert!(!cli.ui);
         assert_eq!(cli.config, Some(PathBuf::from("embed-log.yml")));
         assert!(cli.no_open_browser);
     }
 
     #[test]
-    fn ui_flag_carries_config() {
-        let cli = Cli::parse_from(["embed-log", "--ui", "--config", "desktop.yml"]);
-        assert!(cli.ui);
-        assert_eq!(cli.config, Some(PathBuf::from("desktop.yml")));
+    fn removed_product_surfaces_are_rejected() {
+        for args in [
+            ["embed-log", "--ui"].as_slice(),
+            ["embed-log", "demo"].as_slice(),
+            ["embed-log", "init"].as_slice(),
+            ["embed-log", "onboard"].as_slice(),
+            ["embed-log", "update"].as_slice(),
+            ["embed-log", "merge"].as_slice(),
+            ["embed-log", "parse"].as_slice(),
+            ["embed-log", "validate"].as_slice(),
+            ["embed-log", "sessions", "import"].as_slice(),
+            ["embed-log", "sessions", "bundle"].as_slice(),
+            ["embed-log", "sessions", "prune"].as_slice(),
+            ["embed-log", "sessions", "marker"].as_slice(),
+        ] {
+            assert!(Cli::try_parse_from(args).is_err());
+        }
     }
 
     #[test]
@@ -457,30 +664,49 @@ mod tests {
     #[test]
     fn sessions_command_surface_parses_core_subcommands() {
         for args in [
+            [
+                "embed-log",
+                "sessions",
+                "new",
+                "--instance",
+                "bench-a",
+                "--title",
+                "test run",
+                "--json",
+            ]
+            .as_slice(),
             ["embed-log", "sessions", "list"].as_slice(),
             ["embed-log", "sessions", "info", "abc"].as_slice(),
-            ["embed-log", "sessions", "open", "latest"].as_slice(),
-            ["embed-log", "sessions", "bundle", "latest"].as_slice(),
             [
                 "embed-log",
                 "sessions",
-                "prune",
-                "--keep",
+                "read",
+                "abc",
+                "--after",
                 "10",
-                "--dry-run",
+                "--limit",
+                "20",
+                "--json",
             ]
             .as_slice(),
+            [
+                "embed-log",
+                "sessions",
+                "around",
+                "abc",
+                "--sequence",
+                "12",
+                "--before",
+                "2",
+                "--after",
+                "3",
+                "--time",
+                "relative",
+            ]
+            .as_slice(),
+            ["embed-log", "sessions", "open", "latest"].as_slice(),
             ["embed-log", "sessions", "export", "abc", "--format", "raw"].as_slice(),
             ["embed-log", "sessions", "combined", "abc", "--lines", "10"].as_slice(),
-            [
-                "embed-log",
-                "sessions",
-                "events",
-                "abc",
-                "--severity",
-                "fatal",
-            ]
-            .as_slice(),
             [
                 "embed-log",
                 "sessions",
@@ -497,32 +723,87 @@ mod tests {
     }
 
     #[test]
-    fn new_commands_parse() {
-        Cli::parse_from(["embed-log", "validate"]);
-        Cli::parse_from([
+    fn active_export_accepts_explicit_daemon_targets() {
+        Cli::parse_from(["embed-log", "export", "--instance", "bench-a", "--json"]);
+        Cli::parse_from(["embed-log", "export", "--url", "http://127.0.0.1:18080"]);
+        assert!(Cli::try_parse_from([
             "embed-log",
-            "validate",
+            "export",
+            "--instance",
+            "bench-a",
+            "--url",
+            "http://127.0.0.1:18080",
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn tx_requires_exactly_one_input_and_parses_expectation_options() {
+        let cli = Cli::parse_from([
+            "embed-log",
+            "tx",
+            "--instance",
+            "bench-a",
+            "--source",
+            "DUT_UART",
+            "--line",
+            "reset",
+            "--expect",
+            "boot complete",
+            "--timeout",
+            "250ms",
+            "--context",
+            "4",
             "--json",
-            "--config",
-            "embed-log.yml",
         ]);
-        Cli::parse_from(["embed-log", "init"]);
-        Cli::parse_from(["embed-log", "init", "-o", "my.yml"]);
-        Cli::parse_from(["embed-log", "demo"]);
-        Cli::parse_from(["embed-log", "demo", "--no-open-browser"]);
-        Cli::parse_from(["embed-log", "merge", "--tab", "DevA", "SENSOR_A", "a.log"]);
-        Cli::parse_from([
+        match cli.command {
+            Some(Command::Tx {
+                line,
+                timeout,
+                context,
+                json,
+                ..
+            }) => {
+                assert_eq!(line.as_deref(), Some("reset"));
+                assert_eq!(timeout, std::time::Duration::from_millis(250));
+                assert_eq!(context, 4);
+                assert!(json);
+            }
+            _ => panic!("expected tx command"),
+        }
+        assert!(Cli::try_parse_from(["embed-log", "tx", "--source", "DUT"]).is_err());
+        assert!(Cli::try_parse_from([
             "embed-log",
-            "merge",
-            "-t",
-            "DevA",
-            "SENSOR_A",
-            "a.log",
-            "-o",
-            "out.html",
-        ]);
-        Cli::parse_from(["embed-log", "parse", "session.html"]);
-        Cli::parse_from(["embed-log", "parse", "session.html", "-o", "my-parsed"]);
+            "tx",
+            "--source",
+            "DUT",
+            "--line",
+            "one",
+            "--raw",
+            "two",
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn skill_command_accepts_raw_or_json_output() {
+        Cli::parse_from(["embed-log", "skill"]);
+        Cli::parse_from(["embed-log", "skill", "--json"]);
+        assert!(Cli::try_parse_from(["embed-log", "skill", "live"]).is_err());
+    }
+
+    #[test]
+    fn schema_command_accepts_index_topics_and_command_paths() {
+        for args in [
+            ["embed-log", "schema"].as_slice(),
+            ["embed-log", "schema", "tx", "--json"].as_slice(),
+            ["embed-log", "schema", "sessions.read", "--pretty"].as_slice(),
+            ["embed-log", "schema", "sessions", "around"].as_slice(),
+            ["embed-log", "schema", "errors"].as_slice(),
+            ["embed-log", "schema", "config"].as_slice(),
+        ] {
+            Cli::parse_from(args);
+        }
     }
 
     #[test]
@@ -534,7 +815,7 @@ mod tests {
             "/tmp/logs",
             "--host",
             "0.0.0.0",
-            "--ws-port",
+            "--port",
             "9090",
         ]);
         match cli.command {

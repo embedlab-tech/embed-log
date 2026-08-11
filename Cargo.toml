@@ -3,12 +3,11 @@ resolver = "2"
 members = [
     "crates/embed-log-core",
     "crates/embed-log-cli",
-    "crates/embed-log-tauri",
     "crates/embed-log-tui",
 ]
 
 [workspace.package]
-version = "1.2.1"
+version = "1.3.0"
 edition = "2021"
 rust-version = "1.77"
 license = "MIT"
@@ -39,12 +38,8 @@ clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 thiserror = "2"
 slug = "0.1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-semver = "1"
-flate2 = "1"
-tar = "0.4"
-sha2 = "0.10"
+fs2 = "0.4"
 
-# Core + TUI crates (used by CLI and Tauri)
+# Core + TUI crates
 embed-log-core = { path = "crates/embed-log-core" }
 embed-log-tui = { path = "crates/embed-log-tui" }

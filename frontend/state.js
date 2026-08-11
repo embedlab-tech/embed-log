@@ -107,7 +107,6 @@ export const state = {
     selected:    {},
     selectionScope:  'exact', // 'exact', 'context', or 'context-selected'
     contextPanes:    {},       // paneId → bool; only used when selectionScope === 'context-selected'
-    copyFormat:      'full',   // 'full' (default, unchanged) or 'compact' — see postprocess.js
     unwrap:        false,
     timestampMode: INITIAL_TIMESTAMP_MODE,
     sessionTimestampMode: INITIAL_TIMESTAMP_MODE,
@@ -115,13 +114,6 @@ export const state = {
     firstLogAtMs: _isoToEpochMs(INITIAL_FIRST_LOG_AT),
     useClientRelativeBase: false,
     clientRelativeBaseMs: null,
-
-    // ── Event detection ──
-    events: [],             // [{event_id, source_id, severity, timestamp_num, ...}]
-    eventsEnabled: false,   // true when config has ≥1 event rule
-    eventsTabActive: false, // true while the Events timeline tab is shown
-    includeEventMarkers: false, // nav includes kind:"event" markers when true
-    eventRules: {},         // source → [{name, severity}] from config message
 };
 
 export function setTimestampContext({ mode = null, firstLogAt = undefined, resetMode = false } = {}) {
@@ -162,6 +154,9 @@ export function lineHasTimestampMode(line, mode) {
 
 export function applyTimestampModeToLine(line) {
     if (!line) return;
+    // No time is presentation-only: keep line.ts on the configured mode so
+    // clipboard/download/export metadata can still retain the timestamp.
+    if (state.timestampMode === "hidden") return;
     if (state.timestampMode === "relative" && line.relTs) {
         line.ts = line.relTs;
         line.numTs = Number.isFinite(line.relNum) ? line.relNum : 0;

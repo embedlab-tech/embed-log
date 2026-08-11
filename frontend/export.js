@@ -10,6 +10,7 @@ const STATIC_EXPORT_PROFILE =
 import { renderPaneWindow, updateJumpBtn, getLine } from './lines.js';
 
 import { state, TABS, PANES, PANE_LABELS } from './state.js';
+import { isEditableTarget, isComposingEvent } from './keyboard.js';
 
 export async function exportHtmlSnapshot(options = {}) {
     const btn = options.button === undefined ? document.getElementById("btn-export") : options.button;
@@ -36,7 +37,7 @@ export async function exportHtmlSnapshot(options = {}) {
             "profile.js", "renderPane.js", "renderToolbar.js", "viewer.css",
             "pluginRuntime.js", "state.js", "themes.js", "settings.js", "fontsize.js",
             "ansi.js", "lines.js", "tabs.js", "tabcreate.js",
-            "ui.js", "export.js", "postprocess.js", "selection.js", "events.js", "tsparse.js", "import.js",
+            "ui.js", "export.js", "postprocess.js", "selection.js", "tsparse.js", "import.js",
         ];
 
 
@@ -66,7 +67,7 @@ export async function exportHtmlSnapshot(options = {}) {
             return a.endsWith(".js") ? _escJs(_stripModuleSyntax(src)) : src;
         }));
         const [profileJs, renderPaneJs, renderToolbarJs, css, pluginRuntimeJs, stateJs, themesJs, settingsJs, fontsizeJs,
-               ansiJs, linesJs, tabsJs, tabcreateJs, uiJs, exportJs, postprocessJs, selectionJs, eventsJs, tsparseJs, importJs] = texts;
+               ansiJs, linesJs, tabsJs, tabcreateJs, uiJs, exportJs, postprocessJs, selectionJs, tsparseJs, importJs] = texts;
 
 
         // ------------------------------------------------------------------
@@ -113,17 +114,15 @@ export async function exportHtmlSnapshot(options = {}) {
             `window.__embedLogPluginScripts = ${_safeJson(pluginScripts)};\n` +
             `window.__embedLogInitialPanePluginUiState = ${_safeJson(panePluginUiState)};\n` +
             `window.__embedLogInitialThemeState = ${_safeJson(themeState)};\n` +
-            `window.__embedLogInitialTimestampMode = ${_safeJson(state.timestampMode)};\n` +
+            `window.__embedLogInitialTimestampMode = ${_safeJson(state.timestampMode === "hidden" ? state.sessionTimestampMode : state.timestampMode)};\n` +
             `window.__embedLogFirstLogAt = ${_safeJson(state.firstLogAt)};\n` +
-            `window.__embedLogEventRules = ${_safeJson(state.eventRules || {})};\n` +
-            `window.__embedLogEvents = ${_safeJson(state.events || [])};\n` +
             `window.__embedLogInitialFontSize = ${state.fontSize};`;
 
 
 
         // ------------------------------------------------------------------
-        // Serialize all pane data as compact JSON tuples (same format as
-        // merge_logs.py's lazy mode) for fast hydration with windowed rendering.
+        // Serialize selection-export pane data as compact JSON tuples for
+        // fast hydration with windowed rendering.
         // rawText may be absent on lines loaded before this session; fall back
         // to decoding the stored HTML via a temporary element.
         // ------------------------------------------------------------------
@@ -170,8 +169,8 @@ export async function exportHtmlSnapshot(options = {}) {
             });
         }
         // ------------------------------------------------------------------
-        // Build pane + tab HTML (mirrors merge_logs.py's _pane_html /
-        // _tab_content_html, with TX input row hidden in static mode)
+        // Build pane + tab HTML for selection-only snapshots, with the TX
+        // input row hidden in static mode.
         // ------------------------------------------------------------------
         function _paneHtml(paneId) {
             const raw = document.querySelector(`#pane-${paneId} .pane-name`)?.textContent.trim() || paneId;
@@ -208,16 +207,6 @@ export async function exportHtmlSnapshot(options = {}) {
         });
         if (typeof applyMarkers === "function") applyMarkers();
         if (typeof window.__embedLogOnMarkers === "function") window.__embedLogOnMarkers();
-    }
-    var _eventRules = window.__embedLogEventRules || {};
-    var _events = window.__embedLogEvents || [];
-    var _hasRules = Object.keys(_eventRules).some(function (k) { return Array.isArray(_eventRules[k]) && _eventRules[k].length > 0; });
-    if (_hasRules || _events.length) {
-        state.eventRules = _eventRules;
-        state.eventsEnabled = true;
-        if (typeof initEventsTab === "function") initEventsTab();
-        _events.forEach(function (ev) { if (typeof addEvent === "function") addEvent(ev); });
-        if (typeof renderTabBar === "function") renderTabBar();
     }
     if (${activeTabIdx} !== 0) switchTab(${activeTabIdx});
     (function () {
@@ -301,7 +290,6 @@ ${pluginScriptTags}
 <script>${exportJs}</script>
 <script>${postprocessJs}</script>
 <script>${selectionJs}</script>
-<script>${eventsJs}</script>
 <script>${tsparseJs}</script>
 <script>${importJs}</script>
 <script>${bootstrapJs}</script>
@@ -328,7 +316,44 @@ ${pluginScriptTags}
 }
 
 async function exportToHtml() {
-    return exportHtmlSnapshot();
+    const btn = document.getElementById("btn-export");
+    const previous = btn?.textContent;
+    if (btn) {
+        btn.textContent = "…";
+        btn.disabled = true;
+    }
+    try {
+        const response = await fetch("/api/session/export?download=true", {
+            method: "POST",
+            headers: { "Accept": "text/html" },
+        });
+        if (!response.ok || !response.headers.get("content-type")?.includes("text/html")) {
+            const result = await response.json().catch(() => ({}));
+            throw new Error(result.html_error || `server returned ${response.status}`);
+        }
+
+        // This response is the exact file atomically published in the session
+        // directory; the browser does not run a second full-session renderer.
+        const disposition = response.headers.get("content-disposition") || "";
+        const filename = disposition.match(/filename="([^"]+)"/)?.[1]
+            || "embed-log-session.html";
+        const blobUrl = URL.createObjectURL(await response.blob());
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 0);
+    } catch (err) {
+        console.error("Export failed:", err);
+        alert("Export failed: " + err.message);
+    } finally {
+        if (btn) {
+            btn.textContent = previous;
+            btn.disabled = false;
+        }
+    }
 }
 
 window.__embedLogExportSnapshot = exportHtmlSnapshot;
@@ -421,7 +446,7 @@ function _toggleRawMenu() {
     if (!menu || !btn) return;
 
     const isOpen = menu.classList.contains("open");
-    document.querySelectorAll("#clip-peek-menu.open, #sessions-menu.open").forEach(el =>
+    document.querySelectorAll("#clip-peek-menu.open").forEach(el =>
         el.classList.remove("open")
     );
 
@@ -466,6 +491,7 @@ document.addEventListener("click", e => {
 }, true);
 
 document.addEventListener("keydown", e => {
+    if (isComposingEvent(e) || isEditableTarget(e.target)) return;
     if (e.key === "Escape") _closeRawMenu();
 });
 

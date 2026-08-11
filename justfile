@@ -5,7 +5,7 @@ set dotenv-load := true
 
 cargo := "cargo"
 node_package_dir := "tests-ui"
-config := "demo.yml"
+config := "embed-log.yml"
 frontend_dir := "frontend"
 
 # Show available recipes.
@@ -15,16 +15,6 @@ default:
 # Build the embed-log CLI release binary.
 build:
     {{cargo}} build --locked --release --package embed-log-cli --bin embed-log
-
-# Build the Tauri desktop app release binary.
-build-desktop:
-    {{cargo}} build --locked --release --package embed-log-tauri --bin embed-log-tauri
-
-# Build the embed-log CLI with real network packet capture (pcap) support.
-# Requires libpcap-dev/libpcap-devel/Npcap installed. After building, grant capture
-# permission on Linux with: sudo setcap cap_net_raw,cap_net_admin+eip target/release/embed-log
-build-pcap:
-    {{cargo}} build --locked --release --package embed-log-cli --bin embed-log --features pcap-capture
 
 # Build and install the embed-log CLI from target/release.
 # Defaults to /usr/local/bin. Override: just install /opt/homebrew/bin
@@ -66,8 +56,8 @@ uninstall install_dir="/usr/local/bin":
     fi
     echo "Removed $dest"
 
-# Run embed-log in one of four modes: web, headless, tui, desktop.
-# Examples: just run / just run headless demo.yml / just run tui embed-log.yml / just run desktop embed-log.yml
+# Run embed-log in browser, no-browser, or TUI mode.
+# Examples: just run / just run no-browser embed-log.yml / just run tui embed-log.yml
 run mode="web" cfg=config:
     #!/usr/bin/env sh
     set -eu
@@ -75,41 +65,14 @@ run mode="web" cfg=config:
       web)
         exec {{cargo}} run --package embed-log-cli --bin embed-log -- run --config {{cfg}} --frontend-dir {{frontend_dir}}
         ;;
-      headless)
+      no-browser)
         exec {{cargo}} run --package embed-log-cli --bin embed-log -- run --config {{cfg}} --frontend-dir {{frontend_dir}} --no-open-browser
         ;;
       tui)
         exec {{cargo}} run --package embed-log-cli --bin embed-log -- run --tui --config {{cfg}} --no-open-browser
         ;;
-      desktop)
-        exec {{cargo}} run --package embed-log-tauri --bin embed-log-tauri -- --config {{cfg}}
-        ;;
       *)
-        echo "unknown run mode: {{mode}} (expected: web, headless, tui, desktop)" >&2
-        exit 1
-        ;;
-    esac
-
-# Run demo traffic in one of four modes: web, headless, tui, desktop.
-# Examples: just demo / just demo headless / just demo tui / just demo desktop
-demo mode="web":
-    #!/usr/bin/env sh
-    set -eu
-    case "{{mode}}" in
-      web)
-        exec {{cargo}} run --package embed-log-cli --bin embed-log -- demo --config {{config}} --frontend-dir {{frontend_dir}}
-        ;;
-      headless)
-        exec {{cargo}} run --package embed-log-cli --bin embed-log -- demo --config {{config}} --frontend-dir {{frontend_dir}} --no-open-browser
-        ;;
-      tui)
-        exec {{cargo}} run --package embed-log-cli --bin embed-log -- demo --tui --config {{config}} --no-open-browser
-        ;;
-      desktop)
-        exec env EMBED_LOG_DEMO_TRAFFIC=1 {{cargo}} run --package embed-log-tauri --bin embed-log-tauri -- --config {{config}}
-        ;;
-      *)
-        echo "unknown demo mode: {{mode}} (expected: web, headless, tui, desktop)" >&2
+        echo "unknown run mode: {{mode}} (expected: web, no-browser, tui)" >&2
         exit 1
         ;;
     esac

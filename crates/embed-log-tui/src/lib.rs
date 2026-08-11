@@ -1,23 +1,20 @@
 //! Terminal UI frontend for embed-log.
 //!
-//! The TUI is a WebSocket client to the unchanged `embed-log-core` server
-//! (`/ws` + `/api/*`), exactly like the browser frontend and the Tauri
-//! webview. It supports live viewing, tabs/panes, scrolling, selection/copy,
-//! markers, events, clear, relative/absolute timestamps, and UART TX with
-//! ratatui + crossterm. It does not execute browser JavaScript plugins or
-//! provide onboarding; use `embed-log run --tui` after creating a config.
+//! The TUI is a WebSocket client to the `embed-log-core` server
+//! (`/ws` + `/api/*`), like the browser frontend. It supports live viewing,
+//! tabs/panes, scrolling, selection/copy,
+//! markers, clear, relative/absolute timestamps, and UART TX with
+//! ratatui + crossterm. It does not execute browser JavaScript plugins; use
+//! `embed-log run --tui` after creating a config.
 //!
 //! Two entry points:
-//! - [`run_in_process`] — used by `embed-log run --tui` / `demo --tui` when
-//!   the server is already running in the same process on loopback.
+//! - [`run_in_process`] — used by `embed-log run --tui` when the server is
+//!   already running in the same process on loopback.
 //! - [`run_client`] — connect the standalone binary to any running server.
-//!
-//! See `tui-frontend-plan.md` for the full architecture and phase plan.
 
 pub mod app;
 pub mod client;
 pub mod draw;
-pub mod events;
 pub mod input;
 pub mod keys;
 pub mod lines;
@@ -44,7 +41,7 @@ pub fn run_in_process(ws_port: u16, app_name: Option<&str>) -> Result<()> {
 /// **async** variant for callers already inside a tokio runtime (e.g. the
 /// `embed-log` CLI's `#[tokio::main]`).
 ///
-/// This is the entry point `embed-log run --tui` / `demo --tui` use: the CLI
+/// This is the entry point `embed-log run --tui` uses: the CLI
 /// spawns `LogServer::run()` as a background task, then `.await`s this, then
 /// tears down the server when the TUI quits.
 pub async fn run_in_process_async(ws_port: u16, app_name: Option<&str>) -> Result<()> {

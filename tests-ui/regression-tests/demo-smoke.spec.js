@@ -42,7 +42,7 @@ test.describe('embed-log deterministic demo smoke', () => {
 // Scenario: Connects to backend WS and receives deterministic logs with correct pane labels
 //   Given the user navigates to the app
 //   When  the WebSocket connects
-//   Then  SENSOR_A, SENSOR_B, SENSOR_C, SENSOR_CBOR, and SENSOR_D panes appear with correct labels (DEVICE_A, HOST, AUX, CBOR, PYTEST)
+//   Then  SENSOR_A, SENSOR_B, SENSOR_C, and SENSOR_D panes appear with correct labels (DEVICE_A, HOST, AUX, PYTEST)
 //   And   each pane receives test log lines
 
   test('connects to backend and receives deterministic demo logs', async ({ page }) => {
@@ -62,9 +62,6 @@ test.describe('embed-log deterministic demo smoke', () => {
     await expect(page.locator('#pane-SENSOR_C .pane-name')).toHaveText('AUX');
     await waitForSourceTestLine(page, 'SENSOR_C');
 
-    await page.getByRole('button', { name: 'cbor-tab', exact: true }).click();
-    await expect(page.locator('#pane-SENSOR_CBOR .pane-name')).toHaveText('CBOR');
-    await waitForLineContaining(page, 'SENSOR_CBOR', 'kind=sync');
     await page.getByRole('button', { name: 'PYTEST', exact: true }).click();
     await expect(page.locator('#pane-SENSOR_D .pane-name')).toHaveText('PYTEST');
     await waitForSourceTestLine(page, 'SENSOR_D');
@@ -171,7 +168,7 @@ test.describe('embed-log deterministic demo smoke', () => {
     expect(html).toContain('<div id="toolbar">');
     expect(html).toContain('<div id="tab-bar"></div>');
     expect(html).toContain('hydratePanesFromJson');
-    expect(html).toContain('kind=prefix-cleanup');
+    expect(html).toContain('TEST src=SENSOR_A');
     expect(html).toMatch(/\[SENSOR_A\]/);
     expect(html).not.toContain('<h1>embed-log selection</h1>');
   });
@@ -188,6 +185,19 @@ test('live pane history is retained while tailing', async ({ page }) => {
   await waitForSourceTestLine(page, 'SENSOR_A');
   await waitForSourceTestLine(page, 'SENSOR_B');
 
+  async function scrollPane(paneId, position) {
+    await page.locator(`#log-${paneId}`).evaluate(async (el, pos) => {
+      el.scrollTop = pos === 'top' ? 0 : el.scrollHeight;
+      el.dispatchEvent(new Event('scroll'));
+      // The virtual scroller updates its rendered window on the next frame.
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    }, position);
+  }
+
+  // Capture the actual oldest model lines, not the first row in the current
+  // virtualized tail window.
+  await scrollPane('SENSOR_A', 'top');
+  await scrollPane('SENSOR_B', 'top');
   const firstA = (await page.locator('#log-SENSOR_A .log-line').first().textContent())?.trim();
   const firstB = (await page.locator('#log-SENSOR_B .log-line').first().textContent())?.trim();
   expect(firstA).toBeTruthy();
@@ -206,13 +216,6 @@ test('live pane history is retained while tailing', async ({ page }) => {
 
   await expect.poll(() => storedLineCount('SENSOR_A')).toBeGreaterThan(200);
   await expect.poll(() => storedLineCount('SENSOR_B')).toBeGreaterThan(200);
-
-  async function scrollPane(paneId, position) {
-    await page.locator(`#log-${paneId}`).evaluate((el, pos) => {
-      el.scrollTop = pos === 'top' ? 0 : el.scrollHeight;
-      el.dispatchEvent(new Event('scroll'));
-    }, position);
-  }
 
   await scrollPane('SENSOR_A', 'top');
   await expect(page.locator('#log-SENSOR_A')).toContainText(firstA);
@@ -262,8 +265,6 @@ test('runtime settings panel exposes working font-size controls', async ({ page 
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
     await waitForSourceTestLine(page, 'SENSOR_A');
 
-    // Pick a non-event log line index to mark, so the tooltip assertion is not
-    // racing with event-marker tooltips from the deterministic event rules.
     const markerCandidate = await waitForLineContaining(page, 'SENSOR_A', 'kind=filter-alpha');
     const markerLineIdx = Number.parseInt(await markerCandidate.getAttribute('data-idx'), 10);
     expect(markerLineIdx).toBeGreaterThanOrEqual(0);
@@ -293,7 +294,7 @@ test('runtime settings panel exposes working font-size controls', async ({ page 
     await expect(lineLocator).toHaveClass(/has-marker/);
 
     // Check that the marker tooltip data is attached. The global tooltip can race
-    // with event-marker hover updates while live logs keep streaming, so assert
+    // while live logs keep streaming, so assert
     // the marked row's tooltip payload directly.
     await expect(lineLocator).toHaveAttribute('data-marker-tooltip', 'Test marker description');
 
@@ -320,22 +321,22 @@ test('runtime settings panel exposes working font-size controls', async ({ page 
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
     await waitForSourceTestLine(page, 'SENSOR_A');
 
-    // Select a range in SENSOR_A to enable the Add Note button (Exact scope)
-    const { start, end } = await waitForRangePair(page, 'SENSOR_A', 'kind=prefix-cleanup', 'kind=timestamp-cleanup');
-    await start.click();
-    await end.click({ modifiers: ['Shift'] });
+    const markerCandidate = await waitForLineContaining(page, 'SENSOR_A', 'kind=prefix-cleanup');
 
-    // Grab the first selected line index for later verification
-    const firstIdx = await page.evaluate(() => {
-      const sel = document.querySelector('#log-SENSOR_A .log-line.selected');
-      return sel ? parseInt(sel.dataset.idx, 10) : -1;
-    });
+    // Create a marker through the control protocol; browser selection no longer
+    // exposes a marker-creation action, but rendering/navigation remain supported.
+    const firstIdx = Number.parseInt(await markerCandidate.getAttribute('data-idx'), 10);
+    const numTs = await page.evaluate(async idx => {
+      const { state } = await import('/state.js');
+      return state.rawLines.SENSOR_A?.[idx]?.numTs ?? 0;
+    }, firstIdx);
     expect(firstIdx).toBeGreaterThanOrEqual(0);
-
-    // Click Add Note and save a marker
-    await page.locator('#marker-toggle-SENSOR_A').click();
-    await page.locator('.marker-input').fill('unwrap regression marker');
-    await page.locator('.marker-input-save').click();
+    await page.evaluate(({ idx, numTs }) => {
+      window.wsSend({ cmd: 'save_markers', markers: [{
+        paneId: 'SENSOR_A', lineIdx: idx, numTs,
+        description: 'unwrap regression marker', createdAt: new Date().toISOString(),
+      }] });
+    }, { idx: firstIdx, numTs });
 
     // Wait for marker UI to appear
     await expect(page.locator('#marker-nav')).not.toBeHidden({ timeout: 10_000 });

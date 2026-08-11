@@ -118,7 +118,7 @@ function _restoreIfPossible() {
     if (typeof snap.fontSize === 'number' && snap.fontSize > 0) {
         state.fontSize = snap.fontSize;
     }
-    if (snap.timestampMode === 'absolute' || snap.timestampMode === 'relative') {
+    if (snap.timestampMode === 'absolute' || snap.timestampMode === 'relative' || snap.timestampMode === 'hidden') {
         setTimestampMode(snap.timestampMode);
     }
     

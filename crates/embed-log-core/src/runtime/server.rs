@@ -4,7 +4,6 @@ use std::sync::{
     atomic::{AtomicU64, AtomicUsize},
     Arc, Mutex, RwLock,
 };
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Local};
@@ -21,10 +20,9 @@ use crate::net::control_ws::SourceInfo;
 use crate::net::ws_server::{
     start_server, ExportCallback, RotateCallback, RuntimeStats, ServerState, SourceRuntimeStats,
 };
+use crate::session::manager::atomic_write_file;
 use crate::session::{SessionExporter, SessionManager};
-use crate::sources::{
-    FileSource, LogSource, NetworkCaptureSource, TxCommand, UartSource, UdpSource,
-};
+use crate::sources::{FileSource, LogSource, TxCommand, UartSource, UdpSource};
 
 const REPLAY_BUFFER_SIZE: usize = 5000;
 
@@ -34,6 +32,7 @@ pub struct LogServer {
     frontend_dir: PathBuf,
     logs_root: PathBuf,
     config_path: Option<PathBuf>,
+    export_on_shutdown: bool,
 }
 
 /// Resolved source information for the runtime.
@@ -47,11 +46,11 @@ struct ResolvedSource {
 /// Loaded plugin data for the config message.
 #[derive(Clone)]
 struct LoadedPlugins {
-    /// Plugin definitions: `{ "hex-coap": { "builtin": "hex-coap" } }`
+    /// Optional custom plugin definitions sent to legacy config-v1 clients.
     definitions: serde_json::Value,
-    /// Pane-plugin mappings: `{ "DUT_UART": [{ "name": "hex-coap" }] }`
+    /// Pane-plugin mappings: `{ "DUT_UART": [{ "name": "custom-line" }] }`
     pane_plugins: serde_json::Value,
-    /// Plugin JS source code: `{ "hex-coap": "..." }`
+    /// Custom plugin JS source code: `{ "custom-line": "..." }`
     scripts: serde_json::Value,
 }
 
@@ -62,12 +61,19 @@ impl LogServer {
             frontend_dir,
             logs_root,
             config_path: None,
+            export_on_shutdown: true,
         }
     }
 
     /// Set the config file path — enables resolving relative plugin paths.
     pub fn with_config_path(mut self, path: PathBuf) -> Self {
         self.config_path = Some(path);
+        self
+    }
+
+    /// Control whether a clean process shutdown automatically exports HTML.
+    pub fn with_shutdown_export(mut self, enabled: bool) -> Self {
+        self.export_on_shutdown = enabled;
         self
     }
 
@@ -111,31 +117,9 @@ impl LogServer {
             &source_writability,
         );
 
-        // ── 3c. Load event rules from companion YAML ──
-        let source_names: Vec<String> = sources
-            .iter()
-            .map(|src| src.name.clone())
-            .chain(self.config.merges.iter().map(|m| m.name.clone()))
-            .collect();
-        let event_matchers =
-            crate::config::load_event_matchers(self.config_path.as_deref(), &source_names);
-        let runtime_event_rules = Arc::new(RwLock::new(HashMap::new()));
-        let static_event_rules = Arc::new(
-            event_matchers
-                .iter()
-                .map(|(source, matcher)| (source.clone(), matcher.rules().to_vec()))
-                .collect::<HashMap<_, _>>(),
-        );
-        let event_rules_path = self
-            .config_path
-            .as_ref()
-            .map(|path| {
-                path.parent().unwrap_or(Path::new(".")).join(format!(
-                    "{}.events.yml",
-                    path.file_stem().unwrap_or_default().to_string_lossy()
-                ))
-            })
-            .unwrap_or_else(|| PathBuf::from("embed-log.events.yml"));
+        // Temporary watches are process-local and independent of persisted sessions.
+        let watches = Arc::new(RwLock::new(HashMap::new()));
+        let watch_counter = Arc::new(AtomicU64::new(1));
 
         // Build source metadata for the control API.
         let mut source_metadata: HashMap<String, SourceInfo> = sources
@@ -162,14 +146,10 @@ impl LogServer {
 
         // Build per-source line counters for stable line_idx.
         use std::sync::atomic::AtomicU64;
-        let mut line_counters: HashMap<String, Arc<AtomicU64>> = sources
+        let line_counters: HashMap<String, Arc<AtomicU64>> = sources
             .iter()
             .map(|src| (src.name.clone(), Arc::new(AtomicU64::new(0))))
             .collect();
-        for merge in &self.config.merges {
-            line_counters.insert(merge.name.clone(), Arc::new(AtomicU64::new(0)));
-        }
-
         // ── 4. Compute log file paths ──
         let tab_label = self
             .config
@@ -188,17 +168,6 @@ impl LogServer {
             let log_path = session_dir.join(&log_name);
             source_files.insert(src.name.clone(), log_path.display().to_string());
             log_paths.insert(src.name.clone(), log_path);
-        }
-        for merge in &self.config.merges {
-            let log_name = format!(
-                "{}__{}__{}.log",
-                slugify(tab_label),
-                slugify(&merge.name),
-                slugify(&session_id),
-            );
-            let log_path = session_dir.join(&log_name);
-            source_files.insert(merge.name.clone(), log_path.display().to_string());
-            log_paths.insert(merge.name.clone(), log_path);
         }
         let writer_log_paths: HashMap<String, Arc<Mutex<PathBuf>>> = log_paths
             .iter()
@@ -248,6 +217,7 @@ impl LogServer {
             self.config.server.job_id.clone(),
             self.config.server.timestamp_mode.to_string(),
             None,
+            serde_json::to_value(&self.config.merges).unwrap_or_else(|_| json!([])),
         );
         session_mgr.write_manifest()?;
         let markers = session_mgr.load_markers();
@@ -256,12 +226,11 @@ impl LogServer {
         // ── 8. Create broadcast channel ──
         let (broadcast_tx, _rx) = broadcast::channel::<String>(4096);
         let replay = Arc::new(Mutex::new(VecDeque::with_capacity(REPLAY_BUFFER_SIZE)));
-        let events_replay = Arc::new(Mutex::new(VecDeque::with_capacity(REPLAY_BUFFER_SIZE)));
+        // One ordering point for sequence allocation, persistence, replay, and
+        // live publication across all concurrent source writers.
+        let commit_lock = Arc::new(Mutex::new(()));
         let stats = Arc::new(RuntimeStats::new(
-            sources
-                .iter()
-                .map(|src| src.name.clone())
-                .chain(self.config.merges.iter().map(|m| m.name.clone())),
+            sources.iter().map(|src| src.name.clone()),
             self.config.server.queue_size,
         ));
         let mut source_txs: HashMap<String, mpsc::Sender<LogEntry>> = HashMap::new();
@@ -269,56 +238,7 @@ impl LogServer {
 
         let mut join_handles: Vec<JoinHandle<()>> = Vec::new();
 
-        let source_tab_labels = build_source_tab_labels(&self.config.tabs);
-
-        // ── 8b. Set up merge (virtual combined) pseudo-sources ──
-        // Each merge gets its own writer pipeline — identical to a real
-        // source's — fed by relay taps installed below on its constituent
-        // sources' readers. `merge_feeds` maps a constituent source name to
-        // the merge channel(s) it should also forward tagged copies into.
-        let mut merge_feeds: HashMap<String, Vec<mpsc::Sender<LogEntry>>> = HashMap::new();
-        for merge in &self.config.merges {
-            let (merge_tx, merge_rx) = mpsc::channel::<LogEntry>(self.config.server.queue_size);
-
-            let writer_event_matcher = event_matchers.get(&merge.name).cloned();
-            let writer_runtime = WriterRuntime {
-                broadcast_tx: broadcast_tx.clone(),
-                replay: replay.clone(),
-                events_replay: events_replay.clone(),
-                first_log_at: first_log_at.clone(),
-                session_manager: session_mgr.clone(),
-                stats: stats.source(&merge.name),
-                ts_mode: self.config.server.timestamp_mode,
-                line_counter: line_counters.get(&merge.name).cloned(),
-                event_matcher: writer_event_matcher,
-                runtime_event_rules: runtime_event_rules.clone(),
-                source_meta: SourceRuntimeMeta {
-                    source_id: merge.name.clone(),
-                    source_label: merge_label(merge),
-                    source_kind: "merge".to_string(),
-                    tab_labels: source_tab_labels
-                        .get(&merge.name)
-                        .cloned()
-                        .unwrap_or_default(),
-                    session_id: session_id.clone(),
-                    app_name: self.config.server.app_name.clone(),
-                    job_id: self.config.server.job_id.clone(),
-                },
-            };
-            let log_path = writer_log_paths[&merge.name].clone();
-            let merge_writer_name = merge.name.clone();
-            let writer_handle = tokio::spawn(async move {
-                run_writer(merge_writer_name, log_path, merge_rx, writer_runtime).await;
-            });
-            join_handles.push(writer_handle);
-
-            for src_name in &merge.of {
-                merge_feeds
-                    .entry(src_name.clone())
-                    .or_default()
-                    .push(merge_tx.clone());
-            }
-        }
+        let source_tab_labels = build_source_tab_labels(&self.config.tabs, &self.config.merges);
 
         // ── 9. Start sources + writers ──
         for mut src in sources {
@@ -335,51 +255,28 @@ impl LogServer {
                 src.source.set_tx_receiver(tx_receiver);
             }
 
-            // Spawn source reader — tapped through a relay if one or more
-            // merges reference this source, otherwise wired directly as before.
+            // Spawn the physical source reader directly into its sole writer.
             let reader_name = src.name.clone();
-            match merge_feeds.remove(&src.name) {
-                Some(merge_targets) => {
-                    let (raw_tx, raw_rx) = mpsc::channel::<LogEntry>(self.config.server.queue_size);
-                    let relay_handle = tokio::spawn(relay_to_writer_and_merges(
-                        raw_rx,
-                        entry_tx.clone(),
-                        merge_targets,
-                        src.label.clone(),
-                    ));
-                    join_handles.push(relay_handle);
-                    let reader_handle = tokio::spawn(async move {
-                        if let Err(e) = src.source.run(raw_tx).await {
-                            error!("[{reader_name}] source error: {e}");
-                        }
-                    });
-                    join_handles.push(reader_handle);
+            let reader_entry_tx = entry_tx.clone();
+            let reader_handle = tokio::spawn(async move {
+                if let Err(e) = src.source.run(reader_entry_tx).await {
+                    error!("[{reader_name}] source error: {e}");
                 }
-                None => {
-                    let reader_entry_tx = entry_tx.clone();
-                    let reader_handle = tokio::spawn(async move {
-                        if let Err(e) = src.source.run(reader_entry_tx).await {
-                            error!("[{reader_name}] source error: {e}");
-                        }
-                    });
-                    join_handles.push(reader_handle);
-                }
-            }
+            });
+            join_handles.push(reader_handle);
 
             // Spawn writer task.
             let writer_name = src.name.clone();
-            let writer_event_matcher = event_matchers.get(&src.name).cloned();
             let writer_runtime = WriterRuntime {
                 broadcast_tx: broadcast_tx.clone(),
                 replay: replay.clone(),
-                events_replay: events_replay.clone(),
                 first_log_at: first_log_at.clone(),
                 session_manager: session_mgr.clone(),
                 stats: stats.source(&src.name),
                 ts_mode: self.config.server.timestamp_mode,
                 line_counter: line_counters.get(&src.name).cloned(),
-                event_matcher: writer_event_matcher,
-                runtime_event_rules: runtime_event_rules.clone(),
+                watches: watches.clone(),
+                commit_lock: commit_lock.clone(),
                 source_meta: SourceRuntimeMeta {
                     source_id: src.name.clone(),
                     source_label: src.label.clone(),
@@ -401,32 +298,8 @@ impl LogServer {
 
         // ── 10. Build config message ──
         let session_info = session_mgr.lock().unwrap().build_session_info();
-        let event_rules_meta: serde_json::Value = event_matchers
-            .iter()
-            .map(|(source_name, matcher)| {
-                let rules: Vec<serde_json::Value> = matcher
-                    .rules()
-                    .iter()
-                    .map(|r| {
-                        json!({
-                            "name": r.name,
-                            "severity": r.severity,
-                        })
-                    })
-                    .collect();
-                (source_name.clone(), serde_json::Value::Array(rules))
-            })
-            .collect::<serde_json::Map<_, _>>()
-            .into();
-        let event_rules_meta_clone = event_rules_meta.clone();
-        let config_msg = self.build_config_message(
-            &pane_labels,
-            &pane_kinds,
-            &plugins,
-            session_info,
-            markers,
-            event_rules_meta_clone,
-        );
+        let config_msg =
+            self.build_config_message(&pane_labels, &pane_kinds, &plugins, session_info, markers);
         let shared_config_msg = Arc::new(Mutex::new(config_msg.to_string()));
 
         // ── 11. Create export callback ──
@@ -438,9 +311,9 @@ impl LogServer {
             source_files: shared_source_files.clone(),
             html_path: shared_html_path.clone(),
             plugins: plugins.clone(),
-            event_rules: event_rules_meta.clone(),
             session_mgr: session_mgr.clone(),
             first_log_at: first_log_at.clone(),
+            merges: serde_json::to_value(&self.config.merges).unwrap_or_else(|_| json!([])),
         };
         let on_export: ExportCallback = Arc::new(move || export_session(&export_ctx));
 
@@ -455,6 +328,8 @@ impl LogServer {
             session_mgr: session_mgr.clone(),
             first_log_at: first_log_at.clone(),
             replay: replay.clone(),
+            commit_lock: commit_lock.clone(),
+            line_counters: line_counters.clone(),
             frontend: self.frontend_dir.clone(),
             tabs: tabs_json.clone(),
             pane_labels: pane_labels.clone(),
@@ -467,9 +342,10 @@ impl LogServer {
             config_msg: shared_config_msg.clone(),
             default_light_theme: self.config.server.default_light_theme.clone(),
             default_dark_theme: self.config.server.default_dark_theme.clone(),
-            event_rules: event_rules_meta.clone(),
+            export_on_rotate: self.export_on_shutdown,
+            merges: serde_json::to_value(&self.config.merges).unwrap_or_else(|_| json!([])),
         };
-        let on_rotate: RotateCallback = Arc::new(move || rotate_session(&rotation_ctx));
+        let on_rotate: RotateCallback = Arc::new(move |title| rotate_session(&rotation_ctx, title));
         let shutdown_export = on_export.clone();
 
         // ── 12. Start HTTP + WS server ──
@@ -477,22 +353,25 @@ impl LogServer {
             config_msg: shared_config_msg,
             broadcast_tx: broadcast_tx.clone(),
             replay: replay.clone(),
-            events_replay,
             on_export: Some(on_export.clone()),
             on_rotate: Some(on_rotate),
             session_manager: Some(session_mgr.clone()),
             logs_root: self.logs_root.clone(),
             ws_client_count: Arc::new(AtomicUsize::new(0)),
-            no_client_export_generation: Arc::new(AtomicU64::new(0)),
-            no_client_export_delay: Duration::from_secs(2),
             stats: stats.clone(),
             source_txs: Arc::new(source_txs),
             source_tx_senders: Arc::new(source_tx_senders),
             source_metadata: Arc::new(source_metadata),
             line_counters: Arc::new(line_counters),
-            static_event_rules,
-            event_rules_path,
-            runtime_event_rules,
+            watches,
+            watch_counter,
+            virtual_sources: Arc::new(
+                self.config
+                    .merges
+                    .iter()
+                    .map(|merge| (merge.name.clone(), merge.of.clone()))
+                    .collect(),
+            ),
             control_api: self.config.server.control_api,
         };
 
@@ -500,22 +379,31 @@ impl LogServer {
         let port = self.config.server.ws_port;
         let frontend_dir = self.frontend_dir.clone();
 
-        let server_handle = tokio::spawn(async move {
-            if let Err(e) = start_server(&host, port, Some(frontend_dir), state).await {
-                error!("HTTP/WS server error: {e}");
-            }
-        });
-        join_handles.push(server_handle);
+        let mut server_handle =
+            tokio::spawn(async move { start_server(&host, port, Some(frontend_dir), state).await });
 
-        // ── 13. Wait for shutdown ──
-        tokio::signal::ctrl_c().await?;
+        // ── 13. Wait for shutdown or propagate an HTTP bind/server failure. ──
+        tokio::select! {
+            signal = tokio::signal::ctrl_c() => signal?,
+            result = &mut server_handle => {
+                return match result {
+                    Ok(Ok(())) => Err(anyhow::anyhow!("HTTP/WebSocket server stopped unexpectedly")),
+                    Ok(Err(error)) => Err(error.context("HTTP/WebSocket server failed")),
+                    Err(error) => Err(anyhow::anyhow!("HTTP/WebSocket server task failed: {error}")),
+                };
+            }
+        }
+        server_handle.abort();
         info!("shutting down…");
 
-        // Export current session HTML on shutdown.
-        info!("exporting session HTML before exit…");
-        match shutdown_export() {
-            Ok(path) => info!("session HTML exported: {path}"),
-            Err(e) => error!("session HTML export failed: {e}"),
+        if self.export_on_shutdown {
+            info!("exporting session HTML before exit…");
+            match shutdown_export() {
+                Ok(path) => info!("session HTML exported: {path}"),
+                Err(e) => error!("session HTML export failed: {e}"),
+            }
+        } else {
+            info!("skipping automatic HTML export for daemon shutdown");
         }
 
         Ok(())
@@ -682,29 +570,6 @@ impl LogServer {
                             .with_parser(parser),
                     )
                 }
-                "network_capture" => {
-                    let interface = src_cfg.interface.clone().ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "source {}: network_capture interface is required",
-                            src_cfg.name
-                        )
-                    })?;
-                    let backend = src_cfg
-                        .network_backend
-                        .clone()
-                        .unwrap_or_else(|| "mock".to_string());
-                    Box::new(NetworkCaptureSource::new(
-                        &src_cfg.name,
-                        interface,
-                        src_cfg.bpf_filter.clone(),
-                        backend,
-                        src_cfg.mock_interval,
-                        src_cfg.udp.clone(),
-                        src_cfg.payload.clone(),
-                        src_cfg.snaplen,
-                        src_cfg.promisc,
-                    ))
-                }
                 other => {
                     error!(
                         "source {}: type {other:?} not yet implemented, skipping",
@@ -732,7 +597,6 @@ impl LogServer {
         plugins: &LoadedPlugins,
         session_info: serde_json::Value,
         markers: Vec<serde_json::Value>,
-        event_rules_meta: serde_json::Value,
     ) -> serde_json::Value {
         let tabs_json: Vec<serde_json::Value> = self
             .config
@@ -769,7 +633,7 @@ impl LogServer {
             pane_plugins: plugins.pane_plugins.clone(),
             plugin_scripts: plugins.scripts.clone(),
             markers,
-            event_rules: event_rules_meta,
+            merges: serde_json::to_value(&self.config.merges).unwrap_or_else(|_| json!([])),
         })
     }
 }
@@ -787,7 +651,7 @@ struct WsConfigParts<'a> {
     pane_plugins: serde_json::Value,
     plugin_scripts: serde_json::Value,
     markers: Vec<serde_json::Value>,
-    event_rules: serde_json::Value,
+    merges: serde_json::Value,
 }
 
 fn build_ws_config_message(parts: WsConfigParts<'_>) -> serde_json::Value {
@@ -835,7 +699,7 @@ fn build_ws_config_message(parts: WsConfigParts<'_>) -> serde_json::Value {
         "pane_plugins": parts.pane_plugins,
         "plugin_scripts": parts.plugin_scripts,
         "markers": parts.markers,
-        "event_rules": parts.event_rules,
+        "merges": parts.merges,
     })
 }
 
@@ -848,35 +712,22 @@ struct ExportContext {
     source_files: Arc<Mutex<HashMap<String, String>>>,
     html_path: Arc<Mutex<PathBuf>>,
     plugins: LoadedPlugins,
-    event_rules: serde_json::Value,
     session_mgr: Arc<Mutex<SessionManager>>,
     first_log_at: Arc<Mutex<Option<DateTime<Local>>>>,
+    merges: serde_json::Value,
 }
 
-/// Export the current session to HTML. Skips re-export when the existing HTML
-/// is already newer than every source and marker file.
+/// Export the current session to HTML from the latest complete canonical
+/// combined stream. SessionExporter serializes producers and publishes atomically.
 fn export_session(ctx: &ExportContext) -> Result<String, String> {
     let fla = ctx.first_log_at.lock().unwrap().map(|dt| dt.to_rfc3339());
     let export_html = ctx.html_path.lock().unwrap().clone();
     let export_sources = ctx.source_files.lock().unwrap().clone();
-    let (export_markers, export_events, marker_paths) = ctx
+    let (export_markers, combined_file) = ctx
         .session_mgr
         .lock()
-        .map(|mgr| {
-            (
-                mgr.load_markers(),
-                mgr.load_events(),
-                vec![mgr.session_dir().join("markers.json")],
-            )
-        })
+        .map(|mgr| (mgr.load_markers(), mgr.combined_file()))
         .unwrap_or_default();
-
-    if session_html_is_current(&export_html, &export_sources, &marker_paths) {
-        if let Ok(mut mgr) = ctx.session_mgr.lock() {
-            let _ = mgr.mark_html_exported(&export_html);
-        }
-        return Ok(export_html.display().to_string());
-    }
 
     let exporter = SessionExporter::new(
         export_html.clone(),
@@ -887,13 +738,14 @@ fn export_session(ctx: &ExportContext) -> Result<String, String> {
         ctx.ts_mode.clone(),
         fla,
     )
+    .with_combined_file(combined_file)
+    .with_merges(ctx.merges.clone())
     .with_plugins(
         ctx.plugins.definitions.clone(),
         ctx.plugins.pane_plugins.clone(),
         ctx.plugins.scripts.clone(),
     )
-    .with_markers(export_markers)
-    .with_events(export_events, ctx.event_rules.clone());
+    .with_markers(export_markers);
 
     match exporter.export() {
         Ok(path) => {
@@ -923,6 +775,8 @@ struct RotationContext {
     session_mgr: Arc<Mutex<SessionManager>>,
     first_log_at: Arc<Mutex<Option<DateTime<Local>>>>,
     replay: Arc<Mutex<VecDeque<String>>>,
+    commit_lock: Arc<Mutex<()>>,
+    line_counters: HashMap<String, Arc<AtomicU64>>,
     frontend: PathBuf,
     tabs: Vec<serde_json::Value>,
     pane_labels: HashMap<String, String>,
@@ -935,30 +789,35 @@ struct RotationContext {
     config_msg: Arc<Mutex<String>>,
     default_light_theme: Option<String>,
     default_dark_theme: Option<String>,
-    event_rules: serde_json::Value,
+    export_on_rotate: bool,
+    merges: serde_json::Value,
 }
 
-/// Roll over to a fresh session: create the new session dir + manifest, point
-/// the writers and shared state at it, then export the old session's HTML on a
-/// background thread. Returns `(old_session_info, new_session_info)`.
-fn rotate_session(ctx: &RotationContext) -> Result<(serde_json::Value, serde_json::Value), String> {
-    let (old_session, old_markers, old_events) = {
+/// Roll over to a fresh session without restarting source tasks or releasing
+/// UART ownership. Returns `(old_session_info, new_session_info)`.
+fn rotate_session(
+    ctx: &RotationContext,
+    title: Option<String>,
+) -> Result<(serde_json::Value, serde_json::Value), String> {
+    let title = normalize_session_title(title)?;
+    let commit_guard = ctx
+        .commit_lock
+        .lock()
+        .map_err(|_| "combined commit lock failed".to_string())?;
+    let (old_session, old_markers) = {
         let manager = ctx
             .session_mgr
             .lock()
             .map_err(|_| "session manager lock failed".to_string())?;
-        (
-            manager.build_session_info(),
-            manager.load_markers(),
-            manager.load_events(),
-        )
+        (manager.build_session_info(), manager.load_markers())
     };
     let old_source_files = ctx.source_files.lock().unwrap().clone();
     let old_html_path = ctx.html_path.lock().unwrap().clone();
     let old_first_log_at = ctx.first_log_at.lock().unwrap().map(|dt| dt.to_rfc3339());
 
-    let new_session_id = make_session_id_for_root(&ctx.logs_root, ctx.job_id.as_deref())
-        .map_err(|err| err.to_string())?;
+    let new_session_id =
+        make_titled_session_id_for_root(&ctx.logs_root, ctx.job_id.as_deref(), title.as_deref())
+            .map_err(|err| err.to_string())?;
     let new_session_dir = ctx.logs_root.join(&new_session_id);
     std::fs::create_dir_all(&new_session_dir).map_err(|err| err.to_string())?;
 
@@ -996,7 +855,9 @@ fn rotate_session(ctx: &RotationContext) -> Result<(serde_json::Value, serde_jso
         ctx.job_id.clone(),
         ctx.timestamp_mode.clone(),
         None,
-    );
+        ctx.merges.clone(),
+    )
+    .with_title(title);
     new_manager
         .write_manifest()
         .map_err(|err| err.to_string())?;
@@ -1007,6 +868,9 @@ fn rotate_session(ctx: &RotationContext) -> Result<(serde_json::Value, serde_jso
     }
     *ctx.html_path.lock().unwrap() = new_session_dir.join("session.html");
     *ctx.first_log_at.lock().unwrap() = None;
+    for counter in ctx.line_counters.values() {
+        counter.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
     ctx.replay.lock().unwrap().clear();
 
     let new_session = new_manager.build_session_info();
@@ -1027,108 +891,83 @@ fn rotate_session(ctx: &RotationContext) -> Result<(serde_json::Value, serde_jso
         pane_plugins: ctx.plugins.pane_plugins.clone(),
         plugin_scripts: ctx.plugins.scripts.clone(),
         markers: Vec::new(),
-        event_rules: ctx.event_rules.clone(),
+        merges: ctx.merges.clone(),
     });
     *ctx.config_msg
         .lock()
         .map_err(|_| "config message lock failed".to_string())? = new_config_msg.to_string();
+    drop(commit_guard);
 
-    // Export the old session's HTML off the hot path.
-    if let Some(old_manifest_path) = old_html_path.parent().map(|dir| dir.join("manifest.json")) {
-        let _ = update_manifest_file(
-            &old_manifest_path,
-            &json!({
-                "html_status": "updating",
-                "html_error": serde_json::Value::Null,
-                "last_export_reason": "rotate",
-            }),
-        );
-        let old_export_tabs = ctx.tabs.clone();
-        let old_export_labels = ctx.pane_labels.clone();
-        let old_export_frontend = ctx.frontend.clone();
-        let old_export_ts_mode = ctx.timestamp_mode.clone();
-        let old_export_plugins = ctx.plugins.clone();
-        let old_export_event_rules = ctx.event_rules.clone();
-        std::thread::spawn(move || {
-            let exporter = SessionExporter::new(
-                old_html_path.clone(),
-                old_source_files,
-                old_export_tabs,
-                old_export_labels,
-                old_export_frontend,
-                old_export_ts_mode,
-                old_first_log_at,
-            )
-            .with_plugins(
-                old_export_plugins.definitions,
-                old_export_plugins.pane_plugins,
-                old_export_plugins.scripts,
-            )
-            .with_markers(old_markers)
-            .with_events(old_events, old_export_event_rules);
+    // Export the old foreground session's HTML off the hot path. Daemons keep
+    // raw artifacts only unless an explicit export is requested.
+    if ctx.export_on_rotate {
+        if let Some(old_manifest_path) = old_html_path.parent().map(|dir| dir.join("manifest.json"))
+        {
+            let _ = update_manifest_file(
+                &old_manifest_path,
+                &json!({
+                    "html_status": "updating",
+                    "html_error": serde_json::Value::Null,
+                    "last_export_reason": "rotate",
+                }),
+            );
+            let old_export_tabs = ctx.tabs.clone();
+            let old_export_labels = ctx.pane_labels.clone();
+            let old_export_frontend = ctx.frontend.clone();
+            let old_export_ts_mode = ctx.timestamp_mode.clone();
+            let old_export_plugins = ctx.plugins.clone();
+            let old_export_merges = ctx.merges.clone();
+            std::thread::spawn(move || {
+                let exporter = SessionExporter::new(
+                    old_html_path.clone(),
+                    old_source_files,
+                    old_export_tabs,
+                    old_export_labels,
+                    old_export_frontend,
+                    old_export_ts_mode,
+                    old_first_log_at,
+                )
+                .with_combined_file(old_html_path.parent().unwrap().join("combined.jsonl"))
+                .with_merges(old_export_merges)
+                .with_plugins(
+                    old_export_plugins.definitions,
+                    old_export_plugins.pane_plugins,
+                    old_export_plugins.scripts,
+                )
+                .with_markers(old_markers);
 
-            match exporter.export() {
-                Ok(path) => {
-                    let now = Local::now().to_rfc3339();
-                    let _ = update_manifest_file(
-                        &old_manifest_path,
-                        &json!({
-                            "session_html": path.display().to_string(),
-                            "html_status": "ready",
-                            "html_updated_at": now,
-                            "html_error": serde_json::Value::Null,
-                            "last_export_reason": "rotate",
-                        }),
-                    );
+                match exporter.export() {
+                    Ok(path) => {
+                        let now = Local::now().to_rfc3339();
+                        let _ = update_manifest_file(
+                            &old_manifest_path,
+                            &json!({
+                                "session_html": path.display().to_string(),
+                                "html_status": "ready",
+                                "html_updated_at": now,
+                                "html_error": serde_json::Value::Null,
+                                "last_export_reason": "rotate",
+                            }),
+                        );
+                    }
+                    Err(error) => {
+                        let now = Local::now().to_rfc3339();
+                        let _ = update_manifest_file(
+                            &old_manifest_path,
+                            &json!({
+                                "html_status": "error",
+                                "html_error": error.to_string(),
+                                "html_updated_at": now,
+                                "last_export_reason": "rotate",
+                            }),
+                        );
+                    }
                 }
-                Err(error) => {
-                    let now = Local::now().to_rfc3339();
-                    let _ = update_manifest_file(
-                        &old_manifest_path,
-                        &json!({
-                            "html_status": "error",
-                            "html_error": error.to_string(),
-                            "html_updated_at": now,
-                            "last_export_reason": "rotate",
-                        }),
-                    );
-                }
-            }
-        });
-    }
-
-    Ok((old_session, new_session))
-}
-
-fn session_html_is_current(
-    html_path: &Path,
-    source_files: &HashMap<String, String>,
-    extra_paths: &[PathBuf],
-) -> bool {
-    let Ok(html_meta) = std::fs::metadata(html_path) else {
-        return false;
-    };
-    let Ok(html_mtime) = html_meta.modified() else {
-        return false;
-    };
-
-    for path in source_files
-        .values()
-        .map(PathBuf::from)
-        .chain(extra_paths.iter().cloned())
-    {
-        let Ok(meta) = std::fs::metadata(&path) else {
-            continue;
-        };
-        let Ok(mtime) = meta.modified() else {
-            return false;
-        };
-        if mtime > html_mtime {
-            return false;
+            });
         }
     }
 
-    true
+    Ok((old_session, new_session))
 }
 
 fn update_manifest_file(path: &Path, updates: &serde_json::Value) -> Result<()> {
@@ -1145,17 +984,45 @@ fn update_manifest_file(path: &Path, updates: &serde_json::Value) -> Result<()> 
         }
     }
 
-    std::fs::write(path, serde_json::to_string_pretty(&manifest)?)
+    atomic_write_file(path, serde_json::to_string_pretty(&manifest)?.as_bytes())
         .with_context(|| format!("update manifest {}", path.display()))
 }
 
-fn make_session_id_for_root(logs_root: &Path, job_id: Option<&str>) -> Result<String> {
-    let base_time = Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
-    let base = if let Some(job_id) = job_id {
-        format!("{base_time}__{}", slugify(job_id))
-    } else {
-        base_time
+fn normalize_session_title(title: Option<String>) -> Result<Option<String>, String> {
+    let Some(title) = title else {
+        return Ok(None);
     };
+    if title.trim().is_empty() {
+        return Err("session title must not be empty".to_string());
+    }
+    if title.chars().count() > 120 {
+        return Err("session title must not exceed 120 characters".to_string());
+    }
+    if slugify(title.trim()).is_empty() {
+        return Err("session title must contain a letter or number".to_string());
+    }
+    Ok(Some(title))
+}
+
+fn make_session_id_for_root(logs_root: &Path, job_id: Option<&str>) -> Result<String> {
+    make_titled_session_id_for_root(logs_root, job_id, None)
+}
+
+fn make_titled_session_id_for_root(
+    logs_root: &Path,
+    job_id: Option<&str>,
+    title: Option<&str>,
+) -> Result<String> {
+    let base_time = Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+    let mut base = base_time;
+    if let Some(title) = title {
+        base.push('_');
+        base.push_str(&slugify(title.trim()));
+    }
+    if let Some(job_id) = job_id {
+        base.push_str("__");
+        base.push_str(&slugify(job_id));
+    }
 
     for suffix in 0..1000 {
         let candidate = if suffix == 0 {
@@ -1188,14 +1055,13 @@ struct SourceRuntimeMeta {
 struct WriterRuntime {
     broadcast_tx: broadcast::Sender<String>,
     replay: Arc<Mutex<VecDeque<String>>>,
-    events_replay: Arc<Mutex<VecDeque<String>>>,
     first_log_at: Arc<Mutex<Option<DateTime<Local>>>>,
     session_manager: Arc<Mutex<SessionManager>>,
     stats: Option<Arc<SourceRuntimeStats>>,
     ts_mode: TimestampMode,
     line_counter: Option<Arc<AtomicU64>>,
-    event_matcher: Option<crate::config::PatternMatcher>,
-    runtime_event_rules: Arc<RwLock<HashMap<String, Vec<crate::config::EventRule>>>>,
+    watches: Arc<RwLock<HashMap<String, crate::net::watch::TemporaryWatch>>>,
+    commit_lock: Arc<Mutex<()>>,
     source_meta: SourceRuntimeMeta,
 }
 
@@ -1203,40 +1069,31 @@ fn merge_label(merge: &crate::config::MergeConfig) -> String {
     merge.label.clone().unwrap_or_else(|| merge.name.clone())
 }
 
-/// Forward each entry from `raw_rx` to `writer_tx` unchanged (so the source's
-/// own pipeline is untouched), and to every sender in `merge_targets` as a
-/// tagged clone: message prefixed with `origin`, and `source` set to `origin`
-/// unless it's already a `TX::<origin>` entry (preserved so merged TX lines
-/// keep their styling).
-async fn relay_to_writer_and_merges(
-    mut raw_rx: mpsc::Receiver<LogEntry>,
-    writer_tx: mpsc::Sender<LogEntry>,
-    merge_targets: Vec<mpsc::Sender<LogEntry>>,
-    origin: String,
-) {
-    while let Some(entry) = raw_rx.recv().await {
-        for merge_tx in &merge_targets {
-            let mut tagged = entry.clone();
-            if !tagged.source.starts_with("TX::") {
-                tagged.source = origin.clone();
-            }
-            tagged.message = format!("{origin}: {}", tagged.message);
-            let _ = merge_tx.send(tagged).await;
-        }
-        if writer_tx.send(entry).await.is_err() {
-            break;
-        }
-    }
-}
-
-fn build_source_tab_labels(tabs: &[crate::config::TabConfig]) -> HashMap<String, Vec<String>> {
+fn build_source_tab_labels(
+    tabs: &[crate::config::TabConfig],
+    merges: &[crate::config::MergeConfig],
+) -> HashMap<String, Vec<String>> {
+    let merge_members: HashMap<&str, &[String]> = merges
+        .iter()
+        .map(|merge| (merge.name.as_str(), merge.of.as_slice()))
+        .collect();
     let mut by_source: HashMap<String, Vec<String>> = HashMap::new();
     for tab in tabs {
         for pane in &tab.panes {
-            by_source
-                .entry(pane.source_name().to_string())
-                .or_default()
-                .push(tab.label.clone());
+            let pane_name = pane.source_name();
+            if let Some(members) = merge_members.get(pane_name) {
+                for member in *members {
+                    by_source
+                        .entry(member.clone())
+                        .or_default()
+                        .push(tab.label.clone());
+                }
+            } else {
+                by_source
+                    .entry(pane_name.to_string())
+                    .or_default()
+                    .push(tab.label.clone());
+            }
         }
     }
     by_source
@@ -1259,49 +1116,6 @@ fn build_combined_log_entry(
     combined
 }
 
-/// Create an event marker and broadcast a markers_update.
-///
-/// Replaces any existing event marker at the same (paneId, lineIdx),
-/// but preserves user markers (kind != "event").
-#[allow(clippy::too_many_arguments)]
-fn save_event_marker(
-    session_manager: &Arc<Mutex<SessionManager>>,
-    broadcast_tx: &broadcast::Sender<String>,
-    source_name: &str,
-    line_idx: u64,
-    num_ts: f64,
-    rule_name: &str,
-    severity: &str,
-    message: &str,
-) {
-    if let Ok(mgr) = session_manager.lock() {
-        let now = chrono::Local::now();
-        let event_marker = serde_json::json!({
-            "paneId": source_name,
-            "lineIdx": line_idx,
-            "endIdx": line_idx,
-            "numTs": num_ts,
-            "description": format!("{}: {}", rule_name, message),
-            "kind": "event",
-            "severity": severity,
-            "createdAt": now.to_rfc3339(),
-        });
-
-        // Replace only prior event markers at this line; preserve user markers.
-        match mgr.replace_marker(source_name, line_idx, event_marker, true) {
-            Ok(markers) => {
-                let markers_update = serde_json::json!({
-                    "type": "markers_update",
-                    "markers": markers,
-                    "session": mgr.build_session_info(),
-                });
-                let _ = broadcast_tx.send(markers_update.to_string());
-            }
-            Err(e) => error!("[{source_name}] failed to save event marker: {e}"),
-        }
-    }
-}
-
 /// Writer task: receives log entries, writes to file, broadcasts to WS clients.
 ///
 /// Tracks `first_log_at` and sends a `session_info` update when it's first set.
@@ -1321,6 +1135,13 @@ async fn run_writer(
     use std::io::Write;
 
     while let Some(entry) = entry_rx.recv().await {
+        let _commit_guard = match runtime.commit_lock.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                error!("[{source_name}] combined commit lock poisoned");
+                break;
+            }
+        };
         let desired_log_path = log_path.lock().unwrap().clone();
         if desired_log_path != current_log_path {
             let _ = file.flush();
@@ -1460,76 +1281,34 @@ async fn run_writer(
             }
         }
 
-        let combined_entry = build_combined_log_entry(&payload, &runtime.source_meta);
-        if let Ok(manager) = runtime.session_manager.lock() {
-            if let Err(e) = manager.append_combined_entry(&combined_entry) {
-                error!("[{source_name}] failed to append combined entry: {e}");
+        let mut combined_entry = build_combined_log_entry(&payload, &runtime.source_meta);
+        let (sequence, active_session_id) = match runtime.session_manager.lock() {
+            Ok(mut manager) => match manager.append_combined_entry(&mut combined_entry) {
+                Ok(sequence) => (sequence, manager.session_id().to_string()),
+                Err(error) => {
+                    error!("[{source_name}] failed to append combined entry: {error}");
+                    continue;
+                }
+            },
+            Err(_) => {
+                error!("[{source_name}] session manager lock poisoned");
+                continue;
             }
+        };
+        if let Some(object) = payload.as_object_mut() {
+            object.insert("sequence".to_string(), json!(sequence));
+            object.insert("session_id".to_string(), json!(active_session_id));
         }
 
         let payload_str = payload.to_string();
 
-        // ── Event detection ──
-        // Check message against compiled event rules for this source.
-        let mut event_matches = runtime
-            .event_matcher
-            .as_ref()
-            .map(|matcher| matcher.check(&message))
-            .unwrap_or_default();
-        if let Ok(rules) = runtime.runtime_event_rules.read() {
-            if let Some(rules) = rules.get(&source_name) {
-                event_matches
-                    .extend(crate::config::PatternMatcher::new(rules.clone()).check(&message));
-            }
-        }
-        for event_match in event_matches {
-            let event_payload = json!({
-                "type": "event",
-                "event_id": event_match.rule_name,
-                "source_id": source_name,
-                "severity": event_match.severity,
-                "timestamp": display_ts,
-                "timestamp_iso": ts_iso,
-                "timestamp_num": abs_num,
-                "rel_num": rel_num,
-                "line_idx": line_idx,
-                "message": message,
-                "origin": origin,
-                "captures": event_match.captures,
-            });
-
-            // Broadcast the event to all WS clients.
-            let _ = runtime.broadcast_tx.send(event_payload.to_string());
-
-            // Persist event to events.jsonl.
-            if let Ok(mgr) = runtime.session_manager.lock() {
-                if let Err(e) = mgr.append_event(&event_payload) {
-                    error!("[{source_name}] failed to append event: {e}");
-                }
-            }
-
-            // Push to events replay buffer.
-            {
-                let mut buf = runtime.events_replay.lock().unwrap();
-                if buf.len() >= REPLAY_BUFFER_SIZE {
-                    buf.pop_front();
-                }
-                buf.push_back(event_payload.to_string());
-            }
-
-            // Create an event marker (replaces previous event markers at this line,
-            // preserves user markers).
-            save_event_marker(
-                &runtime.session_manager,
-                &runtime.broadcast_tx,
-                &source_name,
-                line_idx,
-                abs_num,
-                &event_match.rule_name,
-                &event_match.severity,
-                &message,
-            );
-        }
+        crate::net::watch::retain_matching_watches(
+            &runtime.watches,
+            &source_name,
+            is_tx,
+            &message,
+            &payload,
+        );
 
         // Store in replay buffer
         {
@@ -1576,62 +1355,6 @@ mod tests {
     use super::*;
     use tokio::time::{sleep, Duration};
 
-    #[tokio::test]
-    async fn relay_forwards_original_and_tags_merge_copy() {
-        let (raw_tx, raw_rx) = mpsc::channel::<LogEntry>(4);
-        let (writer_tx, mut writer_rx) = mpsc::channel::<LogEntry>(4);
-        let (merge_tx, mut merge_rx) = mpsc::channel::<LogEntry>(4);
-
-        tokio::spawn(relay_to_writer_and_merges(
-            raw_rx,
-            writer_tx,
-            vec![merge_tx],
-            "MCU_LINK_TX".to_string(),
-        ));
-
-        raw_tx
-            .send(LogEntry::new(Local::now(), "MCU_LINK_TX", "hello"))
-            .await
-            .unwrap();
-        drop(raw_tx);
-
-        let original = writer_rx.recv().await.unwrap();
-        assert_eq!(original.source, "MCU_LINK_TX");
-        assert_eq!(original.message, "hello");
-
-        let tagged = merge_rx.recv().await.unwrap();
-        assert_eq!(tagged.source, "MCU_LINK_TX");
-        assert_eq!(tagged.message, "MCU_LINK_TX: hello");
-    }
-
-    #[tokio::test]
-    async fn relay_preserves_tx_origin_convention_on_merge_copy() {
-        let (raw_tx, raw_rx) = mpsc::channel::<LogEntry>(4);
-        let (writer_tx, mut writer_rx) = mpsc::channel::<LogEntry>(4);
-        let (merge_tx, mut merge_rx) = mpsc::channel::<LogEntry>(4);
-
-        tokio::spawn(relay_to_writer_and_merges(
-            raw_rx,
-            writer_tx,
-            vec![merge_tx],
-            "MCU_LINK_TX".to_string(),
-        ));
-
-        raw_tx
-            .send(LogEntry::new(Local::now(), "TX::ui", "version\r\n").with_color("yellow"))
-            .await
-            .unwrap();
-        drop(raw_tx);
-
-        let original = writer_rx.recv().await.unwrap();
-        assert_eq!(original.source, "TX::ui");
-
-        let tagged = merge_rx.recv().await.unwrap();
-        assert_eq!(tagged.source, "TX::ui", "TX::<origin> must survive tagging");
-        assert_eq!(tagged.message, "MCU_LINK_TX: version\r\n");
-        assert_eq!(tagged.color.as_deref(), Some("yellow"));
-    }
-
     fn temp_dir(name: &str) -> PathBuf {
         let nanos = Local::now().timestamp_nanos_opt().unwrap_or_default();
         let dir = std::env::temp_dir().join(format!(
@@ -1646,21 +1369,14 @@ mod tests {
         let mut source_files = HashMap::new();
         source_files.insert("dut".to_string(), source_file.display().to_string());
         let combined_file = dir.join("combined.jsonl");
-
-        let mut pane_labels = HashMap::new();
-        pane_labels.insert("dut".to_string(), "DUT".to_string());
-
-        let mut pane_kinds = HashMap::new();
-        pane_kinds.insert("dut".to_string(), "udp".to_string());
-
         SessionManager::new(
             session_id,
             dir,
             &[json!({ "label": "Main", "panes": ["dut"] })],
             source_files,
             combined_file.display().to_string(),
-            pane_labels,
-            pane_kinds,
+            HashMap::from([("dut".to_string(), "DUT".to_string())]),
+            HashMap::from([("dut".to_string(), "udp".to_string())]),
             json!({}),
             json!({}),
             json!({}),
@@ -1671,6 +1387,7 @@ mod tests {
             None,
             "absolute",
             None,
+            json!([]),
         )
     }
 
@@ -1700,6 +1417,23 @@ mod tests {
     }
 
     #[test]
+    fn virtual_merge_tabs_are_attributed_to_physical_members() {
+        let tabs = vec![crate::config::TabConfig {
+            label: "Link".to_string(),
+            panes: vec![crate::config::PaneConfig::Simple("MCU_LINK".to_string())],
+        }];
+        let merges = vec![crate::config::MergeConfig {
+            name: "MCU_LINK".to_string(),
+            label: Some("MCU Link".to_string()),
+            of: vec!["MCU_TX".to_string(), "MCU_RX".to_string()],
+        }];
+        let labels = build_source_tab_labels(&tabs, &merges);
+        assert_eq!(labels["MCU_TX"], ["Link"]);
+        assert_eq!(labels["MCU_RX"], ["Link"]);
+        assert!(!labels.contains_key("MCU_LINK"));
+    }
+
+    #[test]
     fn collision_safe_session_id_appends_suffix() {
         let root = temp_dir("collision");
         let id = make_session_id_for_root(&root, Some("job")).unwrap();
@@ -1707,6 +1441,22 @@ mod tests {
         let next = make_session_id_for_root(&root, Some("job")).unwrap();
         assert_ne!(id, next);
         assert!(next.starts_with(&id));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn titled_session_id_preserves_job_and_rejects_invalid_titles() {
+        let root = temp_dir("titled-id");
+        let id = make_titled_session_id_for_root(
+            &root,
+            Some("nightly job"),
+            Some("Reconnect Attempt #3"),
+        )
+        .unwrap();
+        assert!(id.contains("_reconnect-attempt-3__nightly-job"));
+        assert!(normalize_session_title(Some("   ".to_string())).is_err());
+        assert!(normalize_session_title(Some("***".to_string())).is_err());
+        assert!(normalize_session_title(Some("x".repeat(121))).is_err());
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -1734,14 +1484,13 @@ mod tests {
         let runtime = WriterRuntime {
             broadcast_tx,
             replay,
-            events_replay: Arc::new(Mutex::new(VecDeque::new())),
             first_log_at: first_log_at.clone(),
             session_manager: manager,
             stats: None,
             ts_mode: TimestampMode::Absolute,
             line_counter: None,
-            event_matcher: None,
-            runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
+            watches: Arc::new(RwLock::new(HashMap::new())),
+            commit_lock: Arc::new(Mutex::new(())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer(
@@ -1798,14 +1547,13 @@ mod tests {
         let runtime = WriterRuntime {
             broadcast_tx,
             replay: Arc::new(Mutex::new(VecDeque::new())),
-            events_replay: Arc::new(Mutex::new(VecDeque::new())),
             first_log_at: Arc::new(Mutex::new(None)),
             session_manager: manager,
             stats: None,
             ts_mode: TimestampMode::Absolute,
             line_counter: None,
-            event_matcher: None,
-            runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
+            watches: Arc::new(RwLock::new(HashMap::new())),
+            commit_lock: Arc::new(Mutex::new(())),
             source_meta: test_source_meta("session-1"),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
@@ -1829,6 +1577,7 @@ mod tests {
         assert_eq!(parsed["session_id"], "session-1");
         assert_eq!(parsed["app_name"], "embed-log");
         assert_eq!(parsed["message"], "boot complete");
+        assert_eq!(parsed["sequence"], 1);
 
         drop(entry_tx);
         handle.await.unwrap();
@@ -1836,321 +1585,97 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn event_match_broadcasts_event_and_creates_marker() {
-        let root = temp_dir("event-match");
-        std::fs::create_dir_all(&root).unwrap();
+    async fn concurrent_writers_commit_combined_and_broadcast_in_sequence_order() {
+        let root = temp_dir("concurrent-sequence");
         let session_dir = root.join("session-1");
         std::fs::create_dir_all(&session_dir).unwrap();
-        let log_path = session_dir.join("main__dut__session-1.log");
-
-        let path = Arc::new(Mutex::new(log_path.clone()));
-        let (entry_tx, entry_rx) = mpsc::channel(4);
-        let (broadcast_tx, mut broadcast_rx) = broadcast::channel(32);
-        let replay = Arc::new(Mutex::new(VecDeque::new()));
-        let first_log_at = Arc::new(Mutex::new(None));
+        let dut_log = session_dir.join("dut.log");
+        let host_log = session_dir.join("host.log");
+        let combined_path = session_dir.join("combined.jsonl");
         let manager = Arc::new(Mutex::new(test_manager(
             "session-1",
             session_dir.clone(),
-            log_path.clone(),
+            dut_log.clone(),
         )));
-
-        // Build a PatternMatcher with a rule matching "ERROR".
-        let matcher = crate::config::PatternMatcher::new(vec![crate::config::EventRule {
-            name: "fatal_error".to_string(),
-            pattern: "ERROR".to_string(),
-            severity: "error".to_string(),
-            regex: regex::Regex::new("ERROR").unwrap(),
-        }]);
-
-        let runtime = WriterRuntime {
+        let (broadcast_tx, mut broadcast_rx) = broadcast::channel(256);
+        let replay = Arc::new(Mutex::new(VecDeque::new()));
+        let first_log_at = Arc::new(Mutex::new(None));
+        let watches = Arc::new(RwLock::new(HashMap::new()));
+        let commit_lock = Arc::new(Mutex::new(()));
+        let (dut_tx, dut_rx) = mpsc::channel(64);
+        let (host_tx, host_rx) = mpsc::channel(64);
+        let make_runtime = |source_id: &str, line_counter: Arc<AtomicU64>| WriterRuntime {
             broadcast_tx: broadcast_tx.clone(),
-            replay,
-            events_replay: Arc::new(Mutex::new(VecDeque::new())),
+            replay: replay.clone(),
             first_log_at: first_log_at.clone(),
-            session_manager: manager,
+            session_manager: manager.clone(),
             stats: None,
             ts_mode: TimestampMode::Absolute,
-            line_counter: None,
-            event_matcher: Some(matcher),
-            runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
-            source_meta: test_source_meta("session-1"),
+            line_counter: Some(line_counter),
+            watches: watches.clone(),
+            commit_lock: commit_lock.clone(),
+            source_meta: SourceRuntimeMeta {
+                source_id: source_id.to_string(),
+                source_label: source_id.to_string(),
+                source_kind: "file".to_string(),
+                tab_labels: vec!["Main".to_string()],
+                session_id: "session-1".to_string(),
+                app_name: "embed-log".to_string(),
+                job_id: None,
+            },
         };
-        let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
-
-        // Send a matching log entry.
-        entry_tx
-            .send(LogEntry::new(
-                Local::now(),
-                "dut".to_string(),
-                "FATAL ERROR: overflow".to_string(),
-            ))
-            .await
-            .unwrap();
-
-        // Wait for the event on broadcast.
-        let mut found_event = false;
-        let mut found_marker = false;
-        for _ in 0..50 {
-            match broadcast_rx.try_recv() {
-                Ok(msg) => {
-                    let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-                    if parsed["type"] == "event" {
-                        assert_eq!(parsed["event_id"], "fatal_error");
-                        assert_eq!(parsed["source_id"], "dut");
-                        assert_eq!(parsed["severity"], "error");
-                        assert_eq!(parsed["message"], "FATAL ERROR: overflow");
-                        assert_eq!(parsed["captures"][0], "ERROR");
-                        assert!(parsed["line_idx"].as_u64().is_some());
-                        assert!(parsed["timestamp_num"].as_f64().is_some());
-                        found_event = true;
-                    }
-                    if parsed["type"] == "markers_update" {
-                        let markers = parsed["markers"].as_array().unwrap();
-                        let event_marker = markers
-                            .iter()
-                            .find(|m| m["kind"] == "event" && m["severity"] == "error");
-                        assert!(event_marker.is_some(), "no event marker found");
-                        assert_eq!(
-                            event_marker.unwrap()["description"],
-                            "fatal_error: FATAL ERROR: overflow"
-                        );
-                        found_marker = true;
-                    }
-                }
-                Err(tokio::sync::broadcast::error::TryRecvError::Empty) => {
-                    sleep(Duration::from_millis(10)).await;
-                }
-                Err(_) => break,
+        let dut_handle = tokio::spawn(run_writer(
+            "DUT".to_string(),
+            Arc::new(Mutex::new(dut_log)),
+            dut_rx,
+            make_runtime("DUT", Arc::new(AtomicU64::new(0))),
+        ));
+        let host_handle = tokio::spawn(run_writer(
+            "HOST".to_string(),
+            Arc::new(Mutex::new(host_log)),
+            host_rx,
+            make_runtime("HOST", Arc::new(AtomicU64::new(0))),
+        ));
+        let dut_sender = tokio::spawn(async move {
+            for index in 0..50 {
+                dut_tx
+                    .send(LogEntry::new(Local::now(), "DUT", format!("dut-{index}")))
+                    .await
+                    .unwrap();
             }
-            if found_event && found_marker {
-                break;
+        });
+        let host_sender = tokio::spawn(async move {
+            for index in 0..50 {
+                host_tx
+                    .send(LogEntry::new(Local::now(), "HOST", format!("host-{index}")))
+                    .await
+                    .unwrap();
+            }
+        });
+        dut_sender.await.unwrap();
+        host_sender.await.unwrap();
+        dut_handle.await.unwrap();
+        host_handle.await.unwrap();
+
+        let combined = std::fs::read_to_string(&combined_path).unwrap();
+        let sequences = combined
+            .lines()
+            .map(|line| {
+                serde_json::from_str::<serde_json::Value>(line).unwrap()["sequence"]
+                    .as_u64()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(sequences, (1..=100).collect::<Vec<_>>());
+
+        let mut broadcast_sequences = Vec::new();
+        while let Ok(message) = broadcast_rx.try_recv() {
+            let value: serde_json::Value = serde_json::from_str(&message).unwrap();
+            if let Some(sequence) = value.get("sequence").and_then(|value| value.as_u64()) {
+                broadcast_sequences.push(sequence);
             }
         }
-
-        assert!(found_event, "expected event broadcast");
-        assert!(found_marker, "expected marker_update broadcast");
-
-        // Verify marker persisted in markers.json.
-        let markers_path = session_dir.join("markers.json");
-        let markers_text = std::fs::read_to_string(&markers_path).unwrap();
-        assert!(markers_text.contains(r#""kind": "event""#));
-        assert!(markers_text.contains(r#""severity": "error""#));
-
-        drop(entry_tx);
-        handle.await.unwrap();
-        std::fs::remove_dir_all(root).ok();
-    }
-
-    #[tokio::test]
-    async fn event_match_multiple_rules() {
-        let root = temp_dir("event-multi");
-        std::fs::create_dir_all(&root).unwrap();
-        let session_dir = root.join("session-1");
-        std::fs::create_dir_all(&session_dir).unwrap();
-        let log_path = session_dir.join("main__dut__session-1.log");
-
-        let path = Arc::new(Mutex::new(log_path.clone()));
-        let (entry_tx, entry_rx) = mpsc::channel(4);
-        let (broadcast_tx, mut broadcast_rx) = broadcast::channel(32);
-        let replay = Arc::new(Mutex::new(VecDeque::new()));
-        let first_log_at = Arc::new(Mutex::new(None));
-        let manager = Arc::new(Mutex::new(test_manager(
-            "session-1",
-            session_dir.clone(),
-            log_path.clone(),
-        )));
-
-        let rule1 = crate::config::EventRule {
-            name: "error".to_string(),
-            pattern: "ERROR".to_string(),
-            severity: "error".to_string(),
-            regex: regex::Regex::new("ERROR").unwrap(),
-        };
-        let rule2 = crate::config::EventRule {
-            name: "warn".to_string(),
-            pattern: "WARN".to_string(),
-            severity: "warn".to_string(),
-            regex: regex::Regex::new("WARN").unwrap(),
-        };
-        let matcher = crate::config::PatternMatcher::new(vec![rule1, rule2]);
-
-        let runtime = WriterRuntime {
-            broadcast_tx: broadcast_tx.clone(),
-            replay,
-            events_replay: Arc::new(Mutex::new(VecDeque::new())),
-            first_log_at: first_log_at.clone(),
-            session_manager: manager,
-            stats: None,
-            ts_mode: TimestampMode::Absolute,
-            line_counter: None,
-            event_matcher: Some(matcher),
-            runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
-            source_meta: test_source_meta("session-1"),
-        };
-        let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
-
-        // Send a log entry matching BOTH rules.
-        entry_tx
-            .send(LogEntry::new(
-                Local::now(),
-                "dut".to_string(),
-                "ERROR: something, WARN: caution".to_string(),
-            ))
-            .await
-            .unwrap();
-
-        let mut event_count = 0;
-        for _ in 0..50 {
-            match broadcast_rx.try_recv() {
-                Ok(msg) => {
-                    let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
-                    if parsed["type"] == "event" {
-                        event_count += 1;
-                    }
-                }
-                Err(tokio::sync::broadcast::error::TryRecvError::Empty) => {
-                    sleep(Duration::from_millis(10)).await;
-                }
-                Err(_) => break,
-            }
-            if event_count >= 2 {
-                break;
-            }
-        }
-
-        assert_eq!(event_count, 2, "expected 2 events for 2 matching rules");
-
-        drop(entry_tx);
-        handle.await.unwrap();
-        std::fs::remove_dir_all(root).ok();
-    }
-
-    #[tokio::test]
-    async fn non_matching_line_produces_no_event() {
-        let root = temp_dir("event-no-match");
-        std::fs::create_dir_all(&root).unwrap();
-        let session_dir = root.join("session-1");
-        std::fs::create_dir_all(&session_dir).unwrap();
-        let log_path = session_dir.join("main__dut__session-1.log");
-
-        let path = Arc::new(Mutex::new(log_path.clone()));
-        let (entry_tx, entry_rx) = mpsc::channel(4);
-        let (broadcast_tx, mut broadcast_rx) = broadcast::channel(32);
-        let replay = Arc::new(Mutex::new(VecDeque::new()));
-        let first_log_at = Arc::new(Mutex::new(None));
-        let manager = Arc::new(Mutex::new(test_manager(
-            "session-1",
-            session_dir.clone(),
-            log_path.clone(),
-        )));
-
-        let rule = crate::config::EventRule {
-            name: "fatal".to_string(),
-            pattern: "FATAL".to_string(),
-            severity: "fatal".to_string(),
-            regex: regex::Regex::new("FATAL").unwrap(),
-        };
-        let matcher = crate::config::PatternMatcher::new(vec![rule]);
-
-        let runtime = WriterRuntime {
-            broadcast_tx: broadcast_tx.clone(),
-            replay,
-            events_replay: Arc::new(Mutex::new(VecDeque::new())),
-            first_log_at: first_log_at.clone(),
-            session_manager: manager,
-            stats: None,
-            ts_mode: TimestampMode::Absolute,
-            line_counter: None,
-            event_matcher: Some(matcher),
-            runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
-            source_meta: test_source_meta("session-1"),
-        };
-        let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
-
-        // Send a non-matching line.
-        entry_tx
-            .send(LogEntry::new(
-                Local::now(),
-                "dut".to_string(),
-                "boot complete".to_string(),
-            ))
-            .await
-            .unwrap();
-
-        // Small delay to let the writer process.
-        sleep(Duration::from_millis(50)).await;
-
-        // Check that no event was broadcast.
-        let events_received: Vec<String> =
-            std::iter::from_fn(|| broadcast_rx.try_recv().ok()).collect();
-
-        let has_event = events_received.iter().any(|m| {
-            serde_json::from_str::<serde_json::Value>(m)
-                .map(|v| v["type"] == "event")
-                .unwrap_or(false)
-        });
-        assert!(!has_event, "non-matching line should not produce event");
-
-        drop(entry_tx);
-        handle.await.unwrap();
-        std::fs::remove_dir_all(root).ok();
-    }
-
-    #[tokio::test]
-    async fn source_without_rules_produces_no_events() {
-        let root = temp_dir("event-no-rules");
-        std::fs::create_dir_all(&root).unwrap();
-        let session_dir = root.join("session-1");
-        std::fs::create_dir_all(&session_dir).unwrap();
-        let log_path = session_dir.join("main__dut__session-1.log");
-
-        let path = Arc::new(Mutex::new(log_path.clone()));
-        let (entry_tx, entry_rx) = mpsc::channel(4);
-        let (broadcast_tx, mut broadcast_rx) = broadcast::channel(32);
-        let replay = Arc::new(Mutex::new(VecDeque::new()));
-        let first_log_at = Arc::new(Mutex::new(None));
-        let manager = Arc::new(Mutex::new(test_manager(
-            "session-1",
-            session_dir.clone(),
-            log_path.clone(),
-        )));
-
-        // Empty event_matchers — no rules for any source.
-        let runtime = WriterRuntime {
-            broadcast_tx: broadcast_tx.clone(),
-            replay,
-            events_replay: Arc::new(Mutex::new(VecDeque::new())),
-            first_log_at: first_log_at.clone(),
-            session_manager: manager,
-            stats: None,
-            ts_mode: TimestampMode::Absolute,
-            line_counter: None,
-            event_matcher: None,
-            runtime_event_rules: Arc::new(RwLock::new(HashMap::new())),
-            source_meta: test_source_meta("session-1"),
-        };
-        let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
-
-        entry_tx
-            .send(LogEntry::new(
-                Local::now(),
-                "dut".to_string(),
-                "ERROR: this would match if rules existed".to_string(),
-            ))
-            .await
-            .unwrap();
-
-        sleep(Duration::from_millis(50)).await;
-
-        let has_event = std::iter::from_fn(|| broadcast_rx.try_recv().ok()).any(|m| {
-            serde_json::from_str::<serde_json::Value>(&m)
-                .map(|v| v["type"] == "event")
-                .unwrap_or(false)
-        });
-        assert!(!has_event, "source without rules should not produce events");
-
-        drop(entry_tx);
-        handle.await.unwrap();
+        assert_eq!(broadcast_sequences, (1..=100).collect::<Vec<_>>());
         std::fs::remove_dir_all(root).ok();
     }
 
@@ -2184,6 +1709,7 @@ mod tests {
 
         let replay = Arc::new(Mutex::new(VecDeque::from(["stale".to_string()])));
         let config_msg = Arc::new(Mutex::new("old-config".to_string()));
+        let line_counter = Arc::new(AtomicU64::new(42));
 
         let mut pane_labels = HashMap::new();
         pane_labels.insert("dut".to_string(), "DUT".to_string());
@@ -2200,6 +1726,8 @@ mod tests {
             session_mgr,
             first_log_at: Arc::new(Mutex::new(Some(Local::now()))),
             replay: replay.clone(),
+            commit_lock: Arc::new(Mutex::new(())),
+            line_counters: HashMap::from([("dut".to_string(), line_counter.clone())]),
             frontend: root.join("frontend"),
             tabs: vec![json!({ "label": "Main", "panes": ["dut"] })],
             pane_labels,
@@ -2212,11 +1740,18 @@ mod tests {
             config_msg: config_msg.clone(),
             default_light_theme: None,
             default_dark_theme: None,
-            event_rules: json!({}),
+            export_on_rotate: false,
+            merges: json!([]),
         };
 
-        let (old_session, new_session) = rotate_session(&ctx).unwrap();
+        let title = "EDHOC reconnect attempt 3".to_string();
+        let (old_session, new_session) = rotate_session(&ctx, Some(title.clone())).unwrap();
         assert_ne!(old_session, new_session, "session info should change");
+        assert_eq!(new_session["title"], title);
+        assert!(new_session["id"]
+            .as_str()
+            .unwrap()
+            .contains("_edhoc-reconnect-attempt-3"));
 
         // Writer now points into a brand-new session directory under the root.
         let new_writer = writer_path.lock().unwrap().clone();
@@ -2230,19 +1765,24 @@ mod tests {
             new_writer.display().to_string()
         );
         assert!(replay.lock().unwrap().is_empty(), "replay buffer cleared");
+        assert_eq!(line_counter.load(std::sync::atomic::Ordering::Relaxed), 0);
         assert_ne!(*config_msg.lock().unwrap(), "old-config");
+        let manifest: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(new_dir.join("manifest.json")).unwrap())
+                .unwrap();
+        assert_eq!(manifest["title"], "EDHOC reconnect attempt 3");
+        assert!(!first_dir.join("session.html").exists());
 
         std::fs::remove_dir_all(root).ok();
     }
 
     #[test]
-    fn export_session_skips_when_html_already_current() {
-        let dir = temp_dir("export-skip");
+    fn explicit_export_regenerates_and_replaces_existing_html() {
+        let dir = temp_dir("export-replace");
         let log = dir.join("dut.log");
         std::fs::write(&log, "[t] hello\n").unwrap();
-        // HTML written after the log → newer mtime → export is skipped.
         let html = dir.join("session.html");
-        std::fs::write(&html, "<html></html>").unwrap();
+        std::fs::write(&html, "<html>stale</html>").unwrap();
 
         let mgr = test_manager("session-1", dir.clone(), log.clone());
         mgr.write_manifest().unwrap();
@@ -2258,13 +1798,17 @@ mod tests {
             )]))),
             html_path: Arc::new(Mutex::new(html.clone())),
             plugins: empty_plugins(),
-            event_rules: json!({}),
             session_mgr: Arc::new(Mutex::new(mgr)),
             first_log_at: Arc::new(Mutex::new(None)),
+            merges: json!([]),
         };
 
         let path = export_session(&ctx).unwrap();
         assert_eq!(path, html.display().to_string());
+        let exported = std::fs::read_to_string(&html).unwrap();
+        assert!(exported.starts_with("<!DOCTYPE html>"));
+        assert!(exported.ends_with("</html>\n"));
+        assert!(!exported.contains("<html>stale</html>"));
 
         std::fs::remove_dir_all(dir).ok();
     }

@@ -25,6 +25,9 @@ export function createLogStore({ state, parseAnsi, buildTimestampInfo, applyTime
     const line = {
       paneId,
       ...buildTimestampInfo(ts, meta && typeof meta === 'object' ? meta : {}),
+      serverLineIdx: Number.isFinite(meta?.lineIdx) ? meta.lineIdx : null,
+      sequence: Number.isFinite(meta?.sequence) ? meta.sequence : null,
+      sessionId: meta?.sessionId || null,
       html: parseAnsi(rawText),
       rawText,
       isTx,

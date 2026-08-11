@@ -35,7 +35,7 @@ impl Default for ParserConfig {
 pub struct SourceConfig {
     pub name: String,
     #[serde(rename = "type")]
-    pub source_type: String, // "uart", "udp", "file", "network_capture"
+    pub source_type: String, // "uart", "udp", "file"
     #[serde(default)]
     pub port: serde_yaml::Value, // string for uart/file, int for udp
     #[serde(default)]
@@ -43,77 +43,6 @@ pub struct SourceConfig {
     pub baudrate: Option<u32>,
     // label
     pub label: Option<String>,
-    // network_capture fields
-    pub interface: Option<String>,
-    #[serde(default)]
-    pub bpf_filter: String,
-    pub network_backend: Option<String>,
-    pub mock_interval: Option<f64>,
-    #[serde(default)]
-    pub udp: Option<NetworkUdpCaptureConfig>,
-    pub snaplen: Option<u32>,
-    pub promisc: Option<bool>,
-    // pcap sub-config
-    pub pcap: Option<PcapConfig>,
-    // payload sub-config
-    pub payload: Option<PayloadConfig>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct NetworkUdpCaptureConfig {
-    #[serde(default)]
-    pub ports: Vec<u16>,
-    pub host: Option<String>,
-    #[serde(default)]
-    pub src_ips: Vec<String>,
-    #[serde(default)]
-    pub dst_ips: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PcapConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    pub path: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PayloadConfig {
-    #[serde(default = "PayloadConfig::default_include_preview")]
-    pub include_preview: bool,
-    #[serde(default = "PayloadConfig::default_max_preview_bytes")]
-    pub max_preview_bytes: u32,
-}
-
-impl Default for PayloadConfig {
-    fn default() -> Self {
-        Self {
-            include_preview: Self::default_include_preview(),
-            max_preview_bytes: Self::default_max_preview_bytes(),
-        }
-    }
-}
-
-impl PayloadConfig {
-    fn default_include_preview() -> bool {
-        true
-    }
-    fn default_max_preview_bytes() -> u32 {
-        128
-    }
-}
-
-/// A compiled event rule loaded from a companion .events.yml file.
-#[derive(Debug, Clone)]
-pub struct EventRule {
-    /// Unique name within its source.
-    pub name: String,
-    /// Raw regex pattern string (as written in the YAML).
-    pub pattern: String,
-    /// Severity label: "info", "warn", "error", or "fatal".
-    pub severity: String,
-    /// Compiled regex for fast matching.
-    pub regex: regex::Regex,
 }
 
 /// Frontend plugin definition.
@@ -176,9 +105,9 @@ pub struct TabConfig {
     pub panes: Vec<PaneConfig>,
 }
 
-/// A virtual pseudo-source that interleaves other sources' entries into one
-/// stream, each line tagged with its origin source's label. Referenced from
-/// `tabs[].panes` exactly like a real source name.
+/// A presentation-only virtual source that interleaves original member
+/// records without persisting copies. Referenced from `tabs[].panes` exactly
+/// like a physical source name.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MergeConfig {
     pub name: String,
@@ -212,7 +141,7 @@ impl ServerConfig {
         "127.0.0.1".to_string()
     }
     fn default_ws_port() -> u16 {
-        8080
+        18080
     }
     fn default_app_name() -> String {
         "embed-log".to_string()
@@ -293,7 +222,7 @@ impl AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            version: 1,
+            version: 2,
             sources: Vec::new(),
             tabs: Vec::new(),
             merges: Vec::new(),

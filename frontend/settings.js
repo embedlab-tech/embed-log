@@ -15,7 +15,11 @@
     if (wsStatus) {
         wsStatus.before(gearBtn);
     } else {
-        toolbar?.appendChild(gearBtn);
+        // Static exports have no WS badge. Keep Settings inside the existing
+        // right toolbar group; appending directly to #toolbar creates a fourth
+        // grid item and makes CSS grid place the button on a second row.
+        const rightGroup = toolbar?.querySelector(".toolbar-right");
+        (rightGroup || toolbar)?.appendChild(gearBtn);
     }
 
     // ---- Settings panel (inserted after toolbar) ----

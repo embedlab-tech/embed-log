@@ -1,44 +1,31 @@
-//! `embed-log run`, `embed-log demo`, and `embed-log onboard` — the commands
-//! that start the log server.
+//! `embed-log run` — starts the log server from YAML or explicit sources.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
 use embed_log_core::config::{
-    load_config, resolve_logs_root, AppConfig, PaneConfig, SourceConfig, TabConfig,
+    config_to_v2_yaml, load_config, resolve_logs_root, AppConfig, PaneConfig, SourceConfig,
+    TabConfig,
 };
-use embed_log_core::demo::{prepare_demo_file_sources, spawn_demo_traffic};
-use embed_log_core::onboarding as ob;
 use embed_log_core::runtime::LogServer;
 
 use crate::config::resolve_config_path;
-use crate::demo_config::DEMO_CONFIG;
-use crate::util::{open_url_in_default_browser, schedule_browser_open};
+use crate::util::schedule_browser_open;
 
-/// `embed-log run` (and the default no-subcommand path): resolve config (running
-/// onboarding first if none exists), start the server, optionally open a
-/// browser or launch the in-process TUI.
+/// `embed-log run` (and the default no-subcommand path): resolve config, start
+/// the server, and optionally open a browser or launch the in-process TUI.
 pub(crate) async fn cmd_run(
     config_path: Option<&PathBuf>,
     frontend_dir: &Path,
     open_browser: bool,
     tui: bool,
+    daemon_mode: bool,
     overrides: &RunOverrides,
 ) -> Result<()> {
     let config_path = resolve_config_path(config_path);
 
-    // First-run onboarding: if no config exists yet, run the browser setup
-    // (same page the Tauri app uses), then proceed to start the real server.
-    // The onboarding page's post-save redirect lands on the live server, so we
-    // suppress the normal browser-open in that case to avoid a second tab.
-    let onboarded = if !config_path.exists() {
-        run_onboarding(&config_path, open_browser)?;
-        true
-    } else {
-        false
-    };
-
+    ensure_config_exists(&config_path)?;
     let mut config = load_config(&config_path).map_err(|e| anyhow::anyhow!("{e}"))?;
     apply_server_overrides(&mut config, overrides);
     let frontend_dir = resolve_dir(frontend_dir)?;
@@ -74,13 +61,15 @@ pub(crate) async fn cmd_run(
         config.server.host, config.server.ws_port
     );
     // In TUI mode, suppress the browser (the terminal is the UI).
-    if open_browser && !onboarded && !tui {
+    if open_browser && !tui {
         schedule_browser_open(config.server.host.clone(), config.server.ws_port);
     }
 
     let ws_port = config.server.ws_port;
     let app_name = config.server.app_name.clone();
-    let server = LogServer::new(config, frontend_dir, logs_root).with_config_path(config_path);
+    let server = LogServer::new(config, frontend_dir, logs_root)
+        .with_config_path(config_path)
+        .with_shutdown_export(!daemon_mode);
     if tui {
         run_server_with_tui(server, ws_port, &app_name).await
     } else {
@@ -88,10 +77,8 @@ pub(crate) async fn cmd_run(
     }
 }
 
-/// `embed-log demo` — write the embedded demo config if none exists, start
-/// synthetic traffic, then run the server.
 /// Start a temporary configuration assembled from explicit command-line sources.
-/// Unlike normal `run`, this never invokes onboarding or reads a default config.
+/// Unlike normal `run`, this does not read a default config.
 ///
 /// The arguments mirror the independent quick-run CLI flags.
 #[allow(clippy::too_many_arguments)]
@@ -115,8 +102,7 @@ pub(crate) async fn cmd_run_quick(
                 path.display()
             );
         }
-        let yaml =
-            serde_yaml::to_string(&config).context("serialize generated quick-run config")?;
+        let yaml = config_to_v2_yaml(&config).context("serialize generated quick-run config")?;
         std::fs::write(path, yaml)
             .with_context(|| format!("write generated config {}", path.display()))?;
         println!("  saved config: {}", path.display());
@@ -171,15 +157,6 @@ fn quick_run_config(
                 parser: Default::default(),
                 baudrate: (kind == "UART").then_some(baudrate),
                 label: Some(label),
-                interface: None,
-                bpf_filter: String::new(),
-                network_backend: None,
-                mock_interval: None,
-                udp: None,
-                snaplen: None,
-                promisc: None,
-                pcap: None,
-                payload: None,
             });
         }
     }
@@ -249,53 +226,6 @@ fn print_run_summary(mode: &str, config: &AppConfig, frontend_dir: &Path, logs_r
     );
 }
 
-pub(crate) async fn cmd_demo(
-    config_path: Option<&PathBuf>,
-    frontend_dir: &Path,
-    open_browser: bool,
-    tui: bool,
-) -> Result<()> {
-    let config_path = resolve_config_path(config_path);
-    if !config_path.exists() {
-        std::fs::write(&config_path, DEMO_CONFIG)
-            .with_context(|| format!("write demo config {}", config_path.display()))?;
-        println!("wrote demo config: {}", config_path.display());
-    }
-    let config = load_config(&config_path).map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    let frontend_dir = resolve_dir(frontend_dir)?;
-    let logs_root = resolve_logs_root(&config_path, &config.logs.dir);
-
-    println!("embed-log v{} (demo)", env!("CARGO_PKG_VERSION"));
-    println!("  config:   {}", config_path.display());
-    println!(
-        "  server:   http://{}:{}",
-        config.server.host, config.server.ws_port
-    );
-    println!(
-        "  tabs:     {}",
-        config
-            .tabs
-            .iter()
-            .map(|t| t.label.as_str())
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
-    if open_browser && !tui {
-        schedule_browser_open(config.server.host.clone(), config.server.ws_port);
-    }
-    prepare_demo_file_sources(&config)?;
-    spawn_demo_traffic(&config);
-    let ws_port = config.server.ws_port;
-    let app_name = config.server.app_name.clone();
-    let server = LogServer::new(config, frontend_dir, logs_root).with_config_path(config_path);
-    if tui {
-        run_server_with_tui(server, ws_port, &app_name).await
-    } else {
-        server.run().await
-    }
-}
-
 /// Spawn the log server as a background task, then run the TUI in the
 /// foreground. When the TUI quits, abort the server task and return.
 ///
@@ -327,53 +257,14 @@ pub(crate) async fn run_server_with_tui(
     tui_result
 }
 
-/// Run the interactive browser onboarding, blocking until the user saves a
-/// config. Returns `Ok(())` once the config has been written to `config_path`.
-///
-/// Uses the exact same `OnboardingServer` + `frontend/onboarding.js` page as
-/// the Tauri desktop app — no separate UI.
-pub(crate) fn run_onboarding(config_path: &Path, open_browser: bool) -> Result<()> {
-    println!("embed-log v{} — first-run setup", env!("CARGO_PKG_VERSION"));
-    println!("  no config found at {}", config_path.display());
-
-    let server = ob::OnboardingServer::start(config_path.to_path_buf(), ob::default_save_handler())
-        .context("start onboarding server")?;
-    println!("  setup page:  {}", server.base_url);
-    println!("  waiting for you to finish setup…");
-
-    if open_browser {
-        // The setup server is already bound, so we can open immediately.
-        if let Err(error) = open_url_in_default_browser(&server.base_url) {
-            tracing::warn!("failed to open browser for onboarding: {error}");
-        }
+fn ensure_config_exists(config_path: &Path) -> Result<()> {
+    if config_path.exists() {
+        return Ok(());
     }
-
-    let result = server
-        .wait_for_save()
-        .map_err(|e| anyhow::anyhow!("onboarding did not complete: {e}"))?;
-    println!("  config saved to {}", result.config_path);
-    println!("  launching log server on port {}…", result.ws_port);
-    println!();
-    Ok(())
-}
-
-/// `embed-log onboard` — explicitly run onboarding, then start the log server
-/// from the resulting config.
-pub(crate) async fn cmd_onboard(
-    config_path: Option<&PathBuf>,
-    frontend_dir: &Path,
-    open_browser: bool,
-) -> Result<()> {
-    let config_path = resolve_config_path(config_path);
-    run_onboarding(&config_path, open_browser)?;
-    cmd_run(
-        Some(&config_path),
-        frontend_dir,
-        false,
-        false,
-        &RunOverrides::default(),
+    anyhow::bail!(
+        "config file {} does not exist; pass UART/file sources directly or copy a file from config-samples/ and use --config",
+        config_path.display()
     )
-    .await
 }
 
 /// Resolve a directory path relative to the cwd (absolute paths pass through).
@@ -419,6 +310,15 @@ mod tests {
             PathBuf::from("/srv/frontend")
         };
         assert_eq!(resolve_dir(&abs).unwrap(), abs);
+    }
+
+    #[test]
+    fn missing_config_reports_non_interactive_recovery_options() {
+        let path = PathBuf::from("definitely-missing-embed-log-test.yml");
+        let error = ensure_config_exists(&path).unwrap_err().to_string();
+        assert!(error.contains("does not exist"));
+        assert!(error.contains("pass UART/file sources directly"));
+        assert!(error.contains("config-samples/"));
     }
 
     #[test]
