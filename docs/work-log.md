@@ -2243,3 +2243,18 @@ Future entries must include this per-file added/removed-line summary.
 | `.github/workflows/ci.yml` | 0 | 3 | Removes the CI invocation of the deleted event-regression script. |
 | `tests-ui/regression-categories.mjs` | 1 | 1 | Removes a deleted CoAP spec and places copy-format coverage in interaction tests. |
 | `tests-ui/regression-tests/relative-time-replay.spec.js` | 13 | 4 | Tests the current static replay timestamp cycle and no-absolute-origin behavior. |
+
+## 2026-08-11 07:05:32 UTC / 2026-08-11 09:05:32 CEST (Warsaw)
+
+- **Commit:** `54945f0` — `Condense README to essential workflows`
+- **Task:** Replace the expansive root README with a concise installation, run, agent-use, canonical-skill, and documentation entry point.
+- **Started:** unavailable; the `/worklog-start` extension command was not available in this API session.
+- **Completed:** 2026-08-11 07:05:32 UTC / 2026-08-11 09:05:32 CEST (+0200) (Warsaw)
+- **Validation:** `cargo test --locked --package embed-log-cli --test skill_cli` — 2 passed; Markdown documentation-link existence check — passed; `git diff --check` — passed.
+- **Model-token delta:** unavailable; the `/worklog-start` extension command was not available in this API session.
+
+### File changes (`54945f0`)
+
+| File | Added | Removed | Summary |
+| --- | ---: | ---: | --- |
+| `README.md` | 25 | 195 | Keeps only install, direct/configured run, agent and skill workflow, Claude Code plugin, and reference links. |
