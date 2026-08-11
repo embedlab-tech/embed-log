@@ -1,243 +1,73 @@
 # embed-log
 
-`embed-log` collects UART, UDP, and file-tail logs, stores them as session artifacts, and serves browser and terminal interfaces for live viewing and static HTML exports.
-
-The current workspace contains:
-
-- `embed-log` CLI: run the log server, inspect and export sessions, and launch browser or TUI mode.
-- `embed-log-core`: shared config, sources, parsers, runtime, HTTP/WebSocket server, and session export logic.
-- `embed-log-tui`: terminal client used by integrated and standalone TUI modes.
-- `frontend/`: browser UI assets embedded into release binaries.
+Capture UART, UDP, and file-tail logs in a browser or terminal UI. Sessions are saved locally and can be exported as self-contained HTML.
 
 ## Install
 
-macOS/Linux latest release:
+macOS/Linux:
 
 ```bash
 curl -fsSL https://github.com/embedlab-tech/embed-log/releases/latest/download/install.sh | sh
 ```
 
-Windows PowerShell latest release:
+Windows PowerShell:
 
 ```powershell
 irm https://github.com/embedlab-tech/embed-log/releases/latest/download/install.ps1 | iex
 ```
 
-Release binaries include embedded frontend assets, so users do **not** need Rust, Cargo, or a separate `frontend/` directory.
+Release binaries include the web UI; Rust and a separate frontend checkout are not required.
 
-See [docs/releasing.md](docs/releasing.md) for release and installer details.
+## Run
 
-## Fast start
-
-Connect one UART without creating YAML:
+Open one serial device:
 
 ```bash
-embed-log run /dev/ttyUSB0
+embed-log run /dev/ttyUSB0 --baud 115200
 ```
 
-Multiple UARTs, a watched file, or the terminal UI:
+Run a saved configuration:
 
 ```bash
-embed-log run -s /dev/ttyUSB0 -s /dev/ttyUSB1 -f ./device.log --baud 115200
-embed-log run /dev/ttyUSB0 --tui
+embed-log doctor --config embed-log.yml
+embed-log run --config embed-log.yml
 ```
 
-This creates an in-memory configuration, opens the web UI (or TUI), and saves a normal session under `./logs/`. Each source gets its own tab. Persist the generated configuration only when you need a custom layout or parser:
+Use `--tui` for the terminal UI. Sessions are written under `./logs/` by default.
+
+## Agent use
+
+The binary contains the version-matched agent skill:
 
 ```bash
-embed-log run /dev/ttyUSB0 --save-config embed-log.yml
+embed-log skill
 ```
 
-See the [quick-start guide](docs/quickstart.md) for all fast-run options, session locations, and when to switch to YAML. Run `embed-log doctor` if a serial device cannot be opened.
+It directs agents to use the CLI only: discover sources with `doctor`, inspect bounded session evidence with `summary`, `read`, `search`, and `around`, then act through the daemon. Do not open configured UARTs or read session files directly.
 
-## Background daemon
-
-Agents and wrapper tools can discover the installed binary's commands, arguments, limits, targeting rules, outputs, and currently stable errors without parsing `--help`:
+For a persistent capture, start a named daemon and read only new records by cursor:
 
 ```bash
-embed-log schema
-embed-log schema sessions.read --json  # --json is optional; schema defaults to compact JSON
-embed-log schema tx --pretty
-embed-log schema errors
+embed-log run --daemon --instance bench-a --config embed-log.yml
+embed-log sessions summary latest --dir ./logs
+embed-log sessions read latest --dir ./logs --after "$CURSOR" --limit 100
+embed-log tx --instance bench-a --source DUT_UART --line "status"
 ```
 
-The compact JSON index is runtime-independent and cacheable by `schema_version` plus `embed_log_version`; query one command for details instead of loading the whole CLI contract. Failed invocations requesting JSON return one `{ok:false,error:{code,message,details}}` document on stdout and a nonzero exit status.
+Evidence is concise text (`+time seq=N src=SOURCE#INDEX | message`). Set `CURSOR` to the final returned sequence number and use `sessions around` for context. Run `embed-log schema` when an agent needs the machine-readable CLI contract.
 
-Keep configured sources, including UART ownership, alive between experiments:
+The same skill is available as a [Claude Code](https://claude.com/claude-code) plugin:
 
-```bash
-embed-log run --daemon --instance bench-a --config embed-log.yml --json
-embed-log status --instance bench-a --json
-embed-log sessions new --instance bench-a --title reconnect-attempt-3 --json
-embed-log tx --instance bench-a --source DUT_UART --line "$DEVICE_COMMAND" \
-  --expect "$EXPECTED_REPLY" --timeout 30s --context 20 --json
-watch_id=$(embed-log watch add --instance bench-a --source DUT_UART \
-  --contains "session established" --ttl 30s --json | jq -r '.watch.id')
-embed-log watch wait "$watch_id" --instance bench-a --timeout 30s --json
-embed-log watch remove "$watch_id" --instance bench-a --json
-embed-log export --instance bench-a --json
-embed-log stop --instance bench-a --json
-```
-
-Each titled session rotation keeps source tasks and UART ownership alive while the browser and TUI switch to the new experiment. `tx --expect` subscribes before writing, then returns only the matching RX entry and bounded live context. Temporary server-side watches retain a match even when it occurs before `watch wait` starts. Every new-session record also has a global sequence cursor, enabling bounded retrieval such as:
-
-```bash
-embed-log sessions read latest --after 100 --limit 50
-embed-log sessions around latest --sequence 119 --before 5 --after 10
-```
-
-The browser full-session Export button and `embed-log export` both atomically publish the same Rust-generated `session.html`; the browser downloads those exact published bytes. Recorded `sessions export --format html` uses that renderer from `manifest.json`, markers, and canonical `combined.jsonl`.
-
-Session readers use concise text by default (`+0.123 seq=1234 src=UART#42 | message`) or one compact structured envelope with `--json`.
-
-Concise reader output is `+12.453 seq=719 src=DUT_UART#428 | message`; use `--json` only when a script needs tuple fields or cursor metadata. Daemon startup requires explicit `--config` and `--instance`; its endpoint comes from `server.listen` unless `--host` or `--port` overrides it. It never selects another port. Repeating the same request reuses the verified running instance. Mutating commands require `--instance`, `EMBED_LOG_INSTANCE`, or an explicit URL. Daemon shutdown skips automatic HTML export by default; foreground modes retain it.
-
-## Claude Code plugin
-
-The release binary embeds the canonical agent skill for zero-setup, version-matched discovery:
-
-```bash
-embed-log skill                  # canonical investigation workflow
-embed-log skill --json           # version metadata plus Markdown content
-```
-
-The same canonical investigation skill is bundled as a [Claude Code](https://claude.com/claude-code) plugin. It uses bounded session readers for both active capture and saved-session analysis while preserving explicit daemon targeting and UART ownership. Install it once, in any Claude Code session:
-
-```
+```text
 /plugin marketplace add embedlab-tech/embed-log
 /plugin install embed-log@embed-log-tools
 ```
 
-It's then available in every project on your machine, not just this repo. Sources: `skills/embed-log/SKILL.md` and `.claude-plugin/`.
+## More documentation
 
-## Build from source
-
-```bash
-just build
-just run no-browser embed-log.yml
-```
-
-Then open:
-
-```text
-http://127.0.0.1:18080/
-```
-
-Copy a relevant file from `config-samples/`, then diagnose and run it:
-
-```bash
-cargo run --package embed-log-cli --bin embed-log -- doctor --config embed-log.yml
-cargo run --package embed-log-cli --bin embed-log -- run --config embed-log.yml
-```
-
-## Control API
-
-Embed-log exposes a single structured JSON WebSocket endpoint for SDK and automation:
-
-```text
-ws://127.0.0.1:18080/api/v1/control
-```
-
-### Commands
-
-| Command | Purpose |
-|---------|---------|
-| `hello` | Get sources, labels, types, writability, session id |
-| `subscribe` | Subscribe to log entries by source name |
-| `unsubscribe` | Remove source subscriptions |
-| `log.inject` | Inject a log entry into the source pipeline and UI |
-| `tx.write` | Write bytes to a writable source (UART) |
-| `marker.create` | Create a marker on a log line |
-
-### `subscribe` / `log.entry`
-
-Subscribe to sources and receive structured log entries replacing the legacy per-source forward ports:
-
-```json
-{
-  "type": "log.entry",
-  "source_id": "DUT_UART",
-  "origin": "SERIAL",
-  "message": "boot complete",
-  "timestamp_iso": "2026-06-14T12:00:00.123Z",
-  "line_idx": 42,
-  "color": null,
-  "is_tx": false
-}
-```
-
-Source-name routing replaces the old `InjectClient`/`ForwardClient` per-port model.
-
-## Python SDK
-
-A synchronous Python SDK is available at `sdk/python/`:
-
-```python
-from embed_log_sdk import EmbedLogClient
-
-with EmbedLogClient.from_config("embed-log.yml", origin="pytest") as client:
-    client.inject_log("DUT_UART", "test: assertion passed", color="cyan")
-    client.tx_write("DUT_UART", "version\r\n")
-    client.subscribe(["DUT_UART"])
-    for entry in client.entries(timeout=5.0):
-        print(entry.source_id, entry.message)
-```
-
-## Companion UART command files
-
-Place a `<config-stem>.commands.yml` alongside your config to provide Tab-cycling command suggestions:
-
-```yaml
-sources:
-  DUT_UART:
-    - "help\r\n"
-    - "version\r\n"
-    - "status\r\n"
-```
-
-The fallback `embed-log.commands.yml` is checked in the config directory and current working directory.
-
-## Terminal UI
-
-Run the server and terminal UI together:
-
-```bash
-embed-log run --config embed-log.yml --tui
-```
-
-Or connect the standalone TUI to an already-running server:
-
-```bash
-embed-log-tui connect ws://127.0.0.1:18080/ws
-```
-
-See [docs/tui.md](docs/tui.md) for keybindings and limitations.
-
-## Legacy inject/forward ports removed
-
-The old per-source TCP `inject_port`, `forward_port`, and `forward_ports` config fields have been removed. Use the single control WebSocket endpoint (`/api/v1/control`) instead. All automation (log injection, subscription/forwarding, TX, markers) goes through one connection, routed by configured source name.
-
-## Documentation
-
-- [Getting up to speed](docs/getting-up-to-speed.md)
 - [Quick start](docs/quickstart.md)
-- [Architecture](docs/architecture.md)
 - [Configuration](docs/configuration.md)
 - [CLI reference](docs/cli.md)
-- [Development](docs/development.md)
 - [Terminal UI](docs/tui.md)
+- [Development](docs/development.md)
 - [Releasing](docs/releasing.md)
-
-## Repository layout
-
-```text
-crates/embed-log-core/     Shared runtime, config, sources, parsers, HTTP/WS, sessions
-crates/embed-log-cli/      CLI binary named `embed-log`
-crates/embed-log-tui/      Terminal UI client and integrated TUI support
-frontend/                  Live/static viewer UI, embedded into release binaries
-sdk/python/                Python SDK, watcher, examples
-config-samples/            Example YAML configs (no legacy fields)
-scripts/                   Release packaging helpers
-docs/                      Current docs
-justfile                   Common development/release commands
-```
