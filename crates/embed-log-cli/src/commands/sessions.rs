@@ -87,6 +87,27 @@ pub(crate) enum SessionsCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Import an offline, absolutely timestamped log file into a saved session.
+    Import {
+        session_id: String,
+        /// External log file to copy into the session.
+        #[arg(long)]
+        file: PathBuf,
+        /// New source id. Defaults to a slug derived from the file name.
+        #[arg(long)]
+        source: Option<String>,
+        /// Label of the new tab.
+        #[arg(long)]
+        tab: String,
+        /// Display label for the imported pane. Defaults to --source.
+        #[arg(long)]
+        label: Option<String>,
+        #[command(flatten)]
+        log_dir: LogDirArgs,
+        /// Machine-readable JSON output.
+        #[arg(long)]
+        json: bool,
+    },
     /// List sessions under a log directory.
     List {
         #[command(flatten)]
@@ -266,6 +287,7 @@ impl SessionsCommand {
     pub(crate) fn machine_output(&self) -> bool {
         match self {
             Self::New { json, .. }
+            | Self::Import { json, .. }
             | Self::List { json, .. }
             | Self::Info { json, .. }
             | Self::Summary { json, .. } => *json,
@@ -323,6 +345,23 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             url,
             json,
         } => create_titled_session(instance.as_deref(), url.as_deref(), &title, json),
+        SessionsCommand::Import {
+            session_id,
+            file,
+            source,
+            tab,
+            label,
+            log_dir,
+            json,
+        } => crate::commands::session_import::import_session(
+            &session_id,
+            &log_dir,
+            &file,
+            source.as_deref(),
+            &tab,
+            label.as_deref(),
+            json,
+        ),
         SessionsCommand::List {
             log_dir,
             json,

@@ -4,6 +4,7 @@
 // only fills the toolbar when it starts empty (static/exported mode).
 
 const ACTIONS = [
+    { id: 'btn-clear',         label: 'Clear',        title: 'Clear the current view without deleting the saved session',       cap: 'clearView' },
     { id: 'btn-export',        label: 'Export HTML',  title: 'Export current session as a self-contained HTML file',          cap: 'exportHtml' },
     { id: 'btn-unwrap',        label: 'Unwrap',       title: 'Unwrap multi-pane tabs into single-pane tabs',                  cap: 'unwrap' },
     { id: 'btn-timestamp-mode', label: 'Absolute',    title: 'Switch timestamps' },

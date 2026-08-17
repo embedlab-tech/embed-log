@@ -5,6 +5,7 @@ import {
 import { parseAnsi } from './ansi.js';
 import { analyzeLinePlugins, getLinePluginTooltip, getConfiguredPanePlugins, getPanePluginSettings, setPanePluginSetting } from './pluginRuntime.js';
 import { isEditableTarget, isComposingEvent } from './keyboard.js';
+import { findNearestCandidate, resolveSyncAnchor } from './timeSync.js';
 
 // ---------------------------------------------------------------------------
 // Line rendering
@@ -53,7 +54,7 @@ export function buildStoredLine(paneId, ts, rawText, isTx, meta = null) {
         : (Number.isFinite(meta) ? { numTs: meta } : {});
     const line = {
         paneId,
-        ...buildTimestampInfo(ts, lineMeta),
+        ...buildTimestampInfo(ts, { ...lineMeta, rawText }),
         serverLineIdx: Number.isFinite(lineMeta.lineIdx) ? lineMeta.lineIdx : null,
         sequence: Number.isFinite(lineMeta.sequence) ? lineMeta.sequence : null,
         sessionId: lineMeta.sessionId || null,
@@ -416,6 +417,48 @@ export function getLine(paneId, idx) {
     const line = buildStoredLine(paneId, ts, rawText, isTx, meta);
     lines[idx] = line;
     return line;
+}
+
+function _getCandidateNum(entry, paneId, idx, domain = "system") {
+    const line = _isRawTuple(entry) ? getLine(paneId, idx) : entry;
+    return line?.timeCandidates?.find(item => item.domain === domain)?.num;
+}
+
+function _findNearestCandidate(paneId, target, domain = "system") {
+    const entries = state.rawLines[paneId] || [];
+    if (domain === "system" && entries.length) {
+        let lo = 0, hi = entries.length - 1;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (_getNumTs(entries[mid], paneId, mid) < target) lo = mid + 1;
+            else hi = mid;
+        }
+        const candidates = [lo];
+        if (lo > 0) candidates.push(lo - 1);
+        const idx = candidates.reduce((best, candidate) =>
+            Math.abs(_getNumTs(entries[candidate], paneId, candidate) - target)
+                < Math.abs(_getNumTs(entries[best], paneId, best) - target)
+                ? candidate : best
+        );
+        return { idx, num: _getNumTs(entries[idx], paneId, idx), distance: Math.abs(_getNumTs(entries[idx], paneId, idx) - target) };
+    }
+    return findNearestCandidate(
+        entries.map((entry, idx) => _isRawTuple(entry) ? getLine(paneId, idx) : entry),
+        target,
+        domain,
+    );
+}
+
+function _resolveSyncAnchor(paneId, line) {
+    if (line?.timeCandidates?.some(item => item.domain === "system")) {
+        return resolveSyncAnchor(line, []);
+    }
+    const otherPaneLines = PANES
+        .filter(candidatePane => candidatePane !== paneId)
+        .map(candidatePane => (state.rawLines[candidatePane] || []).map((entry, idx) =>
+            _isRawTuple(entry) ? getLine(candidatePane, idx) : entry
+        ));
+    return resolveSyncAnchor(line, otherPaneLines);
 }
 
 function _getNumTs(entry, paneId = null, idx = -1) {
@@ -1011,7 +1054,7 @@ export function _linesSetupPane(id) {
         const line = getLine(id, idx);
         if (!line) return;
         hidePluginOverlays();
-        onLineClick(id, line.numTs, lineDiv);
+        onLineClick(id, line, lineDiv);
     });
     logEl.addEventListener("mousedown", e => { if (e.button === 1) e.preventDefault(); });
     logEl.addEventListener("auxclick", e => {
@@ -1021,7 +1064,7 @@ export function _linesSetupPane(id) {
         const idx = parseInt(lineDiv.dataset.idx, 10);
         const line = getLine(id, idx);
         if (!line) return;
-        onMiddleClick(id, line.numTs, lineDiv);
+        onMiddleClick(id, line, lineDiv);
     });
     logEl.addEventListener("mousemove", e => {
         const lineDiv = e.target.closest(".log-line");
@@ -1210,10 +1253,21 @@ export function highlightLine(paneId, div) {
 
 // Scroll a pane to the line closest to numTs — used when switching tabs.
 // Centers the matched line at ~1/3 from the top.
-export function scrollPaneToTs(paneId, numTs) {
+export function scrollPaneToTs(paneId, numTs, domain = "system", fallbackDeviceTs = null) {
     if (numTs === null) return;
     const lines = state.rawLines[paneId];
     if (!lines.length) return;
+    if (domain === "system" && fallbackDeviceTs !== null
+        && !lines.some((entry, idx) => Number.isFinite(_getCandidateNum(entry, paneId, idx, "system")))) {
+        const match = _findNearestCandidate(paneId, fallbackDeviceTs, "device");
+        if (match) _scrollPaneToRawIndex(paneId, match.idx);
+        return;
+    }
+    if (domain !== "system") {
+        const match = _findNearestCandidate(paneId, numTs, domain);
+        if (match) _scrollPaneToRawIndex(paneId, match.idx);
+        return;
+    }
 
     let lo = 0, hi = lines.length - 1;
     while (lo < hi) {
@@ -1267,12 +1321,18 @@ export function scrollPaneToLineIdx(paneId, lineIdx, fallbackNumTs = null) {
 
 // Middle-click: always clear the filter for this pane, scroll to the line
 // in full context, and sync — the deliberate "zoom out to this moment" gesture.
-export function onMiddleClick(paneId, numTs, div) {
+export function onMiddleClick(paneId, lineOrNum, div) {
     const logEl = document.getElementById("log-" + paneId);
     if (!logEl) return;
 
-    let activeDiv = div;
     const rawIdx = parseInt(div?.dataset?.idx, 10);
+    const line = lineOrNum && typeof lineOrNum === "object"
+        ? lineOrNum
+        : getLine(paneId, rawIdx);
+    const anchor = _resolveSyncAnchor(paneId, line);
+    if (!anchor) return;
+
+    let activeDiv = div;
 
     if (state.filters[paneId]) {
         const input = document.querySelector(`.filter-input[data-pane="${paneId}"]`);
@@ -1293,22 +1353,30 @@ export function onMiddleClick(paneId, numTs, div) {
     state.atBottom[paneId] = false;
     updateJumpBtn(paneId);
 
-    state.syncTs = numTs;
+    state.syncTs = anchor.numTs;
+    state.syncDomain = anchor.domain;
+    state.syncDeviceTs = anchor.deviceNum;
     state.syncTabSwitch = true;
     highlightLine(paneId, activeDiv);
-    syncPanes(paneId, numTs, activeDiv);
+    syncPanes(paneId, anchor, activeDiv, line);
 }
 
 // Click handler:
 //   • filter active  → clear filter, re-render, scroll source to line in context
 //   • no filter      → source pane stays exactly where user was (no scroll)
 //   • always         → store syncTs, highlight clicked line, sync other panes in active tab
-export function onLineClick(paneId, numTs, div) {
+export function onLineClick(paneId, lineOrNum, div) {
     const logEl = document.getElementById("log-" + paneId);
     if (!logEl) return;
 
-    let activeDiv = div;
     const rawIdx = parseInt(div?.dataset?.idx, 10);
+    const line = lineOrNum && typeof lineOrNum === "object"
+        ? lineOrNum
+        : getLine(paneId, rawIdx);
+    const anchor = _resolveSyncAnchor(paneId, line);
+    if (!anchor) return;
+
+    let activeDiv = div;
 
     if (state.filters[paneId]) {
         const filterInput = document.querySelector(`.filter-input[data-pane="${paneId}"]`);
@@ -1329,20 +1397,21 @@ export function onLineClick(paneId, numTs, div) {
     state.atBottom[paneId] = false;
     updateJumpBtn(paneId);
 
-    state.syncTs = numTs;
+    state.syncTs = anchor.numTs;
+    state.syncDomain = anchor.domain;
+    state.syncDeviceTs = anchor.deviceNum;
     state.syncTabSwitch = true;
     highlightLine(paneId, activeDiv);
-    syncPanes(paneId, numTs, activeDiv);
+    syncPanes(paneId, anchor, activeDiv, line);
 }
 
-// Sync all OTHER panes in the active tab to numTs, mirroring the clicked
-// line's Y position within the viewport.
-export function syncPanes(fromId, numTs, clickedDiv) {
+// Sync all OTHER panes in the active tab to the resolved anchor, mirroring
+// the clicked line's Y position within the viewport.
+export function syncPanes(fromId, anchor, clickedDiv, clickedLine = null) {
     if (state.unwrap) return;
 
     const activePanes = TABS[state.activeTab]?.panes || [];
     if (activePanes.length < 2) return;
-
     const fromLogEl     = document.getElementById("log-" + fromId);
     const clickedRelTop = clickedDiv.offsetTop - fromLogEl.scrollTop;
 
@@ -1351,16 +1420,15 @@ export function syncPanes(fromId, numTs, clickedDiv) {
         const lines = state.rawLines[toId];
         if (!lines.length) return;
 
-        // Binary search for closest timestamp
-        let lo = 0, hi = lines.length - 1;
-        while (lo < hi) {
-            const mid = (lo + hi) >> 1;
-            if (_getNumTs(lines[mid], toId, mid) < numTs) lo = mid + 1;
-            else hi = mid;
+        let target = _findNearestCandidate(toId, anchor.numTs, anchor.domain);
+        // A clicked line can carry both clocks. If a target pane has no system
+        // timestamp for this moment, use the clicked device timestamp locally.
+        if (!target && anchor.domain === "system" && clickedLine) {
+            const device = clickedLine.timeCandidates?.find(item => item.domain === "device");
+            if (device) target = _findNearestCandidate(toId, device.num, "device");
         }
-        if (lo > 0 && Math.abs(_getNumTs(lines[lo - 1], toId, lo - 1) - numTs) < Math.abs(_getNumTs(lines[lo], toId, lo) - numTs)) {
-            lo--;
-        }
+        if (!target) return;
+        const lo = target.idx;
 
         _renderVirtualWindow(toId, { targetIdx: lo });
         const targetDiv = getRenderedLineElement(toId, lo);

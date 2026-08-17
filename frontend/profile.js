@@ -12,6 +12,7 @@ export const STATIC_PROFILE = {
     kind: "static",
     capabilities: {
         downloadRaw: true,
+        clearView: false,
         exportHtml: false,
         fontSize: true,
         paneSwap: true,
@@ -30,6 +31,7 @@ const LIVE_PROFILE = {
     kind: "live",
     capabilities: {
         downloadRaw: true,
+        clearView: true,
         exportHtml: true,
         fontSize: true,
         paneSwap: true,

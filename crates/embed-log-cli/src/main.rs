@@ -630,7 +630,6 @@ mod tests {
             ["embed-log", "merge"].as_slice(),
             ["embed-log", "parse"].as_slice(),
             ["embed-log", "validate"].as_slice(),
-            ["embed-log", "sessions", "import"].as_slice(),
             ["embed-log", "sessions", "bundle"].as_slice(),
             ["embed-log", "sessions", "prune"].as_slice(),
             ["embed-log", "sessions", "marker"].as_slice(),

@@ -205,6 +205,10 @@ impl SessionExporter {
                             .and_then(|value| value.as_str())
                             .map(str::to_string),
                         rel_num: number("relNum"),
+                        time_domain: record
+                            .get("timestamp_domain")
+                            .and_then(|value| value.as_str())
+                            .map(str::to_string),
                     });
             }
             log_data = combined_data;
@@ -335,6 +339,9 @@ impl SessionExporter {
                             if let Some(rel_num) = e.rel_num {
                                 meta["relNum"] = json!(rel_num);
                             }
+                            if let Some(time_domain) = &e.time_domain {
+                                meta["timeDomain"] = json!(time_domain);
+                            }
                             if let Some(source_id) = &e.source_id {
                                 meta["sourceId"] = json!(source_id);
                             }
@@ -396,6 +403,7 @@ impl SessionExporter {
             "settings.js",
             "fontsize.js",
             "ansi.js",
+            "timeSync.js",
             "lines.js",
             "tabs.js",
             "tabcreate.js",

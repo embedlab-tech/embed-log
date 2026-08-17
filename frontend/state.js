@@ -93,7 +93,9 @@ export const state = {
     fontSize:    14,
     activeTab:   0,
     activePaneTab: 0,
-    syncTs:      null,   // last-clicked numeric timestamp
+    syncTs:      null,   // resolved synchronization anchor
+    syncDomain:  "system", // clock domain used by syncTs: system or device
+    syncDeviceTs: null, // optional device anchor retained after device→system resolution
     syncTabSwitch: false, // true after explicit line sync; next tab switches follow syncTs
     filters:     {},
     wrap:        {},
@@ -178,10 +180,17 @@ export function applyTimestampModeToLine(line) {
     }
 }
 
+const EMBEDDED_ISO_TIMESTAMP_RE = /(?:^|[^0-9])((?:19|20)\d{2}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:?\d{2}))(?![0-9])/g;
+
+function _timestampCandidate(domain, num, ts = null) {
+    return Number.isFinite(num) ? { domain, num, ts } : null;
+}
+
 export function buildTimestampInfo(ts, meta = {}) {
     const info = {
         ts: ts || "",
         numTs: Number.isFinite(meta.numTs) ? meta.numTs : null,
+        timeCandidates: [],
         absTs: typeof meta.absTs === "string" && meta.absTs ? meta.absTs : null,
         absNum: Number.isFinite(meta.absNum) ? meta.absNum : null,
         relTs: typeof meta.relTs === "string" && meta.relTs ? meta.relTs : null,
@@ -206,18 +215,39 @@ export function buildTimestampInfo(ts, meta = {}) {
         info.absTs = ts;
     }
 
-    if (!info.absTs && Number.isFinite(info.relNum) && Number.isFinite(state.firstLogAtMs)) {
+    const primaryDomain = meta.timeDomain === "device" ? "device" : "system";
+    if (primaryDomain !== "device" && !info.absTs && Number.isFinite(info.relNum) && Number.isFinite(state.firstLogAtMs)) {
         info.absNum = state.firstLogAtMs + info.relNum;
         info.absTs = _formatAbsoluteTimestampFromMs(info.absNum);
     }
 
-    if (state.useClientRelativeBase && Number.isFinite(info.absNum)) {
+
+    const primaryNum = primaryDomain === "system"
+        ? (state.timestampMode === "relative" && Number.isFinite(info.relNum)
+            ? info.relNum
+            : (Number.isFinite(info.numTs) ? info.numTs : (Number.isFinite(info.absNum) ? info.absNum : info.relNum)))
+        : info.absNum;
+    const primaryCandidate = _timestampCandidate(primaryDomain, primaryNum, info.absTs || info.relTs);
+    if (primaryCandidate) info.timeCandidates.push(primaryCandidate);
+    if (typeof meta.rawText === "string") {
+        EMBEDDED_ISO_TIMESTAMP_RE.lastIndex = 0;
+        let match;
+        while ((match = EMBEDDED_ISO_TIMESTAMP_RE.exec(meta.rawText)) !== null) {
+            const embeddedMs = _isoToEpochMs(match[1]);
+            const candidate = _timestampCandidate("device", embeddedMs, match[1]);
+            if (candidate && !info.timeCandidates.some(item => item.domain === "device" && item.num === candidate.num)) {
+                info.timeCandidates.push(candidate);
+            }
+        }
+    }
+
+    if (primaryDomain !== "device" && state.useClientRelativeBase && Number.isFinite(info.absNum)) {
         if (!Number.isFinite(state.clientRelativeBaseMs)) {
             state.clientRelativeBaseMs = info.absNum;
         }
         info.relNum = Math.max(0, info.absNum - state.clientRelativeBaseMs);
         info.relTs = formatRelativeTimestamp(info.relNum);
-    } else if ((!info.relTs || !Number.isFinite(info.relNum)) && Number.isFinite(info.absNum) && Number.isFinite(state.firstLogAtMs)) {
+    } else if (primaryDomain !== "device" && (!info.relTs || !Number.isFinite(info.relNum)) && Number.isFinite(info.absNum) && Number.isFinite(state.firstLogAtMs)) {
         info.relNum = Math.max(0, info.absNum - state.firstLogAtMs);
         info.relTs = formatRelativeTimestamp(info.relNum);
     }

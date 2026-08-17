@@ -22,6 +22,7 @@ pub(super) struct LogEntry {
     pub(super) abs_num: Option<i64>,
     pub(super) rel_ts: Option<String>,
     pub(super) rel_num: Option<i64>,
+    pub(super) time_domain: Option<String>,
 }
 
 pub(super) fn parse_log_file(
@@ -59,6 +60,7 @@ pub(super) fn parse_log_file(
                 abs_num,
                 rel_ts,
                 rel_num,
+                time_domain: None,
             });
         } else if raw_line.trim().is_empty() {
             continue;
@@ -208,26 +210,30 @@ pub(super) fn enrich_timestamps(
     for entries in log_data.values_mut() {
         for entry in entries.iter_mut() {
             // Compute rel from abs.
-            if let (None, Some(abs_num), Some(origin_ms)) =
-                (entry.rel_num, entry.abs_num, origin_ms)
-            {
-                let rel = (abs_num - origin_ms).max(0);
-                entry.rel_num = Some(rel);
-                entry.rel_ts = Some(format_relative_ms(rel));
+            if entry.time_domain.as_deref() != Some("device") {
+                if let (None, Some(abs_num), Some(origin_ms)) =
+                    (entry.rel_num, entry.abs_num, origin_ms)
+                {
+                    let rel = (abs_num - origin_ms).max(0);
+                    entry.rel_num = Some(rel);
+                    entry.rel_ts = Some(format_relative_ms(rel));
+                }
             }
             // Compute abs from rel. If the user supplied a fixed-offset origin,
             // preserve that origin's displayed clock rather than converting to
             // the machine's local timezone.
-            if let (None, Some(rel_num)) = (entry.abs_num, entry.rel_num) {
-                if let Some(origin) = origin_fixed {
-                    let abs_dt = origin + chrono::Duration::milliseconds(rel_num);
-                    entry.abs_num = Some(abs_dt.timestamp_millis());
-                    entry.abs_ts = Some(abs_dt.format("%m-%d %H:%M:%S%.3f").to_string());
-                } else if let Some(ms) = origin_ms {
-                    if let Some(abs_utc) = Utc.timestamp_millis_opt(ms + rel_num).single() {
-                        entry.abs_num = Some(abs_utc.timestamp_millis());
-                        let local = abs_utc.with_timezone(&Local);
-                        entry.abs_ts = Some(format_absolute_display(&local));
+            if entry.time_domain.as_deref() != Some("device") {
+                if let (None, Some(rel_num)) = (entry.abs_num, entry.rel_num) {
+                    if let Some(origin) = origin_fixed {
+                        let abs_dt = origin + chrono::Duration::milliseconds(rel_num);
+                        entry.abs_num = Some(abs_dt.timestamp_millis());
+                        entry.abs_ts = Some(abs_dt.format("%m-%d %H:%M:%S%.3f").to_string());
+                    } else if let Some(ms) = origin_ms {
+                        if let Some(abs_utc) = Utc.timestamp_millis_opt(ms + rel_num).single() {
+                            entry.abs_num = Some(abs_utc.timestamp_millis());
+                            let local = abs_utc.with_timezone(&Local);
+                            entry.abs_ts = Some(format_absolute_display(&local));
+                        }
                     }
                 }
             }

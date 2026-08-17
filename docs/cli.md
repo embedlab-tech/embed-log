@@ -281,7 +281,18 @@ Open a session report in the default browser. The canonical HTML export is refre
 embed-log sessions open latest --dir logs
 ```
 
-Export a recorded session from its manifest, markers, and canonical `combined.jsonl`:
+Import an offline device log into a saved session. The file is copied into the session, added as a new tab/source, and its records are appended to the canonical `combined.jsonl`. Absolute RFC3339 timestamps (including `Z`) are parsed as real instants and entries are stably sorted by timestamp for frontend synchronization:
+
+```bash
+embed-log sessions import <SESSION_ID> \
+  --dir logs \
+  --file ./device.log \
+  --source DEVICE_LOG \
+  --tab "Device log" \
+  --label "Device UART"
+```
+
+The imported file must contain absolute timestamped records such as `[2026-08-16T23:37:46.443Z] message`. Continuation lines are attached to the preceding timestamped record; an untimestamped line before the first record is rejected. Re-export the session after importing:
 
 ```bash
 embed-log sessions export <SESSION_ID> --dir logs --format html --output session.html

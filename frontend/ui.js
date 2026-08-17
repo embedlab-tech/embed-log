@@ -7,6 +7,16 @@ import { getPanePluginSettings, setPanePluginSetting } from './pluginRuntime.js'
 
 
 // ---------------------------------------------------------------------------
+// Toolbar — clear live view
+// ---------------------------------------------------------------------------
+// Clearing is a presentation action, but goes through the backend so every
+// connected viewer gets the same clear_logs broadcast. The backend does not
+// delete or rotate the persisted session.
+document.getElementById("btn-clear")?.addEventListener("click", () => {
+    window.wsSend?.({ cmd: "clear_logs" });
+});
+
+// ---------------------------------------------------------------------------
 // Toolbar — UNWRAP toggle
 // ---------------------------------------------------------------------------
 document.getElementById("btn-unwrap")?.addEventListener("click", () => {
