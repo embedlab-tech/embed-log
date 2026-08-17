@@ -36,7 +36,7 @@ export async function exportHtmlSnapshot(options = {}) {
         const ASSETS = [
             "profile.js", "renderPane.js", "renderToolbar.js", "viewer.css",
             "pluginRuntime.js", "state.js", "themes.js", "settings.js", "fontsize.js",
-            "ansi.js", "lines.js", "tabs.js", "tabcreate.js",
+            "ansi.js", "timeSync.js", "lines.js", "tabs.js", "tabcreate.js",
             "ui.js", "export.js", "postprocess.js", "selection.js", "tsparse.js", "import.js",
         ];
 

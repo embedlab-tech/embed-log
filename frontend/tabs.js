@@ -70,7 +70,12 @@ export function switchTab(newIdx) {
     // Scroll logic
     const panesToScroll = state.unwrap ? [PANES[newIdx]] : TABS[newIdx]?.panes || [];
     if (state.syncTabSwitch && state.syncTs !== null) {
-        panesToScroll.forEach(paneId => scrollPaneToTs(paneId, state.syncTs));
+        panesToScroll.forEach(paneId => scrollPaneToTs(
+            paneId,
+            state.syncTs,
+            state.syncDomain,
+            state.syncDeviceTs,
+        ));
     } else {
         panesToScroll.forEach(paneId => scrollPaneToBottom(paneId));
     }

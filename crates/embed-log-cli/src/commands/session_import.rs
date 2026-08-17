@@ -123,10 +123,15 @@ fn import_into_session(
     fs::copy(input, &source_file)
         .with_context(|| format!("copy imported log to {}", source_file.display()))?;
 
-    let combined_file = manifest
+    // CI artifacts can retain the runner's absolute path in the manifest.
+    // Prefer it only when it still exists; otherwise repair it to the copied
+    // session directory used by this offline import.
+    let manifest_combined = manifest
         .get("combined_file")
         .and_then(Value::as_str)
-        .map(PathBuf::from)
+        .map(PathBuf::from);
+    let combined_file = manifest_combined
+        .filter(|path| path.exists())
         .unwrap_or_else(|| session_dir.join("combined.jsonl"));
     let mut next_sequence = max_sequence(&combined_file)?.saturating_add(1);
     let mut combined = OpenOptions::new()
@@ -146,6 +151,7 @@ fn import_into_session(
             "timestamp": abs_ts,
             "timestamp_iso": timestamp_iso,
             "timestamp_num": abs_num,
+            "timestamp_domain": "device",
             "absTs": abs_ts,
             "absNum": abs_num,
             "source_id": source_id,
@@ -186,6 +192,7 @@ fn import_into_session(
         .as_array_mut()
         .context("manifest tabs must be an array")?
         .push(json!({ "label": tab_label, "panes": [source_id] }));
+    root.insert("combined_file".to_string(), json!(combined_file));
     root.insert("html_status".to_string(), json!("pending"));
     root.insert("html_error".to_string(), Value::Null);
     atomic_write_json(&session_dir.join("manifest.json"), &updated)?;
@@ -352,7 +359,7 @@ mod tests {
         let input = dir.path().join("device.log");
         fs::write(
             &input,
-            "{'seq': 2, 'timestamp': '2026-08-16T23:44:47.207000000Z', 'code': 'TAMPER'}\n",
+            "{'seq': 2, 'category': 'CATEGORY_X', 'code': 'CODE_X', 'timestamp': '2026-08-16T23:44:47.207000000Z'}\n",
         )
         .unwrap();
         let entries = parse_import_file(&input).unwrap();
@@ -407,5 +414,6 @@ mod tests {
         let line = fs::read_to_string(combined).unwrap();
         assert!(line.contains("\"sequence\":8"));
         assert!(line.contains("\"source_kind\":\"file-import\""));
+        assert!(line.contains("\"timestamp_domain\":\"device\""));
     }
 }
