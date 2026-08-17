@@ -1116,6 +1116,11 @@ fn build_combined_log_entry(
     combined
 }
 
+/// Flush the buffered source log periodically rather than once per line.
+/// This keeps the file reasonably durable while preserving BufWriter batching
+/// under high-volume capture.
+const LOG_FLUSH_EVERY_LINES: usize = 256;
+
 /// Writer task: receives log entries, writes to file, broadcasts to WS clients.
 ///
 /// Tracks `first_log_at` and sends a `session_info` update when it's first set.
@@ -1132,6 +1137,7 @@ async fn run_writer(
     };
 
     let clock = SessionClock::new(runtime.ts_mode);
+    let mut lines_since_flush = 0usize;
     use std::io::Write;
 
     while let Some(entry) = entry_rx.recv().await {
@@ -1145,6 +1151,7 @@ async fn run_writer(
         let desired_log_path = log_path.lock().unwrap().clone();
         if desired_log_path != current_log_path {
             let _ = file.flush();
+            lines_since_flush = 0;
             match open_log_file(&source_name, &desired_log_path) {
                 Some(next_file) => {
                     current_log_path = desired_log_path;
@@ -1190,8 +1197,13 @@ async fn run_writer(
 
         if let Err(e) = file.write_all(file_line.as_bytes()) {
             error!("[{source_name}] log write error: {e}");
+        } else {
+            lines_since_flush += 1;
+            if lines_since_flush >= LOG_FLUSH_EVERY_LINES {
+                let _ = file.flush();
+                lines_since_flush = 0;
+            }
         }
-        let _ = file.flush();
 
         // Build WS payload with BOTH absolute and relative timestamps.
         // The frontend needs both so the timestamp toggle button works.
@@ -1500,26 +1512,38 @@ mod tests {
             runtime,
         ));
 
-        entry_tx
-            .send(LogEntry::new(
-                Local::now(),
-                "dut".to_string(),
-                "first".to_string(),
-            ))
-            .await
-            .unwrap();
+        for index in 0..LOG_FLUSH_EVERY_LINES {
+            entry_tx
+                .send(LogEntry::new(
+                    Local::now(),
+                    "dut".to_string(),
+                    if index + 1 == LOG_FLUSH_EVERY_LINES {
+                        "first".to_string()
+                    } else {
+                        format!("warmup-{index}")
+                    },
+                ))
+                .await
+                .unwrap();
+        }
         wait_file_contains(&first_log, "first").await;
 
         *path.lock().unwrap() = second_log.clone();
         *first_log_at.lock().unwrap() = None;
-        entry_tx
-            .send(LogEntry::new(
-                Local::now(),
-                "dut".to_string(),
-                "second".to_string(),
-            ))
-            .await
-            .unwrap();
+        for index in 0..LOG_FLUSH_EVERY_LINES {
+            entry_tx
+                .send(LogEntry::new(
+                    Local::now(),
+                    "dut".to_string(),
+                    if index + 1 == LOG_FLUSH_EVERY_LINES {
+                        "second".to_string()
+                    } else {
+                        format!("rotated-warmup-{index}")
+                    },
+                ))
+                .await
+                .unwrap();
+        }
         wait_file_contains(&second_log, "second").await;
 
         drop(entry_tx);

@@ -505,12 +505,16 @@ fn semantics(path: &str) -> Semantics {
             notes: &["default text is concise records; --json emits one fixed tuple envelope"],
         },
         path if path.starts_with("sessions.") => Semantics {
-            mutates: path == "sessions.export",
+            mutates: matches!(path, "sessions.export" | "sessions.import"),
             execution: "offline",
             targeting: session_target,
             output: json_or_text,
             errors: &[],
-            notes: &[],
+            notes: if path == "sessions.import" {
+                &["copies and normalizes an external timestamped log into the selected session", "re-export the session after import to refresh session.html"]
+            } else {
+                &[]
+            },
         },
         "version" | "doctor" | "ports" => Semantics {
             mutates: false,

@@ -185,7 +185,7 @@ test.describe('HTML export replay', () => {
 // Scenario: Exported snapshot hides live-only buttons, shows offline controls, and supports unwrap/font actions
 //   Given a live session with data in SENSOR_A and SENSOR_B
 //   When  the snapshot is exported and reopened
-//   Then  clear/export/ws-status are hidden, unwrap/theme/settings are present, unwrap mode shows pane-tabs, and font controls resize text
+//   Then  clear/export/ws-status are hidden in the static snapshot, unwrap/theme/settings are present, unwrap mode shows pane-tabs, and font controls resize text
 
   test('exported full snapshot keeps only offline toolbar actions and supports unwrap/font controls', async ({ page, browser }, testInfo) => {
     await page.goto('/');

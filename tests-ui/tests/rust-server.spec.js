@@ -30,7 +30,7 @@ test.describe('Rust backend browser e2e', () => {
 
     await expect(page.locator('#pane-DUT .pane-name')).toHaveText('DUT UART');
     await expect(page.locator('#pane-HOST .pane-name')).toHaveText('Host Debug');
-    await expect(page.locator('#btn-clear')).toHaveCount(0);
+    await expect(page.locator('#btn-clear')).toBeVisible();
     await expect(page.locator('#btn-new-session')).toHaveCount(0);
     await expect(page.locator('#btn-sessions')).toHaveCount(0);
     await expect(page.locator('#btn-save-to-server')).toHaveCount(0);
@@ -40,6 +40,12 @@ test.describe('Rust backend browser e2e', () => {
 
     await waitForLineContaining(page, 'DUT', 'E2E DUT boot');
     await waitForLineContaining(page, 'HOST', 'E2E HOST ready');
+
+    // Clear is routed through the backend so all connected viewers receive
+    // the same presentation-only clear_logs broadcast.
+    await page.locator('#btn-clear').click();
+    await expect(page.locator('#log-DUT')).not.toContainText('E2E DUT boot');
+    await expect(page.locator('#log-HOST')).not.toContainText('E2E HOST ready');
   });
 
   test('renders text UDP datagrams in the sensor pane', async ({ page }) => {
