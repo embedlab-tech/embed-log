@@ -1199,7 +1199,10 @@ async fn run_writer(
             error!("[{source_name}] log write error: {e}");
         } else {
             lines_since_flush += 1;
-            if lines_since_flush >= LOG_FLUSH_EVERY_LINES {
+            // Flush a partial batch when the queue goes idle so low-volume
+            // sources remain observable without sacrificing batching during
+            // sustained capture.
+            if lines_since_flush >= LOG_FLUSH_EVERY_LINES || entry_rx.is_empty() {
                 let _ = file.flush();
                 lines_since_flush = 0;
             }
