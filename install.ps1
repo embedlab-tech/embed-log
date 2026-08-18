@@ -138,6 +138,15 @@ try {
     $Destination = Join-Path $InstallDir $Bin
     Copy-Item $ExtractedBin $Destination -Force
 
+    # This adjacent marker lets `embed-log update` distinguish an official
+    # installer-managed binary from Cargo, system-package, or manually copied ones.
+    $MarkerPath = Join-Path $InstallDir ".embed-log-install"
+    $MarkerJson = @{ repository = $Repo; target = $Target; executable = $Destination } | ConvertTo-Json -Compress
+    # Windows PowerShell's Set-Content -Encoding utf8 writes a BOM, which is
+    # not accepted by serde_json. Write UTF-8 without a BOM on all supported
+    # PowerShell versions.
+    [System.IO.File]::WriteAllText($MarkerPath, $MarkerJson, (New-Object System.Text.UTF8Encoding($false)))
+
     Write-Info ""
     Write-Info "embed-log was installed successfully."
     Write-Info "Installed embed-log to $Destination"

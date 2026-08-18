@@ -18,6 +18,15 @@ irm https://github.com/embedlab-tech/embed-log/releases/latest/download/install.
 
 Release binaries include the web UI; Rust and a separate frontend checkout are not required.
 
+Update an installation made by an official installer:
+
+```bash
+embed-log update --check
+embed-log update
+```
+
+The CLI works offline. Background update checks are best-effort and can be disabled with `EMBED_LOG_NO_UPDATE_CHECK=1`.
+
 ## Run
 
 Open one serial device:

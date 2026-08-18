@@ -39,6 +39,12 @@ anyhow = "1"
 thiserror = "2"
 slug = "0.1"
 fs2 = "0.4"
+semver = "1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+flate2 = "1"
+tar = "0.4"
+zip = { version = "0.6", default-features = false, features = ["deflate"] }
+sha2 = "0.10"
 
 # Core + TUI crates
 embed-log-core = { path = "crates/embed-log-core" }

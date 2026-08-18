@@ -35,6 +35,19 @@ Discovery is progressive and token-bounded: call bare `schema` first, then reque
 
 `schema errors` reports `"coverage":"all_json_invocations"`. A failed invocation requesting JSON writes exactly one `{ "ok": false, "error": { "code", "message", "details" } }` document to stdout and exits nonzero; `COMMAND_FAILED` is the stable fallback when no narrower classification applies. Human-mode failures remain concise stderr text. `schema config` is a compact capability descriptor, not yet a formal JSON Schema document.
 
+## Updating
+
+Official-installer installations can check and update from GitHub Releases:
+
+```bash
+embed-log update --check
+embed-log update
+```
+
+`--check` only reports whether a newer release is available. `update` downloads the archive for the current target, verifies its SHA-256 from release metadata, and replaces only an installer-managed executable. Installations from a system package manager, Cargo, or a manual copy must be updated through their original installation method.
+
+The normal CLI remains offline-capable. A long-running interactive `run` may show a hint after a successful best-effort check, but it never waits for a network request and prints nothing when offline or when the check fails. Successful checks are cached for 24 hours to limit requests; cached data never emits a hint, so offline invocations stay silent. Set `EMBED_LOG_NO_UPDATE_CHECK=1` to disable background checks completely. Explicit `update` and `update --check` report a network error when they cannot contact the release source.
+
 Global options:
 
 | Option | Meaning |

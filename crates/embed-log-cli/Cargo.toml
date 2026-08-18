@@ -33,6 +33,12 @@ chrono.workspace = true
 serialport = "4"
 regex = "1"
 futures.workspace = true
+semver.workspace = true
+reqwest.workspace = true
+flate2.workspace = true
+tar.workspace = true
+zip.workspace = true
+sha2.workspace = true
 tokio-tungstenite = "0.24"
 
 [dependencies.embed-log-tui]

@@ -5,6 +5,8 @@ This repo currently has a release path for the `embed-log` CLI binary.
 The released CLI is a prebuilt executable. Users do **not** need Rust or Cargo installed.
 The frontend assets are embedded into the Rust binary at build time via `rust-embed`.
 
+Each release also includes `release.json`, used by `embed-log update`. It maps every supported target to its archive and SHA-256 checksum. The release workflow generates it from the same artifacts used for `SHA256SUMS`; do not publish a release without it.
+
 ## Hosted build matrix
 
 `.github/workflows/release-cli.yml` uses standard GitHub-hosted runners. Its native build/test matrix produces:
@@ -96,6 +98,7 @@ embed-log-x86_64-pc-windows-msvc.zip
 install.sh
 install.ps1
 SHA256SUMS
+release.json
 ```
 
 Windows users can either use `install.ps1` or download and extract the `.zip` from the release page.

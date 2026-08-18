@@ -509,6 +509,21 @@ jobs:
           INSTALL_DIR: ${{ runner.temp }}/embed-log-bin
         run: sh install.sh
 
+      - name: Verify installer management marker
+        run: |
+          marker="${{ runner.temp }}/embed-log-bin/.embed-log-install"
+          test -f "$marker"
+          python3 - "$marker" "${{ runner.temp }}/embed-log-bin/embed-log" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as source:
+              marker = json.load(source)
+          assert marker["repository"] == "embedlab-tech/embed-log"
+          assert marker["target"] == "x86_64-unknown-linux-gnu"
+          assert marker["executable"] == sys.argv[2]
+          PY
+
       - name: Add install dir to PATH
         run: echo "${{ runner.temp }}/embed-log-bin" >> "$GITHUB_PATH"
 
