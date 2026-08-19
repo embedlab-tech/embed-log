@@ -4,7 +4,7 @@
 //! run on a detached thread and ignore every error.
 
 #[cfg(windows)]
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::{
     fs,
     io::{self, Read},
@@ -271,20 +271,25 @@ fn replace_executable(replacement: &Path, exe: &Path) -> Result<()> {
 
 #[cfg(windows)]
 fn replace_executable(replacement: &Path, exe: &Path) -> Result<()> {
-    // Windows locks a running executable. The detached shell waits briefly for
-    // this process to exit, then copies over the destination and removes the
-    // staged file. `move` cannot reliably replace an existing destination on
-    // Windows, whereas `copy /Y` is an explicit overwrite.
-    Command::new("cmd")
-        .args([
-            "/C",
-            &format!(
-                "ping 127.0.0.1 -n 2 > nul & copy /Y \"{}\" \"{}\" > nul && del /F /Q \"{}\" > nul",
-                replacement.display(),
-                exe.display(),
-                replacement.display(),
-            ),
-        ])
+    // Windows locks a running executable. A detached PowerShell helper waits
+    // for this exact process to exit, then overwrites the destination and
+    // removes the staged file. Waiting for the PID is reliable under slow CI;
+    // a fixed ping/sleep delay is not.
+    let quote = |path: &Path| path.display().to_string().replace('\'', "''");
+    let script = format!(
+        "$ErrorActionPreference = 'Stop'; $parent = Get-Process -Id {} -ErrorAction SilentlyContinue; if ($parent) {{ $parent.WaitForExit() }}; Copy-Item -LiteralPath '{}' -Destination '{}' -Force; Remove-Item -LiteralPath '{}' -Force",
+        std::process::id(),
+        quote(replacement),
+        quote(exe),
+        quote(replacement),
+    );
+    Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        // Do not let the helper retain the caller's output pipes; callers that
+        // capture `embed-log update` must be able to observe the CLI exit.
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
         .context("could not start Windows update helper")?;
     println!("The update will finish after embed-log exits.");
