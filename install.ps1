@@ -210,3 +210,7 @@ try {
 } finally {
     Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+# A PowerShell script otherwise preserves a stale $LASTEXITCODE inherited from
+# its caller, even after a successful install.
+exit 0

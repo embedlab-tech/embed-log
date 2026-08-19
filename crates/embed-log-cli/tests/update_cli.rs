@@ -55,7 +55,7 @@ fn serve(
     listener.set_nonblocking(true).unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let server = thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         let mut requests = 0;
         while requests < expected_requests && Instant::now() < deadline {
             let (mut stream, _) = match listener.accept() {
@@ -122,12 +122,12 @@ fn update_replaces_an_installer_managed_unix_binary_after_checksum_verification(
         "version": "99.0.0",
         "assets": { target.clone(): { "archive": "embed-log-test.tar.gz", "sha256": checksum } },
     });
+    let installed = managed_copy(&temp, &target);
     let (base_url, server) = serve(
         serde_json::to_vec(&release).unwrap(),
         fs::read(archive_path).unwrap(),
         2,
     );
-    let installed = managed_copy(&temp, &target);
 
     let output = Command::new(&installed)
         .arg("update")
@@ -163,13 +163,13 @@ fn update_rejects_a_bad_checksum_without_replacing_the_binary() {
         "version": "99.0.0",
         "assets": { target.clone(): { "archive": "embed-log-test.tar.gz", "sha256": "0".repeat(64) } },
     });
+    let installed = managed_copy(&temp, &target);
+    let before = fs::read(&installed).unwrap();
     let (base_url, server) = serve(
         serde_json::to_vec(&release).unwrap(),
         fs::read(archive_path).unwrap(),
         2,
     );
-    let installed = managed_copy(&temp, &target);
-    let before = fs::read(&installed).unwrap();
 
     let output = Command::new(&installed)
         .arg("update")
