@@ -3,9 +3,13 @@
 use std::{
     fs,
     io::{Read, Write},
-    net::TcpListener,
+    net::{SocketAddr, TcpListener},
     path::{Path, PathBuf},
-    process::Command,
+    process::{Child, Command, Stdio},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -229,4 +233,199 @@ fn explicit_update_check_reports_an_offline_connection_error() {
         .unwrap();
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("error sending request"));
+}
+
+/// Follow-up step 3: the background hint must not delay or blacken `run` even
+/// when the update endpoint is completely unreachable. The hint runs on a
+/// detached thread, so the server must come up immediately and the captured
+/// stderr must stay free of any update/network noise.
+#[test]
+fn background_update_hint_is_quiet_when_the_update_endpoint_is_unreachable() {
+    let temp = TempDir::new().unwrap();
+    let port = {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    };
+    let config = hint_config(&temp, port);
+
+    // A dropped listener address guarantees immediate connection refusal for
+    // any background fetch attempt.
+    let dead = TcpListener::bind("127.0.0.1:0").unwrap();
+    let dead_address = dead.local_addr().unwrap();
+    drop(dead);
+
+    let stdout = temp.path().join("run.out");
+    let stderr = temp.path().join("run.err");
+    let started = Instant::now();
+    let mut child = spawn_run(
+        &config,
+        port,
+        &format!("http://{dead_address}"),
+        &stdout,
+        &stderr,
+        false,
+    );
+    assert!(
+        wait_until_ready(port, started + Duration::from_secs(15)),
+        "embed-log run did not start within the deadline"
+    );
+    // Leave the detached hint ample time to attempt (and fail at) its fetch.
+    thread::sleep(Duration::from_secs(1));
+    child.kill().ok();
+    let _ = child.wait();
+
+    let out = fs::read_to_string(&stdout).unwrap();
+    assert!(out.contains("embed-log v"), "run banner missing: {out}");
+    let err = fs::read_to_string(&stderr).unwrap();
+    let lowered = err.to_lowercase();
+    assert!(
+        !lowered.contains("update"),
+        "update hint leaked noise to stderr: {err}"
+    );
+    assert!(
+        !lowered.contains("network"),
+        "update hint leaked noise to stderr: {err}"
+    );
+    assert!(
+        !lowered.contains("error sending request"),
+        "update hint leaked fetch errors to stderr: {err}"
+    );
+}
+
+/// Follow-up step 3: EMBED_LOG_NO_UPDATE_CHECK=1 must suppress the background
+/// hint entirely — no request may reach the update endpoint while a normal
+/// `run` stays up and healthy.
+#[test]
+fn background_update_hint_can_be_disabled_entirely() {
+    let temp = TempDir::new().unwrap();
+    let port = {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    };
+    let config = hint_config(&temp, port);
+
+    // Live update endpoint that observes any background request.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let base_url = format!("http://{}", listener.local_addr().unwrap());
+    let requests = Arc::new(AtomicUsize::new(0));
+    let done = Arc::new(AtomicUsize::new(0));
+    let requests_observer = Arc::clone(&requests);
+    let done_observer = Arc::clone(&done);
+    let observer = thread::spawn(move || {
+        while done_observer.load(Ordering::SeqCst) == 0 {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    requests_observer.fetch_add(1, Ordering::SeqCst);
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    );
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    let stdout = temp.path().join("run.out");
+    let stderr = temp.path().join("run.err");
+    let mut child = spawn_run(&config, port, &base_url, &stdout, &stderr, true);
+
+    let started = Instant::now();
+    assert!(
+        wait_until_ready(port, started + Duration::from_secs(15)),
+        "embed-log run did not start within the deadline"
+    );
+    thread::sleep(Duration::from_millis(300));
+    child.kill().ok();
+    let _ = child.wait();
+    done.store(1, Ordering::SeqCst);
+
+    assert_eq!(
+        requests.load(Ordering::SeqCst),
+        0,
+        "EMBED_LOG_NO_UPDATE_CHECK did not suppress the background update check"
+    );
+    assert!(fs::read_to_string(&stderr).unwrap().is_empty());
+    let _ = observer.join();
+}
+
+/// Writes a minimal v2 config exposing one quiet file source.
+fn hint_config(temp: &TempDir, port: u16) -> PathBuf {
+    let root = temp.path();
+    let logs = root.join("hint-logs");
+    let input = root.join("hint-input.log");
+    fs::create_dir_all(&logs).unwrap();
+    fs::write(&input, "hint fixture line\n").unwrap();
+    let path = root.join("hint.yml");
+    fs::write(
+        &path,
+        format!(
+            "version: 2\nserver:\n  listen: 127.0.0.1:{port}\nlogs:\n  dir: {}\nsources:\n  TEST:\n    type: file\n    path: {}\n",
+            logs.display(),
+            input.display()
+        ),
+    )
+    .unwrap();
+    path
+}
+
+/// Launches a foreground `embed-log run` whose background update hint points at
+/// `base_url`. Output goes to files so a full pipe buffer cannot deadlock the
+/// child while it is being killed. Set `suppress` to also export
+/// `EMBED_LOG_NO_UPDATE_CHECK=1`.
+fn spawn_run(
+    config: &Path,
+    port: u16,
+    base_url: &str,
+    stdout: &Path,
+    stderr: &Path,
+    suppress: bool,
+) -> Child {
+    let mut command = Command::new(binary());
+    command
+        .args([
+            "run",
+            "--config",
+            config.to_str().unwrap(),
+            "--port",
+            &port.to_string(),
+            "--no-open-browser",
+            "--frontend-dir",
+            "/definitely/not/a/frontend",
+        ])
+        .env("RUST_LOG", "warn")
+        .env("EMBED_LOG_UPDATE_BASE_URL", base_url)
+        .stdout(Stdio::from(fs::File::create(stdout).unwrap()))
+        .stderr(Stdio::from(fs::File::create(stderr).unwrap()));
+    if suppress {
+        command.env("EMBED_LOG_NO_UPDATE_CHECK", "1");
+    }
+    command.spawn().unwrap()
+}
+
+/// Polls the run server's /api/v1/status endpoint until it answers.
+fn wait_until_ready(port: u16, deadline: Instant) -> bool {
+    let address = SocketAddr::from(([127, 0, 0, 1], port));
+    let mut response = [0_u8; 4096];
+    while Instant::now() < deadline {
+        let result = std::net::TcpStream::connect_timeout(&address, Duration::from_millis(250));
+        if let Ok(mut stream) = result {
+            let _ = write!(
+                stream,
+                "GET /api/v1/status HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+            );
+            if let Ok(count) = stream.read(&mut response) {
+                let text = String::from_utf8_lossy(&response[..count]);
+                if text.contains("200") && text.contains("api_version") {
+                    return true;
+                }
+            }
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    false
 }
