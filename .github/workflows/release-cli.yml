@@ -140,6 +140,34 @@ jobs:
           if (!(Test-Path $binary)) { throw "Archive is missing $binary" }
           & $binary version --json
 
+      - name: Smoke-test Windows installer marker
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archive = "embed-log-${{ matrix.target }}.zip"
+          $hash = (Get-FileHash -Algorithm SHA256 -Path "dist/$archive").Hash.ToLowerInvariant()
+          "$hash  $archive" | Set-Content -Path dist/SHA256SUMS -NoNewline
+          $installDir = Join-Path $env:RUNNER_TEMP "embed-log-installer-smoke"
+          $port = 18765
+          $server = Start-Process -FilePath python -ArgumentList @("-m", "http.server", "$port", "--directory", (Join-Path $PWD "dist")) -PassThru -WindowStyle Hidden
+          try {
+            Start-Sleep -Seconds 1
+            $env:EMBED_LOG_BASE_URL = "http://127.0.0.1:$port"
+            $env:INSTALL_DIR = $installDir
+            $env:EMBED_LOG_NO_PROMPT = "1"
+            & ./install.ps1 -NoPrompt
+            if ($LASTEXITCODE -ne 0) { throw "install.ps1 failed" }
+            $marker = Get-Content -Raw (Join-Path $installDir ".embed-log-install") | ConvertFrom-Json
+            if ($marker.repository -ne "embedlab-tech/embed-log" -or $marker.target -ne "${{ matrix.target }}" -or $marker.executable -ne (Join-Path $installDir "embed-log.exe")) {
+              throw "installer management marker did not match the installed binary"
+            }
+          } finally {
+            if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }
+            Remove-Item Env:EMBED_LOG_BASE_URL -ErrorAction SilentlyContinue
+            Remove-Item Env:INSTALL_DIR -ErrorAction SilentlyContinue
+            Remove-Item Env:EMBED_LOG_NO_PROMPT -ErrorAction SilentlyContinue
+          }
+
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -191,6 +219,32 @@ jobs:
             embed-log-x86_64-pc-windows-msvc.zip \
             install.sh \
             install.ps1 > SHA256SUMS
+          python3 - <<'PY'
+          import json
+          import os
+
+          hashes = {}
+          with open("SHA256SUMS", encoding="utf-8") as checksums:
+              for line in checksums:
+                  digest, name = line.strip().split(maxsplit=1)
+                  hashes[name.strip()] = digest
+          targets = {
+              "x86_64-unknown-linux-gnu": "embed-log-x86_64-unknown-linux-gnu.tar.gz",
+              "aarch64-apple-darwin": "embed-log-aarch64-apple-darwin.tar.gz",
+              "x86_64-apple-darwin": "embed-log-x86_64-apple-darwin.tar.gz",
+              "x86_64-pc-windows-msvc": "embed-log-x86_64-pc-windows-msvc.zip",
+          }
+          release = {
+              "version": os.environ["RELEASE_TAG"].removeprefix("v"),
+              "assets": {
+                  target: {"archive": archive, "sha256": hashes[archive]}
+                  for target, archive in targets.items()
+              },
+          }
+          with open("release.json", "w", encoding="utf-8") as output:
+              json.dump(release, output, separators=(",", ":"))
+              output.write("\n")
+          PY
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -207,3 +261,4 @@ jobs:
             dist/install.sh
             dist/install.ps1
             dist/SHA256SUMS
+            dist/release.json

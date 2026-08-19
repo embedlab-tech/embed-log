@@ -23,6 +23,7 @@ use commands::schema::cmd_schema;
 use commands::sessions::{cmd_sessions, SessionsCommand};
 use commands::skill::cmd_skill;
 use commands::tx::{cmd_tx, parse_duration, TxInput, TxOptions};
+use commands::update::{cmd_update, spawn_update_hint};
 use commands::watch::{cmd_watch, WatchCommand};
 
 #[derive(Parser)]
@@ -271,6 +272,13 @@ enum Command {
         json: bool,
     },
 
+    /// Check for or install an update from the official GitHub Release
+    Update {
+        /// Only check whether an update is available; do not install it.
+        #[arg(long)]
+        check: bool,
+    },
+
     /// Show version and environment information
     Version {
         /// Config file to inspect
@@ -348,6 +356,9 @@ async fn main() -> ExitCode {
         }
     };
     let machine_output = cli.machine_output();
+    if cli.should_show_update_hint() {
+        spawn_update_hint();
+    }
     match dispatch(cli).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -383,8 +394,19 @@ impl Cli {
             | Some(Command::Ports { json }) => *json,
             Some(Command::Watch { command }) => command.machine_output(),
             Some(Command::Sessions { command }) => command.machine_output(),
-            Some(Command::Hello) | None => false,
+            Some(Command::Hello) | Some(Command::Update { .. }) | None => false,
         }
+    }
+
+    fn should_show_update_hint(&self) -> bool {
+        !self.machine_output()
+            && matches!(
+                self.command,
+                None | Some(Command::Run {
+                    daemon_child: false,
+                    ..
+                })
+            )
     }
 }
 
@@ -534,6 +556,9 @@ async fn dispatch(cli: Cli) -> Result<()> {
             url,
             json,
         }) => cmd_stop(instance.as_deref(), url.as_deref(), json),
+        Some(Command::Update { check }) => {
+            tokio::task::spawn_blocking(move || cmd_update(check)).await?
+        }
         Some(Command::Version { config, json }) => misc::cmd_version(config.as_deref(), json),
         Some(Command::Doctor {
             config,
@@ -626,7 +651,6 @@ mod tests {
             ["embed-log", "demo"].as_slice(),
             ["embed-log", "init"].as_slice(),
             ["embed-log", "onboard"].as_slice(),
-            ["embed-log", "update"].as_slice(),
             ["embed-log", "merge"].as_slice(),
             ["embed-log", "parse"].as_slice(),
             ["embed-log", "validate"].as_slice(),
@@ -636,6 +660,12 @@ mod tests {
         ] {
             assert!(Cli::try_parse_from(args).is_err());
         }
+    }
+
+    #[test]
+    fn update_command_accepts_check_flag() {
+        let cli = Cli::parse_from(["embed-log", "update", "--check"]);
+        assert!(matches!(cli.command, Some(Command::Update { check: true })));
     }
 
     #[test]

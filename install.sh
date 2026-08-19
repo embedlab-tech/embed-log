@@ -163,6 +163,13 @@ mkdir -p "$INSTALL_DIR"
 cp "$tmp_dir/$BIN" "$INSTALL_DIR/$BIN"
 chmod 755 "$INSTALL_DIR/$BIN"
 
+# This adjacent marker lets `embed-log update` distinguish an official
+# installer-managed binary from Cargo, system-package, or manually copied ones.
+# Escape the two user-controlled path values for the small JSON document.
+json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+printf '{"repository":"%s","target":"%s","executable":"%s"}\n' \
+  "$REPO" "$target" "$(json_escape "$INSTALL_DIR/$BIN")" > "$INSTALL_DIR/.embed-log-install"
+
 msg ""
 msg "$BIN was installed successfully."
 msg "Installed $BIN to $INSTALL_DIR/$BIN"

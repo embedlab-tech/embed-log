@@ -18,7 +18,7 @@ fs.mkdirSync(logs, { recursive: true });
 if (!regressionMode) {
   const demoConfig = `version: 2
 server:
-  listen: 127.0.0.1:8080
+  listen: 127.0.0.1:10800
   app_name: embed-log e2e
   timestamp_mode: absolute
 logs:
