@@ -272,14 +272,17 @@ fn replace_executable(replacement: &Path, exe: &Path) -> Result<()> {
 #[cfg(windows)]
 fn replace_executable(replacement: &Path, exe: &Path) -> Result<()> {
     // Windows locks a running executable. The detached shell waits briefly for
-    // this process to exit, then performs the replacement.
+    // this process to exit, then copies over the destination and removes the
+    // staged file. `move` cannot reliably replace an existing destination on
+    // Windows, whereas `copy /Y` is an explicit overwrite.
     Command::new("cmd")
         .args([
             "/C",
             &format!(
-                "ping 127.0.0.1 -n 2 > nul & move /Y \"{}\" \"{}\" > nul",
+                "ping 127.0.0.1 -n 2 > nul & copy /Y \"{}\" \"{}\" > nul && del /F /Q \"{}\" > nul",
                 replacement.display(),
-                exe.display()
+                exe.display(),
+                replacement.display(),
             ),
         ])
         .spawn()
