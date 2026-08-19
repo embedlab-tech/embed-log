@@ -66,6 +66,10 @@ fn serve(
                 }
                 Err(error) => panic!("test server failed: {error}"),
             };
+            // Accepted sockets inherit the listener's non-blocking mode on
+            // macOS. Restore blocking mode before reading the complete HTTP
+            // request, rather than racing the client for its first bytes.
+            stream.set_nonblocking(false).unwrap();
             let mut request = [0_u8; 1024];
             let count = stream.read(&mut request).unwrap();
             let path = String::from_utf8_lossy(&request[..count]);

@@ -59,6 +59,10 @@ fn serve(release: Vec<u8>, archive: Vec<u8>) -> (String, thread::JoinHandle<usiz
                 }
                 Err(error) => panic!("test server failed: {error}"),
             };
+            // Accepted sockets inherit the listener's non-blocking mode on
+            // some platforms. Restore blocking mode before reading the HTTP
+            // request so the fixture cannot race the client for its first bytes.
+            stream.set_nonblocking(false).unwrap();
             let mut request = [0_u8; 1024];
             let count = stream.read(&mut request).unwrap();
             let request = String::from_utf8_lossy(&request[..count]);
