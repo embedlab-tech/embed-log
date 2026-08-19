@@ -1,6 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const defaultBaseURL = 'http://127.0.0.1:8080';
+const defaultBaseURL = 'http://127.0.0.1:10800';
 const baseURL = process.env.E2E_BASE_URL || defaultBaseURL;
 const shouldStartServer = process.env.E2E_START_SERVER !== '0' && baseURL === defaultBaseURL;
 

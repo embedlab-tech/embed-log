@@ -2,7 +2,7 @@ version: 1
 
 server:
   host: 127.0.0.1
-  ws_port: 8080
+  ws_port: 10800
   app_name: embed-log e2e
   timestamp_mode: relative
 
