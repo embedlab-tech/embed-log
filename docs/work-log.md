@@ -923,7 +923,7 @@ Future entries must include this per-file added/removed-line summary.
 - **Task:** Remove the remaining internal transport name from tracked documentation.
 - **Started:** unavailable; no `/worklog-start` checkpoint was recorded.
 - **Completed:** 2026-07-14 05:05:38 UTC / 2026-07-14 07:05:38 CEST (+0200) (Warsaw)
-- **Validation:** case-insensitive tracked-text scan for `gwl`, `lnk`, `mcu-link`, `reader controller`, and `lnk121` found no remaining textual matches.
+- **Validation:** case-insensitive tracked-text scan for `lnk`, `mcu-link`, `reader controller`, and `lnk121` found no remaining textual matches.
 - **Model-token delta:** unavailable; no before checkpoint exists.
 
 ### File changes (`4078025`)
