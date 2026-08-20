@@ -613,22 +613,11 @@ button.active { background: var(--selection); border-color: var(--accent); color
     padding: 0 10px;
     min-height: 1.55em;
     cursor: pointer;
-    user-select: none;
-}
-body:not(.alt-held) .log-line,
-body:not(.alt-held) .log-line * {
-    -webkit-user-select: none;
-    user-select: none;
-}
-body:not(.alt-held) .log-line::selection,
-body:not(.alt-held) .log-line *::selection {
-    background: transparent;
-}
-body.alt-held .log-line,
-body.alt-held .log-line * {
     -webkit-user-select: text;
     user-select: text;
 }
+/* A same-row drag is native text selection; crossing into another row is
+   promoted by selection.js to Embed-log's structured line selection. */
 .log-line:hover  { background: var(--selection); }
 .log-line.tx-line { opacity: 0.8; }
 

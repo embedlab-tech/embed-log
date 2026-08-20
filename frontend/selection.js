@@ -782,8 +782,17 @@ function _exportHtml(paneId) {
 let _drag = null;          // { paneId, startIdx, startY, lineEl, active }
 let _suppressClick = false;
 let _rangeAnchor = null;   // { paneId, idx } set by a normal line click for Shift+Click range selection
-let _altSelection = false; // true during an Alt-native-text-select drag
+let _nativeSelectionFromDrag = false;
 
+function _nativeSingleLineSelection() {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.toString()) return false;
+    const lineFor = node => (node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement)
+        ?.closest?.(".log-line");
+    const anchor = lineFor(selection.anchorNode);
+    const focus = lineFor(selection.focusNode);
+    return !!anchor && anchor === focus;
+}
 
 document.addEventListener("pointerdown", e => {
     if (e.button !== 0) return;
@@ -791,46 +800,60 @@ document.addEventListener("pointerdown", e => {
     if (!line) return;
     const logArea = line.closest(".log-area");
     if (!logArea) return;
-    if (e.altKey) { _altSelection = true; return; }
-    e.preventDefault();
-    window.getSelection()?.removeAllRanges();
+
+    // Do not prevent the default for an ordinary drag: one that remains
+    // within this line is native text selection. Modified clicks are always
+    // structured line-selection gestures, so stop the browser from extending
+    // an old text range before their click handler runs.
+    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        window.getSelection()?.removeAllRanges();
+    }
     hidePluginOverlays();
-
-
     _drag = {
         paneId: logArea.id.slice(4),
         startIdx: parseInt(line.dataset.idx, 10),
+        startX: e.clientX,
         startY: e.clientY,
         lineEl: line,
         active: false,
+        nativeCandidate: false,
+        structuredClick: e.shiftKey || e.ctrlKey || e.metaKey,
     };
     _suppressClick = false;
 });
 
 document.addEventListener("pointermove", e => {
     if (!_drag) return;
-    if (Math.abs(e.clientY - _drag.startY) < 6) return;
 
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const line = el?.closest(".log-line");
+    const logArea = line?.closest(".log-area");
+    const endIdx = line && logArea?.id.slice(4) === _drag.paneId
+        ? parseInt(line.dataset.idx, 10)
+        : NaN;
+
+    // A same-line drag remains native text selection. Crossing into a second
+    // row promotes the gesture to the structured complete-line selection.
     if (!_drag.active) {
+        if (!Number.isFinite(endIdx) || endIdx === _drag.startIdx) {
+            if (Math.hypot(e.clientX - _drag.startX, e.clientY - _drag.startY) > 4) {
+                _drag.nativeCandidate = true;
+            }
+            return;
+        }
+        e.preventDefault();
+        window.getSelection()?.removeAllRanges();
         _drag.active = true;
         _suppressClick = true;
-
         _clearOtherSelections(_drag.paneId);
 
         const raw = _selectionLine(_drag.paneId, _drag.startIdx);
         if (raw) onLineClick(_drag.paneId, raw.numTs, _drag.lineEl);
-
         try { _drag.lineEl.setPointerCapture(e.pointerId); } catch (_) {}
     }
 
-    const el = document.elementFromPoint(e.clientX, e.clientY);
-    if (!el) return;
-    const line = el.closest(".log-line");
-    if (!line) return;
-    const logArea = line.closest(".log-area");
-    if (!logArea || logArea.id.slice(4) !== _drag.paneId) return;
-
-    const endIdx = parseInt(line.dataset.idx, 10);
+    if (!Number.isFinite(endIdx)) return;
     const lo = Math.min(_drag.startIdx, endIdx);
     const hi = Math.max(_drag.startIdx, endIdx);
     const sel = new Set();
@@ -844,12 +867,16 @@ document.addEventListener("pointerup", e => {
         _drag = null;
         return;
     }
-    if (_altSelection) {
-        _altSelection = false;
-        const text = window.getSelection()?.toString();
-        if (text) navigator.clipboard.writeText(text).catch(() => {});
-    } else {
+    if (_drag?.active) {
         window.getSelection()?.removeAllRanges();
+        _nativeSelectionFromDrag = false;
+    } else if (!_drag?.structuredClick && _drag?.nativeCandidate && _nativeSingleLineSelection()) {
+        // Native selection takes precedence over a prior full-line selection.
+        // Ctrl/Cmd+C is deliberately left to the browser below.
+        _clearAllSelections();
+        _nativeSelectionFromDrag = true;
+    } else {
+        _nativeSelectionFromDrag = false;
     }
     _drag = null;
 });
@@ -866,7 +893,11 @@ document.addEventListener("click", e => {
 
     const clickedLine = e.target.closest(".log-line");
     const clickedLogArea = clickedLine?.closest(".log-area");
-    if (clickedLine && clickedLogArea && !e.altKey) {
+    if (clickedLine && clickedLogArea) {
+        if (_nativeSelectionFromDrag) {
+            _nativeSelectionFromDrag = false;
+            return;
+        }
         const paneId = clickedLogArea.id.slice(4);
         const idx = parseInt(clickedLine.dataset.idx, 10);
 
@@ -910,8 +941,14 @@ document.addEventListener("keydown", e => {
     if (isComposingEvent(e)) return;
     if (isEditableTarget(e.target)) return;
     if ((e.ctrlKey || e.metaKey) && e.key === "c") {
+        // Structured line selections take precedence. A native selection made
+        // by a same-row drag clears them on pointerup, so it reaches the
+        // browser fallback below.
         const pane = PANES.find(id => state.selected[id].size > 0);
         if (pane) { _copyExact(pane); e.preventDefault(); return; }
+        // Preserve the browser clipboard behavior for arbitrary text selected
+        // inside one line.
+        if (_nativeSingleLineSelection()) return;
         // No explicit selection — fall back to the sync-highlighted line.
         const hlPane = PANES.find(id => Number.isFinite(state.highlightedIdx[id]) || state.highlighted[id]);
         if (hlPane) {
@@ -931,18 +968,6 @@ document.addEventListener("keydown", e => {
         _clearAllSelections();
     }
 });
-// ── Alt key: hold to enable native text selection on log lines ──
-document.addEventListener("keydown", e => {
-    if (isComposingEvent(e) || isEditableTarget(e.target)) return;
-    if (e.key === "Alt" && !e.ctrlKey && !e.metaKey) {
-        document.body.classList.add("alt-held");
-    }
-});
-document.addEventListener("keyup", e => {
-    if (isEditableTarget(e.target)) return;
-    if (e.key === "Alt") document.body.classList.remove("alt-held");
-});
-window.addEventListener("blur", () => document.body.classList.remove("alt-held"));
 // Update marker nav when markers arrive from server
 window.__embedLogOnMarkers = () => {
     _updateMarkerNav();
