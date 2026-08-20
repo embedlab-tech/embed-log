@@ -348,15 +348,17 @@ Every record captured by the current version receives a session-global `sequence
 Read only a bounded page:
 
 ```bash
-embed-log sessions read latest --dir logs --limit 100
+embed-log sessions read latest --dir logs --limit 50
 embed-log sessions read latest --dir logs --after 100 --limit 50 --json
-embed-log sessions read latest --dir logs --source DUT_UART --last 20 --json
+embed-log sessions read latest --dir logs --source DUT_UART --last 20
 ```
 
-Forward reads default to 100 records and all limits are capped at 1000. `--after` is the global cursor even when `--source` filters the returned records. Selecting a configured virtual merge dynamically expands to its member sources while returned records retain their physical source, source-local index, and global sequence. Readers have exactly two output modes: concise text by default, or one compact structured envelope with `--json`:
+Forward reads default to 50 records and all limits are capped at 1000. `--after` is the global cursor even when `--source` filters the returned records. Selecting a configured virtual merge dynamically expands to its member sources while returned records retain their physical source, source-local index, and global sequence. `--max-bytes` defaults to 16 KiB (maximum 64 KiB) and `--max-message-bytes` defaults to 4 KiB; clipped messages are visibly marked.
+
+For an agent or human investigation, use concise text: it preserves attribution while making the evidence immediately readable. Prefer narrowing the query by session/source/search and then using `around`; a smaller byte cap alone does not make a broad noisy read relevant. Use `--json` only when an integration needs a cursor, ID, or stable structured field. JSON records are positional tuples, so the `fields` array deliberately defines their order:
 
 ```json
-{"session_id":"...","fields":["time","sequence","source","index","message"],"records":[["+12.453",719,"DUT_UART",428,"boot complete"]],"next_cursor":719,"truncated":false,"invalid_records":0}
+{"session_id":"...","fields":["time","sequence","source","index","message"],"records":[["+12.453",719,"DUT_UART",428,"boot complete"]],"next_cursor":719,"truncated":false,"invalid_records":0,"count":1,"clipped":0}
 ```
 
 Use `--time absolute` when wall-clock timestamps are required; relative time is the default. Raw stored objects are available through export/diagnostic paths, not reader format switches. Sessions captured before global sequencing fail with an actionable compatibility error instead of inventing cursors.
@@ -371,10 +373,12 @@ The total around window is capped at 1000 records. Sequence and source-local lin
 
 ### Reader output
 
-`sessions read`, `sessions around`, and `sessions search` intentionally expose only two formats:
+`sessions read` and `sessions around` intentionally expose only two formats:
 
-- default concise text: `+0.123 seq=1234 src=UART#42 | message`;
-- `--json`: one compact envelope with `session_id`, fixed `fields`, tuple `records`, cursor, truncation, and invalid-record metadata.
+- default concise text begins with metadata, for example `@session=SESSION next=1234 count=1 more=0 invalid=0 clipped=0`, followed by canonical lines such as `+0.123 seq=1234 src=UART#42 | message`;
+- `--json`: one compact envelope with `session_id`, fixed `fields`, tuple `records`, cursor, truncation, invalid-record, count, and clipping metadata.
+
+The metadata line is control data, not log evidence. `more=1` means a record or byte budget withheld eligible evidence. Reuse `next` only after refining the query or requesting another bounded page; it never advances beyond an unreturned record. `sessions search` still uses its existing concise lines/JSON envelope; its byte-budget and metadata behavior is planned separately.
 
 The stored `combined.jsonl` stream remains available through `sessions combined` and session export; it is not a reader format selector.
 Read the session-wide combined JSONL stream:
