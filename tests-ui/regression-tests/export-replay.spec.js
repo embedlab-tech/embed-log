@@ -158,7 +158,18 @@ test.describe('HTML export replay', () => {
       }).toBe(2999);
       await expect.poll(renderedCount).toBeLessThan(250);
 
-      await log.evaluate(el => { el.scrollTop = el.scrollHeight / 2; });
+      // A large jump must synchronously materialize the viewport. Waiting for
+      // another scroll/rAF used to leave a blank pane after a trackpad fling.
+      const immediateMiddle = await log.evaluate(el => {
+        el.scrollTop = el.scrollHeight / 2;
+        el.dispatchEvent(new Event('scroll'));
+        return [...el.querySelectorAll('.log-line')]
+          .map(node => Number(node.dataset.idx))
+          .filter(Number.isFinite);
+      });
+      expect(Math.min(...immediateMiddle)).toBeLessThanOrEqual(1500);
+      expect(Math.max(...immediateMiddle)).toBeGreaterThanOrEqual(1500);
+
       await expect.poll(async () => {
         const indices = await log.locator('.log-line').evaluateAll(nodes =>
           nodes.map(n => parseInt(n.dataset.idx, 10)).filter(Number.isFinite)

@@ -369,6 +369,7 @@ function _getVirtual(paneId) {
         visibleIndices: null,
         projectionFilter: undefined,
         projectionSourceLen: -1,
+        pendingOrdinal: null,
     };
     _virtualPanes.set(paneId, vp);
     return vp;
@@ -1035,13 +1036,34 @@ export function _linesSetupPane(id) {
 
         const firstOrdinal = Number.isFinite(vp.firstOrdinal) ? vp.firstOrdinal : 0;
         const lastOrdinal = Number.isFinite(vp.lastOrdinal) ? vp.lastOrdinal : firstOrdinal;
+        const firstVisible = Math.max(0, Math.floor(logEl.scrollTop / rowH));
+        const lastVisible = Math.min(totalCount - 1, Math.ceil((logEl.scrollTop + logEl.clientHeight) / rowH));
+
+        // A wheel/trackpad fling can move the viewport well outside the prior
+        // overscan window before the next animation frame. Render immediately
+        // in that case: leaving the old absolute rows in place produces a
+        // conspicuous blank pane until another scroll event arrives.
+        if (firstVisible < firstOrdinal || lastVisible > lastOrdinal) {
+            // Keep an already queued frame aligned with this immediate render.
+            vp.pendingOrdinal = midOrdinal;
+            const targetIdx = _rawIndexAt(id, vp, midOrdinal);
+            if (targetIdx !== undefined) _renderVirtualWindow(id, { targetIdx });
+            return;
+        }
+
         const rangeCenter = firstOrdinal + Math.floor((lastOrdinal - firstOrdinal) / 2);
         if (Math.abs(midOrdinal - rangeCenter) > OVERSCAN) {
+            // Coalesce to the newest scroll position. Capturing the first
+            // ordinal while a rAF is pending can render a stale window after a
+            // fast fling, briefly exposing an empty viewport.
+            vp.pendingOrdinal = midOrdinal;
             if (_pendingRaf.has(id)) return;
             _pendingRaf.set(id, true);
             requestAnimationFrame(() => {
                 _pendingRaf.delete(id);
-                const targetIdx = _rawIndexAt(id, vp, midOrdinal);
+                const ordinal = vp.pendingOrdinal;
+                vp.pendingOrdinal = null;
+                const targetIdx = Number.isFinite(ordinal) ? _rawIndexAt(id, vp, ordinal) : undefined;
                 if (targetIdx !== undefined) _renderVirtualWindow(id, { targetIdx });
             });
         }
