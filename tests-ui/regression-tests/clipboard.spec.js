@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import fs from 'node:fs';
-import { collectPageErrors, saveDownload, waitForRangePair } from './helpers.js';
+import { collectPageErrors, saveDownload, waitForLineContaining, waitForRangePair } from './helpers.js';
 
 const COPY_SHORTCUT = process.platform === 'darwin' ? 'Meta+C' : 'Control+C';
 
@@ -58,24 +58,53 @@ test.describe('clipboard UX', () => {
     expect(copied).toBe(raw);
   });
 
-// Scenario: Cmd/Ctrl+C copies exact selection to clipboard
+// Scenario: structured multi-line copy remains available
 //   Given the user selects a range in SENSOR_A
-//   When  they press the platform copy shortcut (Cmd/Ctrl+C)
-//   Then  the clipboard contains the selected text including SENSOR_A
+//   When they use the normal Copy action
+//   Then the clipboard contains the formatted selected evidence including SENSOR_A
 
-  test('platform shortcut copies exact selection', async ({ page }) => {
+  test('copy action copies an exact multi-line selection', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
 
     const { start, end } = await waitForRangePair(page, 'SENSOR_A', 'kind=prefix-cleanup', 'kind=timestamp-cleanup');
-    await start.click();
-    await end.click({ modifiers: ['Shift'] });
+    await page.evaluate(([startIdx, endIdx]) => {
+      window.__embedLogTestSelectRange?.('SENSOR_A', startIdx, endIdx);
+    }, [Number(await start.getAttribute('data-idx')), Number(await end.getAttribute('data-idx'))]);
+    await page.locator('#copy-SENSOR_A').click();
+    await expect.poll(() => readClipboard(page)).toContain('SENSOR_A');
+  });
+
+  // Scenario: a native selection inside one row bypasses structured line copy
+  // Given the user selects only a fragment of one rendered log line
+  // When they press Cmd/Ctrl+C
+  // Then the browser copies exactly that fragment, without pane/timestamp formatting.
+  test('platform shortcut preserves native single-line text selection', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await waitForLineContaining(page, 'SENSOR_A', 'kind=warning');
+
+    const selected = await page.locator('#log-SENSOR_A .log-line', { hasText: 'kind=warning' }).first().evaluate(line => {
+      const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) {
+        const start = node.textContent.indexOf('kind=');
+        if (start >= 0) {
+          const end = Math.min(node.textContent.length, start + 'kind=warning'.length);
+          const range = document.createRange();
+          range.setStart(node, start);
+          range.setEnd(node, end);
+          const selection = window.getSelection();
+          selection.removeAllRanges();
+          selection.addRange(range);
+          return selection.toString();
+        }
+      }
+      throw new Error('test log line did not contain selectable kind text');
+    });
 
     await page.keyboard.press(COPY_SHORTCUT);
-    const copied = await readClipboard(page);
-
-    expect(copied.trim().length).toBeGreaterThan(0);
-    expect(copied).toContain('SENSOR_A');
+    expect(await readClipboard(page)).toBe(selected);
   });
 
   // Clipboard buffer UI was removed in frontend refactoring.
