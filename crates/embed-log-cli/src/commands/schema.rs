@@ -635,7 +635,7 @@ mod tests {
         let arguments = value["arguments"].as_array().unwrap();
         let limit = arguments.iter().find(|arg| arg["id"] == "limit").unwrap();
         assert_eq!(limit["long"], "--limit");
-        assert_eq!(limit["default"], json!(["100"]));
+        assert_eq!(limit["default"], json!(["50"]));
         let time = arguments.iter().find(|arg| arg["id"] == "time").unwrap();
         assert_eq!(time["enum"], json!(["relative", "absolute"]));
     }

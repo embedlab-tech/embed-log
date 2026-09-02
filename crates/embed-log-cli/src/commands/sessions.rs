@@ -175,8 +175,14 @@ pub(crate) enum SessionsCommand {
         #[arg(long, conflicts_with_all = ["after", "limit"])]
         last: Option<usize>,
         /// Maximum records returned by forward pagination.
-        #[arg(long, default_value_t = 100)]
+        #[arg(long, default_value_t = DEFAULT_READ_LIMIT)]
         limit: usize,
+        /// Maximum UTF-8 bytes printed as evidence (including metadata).
+        #[arg(long, default_value_t = DEFAULT_EVIDENCE_BYTES)]
+        max_bytes: usize,
+        /// Maximum UTF-8 bytes in one rendered message.
+        #[arg(long, default_value_t = DEFAULT_MESSAGE_BYTES)]
+        max_message_bytes: usize,
         /// Timestamp shown in compact records.
         #[arg(long, value_enum, default_value_t = TimeDisplay::Relative)]
         time: TimeDisplay,
@@ -201,6 +207,12 @@ pub(crate) enum SessionsCommand {
         /// Number of combined records after the target.
         #[arg(long, default_value_t = 20)]
         after: usize,
+        /// Maximum UTF-8 bytes printed as evidence (including metadata).
+        #[arg(long, default_value_t = DEFAULT_EVIDENCE_BYTES)]
+        max_bytes: usize,
+        /// Maximum UTF-8 bytes in one rendered message.
+        #[arg(long, default_value_t = DEFAULT_MESSAGE_BYTES)]
+        max_message_bytes: usize,
         /// Timestamp shown in compact records.
         #[arg(long, value_enum, default_value_t = TimeDisplay::Relative)]
         time: TimeDisplay,
@@ -404,6 +416,8 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             after,
             last,
             limit,
+            max_bytes,
+            max_message_bytes,
             time,
             json,
             include_materialized_merges,
@@ -417,6 +431,8 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
                     after,
                     last,
                     limit,
+                    max_bytes,
+                    max_message_bytes,
                     time,
                     json,
                     include_materialized_merges,
@@ -429,6 +445,8 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
             sequence,
             before,
             after,
+            max_bytes,
+            max_message_bytes,
             time,
             json,
             include_materialized_merges,
@@ -441,6 +459,8 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
                     sequence,
                     before,
                     after,
+                    max_bytes,
+                    max_message_bytes,
                     time,
                     json,
                     include_materialized_merges,
@@ -498,6 +518,13 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
                         .to_rfc3339(),
                 ),
                 None => from,
+            };
+            // Search is an evidence reader: avoid an unbounded default while
+            // retaining --last and --count's distinct whole-stream behavior.
+            let limit = if last.is_none() && !count {
+                limit.or(Some(DEFAULT_SEARCH_LIMIT))
+            } else {
+                limit
             };
             let filters = SearchFilters::compile(
                 sessions,
@@ -815,6 +842,12 @@ pub(crate) fn count_markers_in_session(session_dir: &Path) -> usize {
 }
 
 const MAX_BOUNDED_RECORDS: usize = 1_000;
+const DEFAULT_READ_LIMIT: usize = 50;
+const DEFAULT_SEARCH_LIMIT: usize = 20;
+const DEFAULT_EVIDENCE_BYTES: usize = 16 * 1024;
+const MAX_EVIDENCE_BYTES: usize = 64 * 1024;
+const MIN_EVIDENCE_BYTES: usize = 256;
+const DEFAULT_MESSAGE_BYTES: usize = 4 * 1024;
 
 fn is_materialized_merge(record: &serde_json::Value) -> bool {
     record.get("source_kind").and_then(|value| value.as_str()) == Some("merge")
@@ -854,6 +887,8 @@ struct ReadOptions {
     after: Option<u64>,
     last: Option<usize>,
     limit: usize,
+    max_bytes: usize,
+    max_message_bytes: usize,
     time: TimeDisplay,
     json: bool,
     include_materialized_merges: bool,
@@ -863,6 +898,8 @@ struct AroundOptions {
     sequence: u64,
     before: usize,
     after: usize,
+    max_bytes: usize,
+    max_message_bytes: usize,
     time: TimeDisplay,
     json: bool,
     include_materialized_merges: bool,
@@ -872,6 +909,7 @@ fn read_session(dir: &Path, session_id: &str, options: ReadOptions) -> Result<()
     use std::io::{BufRead, BufReader};
 
     let cap = options.last.unwrap_or(options.limit);
+    validate_evidence_bytes(options.max_bytes, options.max_message_bytes)?;
     anyhow::ensure!(cap > 0, "--limit/--last must be greater than zero");
     anyhow::ensure!(
         cap <= MAX_BOUNDED_RECORDS,
@@ -994,12 +1032,15 @@ fn read_session(dir: &Path, session_id: &str, options: ReadOptions) -> Result<()
         next_cursor,
         invalid_records,
         None,
+        options.max_bytes,
+        options.max_message_bytes,
     )
 }
 
 fn around_session(dir: &Path, session_id: &str, options: AroundOptions) -> Result<()> {
     use std::io::{BufRead, BufReader};
 
+    validate_evidence_bytes(options.max_bytes, options.max_message_bytes)?;
     let context_size = options
         .before
         .checked_add(options.after)
@@ -1077,6 +1118,8 @@ fn around_session(dir: &Path, session_id: &str, options: AroundOptions) -> Resul
         Some(serde_json::json!({
             "sequence": target_sequence,
         })),
+        options.max_bytes,
+        options.max_message_bytes,
     )
 }
 
@@ -1111,6 +1154,19 @@ fn validated_sequence(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn validate_evidence_bytes(max_bytes: usize, max_message_bytes: usize) -> Result<()> {
+    anyhow::ensure!(
+        (MIN_EVIDENCE_BYTES..=MAX_EVIDENCE_BYTES).contains(&max_bytes),
+        "--max-bytes must be between {MIN_EVIDENCE_BYTES} and {MAX_EVIDENCE_BYTES}"
+    );
+    anyhow::ensure!(
+        max_message_bytes > 0 && max_message_bytes <= max_bytes,
+        "--max-message-bytes must be between 1 and --max-bytes"
+    );
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
 fn render_bounded_records(
     session: &SessionRecord,
     records: Vec<serde_json::Value>,
@@ -1120,29 +1176,74 @@ fn render_bounded_records(
     next_cursor: u64,
     invalid_records: usize,
     target: Option<serde_json::Value>,
+    max_bytes: usize,
+    max_message_bytes: usize,
 ) -> Result<()> {
-    if json_output {
-        let mut output = serde_json::json!({
-            "session_id": session.id,
-            "fields": ["time", "sequence", "source", "index", "message"],
-            "records": records.iter().map(|record| compact_tuple(record, time)).collect::<Vec<_>>(),
-            "next_cursor": next_cursor,
-            "truncated": truncated,
-            "invalid_records": invalid_records,
-        });
-        if let Some(target) = target {
-            output["target"] = target;
+    let rendered: Vec<_> = records
+        .iter()
+        .map(|record| {
+            let (message, clipped) = bounded_message(record, max_message_bytes);
+            (record, message, clipped)
+        })
+        .collect();
+    let mut visible = rendered.len();
+    loop {
+        let omitted = visible < rendered.len();
+        let more = truncated || omitted;
+        let cursor = if omitted {
+            rendered[..visible]
+                .last()
+                .and_then(|(record, _, _)| record.get("sequence"))
+                .and_then(|value| value.as_u64())
+                .unwrap_or(next_cursor)
+        } else {
+            next_cursor
+        };
+        let clipped = rendered[..visible]
+            .iter()
+            .filter(|(_, _, clipped)| *clipped)
+            .count();
+        let text_header = format!("@session={} next={cursor} count={visible} more={} invalid={invalid_records} clipped={clipped}", session.id, u8::from(more));
+        let output = if json_output {
+            let mut output = serde_json::json!({
+                "session_id": session.id,
+                "fields": ["time", "sequence", "source", "index", "message"],
+                "records": rendered[..visible].iter().map(|(record, message, _)| compact_tuple_with_message(record, time, message)).collect::<Vec<_>>(),
+                "next_cursor": cursor,
+                "truncated": more,
+                "invalid_records": invalid_records,
+                "count": visible,
+                "clipped": clipped,
+            });
+            if let Some(target) = &target {
+                output["target"] = target.clone();
+            }
+            serde_json::to_string(&output)?
+        } else {
+            let mut output = text_header;
+            for (record, message, _) in &rendered[..visible] {
+                output.push('\n');
+                output.push_str(&compact_text_with_message(record, time, message));
+            }
+            output
+        };
+        if output.len() <= max_bytes || visible == 0 {
+            println!("{output}");
+            return Ok(());
         }
-        println!("{}", serde_json::to_string(&output)?);
-    } else {
-        for record in &records {
-            println!("{}", compact_text(record, time));
-        }
+        visible -= 1;
     }
-    Ok(())
 }
 
 fn compact_tuple(record: &serde_json::Value, time: TimeDisplay) -> serde_json::Value {
+    compact_tuple_with_message(record, time, &compact_message(record))
+}
+
+fn compact_tuple_with_message(
+    record: &serde_json::Value,
+    time: TimeDisplay,
+    message: &str,
+) -> serde_json::Value {
     serde_json::Value::Array(vec![
         serde_json::json!(compact_time(record, time).unwrap_or_default()),
         record
@@ -1157,11 +1258,19 @@ fn compact_tuple(record: &serde_json::Value, time: TimeDisplay) -> serde_json::V
             .get("line_idx")
             .cloned()
             .unwrap_or(serde_json::Value::Null),
-        serde_json::json!(compact_message(record)),
+        serde_json::json!(message),
     ])
 }
 
 fn compact_text(record: &serde_json::Value, time: TimeDisplay) -> String {
+    compact_text_with_message(record, time, &compact_message(record))
+}
+
+fn compact_text_with_message(
+    record: &serde_json::Value,
+    time: TimeDisplay,
+    message: &str,
+) -> String {
     let sequence = record
         .get("sequence")
         .and_then(|value| value.as_u64())
@@ -1175,10 +1284,21 @@ fn compact_text(record: &serde_json::Value, time: TimeDisplay) -> String {
         .and_then(|value| value.as_u64())
         .map_or_else(|| source.to_string(), |index| format!("{source}#{index}"));
     let time = compact_time(record, time).unwrap_or_default();
-    format!(
-        "{time} seq={sequence} src={source} | {}",
-        compact_message(record)
-    )
+    format!("{time} seq={sequence} src={source} | {}", message)
+}
+
+fn bounded_message(record: &serde_json::Value, max_bytes: usize) -> (String, bool) {
+    let message = compact_message(record);
+    if message.len() <= max_bytes {
+        return (message, false);
+    }
+    let suffix = format!("… [clipped original_bytes={}]", message.len());
+    let keep = max_bytes.saturating_sub(suffix.len());
+    let mut end = keep.min(message.len());
+    while end > 0 && !message.is_char_boundary(end) {
+        end -= 1;
+    }
+    (format!("{}{}", &message[..end], suffix), true)
 }
 
 fn compact_message(record: &serde_json::Value) -> String {
@@ -1190,6 +1310,8 @@ fn compact_message(record: &serde_json::Value) -> String {
             .unwrap_or(""),
         &clock,
     )
+    .replace('\r', "\\r")
+    .replace('\n', "\\n")
 }
 
 fn compact_time(record: &serde_json::Value, time: TimeDisplay) -> Option<String> {

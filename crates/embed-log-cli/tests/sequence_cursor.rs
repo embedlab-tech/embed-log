@@ -232,7 +232,9 @@ fn global_sequence_bounded_reads_context_and_rotation() {
     );
     assert!(text.status.success());
     let text = String::from_utf8(text.stdout).unwrap();
-    assert!(text.starts_with('+'), "{text}");
+    assert!(text.starts_with("@session="), "{text}");
+    assert!(text.contains("next=1 count=1 more=1"), "{text}");
+    assert!(text.contains("\n+"), "{text}");
     assert!(text.contains("seq=1"), "{text}");
     assert!(text.contains("src="), "{text}");
 

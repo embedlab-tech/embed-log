@@ -38,8 +38,8 @@ mod tests {
             .nth(1)
             .is_some_and(|line| line.starts_with("description:")));
         assert!(SKILL.contains("embed-log schema"));
-        assert!(SKILL.contains("embed-log sessions read"));
-        assert!(!SKILL.contains("watch"));
+        assert!(SKILL.contains("sessions summary|search|read|around"));
+        assert!(SKILL.contains("watch add/wait"));
         assert!(SKILL.ends_with('\n'));
     }
 }
