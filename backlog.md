@@ -399,6 +399,45 @@ The frontend already has a per-pane Wrap toggle and renders each pane in its own
 
 ---
 
+## 6. Fix selective copying and restore the native context menu
+
+### Goal
+
+Fix frontend copying of structured/selective line selections through the copy popup actions, and allow users to right-click log text and use the browser's normal context menu, especially the native Copy action.
+
+The current selection implementation combines native browser text selection with application-managed complete-line selections. It exposes per-pane popup actions in `frontend/selection.js`, including Exact/All/selected-pane scopes and Copy, while also handling `Ctrl+C`/`Cmd+C` globally. This interaction needs to be made reliable rather than forcing users through a broken popup path or custom-only copying flow.
+
+### Expected behavior
+
+- Selecting one or more complete log lines and pressing the popup's Copy action places exactly the selected text on the clipboard.
+- Exact, all-context, and selected-pane scopes copy the same records that the popup count and token estimate describe.
+- Copying preserves the intended timestamp/message formatting and line order.
+- Copy works for live logs, replayed logs, virtualized rows, long lines, filtered views, and exported HTML sessions.
+- Clipboard API failures provide a visible fallback/error instead of silently doing nothing.
+- Right-clicking a log line or a native text selection opens the browser/OS context menu.
+- The native context menu's Copy action copies the user's actual text selection, including a partial selection within one line, without being replaced by an application-managed whole-line selection unexpectedly.
+- Right-clicking should not clear the selection before the context menu opens, and using the menu should not alter unrelated pane selections.
+- Existing left-click, drag, Shift-click, Ctrl/Cmd-click, popup actions, keyboard shortcuts, markers, and selection export behavior remain compatible.
+
+### Implementation notes
+
+- Trace the full popup path from `_selectionSetupPane` and `_syncSelectionActions` through `_copy`, `_copyExact`, `_copyContext`, `_pendingCopyText`, and `_copyText` in `frontend/selection.js`.
+- Distinguish native `window.getSelection()` from structured `state.selected` consistently; do not let a stale structured selection override a newer native text selection.
+- Avoid preventing `contextmenu` or `copy` browser events unless there is a demonstrated reason. If event handling is required, preserve native behavior when the user has a DOM text range and only apply structured copying for an explicit application selection.
+- Ensure popup buttons remain reachable and correctly scoped after virtualized rerenders, tab changes, pane unwrap/wrap changes, and selection clearing.
+- Keep clipboard formatting in one tested function so the popup, keyboard shortcut, and any future context-menu integration cannot drift.
+- Do not implement a custom right-click menu in this backlog item; the requirement is to restore the regular browser context menu first.
+
+### Acceptance criteria
+
+- Automated frontend tests reproduce the reported popup-copy failure and pass for single-line, multi-line, exact-scope, and context-scope selections.
+- The clipboard contains the expected text, including separators and timestamps where configured, with no HTML or ANSI artifacts.
+- Native right-click and browser Copy work on partial and complete text selections.
+- Context-menu interaction does not trigger accidental line selection, popup dismissal, navigation, or log clearing.
+- Copy behavior is covered in live and exported-session/regression tests across Chromium-supported environments.
+
+---
+
 ## Suggested delivery order
 
 1. Implement configured watcher persistence and the Events tab.
@@ -406,6 +445,7 @@ The frontend already has a per-pane Wrap toggle and renders each pane in its own
 3. Add the simple terminal profile, initially with built-in parsers and then the selected plugin mechanism.
 4. Design and implement measurement extraction and native charts after the watcher analysis pipeline is stable.
 5. Horizontal pane scrolling is a small independent frontend improvement and can ship in any release without waiting for the larger pipeline work.
+6. Fix selective copying and restore the native context menu, then add focused frontend regression coverage.
 
 Charts are listed as the second product idea but intentionally remain a placeholder. Their implementation should follow the shared analysis/event foundations rather than introducing an unrelated frontend-only parser.
 
