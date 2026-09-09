@@ -362,12 +362,50 @@ Prefer reusing the existing Rust TUI client and backend with a single-pane “te
 
 ---
 
+## 5. Independent horizontal scrolling for frontend panes
+
+### Goal
+
+Allow every browser log pane to scroll horizontally when word wrapping is disabled, so long lines remain readable without changing the width or position of neighboring panes.
+
+The frontend already has a per-pane Wrap toggle and renders each pane in its own `.log-area`, but `frontend/viewer.css` currently sets `overflow-x: hidden`. This improvement should extend the existing pane behavior rather than add one shared scrollbar for an entire tab.
+
+### Expected behavior
+
+- Each pane owns an independent horizontal scrollbar and `scrollLeft` position.
+- No-wrap mode preserves each line on one row and exposes its complete width through horizontal scrolling.
+- Wrap mode continues wrapping within the pane and does not leave a misleading horizontal overflow area.
+- Vertical scrolling, follow-tail behavior, filtering, selection, markers, synchronized navigation, and virtualized rendering continue to work.
+- Appending records or jumping to the bottom must not unexpectedly reset the user's horizontal position.
+- One long line must not resize the pane, tab, toolbar, or neighboring pane.
+- Live browser sessions and self-contained exported HTML behave the same way.
+- Trackpad/touch horizontal gestures and the native scrollbar should work without custom gesture interception. Keyboard support may use the browser's native behavior initially.
+
+### Implementation notes
+
+- Change the pane-local overflow policy rather than applying horizontal overflow to `.pane-body` or the whole page.
+- Verify the absolute positioning used by `.log-window` and virtualized `.log-line` elements still contributes the correct horizontal scroll width; add an explicit content/minimum width wrapper if native overflow alone is insufficient.
+- Decide whether toggling Wrap resets horizontal position to zero or preserves and restores the prior no-wrap position. Preserving a per-pane position is preferable if it remains predictable.
+- Keep horizontal positions independent; synchronized timestamp navigation should not synchronize horizontal scrolling.
+
+### Acceptance criteria
+
+- A line wider than its pane can be scrolled to its final character in no-wrap mode.
+- Two panes in one tab can hold different horizontal positions.
+- Scrolling or appending vertically does not reset horizontal position.
+- Enabling Wrap removes the need for horizontal scrolling without breaking row-height virtualization.
+- Filtering, selecting, copying, marking, and jumping to a record still target the correct line after horizontal scrolling.
+- The behavior passes focused frontend tests in both live and exported-session layouts.
+
+---
+
 ## Suggested delivery order
 
 1. Implement configured watcher persistence and the Events tab.
 2. Perform the decoder ABI/runtime design spike and select a safe plugin boundary.
 3. Add the simple terminal profile, initially with built-in parsers and then the selected plugin mechanism.
 4. Design and implement measurement extraction and native charts after the watcher analysis pipeline is stable.
+5. Horizontal pane scrolling is a small independent frontend improvement and can ship in any release without waiting for the larger pipeline work.
 
 Charts are listed as the second product idea but intentionally remain a placeholder. Their implementation should follow the shared analysis/event foundations rather than introducing an unrelated frontend-only parser.
 
