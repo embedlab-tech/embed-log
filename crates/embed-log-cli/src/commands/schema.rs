@@ -63,7 +63,7 @@ fn capability_index(root: &Command) -> Value {
         "topics": ["config", "errors"],
         "interfaces": ["browser", "tui", "http", "websocket", "cli"],
         "source_types": ["uart", "file", "udp"],
-        "parser_types": ["text", "hex-coap", "slip-coap", "zephyr-dict"],
+        "parser_types": ["text", "hex-coap", "slip-coap", "zephyr-dict", "zephyr-dict-framed"],
         "config_version": 2,
         "defaults": {
             "endpoint": "127.0.0.1:18080",
@@ -589,7 +589,7 @@ fn config_capabilities() -> Value {
         "strict_unknown_fields": true,
         "top_level": ["version", "server", "logs", "sources", "ui"],
         "source_types": ["uart", "file", "udp"],
-        "parser_types": ["text", "hex-coap", "slip-coap", "zephyr-dict"],
+        "parser_types": ["text", "hex-coap", "slip-coap", "zephyr-dict", "zephyr-dict-framed"],
         "default_endpoint": "127.0.0.1:18080",
         "diagnostic_command": "embed-log doctor --config <PATH> --json",
         "documentation": "docs/configuration.md",
@@ -624,6 +624,16 @@ mod tests {
         }
         assert!(!commands.iter().any(|value| value == "hello"));
         assert_eq!(first["limits"]["read_records_max"], 1000);
+    }
+
+    #[test]
+    fn record_framed_dictionary_parser_is_discoverable() {
+        for value in [capability_index(&Cli::command()), config_capabilities()] {
+            assert!(value["parser_types"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("zephyr-dict-framed")));
+        }
     }
 
     #[test]

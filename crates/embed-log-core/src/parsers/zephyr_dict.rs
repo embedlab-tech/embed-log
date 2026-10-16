@@ -20,6 +20,8 @@ const MSG_TYPE_NORMAL: u8 = 0;
 const MSG_TYPE_DROPPED: u8 = 1;
 const LOG_HEX_SEP: &str = "##ZLOGV1##";
 const LOG_HEX_SEP_BYTES: &[u8] = LOG_HEX_SEP.as_bytes();
+const RECORD_HEX_SEP: &[u8] = b"##ZLOGV2##";
+const MAX_RECORD_HEX_LEN: usize = 128 * 1024;
 /// Minimum trailing lowercase-hex run (chars) to treat as a dictionary burst without
 /// an explicit `##ZLOGV1##` prefix (Node sometimes omits the marker between bursts).
 const MIN_HEURISTIC_HEX_LEN: usize = 20;
@@ -42,6 +44,9 @@ pub struct ZephyrDictParser {
     hex_parse_stopped: bool,
     dict_buf: Vec<u8>,
     reported_load_error: bool,
+    allow_unframed_hex: bool,
+    record: Option<Vec<u8>>,
+    record_invalid: bool,
 }
 
 enum LoadState {
@@ -51,6 +56,11 @@ enum LoadState {
 
 impl ZephyrDictParser {
     pub fn new(database_path: &str) -> Self {
+        Self::with_unframed_hex(database_path, true)
+    }
+
+    /// Disable legacy HEX guessing when attaching to a record-framed UART.
+    pub fn with_unframed_hex(database_path: &str, allow_unframed_hex: bool) -> Self {
         let state = match Database::load(database_path) {
             Ok(db) => LoadState::Ready(db),
             Err(e) => {
@@ -58,6 +68,8 @@ impl ZephyrDictParser {
                 LoadState::Failed(e)
             }
         };
+        let allow_unframed_hex = allow_unframed_hex
+            && !matches!(&state, LoadState::Ready(db) if db.shell_record_framing);
         Self {
             state,
             mux_mode: MuxMode::Text,
@@ -67,6 +79,9 @@ impl ZephyrDictParser {
             hex_parse_stopped: false,
             dict_buf: Vec::new(),
             reported_load_error: false,
+            allow_unframed_hex,
+            record: None,
+            record_invalid: false,
         }
     }
 
@@ -91,6 +106,19 @@ impl ZephyrDictParser {
     }
 
     fn try_split_on_separator(&mut self, lines: &mut Vec<String>) {
+        // V2 is a line-framed record, not an inline shell substring.
+        if self.text_buf == RECORD_HEX_SEP {
+            self.text_buf.clear();
+            self.dict_buf.clear();
+            self.reset_hex_collect();
+            self.allow_unframed_hex = false;
+            self.record = Some(Vec::new());
+            self.record_invalid = false;
+            return;
+        }
+        if !self.allow_unframed_hex {
+            return;
+        }
         let Some(pos) = find_subslice(&self.text_buf, LOG_HEX_SEP_BYTES) else {
             return;
         };
@@ -201,12 +229,12 @@ impl ZephyrDictParser {
             }
             return;
         }
-        if is_lower_hex(b) {
+        if self.allow_unframed_hex && is_lower_hex(b) {
             self.try_flush_prompt_before_hex(lines);
         }
         self.text_buf.push(b);
         self.try_split_on_separator(lines);
-        if self.mux_mode == MuxMode::Text {
+        if self.allow_unframed_hex && self.mux_mode == MuxMode::Text {
             self.try_promote_hex_text_buf(lines);
         }
     }
@@ -238,7 +266,45 @@ impl ZephyrDictParser {
         lines
     }
 
+    fn process_record_byte(&mut self, b: u8, lines: &mut Vec<String>) {
+        if b != b'\n' {
+            let record = self.record.as_mut().unwrap();
+            if record.len() >= MAX_RECORD_HEX_LEN || (!b.is_ascii_hexdigit() && b != b'\r') {
+                self.record_invalid = true;
+            } else if !self.record_invalid {
+                record.push(b);
+            }
+            return;
+        }
+        let mut record = self.record.take().unwrap();
+        if record.last() == Some(&b'\r') {
+            record.pop();
+        }
+        let bytes = (!self.record_invalid
+            && record.len() % 2 == 0
+            && record.iter().all(u8::is_ascii_hexdigit))
+        .then(|| {
+            std::str::from_utf8(&record)
+                .ok()
+                .and_then(|hex| unhexify_chunk(hex, 2))
+        })
+        .flatten();
+        if let (Some(bytes), LoadState::Ready(db)) = (bytes, &self.state) {
+            if let TakeResult::Consumed { len, mut output } = take_one_message(&bytes, db) {
+                if len == bytes.len() {
+                    lines.append(&mut output);
+                    return;
+                }
+            }
+        }
+        lines.push("[zephyr-dict: malformed or incomplete ##ZLOGV2## record discarded]".into());
+    }
+
     fn process_byte(&mut self, b: u8, lines: &mut Vec<String>) {
+        if self.record.is_some() {
+            self.process_record_byte(b, lines);
+            return;
+        }
         match self.mux_mode {
             MuxMode::Text => self.handle_text_byte(b, lines),
             MuxMode::Hex => self.handle_hex_byte(b, lines),
@@ -1012,6 +1078,7 @@ struct Database {
     little_endian: bool,
     arch: String,
     timestamp_64bit: bool,
+    shell_record_framing: bool,
     /// Epoch seconds at/above which log timestamps are shown as UTC.
     earliest_valid_epoch: u64,
     /// source_id (as it appears in the JSON, i.e. its decimal string) -> name
@@ -1079,6 +1146,11 @@ impl Database {
             little_endian: raw.target.little_endianness.unwrap_or(true),
             arch: raw.arch,
             timestamp_64bit: raw.kconfigs.contains_key("CONFIG_LOG_TIMESTAMP_64BIT"),
+            shell_record_framing: raw
+                .kconfigs
+                .get("CONFIG_SHELL_LOG_DICTIONARY_HEX")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
             earliest_valid_epoch,
             log_instances,
             string_mappings,
@@ -1244,6 +1316,137 @@ mod tests {
         msg.extend_from_slice(&package);
         msg.extend_from_slice(extra_data);
         msg
+    }
+
+    fn record_frame(msg: &[u8]) -> Vec<u8> {
+        let hex: String = msg.iter().map(|b| format!("{b:02x}")).collect();
+        format!("##ZLOGV2##{hex}\r\n").into_bytes()
+    }
+
+    #[test]
+    fn framed_console_and_records_survive_every_transport_split() {
+        let dir = temp_dir("record-splits");
+        let db = write_test_db(&dir, &[(0x1000, "dictionary record")]);
+        let msg = encode_normal_message(3, 1, 42, 0x1000, &[], &[]);
+        let mut stream = b"outside> help\r\ncomplete response\r\n".to_vec();
+        stream.extend(record_frame(&msg));
+        stream.extend(b"deadbeef\r\n0123456789abcdef0123456789abcdef\r\n");
+        stream.extend(record_frame(&msg));
+        for split in 0..=stream.len() {
+            let mut parser = ZephyrDictParser::with_unframed_hex(&db, false);
+            let mut lines = parser.feed(&stream[..split]);
+            lines.extend(parser.feed(&stream[split..]));
+            assert_eq!(lines.len(), 6, "split={split}: {lines:?}");
+            assert_eq!(lines[0], "outside> help");
+            assert_eq!(lines[1], "complete response");
+            assert!(lines[2].contains("dictionary record"));
+            assert_eq!(lines[3], "deadbeef");
+            assert_eq!(lines[4], "0123456789abcdef0123456789abcdef");
+            assert!(lines[5].contains("dictionary record"));
+        }
+    }
+
+    #[test]
+    fn record_is_not_emitted_until_the_delimiter_arrives() {
+        let dir = temp_dir("record-atomic");
+        let db = write_test_db(&dir, &[(0x1000, "hello")]);
+        let msg = encode_normal_message(3, 1, 42, 0x1000, &[], &[]);
+        let frame = record_frame(&msg);
+        let mut parser = ZephyrDictParser::new(&db);
+        for byte in &frame[..frame.len() - 1] {
+            assert!(parser.feed(&[*byte]).is_empty());
+        }
+        assert_eq!(parser.feed(b"\n").len(), 1);
+        assert_eq!(parser.feed(b"deadbeef\n"), vec!["deadbeef"]);
+    }
+
+    #[test]
+    fn dictionary_selects_record_mode_before_any_uart_data() {
+        let dir = temp_dir("record-metadata");
+        let path = write_test_db(&dir, &[]);
+        let mut db: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        db["kconfigs"]["CONFIG_SHELL_LOG_DICTIONARY_HEX"] = serde_json::json!(true);
+        std::fs::write(&path, serde_json::to_vec(&db).unwrap()).unwrap();
+        let mut parser = ZephyrDictParser::new(&path);
+        assert_eq!(
+            parser.feed(b"deadbeef0123456789\n"),
+            vec!["deadbeef0123456789"]
+        );
+        assert!(
+            parser.feed(&record_frame(&[MSG_TYPE_DROPPED, 2, 0]))[0].contains("2 messages dropped")
+        );
+    }
+
+    #[test]
+    fn strict_record_mode_preserves_hex_before_any_marker() {
+        let dir = temp_dir("record-attach");
+        let db = write_test_db(&dir, &[]);
+        let mut parser = ZephyrDictParser::with_unframed_hex(&db, false);
+        assert_eq!(
+            parser.feed(b"0123456789abcdef0123456789abcdef\n"),
+            vec!["0123456789abcdef0123456789abcdef"]
+        );
+        assert_eq!(
+            parser.feed(b"outside> print ##ZLOGV2##\n"),
+            vec!["outside> print ##ZLOGV2##"]
+        );
+    }
+
+    #[test]
+    fn invalid_records_report_once_and_recover_at_next_frame() {
+        let dir = temp_dir("record-invalid");
+        let db = write_test_db(&dir, &[(0x1000, "recovered")]);
+        let msg = encode_normal_message(3, 1, 42, 0x1000, &[], &[]);
+        let valid = record_frame(&msg);
+        let mut odd = valid.clone();
+        odd.insert(10, b'0');
+        let mut embedded_cr = valid.clone();
+        embedded_cr.insert(14, b'\r');
+        let mut extra_packet = msg.clone();
+        extra_packet.extend(&msg);
+        let invalid = vec![
+            b"##ZLOGV2##help\n".to_vec(),
+            b"##ZLOGV2##\n".to_vec(),
+            b"##ZLOGV2##0030\n".to_vec(),
+            odd,
+            embedded_cr,
+            record_frame(&extra_packet),
+        ];
+        for frame in invalid {
+            let mut parser = ZephyrDictParser::new(&db);
+            let lines = parser.feed(&frame);
+            assert_eq!(lines.len(), 1, "{lines:?}");
+            assert!(lines[0].contains("record discarded"), "{lines:?}");
+            assert_eq!(parser.feed(&valid).len(), 1);
+            assert_eq!(parser.feed(b"deadbeef\n"), vec!["deadbeef"]);
+        }
+    }
+
+    #[test]
+    fn oversized_record_is_bounded_and_next_record_recovers() {
+        let dir = temp_dir("record-limit");
+        let db = write_test_db(&dir, &[(0x1000, "next")]);
+        let mut parser = ZephyrDictParser::new(&db);
+        assert!(parser.feed(b"##ZLOGV2##").is_empty());
+        assert!(parser
+            .feed(&vec![b'0'; MAX_RECORD_HEX_LEN + 1024])
+            .is_empty());
+        assert!(parser.record.as_ref().unwrap().len() <= MAX_RECORD_HEX_LEN);
+        assert!(parser.feed(b"\n")[0].contains("record discarded"));
+        let msg = encode_normal_message(3, 1, 42, 0x1000, &[], &[]);
+        assert_eq!(parser.feed(&record_frame(&msg)).len(), 1);
+    }
+
+    #[test]
+    fn framed_drop_record_and_plain_console_are_separate() {
+        let dir = temp_dir("record-drop");
+        let db = write_test_db(&dir, &[]);
+        let mut parser = ZephyrDictParser::new(&db);
+        let lines = parser.feed(&record_frame(&[MSG_TYPE_DROPPED, 3, 0]));
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains('3'));
+        assert_eq!(parser.feed(b"cafebabe\r\n"), vec!["cafebabe"]);
     }
 
     fn feed_hex(parser: &mut ZephyrDictParser, msg: &[u8]) -> Vec<String> {

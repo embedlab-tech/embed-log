@@ -18,8 +18,9 @@ pub fn create_parser(parser: &ParserConfig) -> Box<dyn StreamParser> {
         "text" => Box::new(TextParser::new()),
         "hex-coap" => Box::new(HexCoapParser::new()),
         "slip-coap" => Box::new(SlipCoapParser::new()),
-        "zephyr-dict" => Box::new(ZephyrDictParser::new(
+        "zephyr-dict" | "zephyr-dict-framed" => Box::new(ZephyrDictParser::with_unframed_hex(
             parser.database.as_deref().unwrap_or_default(),
+            parser.parser_type != "zephyr-dict-framed",
         )),
         _ => {
             tracing::warn!(

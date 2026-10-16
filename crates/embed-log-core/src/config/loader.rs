@@ -494,10 +494,10 @@ fn validate_config(config: &mut AppConfig, config_path: &Path) -> Result<(), Con
         let parser_type = &src.parser.parser_type;
         if !matches!(
             parser_type.as_str(),
-            "text" | "hex-coap" | "slip-coap" | "zephyr-dict"
+            "text" | "hex-coap" | "slip-coap" | "zephyr-dict" | "zephyr-dict-framed"
         ) {
             return Err(ConfigError::validation(format!(
-                "{}.parser.type unsupported: {parser_type:?} (use 'text', 'hex-coap', 'slip-coap', or 'zephyr-dict')",
+                "{}.parser.type unsupported: {parser_type:?} (use 'text', 'hex-coap', 'slip-coap', 'zephyr-dict', or 'zephyr-dict-framed')",
                 ctx()
             )));
         }
@@ -507,7 +507,7 @@ fn validate_config(config: &mut AppConfig, config_path: &Path) -> Result<(), Con
                 ctx()
             )));
         }
-        if parser_type == "zephyr-dict" {
+        if matches!(parser_type.as_str(), "zephyr-dict" | "zephyr-dict-framed") {
             let db = src.parser.database.as_deref().unwrap_or("");
             if db.trim().is_empty() {
                 return Err(ConfigError::validation(format!(
@@ -1063,6 +1063,30 @@ tabs:
         let err = load_config(&path).unwrap_err().to_string();
         assert!(err.contains("parser.database is required"), "{err}");
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn framed_dictionary_parser_validates_and_resolves_database() {
+        let path = std::env::temp_dir().join("zephyr-dict-framed-test.yml");
+        let yaml = "version: 2\nsources:\n  DUT:\n    type: uart\n    path: /dev/ttyUSB0\n    parser:\n      type: zephyr-dict-framed\n      database: dictionary.json\n";
+        std::fs::write(&path, yaml).unwrap();
+        let cfg = load_config(&path).unwrap();
+        assert_eq!(cfg.sources[0].parser.parser_type, "zephyr-dict-framed");
+        assert_eq!(
+            cfg.sources[0].parser.database.as_deref(),
+            Some(
+                path.parent()
+                    .unwrap()
+                    .join("dictionary.json")
+                    .display()
+                    .to_string()
+                    .as_str()
+            )
+        );
+        std::fs::write(&path, yaml.replace("      database: dictionary.json\n", "")).unwrap();
+        let err = load_config(&path).unwrap_err().to_string();
+        assert!(err.contains("parser.database is required"), "{err}");
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]
