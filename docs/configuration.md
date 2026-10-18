@@ -152,7 +152,27 @@ sources:
       database: build/zephyr/log_dictionary.json
 ```
 
+`zephyr-dict` decodes standard Zephyr v3 **binary** dictionary records. For UART,
+select `CONFIG_LOG_BACKEND_UART_OUTPUT_DICTIONARY_BIN=y` in the firmware. No
+additional framing, escaping, or checksums are introduced by the parser.
+
+For ASCII HEX dictionary output (`CONFIG_LOG_BACKEND_UART_OUTPUT_DICTIONARY_HEX=y`),
+use `type: zephyr-dict-hex` instead. This retains the existing HEX decoder.
+**Migration:** configurations that used `zephyr-dict` for HEX in earlier versions
+must change that name to `zephyr-dict-hex`; the formats are not auto-detected.
+
 The database path resolves relative to the configuration file and must match the firmware build that produced the logs.
+
+The binary parser also preserves console text, ANSI sequences, and UTF-8 between
+records. Firmware must serialize complete records with console output; the parser
+cannot repair byte-level interleaving. Once a record is recognized, its declared
+length determines its end, including arbitrary binary hexdump data.
+
+Binary acquisition is heuristic: attaching midway through a record or byte loss
+can discard initial data, and recovery is not guaranteed for arbitrary damaged
+streams or binary console replies. Drop records alone do not establish initial
+synchronization. Incomplete candidates wait for more input, buffers are bounded,
+and detectable decode failures are reported.
 
 ### File tail
 
@@ -165,7 +185,7 @@ sources:
 
 The source creates the file if missing, starts at its current end, and emits appended lines.
 
-Supported backend parser types are `text`, `hex-coap`, `slip-coap`, and `zephyr-dict`.
+Supported backend parser types are `text`, `hex-coap`, `slip-coap`, `zephyr-dict` (binary), and `zephyr-dict-hex`.
 
 ## UI layout
 

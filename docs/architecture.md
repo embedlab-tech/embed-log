@@ -128,9 +128,10 @@ bytes/datagram ──▶ StreamParser::feed(&[u8]) ──▶ Vec<String>
 | `text` | UART, UDP, file | UTF-8-ish line splitting with buffering. |
 | `hex-coap` | UART, UDP, file | Replaces textual hexadecimal CoAP packets with a readable decode. |
 | `slip-coap` | UART only | Decodes SLIP-framed UDP datagrams carrying CoAP messages. |
-| `zephyr-dict` | Any source | Decodes Zephyr dictionary-logging binary messages against `parser.database`. |
+| `zephyr-dict` | Any source | Decodes standard Zephyr v3 dictionary binary records, preserving console text between records. Requires `parser.database`. |
+| `zephyr-dict-hex` | Any source | Existing ASCII HEX dictionary decoder (including `##ZLOGV1##`); requires `parser.database`. |
 
-Config validation rejects `slip-coap` on non-UART sources and `zephyr-dict` without `parser.database` set.
+Config validation rejects `slip-coap` on non-UART sources and either dictionary parser without `parser.database` set.
 
 ## HTTP/WebSocket API
 

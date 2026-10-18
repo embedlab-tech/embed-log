@@ -1,0 +1,15 @@
+# Standard Zephyr binary dictionary records, optionally mixed with console text.
+# Firmware must serialize complete records; no custom framing is required.
+version: 2
+server:
+  listen: 127.0.0.1:18080
+logs:
+  dir: logs
+sources:
+  DUT:
+    type: uart
+    path: /dev/ttyUSB0
+    baud: 115200
+    parser:
+      type: zephyr-dict
+      database: ../firmware/build/zephyr/log_dictionary.json

@@ -494,10 +494,10 @@ fn validate_config(config: &mut AppConfig, config_path: &Path) -> Result<(), Con
         let parser_type = &src.parser.parser_type;
         if !matches!(
             parser_type.as_str(),
-            "text" | "hex-coap" | "slip-coap" | "zephyr-dict"
+            "text" | "hex-coap" | "slip-coap" | "zephyr-dict" | "zephyr-dict-hex"
         ) {
             return Err(ConfigError::validation(format!(
-                "{}.parser.type unsupported: {parser_type:?} (use 'text', 'hex-coap', 'slip-coap', or 'zephyr-dict')",
+                "{}.parser.type unsupported: {parser_type:?} (use 'text', 'hex-coap', 'slip-coap', 'zephyr-dict', or 'zephyr-dict-hex')",
                 ctx()
             )));
         }
@@ -507,7 +507,7 @@ fn validate_config(config: &mut AppConfig, config_path: &Path) -> Result<(), Con
                 ctx()
             )));
         }
-        if parser_type == "zephyr-dict" {
+        if matches!(parser_type.as_str(), "zephyr-dict" | "zephyr-dict-hex") {
             let db = src.parser.database.as_deref().unwrap_or("");
             if db.trim().is_empty() {
                 return Err(ConfigError::validation(format!(
@@ -1063,6 +1063,24 @@ tabs:
         let err = load_config(&path).unwrap_err().to_string();
         assert!(err.contains("parser.database is required"), "{err}");
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn both_dictionary_parser_names_require_a_database() {
+        for name in ["zephyr-dict", "zephyr-dict-hex"] {
+            let yaml = format!("version: 2\nsources:\n  DUT:\n    type: uart\n    path: /dev/ttyUSB0\n    parser:\n      type: {name}\n");
+            let path = std::env::temp_dir().join(format!("{name}-database-validation.yml"));
+            std::fs::write(&path, &yaml).unwrap();
+            let error = load_config(&path).unwrap_err().to_string();
+            assert!(
+                error.contains("parser.database is required"),
+                "{name}: {error}"
+            );
+            std::fs::write(&path, format!("{yaml}      database: database.json\n")).unwrap();
+            let config = load_config(&path).unwrap();
+            assert_eq!(config.sources[0].parser.parser_type, name);
+            std::fs::remove_file(path).unwrap();
+        }
     }
 
     #[test]

@@ -10,7 +10,7 @@ pub struct ParserConfig {
     #[serde(rename = "type", default = "ParserConfig::default_type")]
     pub parser_type: String,
     /// Path to a Zephyr dictionary-logging `database.json`. Required when
-    /// `type: zephyr-dict`; ignored otherwise.
+    /// `type: zephyr-dict` (binary) or `zephyr-dict-hex`; ignored otherwise.
     #[serde(default)]
     pub database: Option<String>,
 }
