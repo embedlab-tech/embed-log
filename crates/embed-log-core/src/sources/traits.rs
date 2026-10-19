@@ -21,6 +21,7 @@ pub struct TxCommand {
 /// through the provided channel.  When the channel is closed the source
 /// should exit cleanly.
 #[async_trait::async_trait]
+#[allow(clippy::double_must_use)] // async_trait boxes the future; newer clippy flags it
 pub trait LogSource: Send + 'static {
     /// Read from the source and send log entries through `tx`.
     ///
