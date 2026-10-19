@@ -2,7 +2,7 @@ import {
     state, TABS, PANES, buildTimestampInfo, applyTimestampModeToLine,
     lineHasTimestampMode, noteRelativeTimestampCandidate,
 } from './state.js';
-import { parseAnsi } from './ansi.js';
+import { parseAnsi, isErasedConsoleLine } from './ansi.js';
 import { analyzeLinePlugins, getLinePluginTooltip, getConfiguredPanePlugins, getPanePluginSettings, setPanePluginSetting } from './pluginRuntime.js';
 import { isEditableTarget, isComposingEvent } from './keyboard.js';
 import { findNearestCandidate, resolveSyncAnchor } from './timeSync.js';
@@ -61,6 +61,7 @@ export function buildStoredLine(paneId, ts, rawText, isTx, meta = null) {
         html,
         rawText,
         isTx,
+        transientConsoleRedraw: !isTx && isErasedConsoleLine(rawText),
         pluginData: null,
         pluginFilterText: "",
         pluginClassNames: [],
@@ -92,6 +93,7 @@ export function _lineClass(line, idx, paneId) {
 }
 
 export function matchesFilter(line, rx) {
+    if (!line.isTx && (line.transientConsoleRedraw ?? isErasedConsoleLine(line.rawText))) return false;
     if (!rx) return true;
     const rendered = line.pluginInlineText || line.html.replace(/<[^>]+>/g, "");
     const rawText = typeof line.rawText === "string" ? line.rawText : "";
@@ -485,21 +487,29 @@ function _getNumTs(entry, paneId = null, idx = -1) {
 function _getVisibleIndices(paneId, vp) {
     const lines = state.rawLines[paneId] || [];
     const rx = state.filters[paneId] || null;
-    if (!rx) {
-        vp.visibleIndices = null;
-        vp.projectionFilter = null;
-        vp.projectionSourceLen = lines.length;
-        return null;
-    }
-    if (vp.projectionFilter === rx && vp.projectionSourceLen === lines.length && Array.isArray(vp.visibleIndices)) {
+    // Preserve raw rows/indices for export, selection and debugging, but don't
+    // allocate visual rows for terminal text erased before the next record.
+    // Extend the projection on append instead of rescanning the entire session.
+    if (rx && vp.projectionRows === lines && vp.projectionFilter === rx
+        && vp.projectionSourceLen === lines.length && Array.isArray(vp.visibleIndices)) {
         return vp.visibleIndices;
     }
-    const indices = [];
-    for (let rawIndex = 0; rawIndex < lines.length; rawIndex++) {
-        const line = getLine(paneId, rawIndex);
-        if (line && matchesFilter(line, rx)) indices.push(rawIndex);
+    const extend = !rx && vp.projectionRows === lines && vp.projectionFilter === rx
+        && vp.projectionSourceLen <= lines.length && Array.isArray(vp.visibleIndices);
+    const indices = extend ? vp.visibleIndices : [];
+    for (let rawIndex = extend ? vp.projectionSourceLen : 0; rawIndex < lines.length; rawIndex++) {
+        if (!rx) {
+            const entry = lines[rawIndex];
+            const rawText = _isRawTuple(entry) ? entry[1] : entry.rawText;
+            const isTx = _isRawTuple(entry) ? entry[2] : entry.isTx;
+            if (isTx || !isErasedConsoleLine(rawText)) indices.push(rawIndex);
+        } else {
+            const line = getLine(paneId, rawIndex);
+            if (line && matchesFilter(line, rx)) indices.push(rawIndex);
+        }
     }
     vp.visibleIndices = indices;
+    vp.projectionRows = lines;
     vp.projectionFilter = rx;
     vp.projectionSourceLen = lines.length;
     return indices;

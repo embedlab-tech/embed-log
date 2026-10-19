@@ -42,6 +42,48 @@ export function parseAnsi(raw) {
     return result;
 }
 
+// Recognize a transient terminal row that was completely erased before the
+// next log record. Do not guess prompt names or drop ordinary console output.
+// Deliberately conservative: unknown controls, multiline text and non-ASCII
+// column widths remain visible. Raw session data is never changed.
+export function isErasedConsoleLine(raw) {
+    if (typeof raw !== "string" || !raw.includes("\x1b[")) return false;
+    let cells = [], column = 0, erased = false, printed = false;
+    for (let i = 0; i < raw.length;) {
+        const c = raw[i];
+        if (c === "\x1b") {
+            const match = /^\x1b\[([0-9;]*)([A-Za-z])/.exec(raw.slice(i));
+            if (!match) return false;
+            i += match[0].length;
+            const [, params, command] = match;
+            if (command === "m") continue; // SGR does not occupy a cell.
+            if (params.includes(";")) return false;
+            const n = Number(params || 0);
+            if (!Number.isSafeInteger(n) || n > 4096) return false;
+            if (command === "D") column = Math.max(0, column - (n || 1));
+            else if (command === "C") column += n || 1;
+            else if (command === "G") column = Math.max(0, (n || 1) - 1);
+            else if (command === "K" || command === "J") {
+                if (n === 0) cells.length = Math.min(cells.length, column);
+                else if (n === 1) cells.fill(" ", 0, column + 1);
+                else if (n === 2) cells = [];
+                else return false;
+                erased = true;
+            } else return false;
+            if (column > 4096) return false;
+        } else {
+            i++;
+            if (c === "\r") column = 0;
+            else if (c === "\b") column = Math.max(0, column - 1);
+            else if (c >= " " && c <= "~" && column < 4096) {
+                cells[column++] = c;
+                printed = true;
+            } else return false;
+        }
+    }
+    return erased && printed && cells.every(c => c === " ");
+}
+
 // "03-25 11:50:00.123" → sortable integer
 // "T+00:00:01.234"     → elapsed milliseconds
 export function tsToNum(ts) {
