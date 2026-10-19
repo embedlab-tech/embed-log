@@ -1,4 +1,4 @@
-# Two UART sources using Zephyr dictionary logging.
+# Two UART sources using ASCII HEX Zephyr dictionary logging.
 version: 2
 server:
   listen: 127.0.0.1:18080
@@ -12,7 +12,7 @@ sources:
     path: /dev/ttyUSB0
     baud: 115200
     parser:
-      type: zephyr-dict
+      type: zephyr-dict-hex
       database: ../firmware/build_inside_dev/zephyr/log_dictionary.json
   NODE_B:
     label: Node B (dict log)
@@ -20,7 +20,7 @@ sources:
     path: /dev/ttyUSB1
     baud: 115200
     parser:
-      type: zephyr-dict
+      type: zephyr-dict-hex
       database: ../firmware/build_outside_dev/zephyr/log_dictionary.json
 ui:
   tabs:

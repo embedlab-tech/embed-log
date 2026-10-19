@@ -13,6 +13,10 @@ use serde::Deserialize;
 
 use super::traits::StreamParser;
 
+// Keep the shared decoder private; the binary transport reuses it as a child.
+#[path = "zephyr_dict_binary.rs"]
+pub mod binary;
+
 /// Default earliest-valid epoch for UTC log timestamps (2000-01-01 UTC).
 const DEFAULT_EARLIEST_VALID_EPOCH: u64 = 946_684_800;
 

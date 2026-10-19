@@ -8,6 +8,7 @@ pub use hex_coap::HexCoapParser;
 pub use slip_coap::SlipCoapParser;
 pub use text::TextParser;
 pub use traits::StreamParser;
+pub use zephyr_dict::binary::ZephyrDictBinaryParser;
 pub use zephyr_dict::ZephyrDictParser;
 
 use crate::config::models::ParserConfig;
@@ -18,7 +19,10 @@ pub fn create_parser(parser: &ParserConfig) -> Box<dyn StreamParser> {
         "text" => Box::new(TextParser::new()),
         "hex-coap" => Box::new(HexCoapParser::new()),
         "slip-coap" => Box::new(SlipCoapParser::new()),
-        "zephyr-dict" => Box::new(ZephyrDictParser::new(
+        "zephyr-dict" => Box::new(ZephyrDictBinaryParser::new(
+            parser.database.as_deref().unwrap_or_default(),
+        )),
+        "zephyr-dict-hex" => Box::new(ZephyrDictParser::new(
             parser.database.as_deref().unwrap_or_default(),
         )),
         _ => {
