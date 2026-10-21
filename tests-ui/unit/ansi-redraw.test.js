@@ -5,12 +5,21 @@ import { isErasedConsoleLine, parseAnsi } from '../../frontend/ansi.js';
 test('fully erased terminal redraws are transient, without prompt-name matching', () => {
     for (const raw of [
         'device> \x1b[8D\x1b[J',
+        'device uart> \x1b[13D\x1b[J',
         '\x1b[32mdevice> \x1b[0m\x1b[8D\x1b[0K',
         'typed command\r\x1b[K',
         'arbitrary text\x1b[2K',
         'abc\x1b[1G\x1b[J',
         'abc\b\b\b\x1b[J',
         'abc\x1b[3D\x1b[3C\x1b[1K',
+    ]) assert.equal(isErasedConsoleLine(raw), true, JSON.stringify(raw));
+});
+
+test('control-only erase sequences are transient', () => {
+    for (const raw of [
+        '\x1b[0K',
+        '\x1b[2K',
+        '\x1b[0K\x1b[0m',
     ]) assert.equal(isErasedConsoleLine(raw), true, JSON.stringify(raw));
 });
 
@@ -22,7 +31,7 @@ test('preserve ordinary console, command responses, partial erasure and new outp
         'device> \x1b[3D\x1b[J',
         'device> \x1b[8D\x1b[Jresponse',
         'abc\x1b[3D\x1b[Kok',
-        'abc\n\x1b[2K', '\x1b[2K',
+        'abc\n\x1b[2K',
     ]) assert.equal(isErasedConsoleLine(raw), false, JSON.stringify(raw));
 });
 

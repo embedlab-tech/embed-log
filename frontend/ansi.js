@@ -81,7 +81,9 @@ export function isErasedConsoleLine(raw) {
             } else return false;
         }
     }
-    return erased && printed && cells.every(c => c === " ");
+    // A control-only erase (for example "\x1b[0K" from GitLab/terminal
+    // redraws) is transient as well; there are no cells left to inspect.
+    return erased && (!printed || cells.every(c => c === " "));
 }
 
 // "03-25 11:50:00.123" → sortable integer
