@@ -369,6 +369,7 @@ function _getVirtual(paneId) {
         lastRendered: -1,
         rowHeight: 0,
         visibleIndices: null,
+        projectionRows: null,
         projectionFilter: undefined,
         projectionSourceLen: -1,
         pendingOrdinal: null,
@@ -516,19 +517,15 @@ function _getVisibleIndices(paneId, vp) {
 }
 
 function _visibleCount(paneId, vp) {
-    const lines = state.rawLines[paneId] || [];
-    const visible = _getVisibleIndices(paneId, vp);
-    return visible ? visible.length : lines.length;
+    return _getVisibleIndices(paneId, vp).length;
 }
 
 function _rawIndexAt(paneId, vp, ordinal) {
-    const visible = _getVisibleIndices(paneId, vp);
-    return visible ? visible[ordinal] : ordinal;
+    return _getVisibleIndices(paneId, vp)[ordinal];
 }
 
 function _ordinalForRawIndex(paneId, vp, rawIndex) {
     const visible = _getVisibleIndices(paneId, vp);
-    if (!visible) return rawIndex;
     let lo = 0, hi = visible.length;
     while (lo < hi) {
         const mid = (lo + hi) >> 1;
@@ -1321,7 +1318,17 @@ function _entryServerLineIdx(entry, paneId, idx) {
     return Number.isFinite(entry?.serverLineIdx) ? entry.serverLineIdx : null;
 }
 
-function _scrollPaneToRawIndex(paneId, rawIdx) {
+// A time-sync target can be a hidden row (filtered out or an erased console
+// redraw); use the next visible row instead so the pane still scrolls.
+function _visibleRawIndexNear(paneId, rawIdx) {
+    const vp = _getVirtual(paneId);
+    if (!vp) return rawIdx;
+    return _rawIndexAt(paneId, vp, _ordinalForRawIndex(paneId, vp, rawIdx));
+}
+
+function _scrollPaneToRawIndex(paneId, requestedIdx) {
+    const rawIdx = _visibleRawIndexNear(paneId, requestedIdx);
+    if (rawIdx === undefined) return;
     _renderVirtualWindow(paneId, { targetIdx: rawIdx });
     const div = getRenderedLineElement(paneId, rawIdx);
     if (!div) return;
@@ -1460,7 +1467,8 @@ export function syncPanes(fromId, anchor, clickedDiv, clickedLine = null) {
             if (device) target = _findNearestCandidate(toId, device.num, "device");
         }
         if (!target) return;
-        const lo = target.idx;
+        const lo = _visibleRawIndexNear(toId, target.idx);
+        if (lo === undefined) return;
 
         _renderVirtualWindow(toId, { targetIdx: lo });
         const targetDiv = getRenderedLineElement(toId, lo);

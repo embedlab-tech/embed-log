@@ -46,15 +46,20 @@ export function parseAnsi(raw) {
 // next log record. Do not guess prompt names or drop ordinary console output.
 // Deliberately conservative: unknown controls, multiline text and non-ASCII
 // column widths remain visible. Raw session data is never changed.
+const ERASE_RE = /\x1b\[[0-9]*[JK]/;
+const CSI_RE = /\x1b\[([0-9;]*)([A-Za-z])/y;
+
 export function isErasedConsoleLine(raw) {
-    if (typeof raw !== "string" || !raw.includes("\x1b[")) return false;
+    // Fast path: most colored log lines contain SGR only and no erase.
+    if (typeof raw !== "string" || !ERASE_RE.test(raw)) return false;
     let cells = [], column = 0, erased = false, printed = false;
     for (let i = 0; i < raw.length;) {
         const c = raw[i];
         if (c === "\x1b") {
-            const match = /^\x1b\[([0-9;]*)([A-Za-z])/.exec(raw.slice(i));
+            CSI_RE.lastIndex = i;
+            const match = CSI_RE.exec(raw);
             if (!match) return false;
-            i += match[0].length;
+            i = CSI_RE.lastIndex;
             const [, params, command] = match;
             if (command === "m") continue; // SGR does not occupy a cell.
             if (params.includes(";")) return false;
