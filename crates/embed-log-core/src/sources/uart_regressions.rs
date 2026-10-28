@@ -4,6 +4,23 @@ use serialport::SerialPort;
 use std::io::Write;
 use tokio::time::timeout;
 
+/// Write to a PTY master without blocking a runtime worker thread.
+fn feed(master: &mut serialport::TTYPort, data: &[u8]) {
+    tokio::task::block_in_place(|| master.write_all(data).unwrap());
+}
+
+/// Unique per call even when the clock has only microsecond resolution (macOS)
+/// and several tests start in the same instant.
+fn unique_suffix() -> String {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("{}-{nanos}-{seq}", std::process::id())
+}
+
 fn normal_record() -> Vec<u8> {
     let mut wire = vec![0, 0x30, 8, 0, 0, 0];
     wire.extend(1u32.to_le_bytes());
@@ -13,13 +30,14 @@ fn normal_record() -> Vec<u8> {
     wire
 }
 
-#[tokio::test]
+// Multi-thread: a PTY write can block in the kernel until the UART task
+// drains the slave. On a current-thread runtime that write would also stop
+// the task that drains it (macOS PTY buffers are ~1 KiB): a silent deadlock
+// that no tokio::time::timeout can interrupt.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn incomplete_source_does_not_block_peer_or_boot_output() {
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let path = std::env::temp_dir().join(format!("embed-log-pty-dictionary-{unique}.json"));
+    let path =
+        std::env::temp_dir().join(format!("embed-log-pty-dictionary-{}.json", unique_suffix()));
     std::fs::write(&path, r#"{"version":3,"target":{"bits":32,"little_endianness":true},"arch":"arm","log_subsys":{"log_instances":{"1":{"name":"app"}}},"string_mappings":{"4096":"alive"}}"#).unwrap();
     let (mut master_a, mut port_a) = serialport::TTYPort::pair().unwrap();
     let (mut master_b, mut port_b) = serialport::TTYPort::pair().unwrap();
@@ -36,17 +54,18 @@ async fn incomplete_source_does_not_block_peer_or_boot_output() {
     // A plausible stale header advertises 65535 missing hexdump bytes.
     let mut stale = good.clone();
     stale[4..6].copy_from_slice(&65535u16.to_le_bytes());
-    master_a.write_all(&stale).unwrap();
-    master_b.write_all(&good).unwrap();
+    feed(&mut master_a, &stale);
+    feed(&mut master_b, &good);
     let first = timeout(Duration::from_secs(2), rx.recv())
         .await
         .unwrap()
         .unwrap();
     assert_eq!(first.source, "device-b");
     assert!(first.message.contains("app: alive"));
-    master_a
-        .write_all(b"*** Booting firmware ***\r\nBOOT COMPLETE\r\n")
-        .unwrap();
+    feed(
+        &mut master_a,
+        b"*** Booting firmware ***\r\nBOOT COMPLETE\r\n",
+    );
     let waiting_since = tokio::time::Instant::now();
     let mut abandonments = 0;
     timeout(Duration::from_secs(7), async {
@@ -67,7 +86,7 @@ async fn incomplete_source_does_not_block_peer_or_boot_output() {
     // Drain a burst, then require fresh output from both independent sources.
     const BURST_SIZE: usize = 128;
     for _ in 0..BURST_SIZE {
-        master_a.write_all(&good).unwrap();
+        feed(&mut master_a, &good);
     }
     let burst = timeout(Duration::from_secs(3), async {
         let mut count = 0;
@@ -82,8 +101,8 @@ async fn incomplete_source_does_not_block_peer_or_boot_output() {
     .await
     .expect("burst stalled");
     assert_eq!(burst, BURST_SIZE);
-    master_b.write_all(&good).unwrap();
-    master_a.write_all(&good).unwrap();
+    feed(&mut master_b, &good);
+    feed(&mut master_a, &good);
     let mut sources = std::collections::HashSet::new();
     timeout(Duration::from_secs(2), async {
         while sources.len() < 2 {
@@ -104,11 +123,7 @@ async fn incomplete_source_does_not_block_peer_or_boot_output() {
 }
 
 fn test_dictionary(label: &str) -> std::path::PathBuf {
-    let unique = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let path = std::env::temp_dir().join(format!("embed-log-{label}-{unique}.json"));
+    let path = std::env::temp_dir().join(format!("embed-log-{label}-{}.json", unique_suffix()));
     std::fs::write(&path, r#"{"version":3,"target":{"bits":32,"little_endianness":true},"arch":"arm","log_subsys":{"log_instances":{"1":{"name":"app"}}},"string_mappings":{"4096":"alive"}}"#).unwrap();
     path
 }
@@ -121,7 +136,11 @@ async fn expect_alive(rx: &mut mpsc::Receiver<LogEntry>) {
     assert!(entry.message.contains("app: alive"), "{}", entry.message);
 }
 
-#[tokio::test]
+// Multi-thread: a PTY write can block in the kernel until the UART task
+// drains the slave. On a current-thread runtime that write would also stop
+// the task that drains it (macOS PTY buffers are ~1 KiB): a silent deadlock
+// that no tokio::time::timeout can interrupt.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn uart_soft_idle_keeps_header_and_activity_restarts_hard_deadline() {
     let path = test_dictionary("idle");
     let (mut master, mut slave) = serialport::TTYPort::pair().unwrap();
@@ -131,24 +150,24 @@ async fn uart_soft_idle_keeps_header_and_activity_restarts_hard_deadline() {
         .with_parser_database(Some(path.to_string_lossy().into_owned()));
     let task = tokio::spawn(Box::new(source).run(tx));
     let good = normal_record();
-    master.write_all(&good).unwrap();
+    feed(&mut master, &good);
     expect_alive(&mut rx).await;
-    master.write_all(&good[..14]).unwrap();
+    feed(&mut master, &good[..14]);
     tokio::time::sleep(Duration::from_millis(1300)).await;
     assert!(rx.try_recv().is_err(), "soft idle destroyed a valid header");
-    master.write_all(&good[14..]).unwrap();
+    feed(&mut master, &good[14..]);
     expect_alive(&mut rx).await;
     // A second partial read resets elapsed silence, even after several idle ticks.
-    master.write_all(&good[..14]).unwrap();
+    feed(&mut master, &good[..14]);
     tokio::time::sleep(Duration::from_millis(3500)).await;
-    master.write_all(&good[14..18]).unwrap();
+    feed(&mut master, &good[14..18]);
     tokio::time::sleep(Duration::from_millis(1800)).await;
     assert!(
         rx.try_recv().is_err(),
         "deadline was not reset by received bytes"
     );
-    master.write_all(&good[18..]).unwrap();
-    master.write_all(&[1, 69, 0]).unwrap();
+    feed(&mut master, &good[18..]);
+    feed(&mut master, &[1, 69, 0]);
     expect_alive(&mut rx).await;
     let drop = timeout(Duration::from_secs(2), rx.recv())
         .await
@@ -161,7 +180,11 @@ async fn uart_soft_idle_keeps_header_and_activity_restarts_hard_deadline() {
 }
 
 #[cfg(target_os = "linux")]
-#[tokio::test]
+// Multi-thread: a PTY write can block in the kernel until the UART task
+// drains the slave. On a current-thread runtime that write would also stop
+// the task that drains it (macOS PTY buffers are ~1 KiB): a silent deadlock
+// that no tokio::time::timeout can interrupt.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn uart_reconnect_recreates_parser_and_accepts_delayed_record() {
     let path = test_dictionary("reconnect");
     let link = path.with_extension("tty");
@@ -175,9 +198,9 @@ async fn uart_reconnect_recreates_parser_and_accepts_delayed_record() {
     let task = tokio::spawn(Box::new(source).run(tx));
     tokio::time::sleep(Duration::from_millis(300)).await;
     let good = normal_record();
-    old_master.write_all(&good).unwrap();
+    feed(&mut old_master, &good);
     expect_alive(&mut rx).await;
-    old_master.write_all(&good[..14]).unwrap();
+    feed(&mut old_master, &good[..14]);
     tokio::time::sleep(Duration::from_millis(200)).await;
     let (mut master, slave) = serialport::TTYPort::pair().unwrap();
     std::fs::remove_file(&link).unwrap();
@@ -186,13 +209,13 @@ async fn uart_reconnect_recreates_parser_and_accepts_delayed_record() {
     drop(old_master);
     tokio::time::sleep(Duration::from_millis(1500)).await;
     // No old pending header or old deadline may leak into the new parser.
-    master.write_all(&good).unwrap();
+    feed(&mut master, &good);
     expect_alive(&mut rx).await;
-    master.write_all(&good[..14]).unwrap();
+    feed(&mut master, &good[..14]);
     tokio::time::sleep(Duration::from_millis(1300)).await;
     assert!(rx.try_recv().is_err());
-    master.write_all(&good[14..]).unwrap();
-    master.write_all(&[1, 69, 0]).unwrap();
+    feed(&mut master, &good[14..]);
+    feed(&mut master, &[1, 69, 0]);
     expect_alive(&mut rx).await;
     let drop = timeout(Duration::from_secs(2), rx.recv())
         .await
