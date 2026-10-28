@@ -6,10 +6,17 @@ use std::time::Duration;
 struct TestDb(PathBuf);
 impl TestDb {
     fn new(mappings: &[(u64, &str)]) -> Self {
-        let id = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
+        // The clock alone is not unique: macOS has microsecond resolution and
+        // parallel tests could share (and delete) one another's dictionary.
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let id = format!(
+            "{}-{seq}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
         let dir =
             std::env::temp_dir().join(format!("embed-log-regression-{}-{id}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
