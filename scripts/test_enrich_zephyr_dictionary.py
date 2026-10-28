@@ -1,5 +1,6 @@
 """Small portable ELF fixtures; run: python -m unittest discover -s scripts -p 'test_enrich_*.py'."""
 import base64
+import importlib.util
 import json
 from pathlib import Path
 import struct
@@ -9,6 +10,11 @@ import tempfile
 import unittest
 
 from enrich_zephyr_dictionary import enrich
+
+# pyelftools is an optional dependency of the enrichment tool only. Skip (and
+# report it) instead of failing when it is not installed; without it even the
+# CLI failure test would pass for the wrong reason (ImportError exit code).
+HAS_PYELFTOOLS = importlib.util.find_spec("elftools") is not None
 
 
 def elf_fixture(bits):
@@ -27,6 +33,7 @@ def elf_fixture(bits):
     return header + data + names + sh(0,0,0,0,0,0) + sh(1,1,2,0x2000,ro_offset,len(data)) + sh(9,3,0,0,names_offset,len(names))
 
 
+@unittest.skipUnless(HAS_PYELFTOOLS, "pyelftools not installed (python -m pip install pyelftools)")
 class EnrichmentTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

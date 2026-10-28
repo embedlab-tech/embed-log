@@ -4,8 +4,8 @@
 //! Acquisition is heuristic: initial data can be lost, and arbitrary binary
 //! console output or corruption cannot be classified without ambiguity.
 use super::{
-    decode_package, read_uint_sized, take_one_message, Database, LoadState, TakeResult,
-    MSG_TYPE_DROPPED, MSG_TYPE_NORMAL,
+    decode_package, read_uint_sized, take_one_message, Database, DecodeError, LoadState,
+    TakeResult, MSG_TYPE_DROPPED, MSG_TYPE_NORMAL,
 };
 use crate::parsers::traits::StreamParser;
 use std::time::Duration;
@@ -213,7 +213,7 @@ fn known_package(bytes: &[u8], db: &Database) -> bool {
     let len = read_uint_sized(&bytes[2..4], db.little_endian, 2).unwrap() as usize;
     bytes
         .get(start..start + len)
-        .is_some_and(|pkg| decode_package(pkg, db).is_ok())
+        .is_some_and(|pkg| !matches!(decode_package(pkg, db), Err(DecodeError::Structure(_))))
 }
 
 /// Restrict acquisition lookahead to ordinary records from this database.

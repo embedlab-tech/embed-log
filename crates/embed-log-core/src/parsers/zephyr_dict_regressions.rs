@@ -375,3 +375,142 @@ fn soft_idle_flushes_only_classified_console_text_and_keeps_sync() {
         vec!["--- 69 messages dropped ---"]
     );
 }
+
+#[test]
+fn escaped_percent_is_not_rewritten_into_a_conversion() {
+    let db = TestDb::new(&[(0x1000, "100%%p %%llu %%zu %d %p")]);
+    assert_both_transports(
+        &db,
+        &package(&[5, 0x20001000], &[]),
+        "100%p %llu %zu 5 0x20001000",
+    );
+}
+#[test]
+fn literal_inttypes_macros_set_argument_width_before_the_walk() {
+    let db = TestDb::new(&[(0x1000, "v=%PRIu64 n=%d %%PRIu64")]);
+    assert_both_transports(&db, &package(&[5, 1, 9], &[]), "v=4294967301 n=9 %PRIu64");
+}
+#[test]
+fn intmax_argument_is_eight_bytes_on_a_32_bit_target() {
+    let db = TestDb::new(&[(0x1000, "%jd %ju %d")]);
+    assert_both_transports(
+        &db,
+        &package(&[0xffff_fffe, 0xffff_ffff, 5, 1, 9], &[]),
+        "-2 4294967301 9",
+    );
+}
+#[test]
+fn size_t_argument_is_eight_bytes_on_a_64_bit_target() {
+    let db = TestDb::new(&[(0x1000, "%zu %d %td")]);
+    let mut json: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&db.0).unwrap()).unwrap();
+    json["target"]["bits"] = serde_json::json!(64);
+    json["arch"] = serde_json::json!("arm64");
+    std::fs::write(&db.0, serde_json::to_vec(&json).unwrap()).unwrap();
+    let mut pkg = vec![7u8, 0, 0, 0];
+    for word in [0x1000u64, 0x1_0000_0005, 9, (-3i64) as u64] {
+        pkg.extend(word.to_le_bytes());
+    }
+    pkg[0] = (pkg.len() / 4) as u8;
+    assert_eq!(decode_package(&pkg, &db.load()).unwrap(), "4294967301 9 -3");
+}
+#[test]
+fn unrenderable_record_is_reported_without_losing_synchronization() {
+    let db = TestDb::new(&[(0x1000, "[%*d]"), (0x1004, "after")]);
+    let bad = record(&package(&[20_000, 7], &[]), &[]);
+    let mut good_pkg = package(&[], &[]);
+    good_pkg[4..8].copy_from_slice(&0x1004u32.to_le_bytes());
+    let good = record(&good_pkg, &[]);
+    for acquired in [false, true] {
+        let mut wire = Vec::new();
+        if acquired {
+            wire.extend(&good);
+        }
+        wire.extend(&bad);
+        wire.extend(&good);
+        wire.extend([1, 3, 0]);
+        for size in 1..=wire.len() {
+            let mut parser = binary::ZephyrDictBinaryParser::new(db.path());
+            let got: Vec<_> = wire.chunks(size).flat_map(|c| parser.feed(c)).collect();
+            let expected_good = if acquired { 2 } else { 1 };
+            assert_eq!(got.len(), expected_good + 2, "chunk {size}: {got:?}");
+            assert!(
+                got[usize::from(acquired)]
+                    .contains("<inf> app: [zephyr-dict: cannot render format \"[%*d]\""),
+                "{got:?}"
+            );
+            assert!(got.iter().filter(|l| l.ends_with("app: after")).count() == expected_good);
+            assert!(
+                got.last().unwrap().contains("3 messages dropped"),
+                "{got:?}"
+            );
+            assert!(
+                !got.iter()
+                    .any(|l| l.contains("synchronization") || l.contains("skipped")),
+                "{got:?}"
+            );
+        }
+    }
+}
+#[test]
+fn field_width_and_numeric_precision_are_bounded() {
+    let db = TestDb::new(&[
+        (0x1000, "[%*d]"),
+        (0x2000, "[%.20000f]"),
+        (0x3000, "[%20000d]"),
+    ]);
+    let d = db.load();
+    assert!(matches!(
+        decode_package(&package(&[20_000, 7], &[]), &d),
+        Err(DecodeError::Render { .. })
+    ));
+    assert_eq!(
+        decode_package(&package(&[4, 7], &[]), &d).unwrap(),
+        "[   7]"
+    );
+    for fmt in [0x2000u32, 0x3000] {
+        let mut pkg = package(&[0, 0], &[]);
+        pkg[4..8].copy_from_slice(&fmt.to_le_bytes());
+        assert!(
+            matches!(decode_package(&pkg, &d), Err(DecodeError::Render { .. })),
+            "{fmt:x}"
+        );
+    }
+}
+#[test]
+fn hex_console_text_without_newline_is_bounded_and_linear() {
+    let db = TestDb::new(&[(0x1000, "x")]);
+    let mut parser = ZephyrDictParser::new(db.path());
+    let data: Vec<u8> = (0..150_000).map(|i| b"GHIJKLMNOP "[i % 11]).collect();
+    let mut got = Vec::new();
+    for chunk in data.chunks(64) {
+        got.extend(parser.feed(chunk));
+        assert!(parser.text_buf.len() < MAX_TEXT_LINE_LEN);
+    }
+    got.extend(parser.feed(b"\n"));
+    assert_eq!(
+        got.iter().map(String::len).collect::<Vec<_>>(),
+        [
+            MAX_TEXT_LINE_LEN,
+            MAX_TEXT_LINE_LEN,
+            150_000 - 2 * MAX_TEXT_LINE_LEN
+        ]
+    );
+}
+#[test]
+fn long_hex_burst_does_not_accumulate_decoded_characters() {
+    let db = TestDb::new(&[(0x1000, "tick %d")]);
+    let mut parser = ZephyrDictParser::new(db.path());
+    let wire = record(&package(&[1], &[]), &[]);
+    let hex: String = wire.iter().map(|b| format!("{b:02x}")).collect();
+    let mut decoded = parser.feed(b"##ZLOGV1##").len();
+    for _ in 0..500 {
+        decoded += parser.feed(hex.as_bytes()).len();
+        assert!(parser.hex_collect.len() < 2, "{}", parser.hex_collect.len());
+    }
+    assert_eq!(decoded, 500);
+    assert!(parser
+        .feed(b"\nshell> ok\n")
+        .iter()
+        .any(|l| l == "shell> ok"));
+}
