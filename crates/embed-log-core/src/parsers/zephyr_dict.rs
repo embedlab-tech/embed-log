@@ -17,6 +17,10 @@ use super::traits::StreamParser;
 #[path = "zephyr_dict_binary.rs"]
 pub mod binary;
 
+#[cfg(test)]
+#[path = "zephyr_dict_regressions.rs"]
+mod regression_tests;
+
 /// Default earliest-valid epoch for UTC log timestamps (2000-01-01 UTC).
 const DEFAULT_EARLIEST_VALID_EPOCH: u64 = 946_684_800;
 
@@ -29,6 +33,9 @@ const LOG_HEX_SEP_BYTES: &[u8] = LOG_HEX_SEP.as_bytes();
 const MIN_HEURISTIC_HEX_LEN: usize = 20;
 /// Minimum hex-only text buffer length to enter Hex mode right after a shell prompt.
 const MIN_PROMPT_HEX_LEN: usize = 8;
+/// Console text without a newline (wrong baud rate, binary noise) is emitted
+/// in chunks of this size, matching the binary transport, to bound memory.
+const MAX_TEXT_LINE_LEN: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MuxMode {
@@ -95,9 +102,12 @@ impl ZephyrDictParser {
     }
 
     fn try_split_on_separator(&mut self, lines: &mut Vec<String>) {
-        let Some(pos) = find_subslice(&self.text_buf, LOG_HEX_SEP_BYTES) else {
+        // Called after every pushed byte, so a separator can only complete at
+        // the end. Searching the whole buffer each time was O(n^2) per line.
+        if !self.text_buf.ends_with(LOG_HEX_SEP_BYTES) {
             return;
-        };
+        }
+        let pos = self.text_buf.len() - LOG_HEX_SEP_BYTES.len();
         let mut tail = self.text_buf.split_off(pos);
         if let Some(line) = self.emit_text_line() {
             lines.push(line);
@@ -173,16 +183,23 @@ impl ZephyrDictParser {
             self.dict_buf.extend(bytes);
             lines.extend(self.decode_pending_dict_messages());
         }
+        // Unhexified characters are no longer needed; keep a long burst
+        // without a newline from growing the buffer without bound.
+        self.hex_collect.drain(..self.hex_unhexified);
+        self.hex_unhexified = 0;
     }
 
     fn handle_hex_byte(&mut self, b: u8, lines: &mut Vec<String>) {
         if is_lower_hex(b) {
-            self.hex_collect.push(b as char);
-            self.try_incremental_hex_decode(lines);
-        } else if matches!(b, b'\r' | b'\n') {
-            if !self.hex_collect.is_empty() {
-                self.flush_hex_block(lines);
+            // After a decode stop the rest of the block is discarded anyway.
+            if !self.hex_parse_stopped {
+                self.hex_collect.push(b as char);
+                self.try_incremental_hex_decode(lines);
             }
+        } else if matches!(b, b'\r' | b'\n') {
+            // Always end the block: hex_collect may already be drained, and
+            // the reset also clears a decode stop for the next block.
+            self.flush_hex_block(lines);
             self.mux_mode = MuxMode::Text;
         } else if b == b'\t' || b == b' ' {
             // skip framing whitespace between separator and hex body
@@ -212,6 +229,11 @@ impl ZephyrDictParser {
         self.try_split_on_separator(lines);
         if self.mux_mode == MuxMode::Text {
             self.try_promote_hex_text_buf(lines);
+        }
+        if self.mux_mode == MuxMode::Text && self.text_buf.len() >= MAX_TEXT_LINE_LEN {
+            if let Some(line) = self.emit_text_line() {
+                lines.push(line);
+            }
         }
     }
 
@@ -270,12 +292,6 @@ impl StreamParser for ZephyrDictParser {
     }
 }
 
-fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
-}
-
 fn is_lower_hex(b: u8) -> bool {
     matches!(b, b'0'..=b'9' | b'a'..=b'f')
 }
@@ -323,40 +339,93 @@ fn hex_nibble(byte: &u8) -> Option<u8> {
     }
 }
 
-/// Normalize format strings from the dictionary database for Rust `sprintf`.
+/// `inttypes.h` macros that may appear literally in `log_strings` ELF entries.
+const INTTYPES_MACROS: [(&str, &str); 6] = [
+    ("PRIu32", "u"),
+    ("PRId32", "d"),
+    ("PRIx32", "x"),
+    ("PRIu64", "llu"),
+    ("PRId64", "lld"),
+    ("PRIx64", "llx"),
+];
+
+/// Rewrite printf conversion specifications without touching literal text.
 ///
-/// Mirrors Zephyr's `log_parser.py::formalize_fmt_string` plus `inttypes.h` /
-/// `size_t` macros that may appear literally in `log_strings` ELF entries.
-fn formalize_fmt_string(fmt: &str, is_64bit: bool) -> String {
-    let mut s = fmt.to_string();
-
-    let (zu, zd, zi) = if is_64bit {
-        ("%lu", "%ld", "%ld")
-    } else {
-        ("%u", "%d", "%d")
-    };
-    for (src, dst) in [
-        ("%PRIu32", "%u"),
-        ("%PRId32", "%d"),
-        ("%PRIx32", "%x"),
-        ("%PRIu64", "%llu"),
-        ("%PRId64", "%lld"),
-        ("%PRIx64", "%llx"),
-        ("%zu", zu),
-        ("%zd", zd),
-        ("%zi", zi),
-    ] {
-        s = s.replace(src, dst);
-    }
-
-    for spec in ['d', 'i', 'o', 'u', 'x', 'X'] {
-        s = s.replace(&format!("%ll{spec}"), &format!("%l{spec}"));
-        if matches!(spec, 'x' | 'X') {
-            s = s.replace(&format!("%#ll{spec}"), &format!("%#l{spec}"));
+/// Plain substring replacement would also rewrite escaped percent signs
+/// (`"100%%p"` -> `"100%0x%x"`), adding a conversion that has no argument.
+/// `expand_inttypes` must run BEFORE the va_list walk (it changes argument
+/// widths); `pointer_as_hex` only feeds the host formatter.
+fn rewrite_fmt_specs(fmt: &str, expand_inttypes: bool, pointer_as_hex: bool) -> String {
+    let mut out = String::with_capacity(fmt.len() + 8);
+    let mut rest = fmt;
+    while let Some(pos) = rest.find('%') {
+        out.push_str(&rest[..pos]);
+        let spec = &rest[pos + 1..];
+        if let Some(after) = spec.strip_prefix('%') {
+            out.push_str("%%");
+            rest = after;
+            continue;
         }
-        s = s.replace(&format!("%hh{spec}"), &format!("%h{spec}"));
+        let take =
+            |s: &str, allowed: &str| s.len() - s.trim_start_matches(|c| allowed.contains(c)).len();
+        let flags_end = take(spec, "-+ #0");
+        let mut end = flags_end;
+        end += if spec[end..].starts_with('*') {
+            1
+        } else {
+            take(&spec[end..], "0123456789")
+        };
+        if spec[end..].starts_with('.') {
+            end += 1;
+            end += if spec[end..].starts_with('*') {
+                1
+            } else {
+                take(&spec[end..], "0123456789")
+            };
+        }
+        let head = &spec[..end]; // flags, width and precision
+        let after_head = &spec[end..];
+        if expand_inttypes {
+            if let Some((name, mapped)) = INTTYPES_MACROS
+                .iter()
+                .find(|(n, _)| after_head.starts_with(n))
+            {
+                out.push('%');
+                out.push_str(head);
+                out.push_str(mapped);
+                rest = &after_head[name.len()..];
+                continue;
+            }
+        }
+        let len_end = take(after_head, "hlLqjzZt");
+        let conv = after_head[len_end..].chars().next();
+        let spec_end = end + len_end + conv.map_or(0, char::len_utf8);
+        if pointer_as_hex && conv == Some('p') {
+            // The "0x" prefix belongs to the padded field ("%8p" of 1 is
+            // "     0x1"), so the pointer is pre-formatted and printed as %s.
+            // Only '-' is meaningful for a string; '#', '0', '+', ' ' are not.
+            // Precision is kept (it may be '*' with its own argument) but is
+            // neutralized in render() so it never truncates the address.
+            out.push('%');
+            out.extend(spec[..flags_end].chars().filter(|&c| c == '-'));
+            out.push_str(&head[flags_end..]);
+            out.push('s');
+        } else {
+            out.push('%');
+            out.push_str(&spec[..spec_end]);
+        }
+        rest = &spec[spec_end..];
     }
-    s.replace("%p", "0x%x")
+    out.push_str(rest);
+    out
+}
+
+/// Normalize a format string for the Rust `sprintf` host formatter.
+/// `sprintf` accepts and ignores C length modifiers, so only `%p` needs
+/// rewriting (to `%s` of a pre-formatted "0x..." value); argument widths
+/// were already decided by `extract_args`.
+fn formalize_fmt_string(fmt: &str) -> String {
+    rewrite_fmt_specs(fmt, false, true)
 }
 
 enum TakeResult {
@@ -427,8 +496,9 @@ fn take_normal_message(buf: &[u8], db: &Database) -> TakeResult {
         return malformed();
     };
 
-    let total_len = fixed_prefix + pkg_len as usize + data_len as usize;
-    if buf.len() < total_len {
+    let package_end = fixed_prefix + pkg_len as usize;
+    let total_len = package_end + data_len as usize;
+    if buf.len() < package_end {
         return TakeResult::NeedMore;
     }
 
@@ -449,12 +519,22 @@ fn take_normal_message(buf: &[u8], db: &Database) -> TakeResult {
     }
 
     let package = &buf[fixed_prefix..fixed_prefix + pkg_len as usize];
-    let extra_data = &buf[fixed_prefix + pkg_len as usize..total_len];
-
+    // Validate the package before waiting for its hexdump. A stale/corrupt
+    // header must not hold console text behind a bogus 64 KiB data length.
     let body = match decode_package(package, db) {
         Ok(msg) => msg,
-        Err(_) => return TakeResult::Stop,
+        // The header, source and format pointer are valid, so the record
+        // boundary is trustworthy: report it and keep synchronization rather
+        // than rescanning the record's own bytes as if they were new input.
+        Err(DecodeError::Render { fmt, reason }) => {
+            format!("[zephyr-dict: cannot render format {fmt:?}: {reason}]")
+        }
+        Err(DecodeError::Structure(_)) => return TakeResult::Stop,
     };
+    if buf.len() < total_len {
+        return TakeResult::NeedMore;
+    }
+    let extra_data = &buf[package_end..total_len];
 
     let mut output = Vec::with_capacity(2);
     if level == 0 {
@@ -524,9 +604,33 @@ fn hexdump_lines(data: &[u8]) -> Vec<String> {
 // Package decoding: cbprintf_package layout -> format string + argument list
 // ---------------------------------------------------------------------------
 
-fn decode_package(package: &[u8], db: &Database) -> Result<String, String> {
+/// Why a package could not be decoded.
+#[derive(Debug)]
+enum DecodeError {
+    /// Not a package from this dictionary: bad layout, unknown format pointer
+    /// or a truncated argument list. Used as the stream acquisition oracle.
+    /// The message is only surfaced through `Debug` (tests, tracing).
+    Structure(#[allow(dead_code)] String),
+    /// A structurally valid package whose format the host formatter cannot
+    /// reproduce (unsupported conversion, output limit, ...).
+    Render { fmt: String, reason: String },
+}
+
+impl From<&str> for DecodeError {
+    fn from(msg: &str) -> Self {
+        DecodeError::Structure(msg.to_string())
+    }
+}
+
+impl From<String> for DecodeError {
+    fn from(msg: String) -> Self {
+        DecodeError::Structure(msg)
+    }
+}
+
+fn decode_package(package: &[u8], db: &Database) -> Result<String, DecodeError> {
     if package.len() < 4 {
-        return Err("package shorter than its 4-byte sub-header".to_string());
+        return Err("package shorter than its 4-byte sub-header".into());
     }
     let ptr_size = db.ptr_size();
 
@@ -537,18 +641,18 @@ fn decode_package(package: &[u8], db: &Database) -> Result<String, String> {
 
     let offset_end_of_args = offset_end_of_args_units * 4 + num_ro_str_indexes + num_rw_str_indexes;
     if offset_end_of_args < 0 || offset_end_of_args as usize > package.len() {
-        return Err("argument-list end offset out of range".to_string());
+        return Err("argument-list end offset out of range".into());
     }
     let offset_end_of_args = offset_end_of_args as usize;
 
     let string_tbl = extract_string_table(&package[offset_end_of_args..]);
     if string_tbl.len() != num_packed_strings {
-        return Err("packed string table size mismatch".to_string());
+        return Err("packed string table size mismatch".into());
     }
 
     let hdr_len = 4 + ptr_size; // 4-byte sub-header + format-string pointer
     if package.len() < hdr_len || offset_end_of_args < hdr_len {
-        return Err("package too short for format-string pointer".to_string());
+        return Err("package too short for format-string pointer".into());
     }
     let fmt_ptr_off = 4;
     let fmt_str_ptr = read_uint_sized(
@@ -559,33 +663,36 @@ fn decode_package(package: &[u8], db: &Database) -> Result<String, String> {
     .ok_or("failed to read format-string pointer")?;
     // Negative offset: the format string sits one pointer-width *before*
     // where the va_list argument offsets are measured from.
-    let fmt_str = get_string(db, fmt_str_ptr, -(ptr_size as i64), &string_tbl);
-    if fmt_str.is_empty() {
-        return Err(format!(
-            "could not resolve format string @0x{fmt_str_ptr:x}"
-        ));
-    }
-
+    let fmt_str = lookup_string(db, fmt_str_ptr, -(ptr_size as i64), &string_tbl)
+        .ok_or_else(|| format!("could not resolve format string @0x{fmt_str_ptr:x}"))?;
+    // inttypes macros change argument widths, so expand them before the walk.
+    let walk_fmt = rewrite_fmt_specs(&fmt_str, true, false);
     let arg_list = &package[hdr_len..offset_end_of_args];
-    let args = extract_args(&fmt_str, arg_list, &string_tbl, db)
+    let args = extract_args(&walk_fmt, arg_list, &string_tbl, db)
         .ok_or_else(|| format!("failed to extract arguments for format {fmt_str:?}"))?;
 
-    render(&fmt_str, &args)
+    // %p -> 0x%x only for the host formatter, AFTER the ABI walk. Database
+    // strings used as %s arguments are never rewritten.
+    render(&formalize_fmt_string(&walk_fmt), &args).map_err(|reason| DecodeError::Render {
+        fmt: fmt_str,
+        reason,
+    })
 }
 
 fn extract_string_table(bytes: &[u8]) -> HashMap<i64, String> {
     let mut tbl = HashMap::new();
     let mut idx: Option<i64> = None;
-    let mut cur = String::new();
+    let mut cur = Vec::new();
     for &b in bytes {
         match idx {
             None => idx = Some(b as i64),
             Some(i) => {
                 if b == 0 {
-                    tbl.insert(i, std::mem::take(&mut cur));
+                    tbl.insert(i, String::from_utf8_lossy(&cur).into_owned());
+                    cur.clear();
                     idx = None;
                 } else {
-                    cur.push(b as char);
+                    cur.push(b);
                 }
             }
         }
@@ -596,21 +703,18 @@ fn extract_string_table(bytes: &[u8]) -> HashMap<i64, String> {
 /// Resolve a string pointer: try the database's static string tables first,
 /// then fall back to the packed message's own inline string table (used for
 /// strings the firmware couldn't statically resolve at compile time).
-fn get_string(
+fn lookup_string(
     db: &Database,
     ptr: u64,
     arg_offset: i64,
     string_tbl: &HashMap<i64, String>,
-) -> String {
-    if let Some(s) = db.find_string(ptr) {
-        return s;
-    }
+) -> Option<String> {
     let ptr_size = db.ptr_size() as i64;
     let str_idx = (arg_offset + ptr_size * 2) / 4; // 4 == sizeof(int), always
-    match string_tbl.get(&str_idx) {
-        Some(s) => s.clone(),
-        None => format!("<string@0x{ptr:x}>"),
-    }
+    string_tbl
+        .get(&str_idx)
+        .cloned()
+        .or_else(|| db.find_string(ptr))
 }
 
 // ---------------------------------------------------------------------------
@@ -635,6 +739,7 @@ enum ArgVal {
     U(u64),
     F(f64),
     S(String),
+    MissingString(u64),
 }
 
 struct ExtractedArg {
@@ -746,6 +851,9 @@ fn extract_args(
     let chars: Vec<char> = fmt.chars().collect();
     let mut arg_offset: i64 = 0;
     let mut arg_data_type = ArgType::Int;
+    // j/z/t length modifier: intmax_t is always 64-bit; size_t/ptrdiff_t
+    // follow the pointer width (ILP32/LP64), i.e. `long`.
+    let mut size_modifier: Option<ArgType> = None;
     let mut is_parsing = false;
     let mut args = Vec::new();
 
@@ -758,6 +866,7 @@ fn extract_args(
             if fmt_ch == '%' {
                 is_parsing = true;
                 arg_data_type = ArgType::Int;
+                size_modifier = None;
             }
             i += 1;
             continue;
@@ -766,7 +875,23 @@ fn extract_args(
             i += 1;
             continue;
         } else if fmt_ch == '*' {
-            // Match log_parser_v3.py: '*' is a modifier, not a separate argument.
+            // printf's dynamic width/precision consumes a promoted int BEFORE
+            // the conversion value, including on pointer-width stack slots.
+            let align = type_align(ArgType::Int, is64) as i64;
+            let stk_align = stack_align(arch, is64, ArgType::Int);
+            if stk_align > 1 {
+                arg_offset = ((arg_offset + align - 1) / align) * align;
+            }
+            let off = usize::try_from(arg_offset).ok()?;
+            let value = read_int_sized(arg_list.get(off..off + 4)?, le, 4)?;
+            args.push(ExtractedArg {
+                conv: '*',
+                value: ArgVal::I(value),
+            });
+            arg_offset += 4;
+            if stk_align > 1 {
+                arg_offset = ((arg_offset + align - 1) / align) * align;
+            }
             i += 1;
             continue;
         } else if fmt_ch.is_ascii_digit()
@@ -777,14 +902,28 @@ fn extract_args(
             i += 1;
             continue;
         } else if matches!(fmt_ch, 'j' | 'z' | 't') {
-            arg_data_type = ArgType::Long;
+            // Upstream log_parser_v3.py records this but then overwrites it in
+            // the conversion branch, so %jd on 32-bit and %zu on 64-bit read
+            // only four bytes and shift every following argument.
+            size_modifier = Some(if fmt_ch == 'j' {
+                ArgType::LongLong
+            } else {
+                ArgType::Long
+            });
             i += 1;
             continue;
         } else if matches!(fmt_ch, 'c' | 'd' | 'i' | 'o' | 'u' | 'x' | 'X') {
             let unsigned = matches!(fmt_ch, 'c' | 'o' | 'u' | 'x' | 'X');
             let prev1 = (i >= 1).then(|| chars[i - 1]);
             let prev2 = (i >= 2).then(|| chars[i - 2]);
-            arg_data_type = if prev1 == Some('l') {
+            arg_data_type = if let Some(modifier) = size_modifier {
+                match (modifier, unsigned) {
+                    (ArgType::LongLong, true) => ArgType::ULongLong,
+                    (ArgType::LongLong, false) => ArgType::LongLong,
+                    (_, true) => ArgType::ULong,
+                    (_, false) => ArgType::Long,
+                }
+            } else if prev1 == Some('l') {
                 if prev2 == Some('l') {
                     if unsigned {
                         ArgType::ULongLong
@@ -851,7 +990,11 @@ fn extract_args(
                     ArgVal::U(v) => v,
                     _ => return None,
                 };
-                ArgVal::S(get_string(db, ptr, arg_offset, string_tbl))
+                match lookup_string(db, ptr, arg_offset, string_tbl) {
+                    Some(s) => ArgVal::S(s),
+                    None if ptr == 0 => ArgVal::S("(null)".into()),
+                    None => ArgVal::MissingString(ptr),
+                }
             } else {
                 value
             };
@@ -873,21 +1016,102 @@ fn extract_args(
     Some(args)
 }
 
+/// Upper bound for a printf field width or numeric precision. A corrupted or
+/// hostile record must not turn one log entry into megabytes of padding.
+const MAX_FIELD_LEN: i32 = 16 * 1024;
+
 fn render(fmt_str: &str, args: &[ExtractedArg]) -> Result<String, String> {
-    let boxed: Vec<Box<dyn sprintf::Printf>> = args.iter().map(arg_to_printf_box).collect();
-    let refs: Vec<&dyn sprintf::Printf> = boxed.iter().map(|b| b.as_ref()).collect();
-    match sprintf::vsprintf(fmt_str, &refs) {
-        Ok(s) => Ok(s),
-        // Dynamic width/precision ('*') and other unsupported specifiers: show
-        // the format string rather than a second overlapping diagnostic line.
-        Err(_) if fmt_str.contains('*') => Ok(fmt_str.to_string()),
-        Err(e) => Err(format!("{e} (fmt={fmt_str:?})")),
+    use sprintf::parser::{ConversionType, FormatElement, NumericParam};
+    // sprintf 0.4 also treats an explicit .* as omitted precision. Expand
+    // stars ourselves, consuming their ints in va_list order, before parsing.
+    let mut expanded = String::new();
+    let mut values = Vec::new();
+    let mut args = args.iter();
+    let mut in_spec = false;
+    let mut precision = false;
+    for ch in fmt_str.chars() {
+        if !in_spec {
+            expanded.push(ch);
+            if ch == '%' {
+                in_spec = true;
+                precision = false;
+            }
+        } else if ch == '*' {
+            let arg = args.next().ok_or("missing width/precision argument")?;
+            let ArgVal::I(value) = arg.value else {
+                return Err("width/precision is not int".into());
+            };
+            let value = value as i32;
+            if precision && value < 0 {
+                expanded.pop(); // omit the preceding dot, as required by printf
+            } else {
+                let magnitude = value.checked_abs().ok_or("width/precision out of range")?;
+                // Only a width pads here. A dynamic precision is checked after
+                // parsing, where the conversion is known: it pads numbers but
+                // only truncates strings ("%.*s" == "%.20000s").
+                if !precision && magnitude > MAX_FIELD_LEN {
+                    return Err(format!(
+                        "field {value} exceeds output limit {MAX_FIELD_LEN}"
+                    ));
+                }
+                if value < 0 {
+                    expanded.push('-');
+                }
+                expanded.push_str(&magnitude.to_string());
+            }
+        } else {
+            expanded.push(ch);
+            if ch == '.' {
+                precision = true;
+            }
+            if "diouxXcspnaAeEfFgG".contains(ch) {
+                values.push(args.next().ok_or("missing conversion argument")?);
+                in_spec = false;
+            } else if !"-+ #0123456789.hlLjzt".contains(ch) {
+                // '%%' or an unknown conversion: like extract_args, it ends
+                // the specification without consuming an argument.
+                in_spec = false;
+            }
+        }
     }
+    if args.next().is_some() {
+        return Err("unused conversion arguments".into());
+    }
+    let mut format = sprintf::parser::parse_format_string(&expanded).map_err(|e| e.to_string())?;
+    let mut value_iter = values.iter();
+    for element in &mut format {
+        let FormatElement::Format(spec) = element else {
+            continue;
+        };
+        if spec.conversion_type == ConversionType::PercentSign {
+            continue;
+        }
+        let value = value_iter.next().ok_or("missing conversion argument")?;
+        if matches!(value.value, ArgVal::MissingString(_)) || value.conv == 'p' {
+            // Never truncate an unresolved-address diagnostic into e.g. "<st",
+            // nor a pointer pre-formatted as "0x..." (rendered through %s).
+            spec.precision = NumericParam::Literal(i32::MAX);
+        }
+        if matches!(spec.width, NumericParam::Literal(w) if w > MAX_FIELD_LEN) {
+            return Err(format!("field width exceeds output limit {MAX_FIELD_LEN}"));
+        }
+        // String precision only truncates; numeric precision pads with zeros.
+        if spec.conversion_type != ConversionType::String
+            && matches!(spec.precision, NumericParam::Literal(p) if p > MAX_FIELD_LEN)
+        {
+            return Err(format!("precision exceeds output limit {MAX_FIELD_LEN}"));
+        }
+    }
+    let boxed: Vec<_> = values.into_iter().map(arg_to_printf_box).collect();
+    let refs: Vec<&dyn sprintf::Printf> = boxed.iter().map(|b| b.as_ref()).collect();
+    sprintf::vsprintfp(&format, &refs).map_err(|e| e.to_string())
 }
 
 fn arg_to_printf_box(arg: &ExtractedArg) -> Box<dyn sprintf::Printf> {
     match (&arg.value, arg.conv) {
         (ArgVal::S(s), _) => Box::new(s.clone()),
+        (ArgVal::MissingString(ptr), _) => Box::new(format!("<string@0x{ptr:x}>")),
+        (ArgVal::U(v), 'p') => Box::new(format!("0x{v:x}")),
         // %c needs a concrete type sprintf's Printf impl treats as a
         // character (u32 handles ConversionType::Char); everything else
         // (%d/%u/%x/%o/%p/...) works fine as plain i64/u64.
@@ -1045,12 +1269,10 @@ impl Database {
             ));
         }
 
-        let is_64bit = raw.target.bits.unwrap_or(32) == 64;
         let mut string_mappings = HashMap::with_capacity(raw.string_mappings.len());
         for (addr, s) in raw.string_mappings {
             if let Ok(addr) = addr.parse::<u64>() {
-                let value = formalize_fmt_string(&s, is_64bit);
-                string_mappings.insert(addr, value);
+                string_mappings.insert(addr, s);
             }
         }
 
@@ -1101,9 +1323,12 @@ impl Database {
         // Combined/deduplicated strings: ptr may point partway into an
         // already-stored string sharing a suffix with it.
         for (addr, s) in &self.string_mappings {
-            if *addr <= ptr && ptr < addr + s.len() as u64 {
-                let offset = (ptr - addr) as usize;
-                return Some(s[offset..].to_string());
+            if let Some(offset) = ptr.checked_sub(*addr).and_then(|o| usize::try_from(o).ok()) {
+                // The terminating NUL is a valid pooled empty string. get()
+                // also rejects pointers into the middle of a UTF-8 codepoint.
+                if let Some(suffix) = s.get(offset..) {
+                    return Some(suffix.to_string());
+                }
             }
         }
         for section in &self.sections {
