@@ -368,7 +368,8 @@ fn rewrite_fmt_specs(fmt: &str, expand_inttypes: bool, pointer_as_hex: bool) -> 
         }
         let take =
             |s: &str, allowed: &str| s.len() - s.trim_start_matches(|c| allowed.contains(c)).len();
-        let mut end = take(spec, "-+ #0");
+        let flags_end = take(spec, "-+ #0");
+        let mut end = flags_end;
         end += if spec[end..].starts_with('*') {
             1
         } else {
@@ -400,10 +401,15 @@ fn rewrite_fmt_specs(fmt: &str, expand_inttypes: bool, pointer_as_hex: bool) -> 
         let conv = after_head[len_end..].chars().next();
         let spec_end = end + len_end + conv.map_or(0, char::len_utf8);
         if pointer_as_hex && conv == Some('p') {
-            // Keep flags/width/precision; drop '#' so "0x" is not printed twice.
-            out.push_str("0x%");
-            out.push_str(&head.replacen('#', "", 1));
-            out.push('x');
+            // The "0x" prefix belongs to the padded field ("%8p" of 1 is
+            // "     0x1"), so the pointer is pre-formatted and printed as %s.
+            // Only '-' is meaningful for a string; '#', '0', '+', ' ' are not.
+            // Precision is kept (it may be '*' with its own argument) but is
+            // neutralized in render() so it never truncates the address.
+            out.push('%');
+            out.extend(spec[..flags_end].chars().filter(|&c| c == '-'));
+            out.push_str(&head[flags_end..]);
+            out.push('s');
         } else {
             out.push('%');
             out.push_str(&spec[..spec_end]);
@@ -416,7 +422,8 @@ fn rewrite_fmt_specs(fmt: &str, expand_inttypes: bool, pointer_as_hex: bool) -> 
 
 /// Normalize a format string for the Rust `sprintf` host formatter.
 /// `sprintf` accepts and ignores C length modifiers, so only `%p` needs
-/// rewriting; argument widths were already decided by `extract_args`.
+/// rewriting (to `%s` of a pre-formatted "0x..." value); argument widths
+/// were already decided by `extract_args`.
 fn formalize_fmt_string(fmt: &str) -> String {
     rewrite_fmt_specs(fmt, false, true)
 }
@@ -1039,7 +1046,10 @@ fn render(fmt_str: &str, args: &[ExtractedArg]) -> Result<String, String> {
                 expanded.pop(); // omit the preceding dot, as required by printf
             } else {
                 let magnitude = value.checked_abs().ok_or("width/precision out of range")?;
-                if magnitude > MAX_FIELD_LEN {
+                // Only a width pads here. A dynamic precision is checked after
+                // parsing, where the conversion is known: it pads numbers but
+                // only truncates strings ("%.*s" == "%.20000s").
+                if !precision && magnitude > MAX_FIELD_LEN {
                     return Err(format!(
                         "field {value} exceeds output limit {MAX_FIELD_LEN}"
                     ));
@@ -1077,8 +1087,9 @@ fn render(fmt_str: &str, args: &[ExtractedArg]) -> Result<String, String> {
             continue;
         }
         let value = value_iter.next().ok_or("missing conversion argument")?;
-        if matches!(value.value, ArgVal::MissingString(_)) {
-            // Never truncate an unresolved-address diagnostic into e.g. "<st".
+        if matches!(value.value, ArgVal::MissingString(_)) || value.conv == 'p' {
+            // Never truncate an unresolved-address diagnostic into e.g. "<st",
+            // nor a pointer pre-formatted as "0x..." (rendered through %s).
             spec.precision = NumericParam::Literal(i32::MAX);
         }
         if matches!(spec.width, NumericParam::Literal(w) if w > MAX_FIELD_LEN) {
@@ -1100,6 +1111,7 @@ fn arg_to_printf_box(arg: &ExtractedArg) -> Box<dyn sprintf::Printf> {
     match (&arg.value, arg.conv) {
         (ArgVal::S(s), _) => Box::new(s.clone()),
         (ArgVal::MissingString(ptr), _) => Box::new(format!("<string@0x{ptr:x}>")),
+        (ArgVal::U(v), 'p') => Box::new(format!("0x{v:x}")),
         // %c needs a concrete type sprintf's Printf impl treats as a
         // character (u32 handles ConversionType::Char); everything else
         // (%d/%u/%x/%o/%p/...) works fine as plain i64/u64.

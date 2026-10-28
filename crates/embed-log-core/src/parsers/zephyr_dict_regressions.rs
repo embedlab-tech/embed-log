@@ -514,3 +514,47 @@ fn long_hex_burst_does_not_accumulate_decoded_characters() {
         .iter()
         .any(|l| l == "shell> ok"));
 }
+#[test]
+fn pointer_prefix_belongs_to_the_padded_field() {
+    for (fmt, words, body) in [
+        ("[%p]", vec![0x2000_1000u32], "[0x20001000]"),
+        ("[%8p]", vec![1], "[     0x1]"),
+        ("[%-8p]", vec![1], "[0x1     ]"),
+        ("[%#08p]", vec![1], "[     0x1]"),
+        ("[%*p] %d", vec![6, 0xab, 9], "[  0xab] 9"),
+        ("[%.1p] %d", vec![0xabc, 9], "[0xabc] 9"),
+        ("[%.*p] %d", vec![1, 0xabc, 9], "[0xabc] 9"),
+    ] {
+        let db = TestDb::new(&[(0x1000, fmt)]);
+        assert_both_transports(&db, &package(&words, &[]), body);
+    }
+}
+#[test]
+fn dynamic_string_precision_only_truncates_and_is_not_size_limited() {
+    let db = TestDb::new(&[(0x1000, "[%.*s] %d")]);
+    let pkg = package(&[20_000, 0xdeadbeef, 9], &[(3, "hi")]);
+    assert_eq!(decode_package(&pkg, &db.load()).unwrap(), "[hi] 9");
+    // Same as the literal form.
+    let db = TestDb::new(&[(0x1000, "[%.20000s] %d")]);
+    let pkg = package(&[0xdeadbeef, 9], &[(2, "hi")]);
+    assert_eq!(decode_package(&pkg, &db.load()).unwrap(), "[hi] 9");
+    // Width pads and numeric precision zero-fills: both stay bounded.
+    for (fmt, words) in [
+        ("[%*s]", vec![20_000u32, 0xdeadbeef]),
+        ("[%.*d]", vec![20_000, 7]),
+    ] {
+        let db = TestDb::new(&[(0x1000, fmt)]);
+        let strs: &[(u8, &str)] = if fmt.ends_with("s]") {
+            &[(3, "hi")]
+        } else {
+            &[]
+        };
+        assert!(
+            matches!(
+                decode_package(&package(&words, strs), &db.load()),
+                Err(DecodeError::Render { .. })
+            ),
+            "{fmt}"
+        );
+    }
+}
