@@ -4,10 +4,13 @@
 //! Acquisition is heuristic: initial data can be lost, and arbitrary binary
 //! console output or corruption cannot be classified without ambiguity.
 use super::{
-    read_uint_sized, take_one_message, Database, LoadState, TakeResult, MSG_TYPE_DROPPED,
-    MSG_TYPE_NORMAL,
+    decode_package, read_uint_sized, take_one_message, Database, LoadState, TakeResult,
+    MSG_TYPE_DROPPED, MSG_TYPE_NORMAL,
 };
 use crate::parsers::traits::StreamParser;
+use std::time::Duration;
+
+const INCOMPLETE_RECORD_IDLE_DEADLINE: Duration = Duration::from_secs(5);
 
 pub struct ZephyrDictBinaryParser {
     state: LoadState,
@@ -33,7 +36,7 @@ impl ZephyrDictBinaryParser {
         }
     }
 
-    fn consume(&mut self, lines: &mut Vec<String>) {
+    fn consume(&mut self, lines: &mut Vec<String>, expired: bool) {
         let LoadState::Ready(db) = &self.state else {
             return;
         };
@@ -61,7 +64,12 @@ impl ZephyrDictBinaryParser {
             }
             if bytes[0] == MSG_TYPE_NORMAL {
                 if bytes.len() < 2 {
-                    break;
+                    if !expired {
+                        break;
+                    }
+                    offset += 1;
+                    self.skipped += 1;
+                    continue;
                 }
                 let level = if db.little_endian {
                     bytes[1] >> 4
@@ -75,7 +83,12 @@ impl ZephyrDictBinaryParser {
                 }
                 let prefix = 6 + db.ptr_size();
                 if bytes.len() < prefix {
-                    break;
+                    if !expired {
+                        break;
+                    }
+                    offset += 1;
+                    self.skipped += 1;
+                    continue;
                 }
                 let pkg_len = read_uint_sized(&bytes[2..4], db.little_endian, 2).unwrap();
                 let source =
@@ -91,7 +104,29 @@ impl ZephyrDictBinaryParser {
                 }
             }
             match take_one_message(bytes, db) {
-                TakeResult::NeedMore => break,
+                TakeResult::NeedMore => {
+                    // During acquisition a bogus length from a different ELF
+                    // must not mask a later complete, known record. Never scan
+                    // inside an acquired record: its hexdump can contain one.
+                    if !self.synchronized && !known_package(bytes, db) {
+                        if let Some(next) = (1..bytes.len()).find(|&i| {
+                            known_normal_record(&bytes[i..], db)
+                                && matches!(
+                                    take_one_message(&bytes[i..], db),
+                                    TakeResult::Consumed { .. }
+                                )
+                        }) {
+                            offset += next;
+                            self.skipped += next;
+                            continue;
+                        }
+                    }
+                    if !expired {
+                        break;
+                    }
+                    offset += 1;
+                    self.skipped += 1;
+                }
                 TakeResult::Consumed { len, mut output } => {
                     flush_binary_console(&mut self.console_text, lines);
                     if self.skipped != 0 {
@@ -133,7 +168,7 @@ impl StreamParser for ZephyrDictBinaryParser {
         let mut lines = Vec::new();
         for chunk in data.chunks(4096) {
             self.pending.extend_from_slice(chunk);
-            self.consume(&mut lines);
+            self.consume(&mut lines, false);
             // Wire length fields are u16; even a maximum-sized record is less
             // than 132 KiB. Bound memory independently of UART read sizes.
             if self.pending.len() > 256 * 1024 {
@@ -144,6 +179,60 @@ impl StreamParser for ZephyrDictBinaryParser {
         }
         lines
     }
+
+    fn on_idle(&mut self, idle_for: Duration) -> Vec<String> {
+        let mut lines = Vec::new();
+        // shortcut: valid data delayed beyond 5 s can be lost; only explicit
+        // framing/reset signals could make bounded recovery lossless.
+        if idle_for >= INCOMPLETE_RECORD_IDLE_DEADLINE && !self.pending.is_empty() {
+            self.synchronized = false;
+            lines.push(
+                "[zephyr-dict: incomplete record abandoned after 5 s idle; synchronization lost; valid delayed data may be lost]".into(),
+            );
+            self.consume(&mut lines, true);
+        }
+        flush_binary_console(&mut self.console_text, &mut lines);
+        if self.skipped != 0 {
+            lines.push(format!(
+                "[zephyr-dict: skipped {} bytes while acquiring stream]",
+                self.skipped
+            ));
+            self.skipped = 0;
+        }
+        lines
+    }
+}
+
+/// A validated package establishes a payload boundary even on the first
+/// record. Do not mistake an entire nested record in its hexdump for recovery.
+fn known_package(bytes: &[u8], db: &Database) -> bool {
+    let start = 6 + db.ptr_size() + if db.timestamp_64bit { 8 } else { 4 };
+    if bytes.len() < start {
+        return false;
+    }
+    let len = read_uint_sized(&bytes[2..4], db.little_endian, 2).unwrap() as usize;
+    bytes
+        .get(start..start + len)
+        .is_some_and(|pkg| decode_package(pkg, db).is_ok())
+}
+
+/// Restrict acquisition lookahead to ordinary records from this database.
+/// LOG_RAW/drop markers are too weak to distinguish from arbitrary payload.
+fn known_normal_record(bytes: &[u8], db: &Database) -> bool {
+    let prefix = 6 + db.ptr_size();
+    if bytes.len() < prefix || bytes[0] != MSG_TYPE_NORMAL {
+        return false;
+    }
+    let level = if db.little_endian {
+        bytes[1] >> 4
+    } else {
+        bytes[1] & 15
+    };
+    if !(1..=4).contains(&level) {
+        return false;
+    }
+    let source = read_uint_sized(&bytes[6..prefix], db.little_endian, db.ptr_size()).unwrap();
+    db.log_instances.contains_key(&source.to_string())
 }
 
 fn flush_binary_console(text: &mut Vec<u8>, lines: &mut Vec<String>) {

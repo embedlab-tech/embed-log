@@ -17,6 +17,10 @@ use super::traits::StreamParser;
 #[path = "zephyr_dict_binary.rs"]
 pub mod binary;
 
+#[cfg(test)]
+#[path = "zephyr_dict_regressions.rs"]
+mod regression_tests;
+
 /// Default earliest-valid epoch for UTC log timestamps (2000-01-01 UTC).
 const DEFAULT_EARLIEST_VALID_EPOCH: u64 = 946_684_800;
 
@@ -427,8 +431,9 @@ fn take_normal_message(buf: &[u8], db: &Database) -> TakeResult {
         return malformed();
     };
 
-    let total_len = fixed_prefix + pkg_len as usize + data_len as usize;
-    if buf.len() < total_len {
+    let package_end = fixed_prefix + pkg_len as usize;
+    let total_len = package_end + data_len as usize;
+    if buf.len() < package_end {
         return TakeResult::NeedMore;
     }
 
@@ -449,12 +454,16 @@ fn take_normal_message(buf: &[u8], db: &Database) -> TakeResult {
     }
 
     let package = &buf[fixed_prefix..fixed_prefix + pkg_len as usize];
-    let extra_data = &buf[fixed_prefix + pkg_len as usize..total_len];
-
+    // Validate the package before waiting for its hexdump. A stale/corrupt
+    // header must not hold console text behind a bogus 64 KiB data length.
     let body = match decode_package(package, db) {
         Ok(msg) => msg,
         Err(_) => return TakeResult::Stop,
     };
+    if buf.len() < total_len {
+        return TakeResult::NeedMore;
+    }
+    let extra_data = &buf[package_end..total_len];
 
     let mut output = Vec::with_capacity(2);
     if level == 0 {
@@ -559,33 +568,32 @@ fn decode_package(package: &[u8], db: &Database) -> Result<String, String> {
     .ok_or("failed to read format-string pointer")?;
     // Negative offset: the format string sits one pointer-width *before*
     // where the va_list argument offsets are measured from.
-    let fmt_str = get_string(db, fmt_str_ptr, -(ptr_size as i64), &string_tbl);
-    if fmt_str.is_empty() {
-        return Err(format!(
-            "could not resolve format string @0x{fmt_str_ptr:x}"
-        ));
-    }
-
+    let fmt_str = lookup_string(db, fmt_str_ptr, -(ptr_size as i64), &string_tbl)
+        .ok_or_else(|| format!("could not resolve format string @0x{fmt_str_ptr:x}"))?;
     let arg_list = &package[hdr_len..offset_end_of_args];
     let args = extract_args(&fmt_str, arg_list, &string_tbl, db)
         .ok_or_else(|| format!("failed to extract arguments for format {fmt_str:?}"))?;
 
-    render(&fmt_str, &args)
+    // Normalize only for the host formatter, AFTER the ABI walk: %llu -> %lu
+    // would otherwise read four bytes instead of eight on a 32-bit target.
+    // Keep database strings untouched for literal %s and pooled byte offsets.
+    render(&formalize_fmt_string(&fmt_str, db.is_64bit), &args)
 }
 
 fn extract_string_table(bytes: &[u8]) -> HashMap<i64, String> {
     let mut tbl = HashMap::new();
     let mut idx: Option<i64> = None;
-    let mut cur = String::new();
+    let mut cur = Vec::new();
     for &b in bytes {
         match idx {
             None => idx = Some(b as i64),
             Some(i) => {
                 if b == 0 {
-                    tbl.insert(i, std::mem::take(&mut cur));
+                    tbl.insert(i, String::from_utf8_lossy(&cur).into_owned());
+                    cur.clear();
                     idx = None;
                 } else {
-                    cur.push(b as char);
+                    cur.push(b);
                 }
             }
         }
@@ -596,21 +604,18 @@ fn extract_string_table(bytes: &[u8]) -> HashMap<i64, String> {
 /// Resolve a string pointer: try the database's static string tables first,
 /// then fall back to the packed message's own inline string table (used for
 /// strings the firmware couldn't statically resolve at compile time).
-fn get_string(
+fn lookup_string(
     db: &Database,
     ptr: u64,
     arg_offset: i64,
     string_tbl: &HashMap<i64, String>,
-) -> String {
-    if let Some(s) = db.find_string(ptr) {
-        return s;
-    }
+) -> Option<String> {
     let ptr_size = db.ptr_size() as i64;
     let str_idx = (arg_offset + ptr_size * 2) / 4; // 4 == sizeof(int), always
-    match string_tbl.get(&str_idx) {
-        Some(s) => s.clone(),
-        None => format!("<string@0x{ptr:x}>"),
-    }
+    string_tbl
+        .get(&str_idx)
+        .cloned()
+        .or_else(|| db.find_string(ptr))
 }
 
 // ---------------------------------------------------------------------------
@@ -635,6 +640,7 @@ enum ArgVal {
     U(u64),
     F(f64),
     S(String),
+    MissingString(u64),
 }
 
 struct ExtractedArg {
@@ -766,7 +772,23 @@ fn extract_args(
             i += 1;
             continue;
         } else if fmt_ch == '*' {
-            // Match log_parser_v3.py: '*' is a modifier, not a separate argument.
+            // printf's dynamic width/precision consumes a promoted int BEFORE
+            // the conversion value, including on pointer-width stack slots.
+            let align = type_align(ArgType::Int, is64) as i64;
+            let stk_align = stack_align(arch, is64, ArgType::Int);
+            if stk_align > 1 {
+                arg_offset = ((arg_offset + align - 1) / align) * align;
+            }
+            let off = usize::try_from(arg_offset).ok()?;
+            let value = read_int_sized(arg_list.get(off..off + 4)?, le, 4)?;
+            args.push(ExtractedArg {
+                conv: '*',
+                value: ArgVal::I(value),
+            });
+            arg_offset += 4;
+            if stk_align > 1 {
+                arg_offset = ((arg_offset + align - 1) / align) * align;
+            }
             i += 1;
             continue;
         } else if fmt_ch.is_ascii_digit()
@@ -851,7 +873,11 @@ fn extract_args(
                     ArgVal::U(v) => v,
                     _ => return None,
                 };
-                ArgVal::S(get_string(db, ptr, arg_offset, string_tbl))
+                match lookup_string(db, ptr, arg_offset, string_tbl) {
+                    Some(s) => ArgVal::S(s),
+                    None if ptr == 0 => ArgVal::S("(null)".into()),
+                    None => ArgVal::MissingString(ptr),
+                }
             } else {
                 value
             };
@@ -874,20 +900,82 @@ fn extract_args(
 }
 
 fn render(fmt_str: &str, args: &[ExtractedArg]) -> Result<String, String> {
-    let boxed: Vec<Box<dyn sprintf::Printf>> = args.iter().map(arg_to_printf_box).collect();
-    let refs: Vec<&dyn sprintf::Printf> = boxed.iter().map(|b| b.as_ref()).collect();
-    match sprintf::vsprintf(fmt_str, &refs) {
-        Ok(s) => Ok(s),
-        // Dynamic width/precision ('*') and other unsupported specifiers: show
-        // the format string rather than a second overlapping diagnostic line.
-        Err(_) if fmt_str.contains('*') => Ok(fmt_str.to_string()),
-        Err(e) => Err(format!("{e} (fmt={fmt_str:?})")),
+    use sprintf::parser::{ConversionType, FormatElement, NumericParam};
+    // sprintf 0.4 also treats an explicit .* as omitted precision. Expand
+    // stars ourselves, consuming their ints in va_list order, before parsing.
+    let mut expanded = String::new();
+    let mut values = Vec::new();
+    let mut args = args.iter();
+    let mut in_spec = false;
+    let mut precision = false;
+    for ch in fmt_str.chars() {
+        if !in_spec {
+            expanded.push(ch);
+            if ch == '%' {
+                in_spec = true;
+                precision = false;
+            }
+        } else if ch == '*' {
+            let arg = args.next().ok_or("missing width/precision argument")?;
+            let ArgVal::I(value) = arg.value else {
+                return Err("width/precision is not int".into());
+            };
+            let value = value as i32;
+            if precision && value < 0 {
+                expanded.pop(); // omit the preceding dot, as required by printf
+            } else {
+                let magnitude = value.checked_abs().ok_or("width/precision out of range")?;
+                if magnitude > 1024 * 1024 {
+                    return Err("field exceeds output limit".into());
+                }
+                if value < 0 {
+                    expanded.push('-');
+                }
+                expanded.push_str(&magnitude.to_string());
+            }
+        } else {
+            expanded.push(ch);
+            if ch == '.' {
+                precision = true;
+            }
+            if ch == '%' {
+                in_spec = false;
+            } else if "diouxXcspnaAeEfFgG".contains(ch) {
+                values.push(args.next().ok_or("missing conversion argument")?);
+                in_spec = false;
+            }
+        }
     }
+    if args.next().is_some() {
+        return Err("unused conversion arguments".into());
+    }
+    let mut format = sprintf::parser::parse_format_string(&expanded).map_err(|e| e.to_string())?;
+    let mut value_iter = values.iter();
+    for element in &mut format {
+        let FormatElement::Format(spec) = element else {
+            continue;
+        };
+        if spec.conversion_type == ConversionType::PercentSign {
+            continue;
+        }
+        let value = value_iter.next().ok_or("missing conversion argument")?;
+        if matches!(value.value, ArgVal::MissingString(_)) {
+            // Never truncate an unresolved-address diagnostic into e.g. "<st".
+            spec.precision = NumericParam::Literal(i32::MAX);
+        }
+        if matches!(spec.width, NumericParam::Literal(w) if w > 1024 * 1024) {
+            return Err("field width exceeds output limit".into());
+        }
+    }
+    let boxed: Vec<_> = values.into_iter().map(arg_to_printf_box).collect();
+    let refs: Vec<&dyn sprintf::Printf> = boxed.iter().map(|b| b.as_ref()).collect();
+    sprintf::vsprintfp(&format, &refs).map_err(|e| format!("{e} (fmt={fmt_str:?})"))
 }
 
 fn arg_to_printf_box(arg: &ExtractedArg) -> Box<dyn sprintf::Printf> {
     match (&arg.value, arg.conv) {
         (ArgVal::S(s), _) => Box::new(s.clone()),
+        (ArgVal::MissingString(ptr), _) => Box::new(format!("<string@0x{ptr:x}>")),
         // %c needs a concrete type sprintf's Printf impl treats as a
         // character (u32 handles ConversionType::Char); everything else
         // (%d/%u/%x/%o/%p/...) works fine as plain i64/u64.
@@ -1045,12 +1133,10 @@ impl Database {
             ));
         }
 
-        let is_64bit = raw.target.bits.unwrap_or(32) == 64;
         let mut string_mappings = HashMap::with_capacity(raw.string_mappings.len());
         for (addr, s) in raw.string_mappings {
             if let Ok(addr) = addr.parse::<u64>() {
-                let value = formalize_fmt_string(&s, is_64bit);
-                string_mappings.insert(addr, value);
+                string_mappings.insert(addr, s);
             }
         }
 
@@ -1101,9 +1187,12 @@ impl Database {
         // Combined/deduplicated strings: ptr may point partway into an
         // already-stored string sharing a suffix with it.
         for (addr, s) in &self.string_mappings {
-            if *addr <= ptr && ptr < addr + s.len() as u64 {
-                let offset = (ptr - addr) as usize;
-                return Some(s[offset..].to_string());
+            if let Some(offset) = ptr.checked_sub(*addr).and_then(|o| usize::try_from(o).ok()) {
+                // The terminating NUL is a valid pooled empty string. get()
+                // also rejects pointers into the middle of a UTF-8 codepoint.
+                if let Some(suffix) = s.get(offset..) {
+                    return Some(suffix.to_string());
+                }
             }
         }
         for section in &self.sections {

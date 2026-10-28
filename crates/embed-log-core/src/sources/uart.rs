@@ -23,6 +23,9 @@ use crate::models::LogEntry;
 use crate::parsers::create_parser;
 
 const UART_RECONNECT_DELAY: Duration = Duration::from_secs(1);
+// Start with a soft flush, then keep notifying so parser deadlines can fire.
+const UART_PARSER_IDLE: Duration = Duration::from_secs(1);
+const UART_PARSER_IDLE_REPEAT: Duration = Duration::from_millis(250);
 type SharedSerialPort = Arc<tokio::sync::Mutex<Option<Box<dyn serialport::SerialPort>>>>;
 
 /// How the UART source obtains its serial port.
@@ -271,6 +274,8 @@ impl LogSource for UartSource {
         }
 
         let mut parser = create_parser(&parser_cfg);
+        let mut last_activity = tokio::time::Instant::now();
+        let mut next_idle = last_activity + UART_PARSER_IDLE;
 
         loop {
             // Clone the port under the lock, then release before the blocking read.
@@ -298,6 +303,8 @@ impl LogSource for UartSource {
                     this.reconnect_port(&port, &format!("clone error: {e}"))
                         .await?;
                     parser = create_parser(&parser_cfg);
+                    last_activity = tokio::time::Instant::now();
+                    next_idle = last_activity + UART_PARSER_IDLE;
                     continue;
                 }
             };
@@ -305,7 +312,7 @@ impl LogSource for UartSource {
             let (buf, n) = match read_result {
                 Ok((buf, n)) => (buf, n),
                 Err(e) if matches!(e.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) => {
-                    continue;
+                    ([0u8; 4096], 0)
                 }
                 Err(e) if e.kind() == ErrorKind::Interrupted => {
                     continue;
@@ -314,16 +321,27 @@ impl LogSource for UartSource {
                     this.reconnect_port(&port, &format!("read error: {e}"))
                         .await?;
                     parser = create_parser(&parser_cfg);
+                    last_activity = tokio::time::Instant::now();
+                    next_idle = last_activity + UART_PARSER_IDLE;
                     continue;
                 }
             };
 
-            if n == 0 {
+            let lines = if n == 0 {
                 tokio::time::sleep(Duration::from_millis(25)).await;
-                continue;
-            }
+                let now = tokio::time::Instant::now();
+                if now < next_idle {
+                    continue;
+                }
+                next_idle = now + UART_PARSER_IDLE_REPEAT;
+                parser.on_idle(now.duration_since(last_activity))
+            } else {
+                last_activity = tokio::time::Instant::now();
+                next_idle = last_activity + UART_PARSER_IDLE;
+                parser.feed(&buf[..n])
+            };
 
-            for line in parser.feed(&buf[..n]) {
+            for line in lines {
                 let trimmed = line.trim_end();
                 if trimmed.is_empty() {
                     continue;
@@ -439,6 +457,10 @@ fn open_serial_with_fallback(
         .open()
         .map_err(|e| anyhow::anyhow!("[{name}] failed to open serial port {path}: {e}"))
 }
+
+#[cfg(all(test, unix))]
+#[path = "uart_regressions.rs"]
+mod regression_tests;
 
 #[cfg(test)]
 #[cfg(unix)]

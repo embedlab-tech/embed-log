@@ -171,8 +171,48 @@ length determines its end, including arbitrary binary hexdump data.
 Binary acquisition is heuristic: attaching midway through a record or byte loss
 can discard initial data, and recovery is not guaranteed for arbitrary damaged
 streams or binary console replies. Drop records alone do not establish initial
-synchronization. Incomplete candidates wait for more input, buffers are bounded,
-and detectable decode failures are reported.
+synchronization. During acquisition, an incomplete candidate may be skipped for
+an independently validated complete record from the configured dictionary. Once
+synchronized, the parser never scans inside a record's hexdump.
+
+On UART, soft idle callbacks start after **one second without received bytes**
+and repeat every 250 ms. They preserve plausible incomplete BIN records. After
+**five seconds of silence**, the parser reports truncation, releases buffered
+console text, and reacquires on subsequent records. A legitimate record paused
+beyond that deadline is also treated as truncated. A single 100 ms serial read
+timeout does not reset the parser, and newly received bytes restart the idle
+deadline. File/UDP parsers have no UART idle timer. Buffers are bounded and
+detectable decode failures are reported.
+This does not automatically select a different firmware's dictionary. Stop or
+restart a session with the matching database when flashing a different image;
+do not use stale decoded boot output as evidence about the newly flashed image.
+
+#### Empty strings and raw section bytes
+
+The decoder handles dynamic printf width/precision (`%*s`, `%.*s`, `%*.*s`),
+including signed arguments and following conversions. Literal string arguments
+are not rewritten as format strings; packed strings are decoded as UTF-8.
+
+A string pointer to a mapped string's terminating NUL resolves to `""`. The
+linker can also pool `""` into a NUL inside a **binary** `.rodata` constant.
+Stock Zephyr dictionaries may omit that address and contain no raw sections;
+the decoder cannot infer its byte value from `string_mappings` alone. Unmapped
+pointers remain visible as `<string@0x…>` rather than being silently hidden.
+
+To resolve those addresses, enrich the dictionary once using its **matching ELF**:
+
+```sh
+python -m pip install pyelftools
+python scripts/enrich_zephyr_dictionary.py \
+  --database build/zephyr/log_dictionary.json \
+  --elf build/zephyr/zephyr.elf \
+  --output build/zephyr/log_dictionary.enriched.json
+```
+
+Use the enriched JSON as `parser.database` (and package that JSON alongside the
+firmware). The tool verifies the target and existing string bytes before adding read-only
+string sections. No firmware or wire-format change is required, and decoding
+the enriched JSON needs neither Python nor the ELF at runtime.
 
 ### File tail
 
