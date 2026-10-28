@@ -153,7 +153,20 @@ jobs:
           $port = 18765
           $server = Start-Process -FilePath python -ArgumentList @("-m", "http.server", "$port", "--directory", (Join-Path $PWD "dist")) -PassThru -WindowStyle Hidden
           try {
-            Start-Sleep -Seconds 1
+            # Wait until the local server actually serves files. A fixed 1 s
+            # sleep races with Python start-up on cold Windows runners, and the
+            # installer's download then fails with only "exit code 1".
+            $ready = $false
+            for ($i = 0; $i -lt 60 -and -not $ready; $i++) {
+              if ($server.HasExited) { throw "python http.server exited early (code $($server.ExitCode))" }
+              try {
+                Invoke-WebRequest -Uri "http://127.0.0.1:$port/SHA256SUMS" -UseBasicParsing -TimeoutSec 2 | Out-Null
+                $ready = $true
+              } catch {
+                Start-Sleep -Milliseconds 500
+              }
+            }
+            if (-not $ready) { throw "python http.server did not serve dist/ on port $port within 30 s" }
             $env:EMBED_LOG_BASE_URL = "http://127.0.0.1:$port"
             $env:INSTALL_DIR = $installDir
             $env:EMBED_LOG_NO_PROMPT = "1"
