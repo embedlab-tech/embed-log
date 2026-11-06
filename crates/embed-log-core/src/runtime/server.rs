@@ -340,6 +340,7 @@ impl LogServer {
             job_id: self.config.server.job_id.clone(),
             timestamp_mode: self.config.server.timestamp_mode.to_string(),
             config_msg: shared_config_msg.clone(),
+            runtime_config: runtime_config_summary(&self.config, &self.logs_root),
             default_light_theme: self.config.server.default_light_theme.clone(),
             default_dark_theme: self.config.server.default_dark_theme.clone(),
             export_on_rotate: self.export_on_shutdown,
@@ -625,6 +626,7 @@ impl LogServer {
             default_light_theme: &self.config.server.default_light_theme,
             default_dark_theme: &self.config.server.default_dark_theme,
             session_info,
+            runtime_config: runtime_config_summary(&self.config, &self.logs_root),
             pane_labels,
             pane_kinds,
             pane_commands,
@@ -638,11 +640,27 @@ impl LogServer {
     }
 }
 
+// Deliberate allowlist: do not publish the YAML, plugin options, scripts or environment.
+fn runtime_config_summary(config: &AppConfig, logs_root: &std::path::Path) -> serde_json::Value {
+    json!({
+        "server": { "host": config.server.host, "port": config.server.ws_port,
+            "timestamp_mode": config.server.timestamp_mode.to_string() },
+        "logs_dir": logs_root,
+        "sources": config.sources.iter().map(|source| json!({
+            "name": source.name, "label": source.label, "type": source.source_type,
+            "port": source.port,
+            "baudrate": if source.source_type == "uart" { Some(source.baudrate.unwrap_or(config.baudrate)) } else { None },
+            "parser": { "type": source.parser.parser_type, "database": source.parser.database },
+        })).collect::<Vec<_>>(),
+    })
+}
+
 struct WsConfigParts<'a> {
     app_name: &'a str,
     default_light_theme: &'a Option<String>,
     default_dark_theme: &'a Option<String>,
     session_info: serde_json::Value,
+    runtime_config: serde_json::Value,
     pane_labels: &'a HashMap<String, String>,
     pane_kinds: &'a HashMap<String, String>,
     pane_commands: serde_json::Value,
@@ -691,6 +709,7 @@ fn build_ws_config_message(parts: WsConfigParts<'_>) -> serde_json::Value {
             "dark": parts.default_dark_theme,
         },
         "session": parts.session_info,
+        "runtime_config": parts.runtime_config,
         "pane_labels": parts.pane_labels,
         "pane_kinds": parts.pane_kinds,
         "pane_commands": parts.pane_commands,
@@ -787,6 +806,7 @@ struct RotationContext {
     job_id: Option<String>,
     timestamp_mode: String,
     config_msg: Arc<Mutex<String>>,
+    runtime_config: serde_json::Value,
     default_light_theme: Option<String>,
     default_dark_theme: Option<String>,
     export_on_rotate: bool,
@@ -883,6 +903,7 @@ fn rotate_session(
         default_light_theme: &ctx.default_light_theme,
         default_dark_theme: &ctx.default_dark_theme,
         session_info: new_session.clone(),
+        runtime_config: ctx.runtime_config.clone(),
         pane_labels: &ctx.pane_labels,
         pane_kinds: &ctx.pane_kinds,
         pane_commands: ctx.pane_commands.clone(),
@@ -1368,6 +1389,29 @@ fn open_log_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_summary_uses_effective_values_without_plugin_contents() {
+        let config: AppConfig = serde_json::from_value(json!({
+            "baudrate": 230400,
+            "sources": [{"name":"DUT", "type":"uart", "port":"/dev/ttyUSB0",
+                "parser":{"type":"zephyr-dict", "database":"/build/database.json"}},
+                {"name":"HOST", "type":"uart", "port":"/dev/ttyUSB1", "baudrate":9600}],
+            "frontend_plugins":{"private":{"path":"/private/not-for-publication.js"}},
+            "logs":{"dir":"not-the-effective-directory"}
+        }))
+        .unwrap();
+        let summary = runtime_config_summary(&config, std::path::Path::new("/effective/logs"));
+        assert_eq!(summary["logs_dir"], "/effective/logs");
+        assert_eq!(summary["sources"][0]["baudrate"], 230400);
+        assert_eq!(summary["sources"][1]["baudrate"], 9600);
+        assert_eq!(
+            summary["sources"][0]["parser"]["database"],
+            "/build/database.json"
+        );
+        assert!(!summary.to_string().contains("not-for-publication"));
+        assert_eq!(summary.as_object().unwrap().len(), 3);
+    }
     use tokio::time::{sleep, Duration};
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -1760,6 +1804,7 @@ mod tests {
             pane_labels,
             pane_kinds,
             pane_commands: json!({}),
+            runtime_config: json!({"sources": [{"name": "dut", "type": "uart"}]}),
             plugins: empty_plugins(),
             app_name: "embed-log".to_string(),
             job_id: None,
@@ -1794,6 +1839,9 @@ mod tests {
         assert!(replay.lock().unwrap().is_empty(), "replay buffer cleared");
         assert_eq!(line_counter.load(std::sync::atomic::Ordering::Relaxed), 0);
         assert_ne!(*config_msg.lock().unwrap(), "old-config");
+        let rotated_config: serde_json::Value =
+            serde_json::from_str(&config_msg.lock().unwrap()).unwrap();
+        assert_eq!(rotated_config["runtime_config"], ctx.runtime_config);
         let manifest: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(new_dir.join("manifest.json")).unwrap())
                 .unwrap();

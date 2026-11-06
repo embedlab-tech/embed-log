@@ -1,5 +1,11 @@
 # Configuration
 
+## Inspecting the running configuration
+
+In the live browser, open **Settings → Configuration**. In the TUI, press **I** (uppercase). Both show the same read-only runtime summary: server host/port and timestamp mode, effective logs directory, source type/port or path, effective UART baudrate, parser and dictionary path. CLI overrides are reflected; this is not the original YAML.
+
+The summary deliberately excludes plugin options, script contents and environment variables. It is visible to connected viewers, so source paths are not private. Older servers and offline HTML without runtime metadata show the view as unavailable. Configuration cannot be edited here.
+
 `embed-log` uses YAML configuration version `2`.
 
 Config path resolution:

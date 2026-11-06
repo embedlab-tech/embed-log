@@ -11,6 +11,7 @@ const categories = {
     'regression-tests/plugin-failure-isolation.spec.js',
   ],
   interaction: [
+    'regression-tests/runtime-config.spec.js',
     'regression-tests/clipboard.spec.js',
     'regression-tests/copy-format.spec.js',
     'regression-tests/drag-selection.spec.js',
