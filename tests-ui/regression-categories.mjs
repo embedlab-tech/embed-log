@@ -16,6 +16,7 @@ const categories = {
     'regression-tests/drag-selection.spec.js',
     'regression-tests/filter-keyboard.spec.js',
     'regression-tests/layout-sync.spec.js',
+    'regression-tests/horizontal-scroll.spec.js',
     'regression-tests/scope-selection.spec.js',
   ],
   sessions: [
