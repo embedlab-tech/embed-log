@@ -1,6 +1,6 @@
 //! Small process/browser helpers shared across command modules.
 
-use std::process::Command as ProcessCommand;
+use std::process::{Command as ProcessCommand, Stdio};
 
 use anyhow::{Context, Result};
 
@@ -29,14 +29,17 @@ pub(crate) fn schedule_browser_open(host: String, port: u16) {
     tokio::spawn(async move {
         wait_for_port(port, std::time::Duration::from_secs(10)).await;
         let url = format!("http://{host}:{port}/");
-        if let Err(error) = open_url_in_default_browser(&url) {
-            tracing::warn!("failed to open browser at {url}: {error}");
+        if open_url_in_default_browser(&url).is_err() {
+            eprintln!("{}", browser_open_hint(&url));
         }
     });
 }
 
-/// Open `url` in the platform default browser. Spawns detached; errors only on
-/// spawn failure.
+fn browser_open_hint(url: &str) -> String {
+    format!("Could not open a browser; open {url} manually (VS Code: Ports tab). Use --no-open-browser to skip.")
+}
+
+/// Open `url` detached, reporting launcher failure without leaking helper output.
 pub(crate) fn open_url_in_default_browser(url: &str) -> Result<()> {
     #[cfg(target_os = "macos")]
     let mut command = {
@@ -76,9 +79,19 @@ pub(crate) fn open_url_in_default_browser(url: &str) -> Result<()> {
         command.creation_flags(CREATE_NEW_PROCESS_GROUP);
     }
 
-    command
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
-        .with_context(|| format!("open default browser for {url}"))?;
+        .with_context(|| browser_open_hint(url))?;
+    let url = url.to_owned();
+    // Some launchers stay alive with the browser; never block the CLI on them.
+    std::thread::spawn(move || {
+        if !child.wait().is_ok_and(|status| status.success()) {
+            eprintln!("{}", browser_open_hint(&url));
+        }
+    });
     Ok(())
 }
 
