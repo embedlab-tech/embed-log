@@ -46,6 +46,7 @@ pub struct UartSource {
     parser: ParserConfig,
     port_source: PortSource,
     tx_rx: Option<mpsc::Receiver<TxCommand>>,
+    dictionary: Option<super::dictionary::DictionaryRuntime>,
 }
 
 impl UartSource {
@@ -70,6 +71,7 @@ impl UartSource {
                 baudrate,
             },
             tx_rx: None,
+            dictionary: None,
         }
     }
 
@@ -92,6 +94,7 @@ impl UartSource {
                 port: Arc::new(tokio::sync::Mutex::new(Some(port))),
             },
             tx_rx: None,
+            dictionary: None,
         }
     }
 
@@ -190,7 +193,8 @@ impl LogSource for UartSource {
     async fn run(self: Box<Self>, tx: mpsc::Sender<LogEntry>) -> Result<()> {
         let mut this = self;
         let name = this.name.clone();
-        let parser_cfg = this.parser.clone();
+        let mut dictionary = this.dictionary.take();
+        let mut parser_cfg = this.parser.clone();
 
         // Obtain the serial port (open by path or use pre-opened).
         let port = this.get_port().await?;
@@ -273,11 +277,30 @@ impl LogSource for UartSource {
             });
         }
 
+        if let Some(runtime) = &dictionary {
+            parser_cfg = runtime
+                .current_config(parser_cfg)
+                .map_err(anyhow::Error::msg)?;
+        }
         let mut parser = create_parser(&parser_cfg);
         let mut last_activity = tokio::time::Instant::now();
         let mut next_idle = last_activity + UART_PARSER_IDLE;
 
         loop {
+            if let Some(runtime) = &mut dictionary {
+                while let Some((result, ack)) = runtime.apply_next(&mut parser, &mut parser_cfg) {
+                    if let Ok(status) = &result {
+                        let message = format!("[dictionary: generation {}; DB {}; partial record discarded; explicit boundary, not firmware detection]", status.generation, status.dictionary.as_ref().unwrap().dictionary_id);
+                        let _ = tx
+                            .send(LogEntry::new(Local::now(), name.clone(), message))
+                            .await;
+                    }
+                    let _ = ack.send(result);
+                }
+                parser_cfg = runtime
+                    .current_config(parser_cfg)
+                    .map_err(anyhow::Error::msg)?;
+            }
             // Clone the port under the lock, then release before the blocking read.
             let cloned = {
                 let guard = port.lock().await;
@@ -338,6 +361,9 @@ impl LogSource for UartSource {
             } else {
                 last_activity = tokio::time::Instant::now();
                 next_idle = last_activity + UART_PARSER_IDLE;
+                if let Some(runtime) = &mut dictionary {
+                    runtime.record_raw(&buf[..n]).map_err(anyhow::Error::msg)?;
+                }
                 parser.feed(&buf[..n])
             };
 
@@ -364,6 +390,14 @@ impl LogSource for UartSource {
 
     fn writable(&self) -> bool {
         true
+    }
+
+    fn parser_config(&self) -> Option<&ParserConfig> {
+        Some(&self.parser)
+    }
+
+    fn set_dictionary_runtime(&mut self, runtime: super::dictionary::DictionaryRuntime) {
+        self.dictionary = Some(runtime);
     }
 
     fn set_tx_receiver(&mut self, rx: mpsc::Receiver<TxCommand>) {

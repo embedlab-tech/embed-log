@@ -172,6 +172,44 @@ def e2e_server(embed_log_binary: Path, frontend_dir: Path, temp_dir: Path,
         server.stop()
 
 
+def test_runtime_dictionary_sdk_and_cli(e2e_server, pty_pair, temp_dir):
+    """Real WS/CLI + PTY: A->B, rejected CAS, raw bytes and uninterrupted TX."""
+    import hashlib
+    import struct
+    from embed_log_sdk import EmbedLogClient
+    from embed_log_sdk.exceptions import ServerError
+
+    record = bytes([0, 0x30, 8, 0, 0, 0]) + struct.pack("<II", 1, 42) + bytes([2, 0, 0, 0]) + struct.pack("<I", 0x1000)
+    with EmbedLogClient(e2e_server.ws_url()) as client:
+        client.subscribe(["DUT_UART"])
+        for generation, message in enumerate(["image-A", "image-B"]):
+            database = temp_dir / f"{message}.json"
+            payload = json.dumps({"version": 3, "build_id": message,
+                "target": {"bits": 32, "little_endianness": True}, "arch": "arm",
+                "log_subsys": {"log_instances": {"1": {"name": "app"}}},
+                "string_mappings": {"4096": message}}).encode()
+            database.write_bytes(payload)
+            staged = client.stage_dictionary("DUT_UART", database)
+            assert staged["dictionary_id"] == hashlib.sha256(payload).hexdigest()
+            assert client.dictionary_status("DUT_UART")["generation"] == generation
+            applied = client.activate_dictionary("DUT_UART", staged["dictionary_id"], generation)
+            assert applied["generation"] == generation + 1
+            os.write(pty_pair[0], record)
+            entries = client.entries(timeout=3)
+            assert any(entry.message.endswith("app: " + message) for entry in entries)
+            with pytest.raises(ServerError, match="generation conflict"):
+                client.activate_dictionary("DUT_UART", staged["dictionary_id"], generation)
+        status = client.dictionary_status("DUT_UART")
+        assert Path(status["raw_file"]).read_bytes() == record * 2
+        cli = subprocess.run([str(e2e_server.binary), "dictionary", "--source", "DUT_UART",
+            "--url", f"http://127.0.0.1:{e2e_server.port}", "--json", "status"],
+            capture_output=True, text=True, timeout=15, check=True)
+        assert json.loads(cli.stdout)["status"]["generation"] == 2
+        assert client.tx_write("DUT_UART", "version\n") > 0
+        ready, _, _ = select.select([pty_pair[0]], [], [], 3)
+        assert ready and os.read(pty_pair[0], 128) == b"version\r"
+
+
 # ---- Tests --------------------------------------------------------------
 
 

@@ -39,6 +39,12 @@ pub trait LogSource: Send + 'static {
         false
     }
 
+    fn parser_config(&self) -> Option<&crate::config::models::ParserConfig> {
+        None
+    }
+
+    fn set_dictionary_runtime(&mut self, _runtime: super::dictionary::DictionaryRuntime) {}
+
     /// Attach a TX command receiver so this source can accept writes.
     /// Default implementation is a no-op for non-writable sources.
     fn set_tx_receiver(&mut self, _rx: mpsc::Receiver<TxCommand>) {}

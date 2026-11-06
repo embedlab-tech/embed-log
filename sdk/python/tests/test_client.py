@@ -124,6 +124,45 @@ def fake_ws():
     patcher.stop()
 
 
+@pytest.mark.parametrize("method,command,response_key", [
+    ("stage_dictionary", "dictionary.stage", "dictionary"),
+    ("dictionary_status", "dictionary.status", "status"),
+    ("activate_dictionary", "dictionary.activate", "status"),
+])
+def test_dictionary_commands_preserve_upload_and_generation(fake_ws, tmp_path, method, command, response_key):
+    fake_ws.queue_send({"type": "hello.result", "id": "hello-init",
+                        "sources": {"UART_A": {"type": "uart", "writable": True}},
+                        "session": {"id": "s1"}})
+    client = EmbedLogClient("ws://127.0.0.1:18080/api/v1/control")
+    database = tmp_path / "db.json"
+    database.write_bytes(b'  {"version":3}\r\n')
+    arguments = {"stage_dictionary": [database], "dictionary_status": [],
+                 "activate_dictionary": ["sha256-id", 7]}[method]
+    with patch.object(client, "_send_and_wait", return_value={response_key: {"generation": 8}}) as send:
+        assert getattr(client, method)("UART_A", *arguments) == {"generation": 8}
+        assert send.call_args.args[1:3] == (command, command + ".result")
+        extra = send.call_args.kwargs["extra"]
+        assert extra["source_id"] == "UART_A"
+        if method == "stage_dictionary":
+            assert extra["dictionary_json"].encode() == database.read_bytes()
+        elif method == "activate_dictionary":
+            assert extra["dictionary_id"] == "sha256-id"
+            assert extra["expected_generation"] == 7
+            assert extra["parser_type"] == "zephyr-dict"
+    client.close()
+
+
+def test_dictionary_activation_server_rejection_is_not_success(fake_ws):
+    fake_ws.queue_send({"type": "hello.result", "id": "hello-init",
+                        "sources": {"UART_A": {"type": "uart", "writable": True}},
+                        "session": {"id": "s1"}})
+    fake_ws.queue_send("AUTO:dictionary.activate.result:ok=False:error=generation conflict")
+    client = EmbedLogClient("ws://127.0.0.1:18080/api/v1/control")
+    with pytest.raises(ServerError, match="generation conflict"):
+        client.activate_dictionary("UART_A", "sha256-id", 0)
+    client.close()
+
+
 # ── Hello handshake ──
 
 
