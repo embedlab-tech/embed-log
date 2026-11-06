@@ -142,6 +142,7 @@ pub struct ServerState {
     pub source_txs: Arc<HashMap<String, mpsc::Sender<crate::models::LogEntry>>>,
     /// Per-source TX command channels for writing bytes to writable sources (e.g. UART).
     pub source_tx_senders: Arc<HashMap<String, mpsc::Sender<TxCommand>>>,
+    pub dictionaries: Arc<HashMap<String, crate::sources::dictionary::DictionaryControl>>,
     /// Source metadata for the control API (name → type, label, writable).
     pub source_metadata: Arc<HashMap<String, SourceInfo>>,
     /// Per-source line counters for stable `line_idx` in log entries.
@@ -594,6 +595,7 @@ async fn api_status_handler(State(state): State<ServerState>) -> impl IntoRespon
                     "virtual": state.virtual_sources.contains_key(name),
                     "members": state.virtual_sources.get(name),
                     "stats": stats,
+                    "dictionary": state.dictionaries.get(name).map(|control| control.status()),
                 }),
             )
         })
@@ -1046,6 +1048,7 @@ mod tests {
             stats: Arc::new(RuntimeStats::empty()),
             source_txs: Arc::new(HashMap::new()),
             source_tx_senders: Arc::new(HashMap::new()),
+            dictionaries: Arc::new(HashMap::new()),
             source_metadata: Arc::new(HashMap::new()),
             line_counters: Arc::new(HashMap::new()),
             virtual_sources: Arc::new(HashMap::new()),

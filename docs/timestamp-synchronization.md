@@ -12,7 +12,7 @@ A line may contain one or more timestamp candidates. Candidates are not compared
 For example:
 
 ```text
-08-17 08:49:17.384 [OUTSIDE] [2026-08-17T08:12:20.873Z]:<inf> eventlog: ...
+08-17 08:49:17.384 [UART_A] [2026-08-17T08:12:20.873Z]:<inf> eventlog: ...
 ```
 
 contains both a host/system timestamp and a device timestamp.

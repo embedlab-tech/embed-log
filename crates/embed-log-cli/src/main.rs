@@ -16,6 +16,7 @@ use anyhow::Result;
 use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 
 use commands::daemon::{cmd_mark, cmd_start_daemon, cmd_stats, cmd_status, cmd_stop};
+use commands::dictionary::{cmd_dictionary, DictionaryArgs};
 use commands::export::cmd_export;
 use commands::misc;
 use commands::run::{cmd_run, cmd_run_quick, RunOverrides};
@@ -253,6 +254,9 @@ enum Command {
         json: bool,
     },
 
+    /// Stage, activate or inspect a UART dictionary without restarting capture.
+    Dictionary(DictionaryArgs),
+
     /// Manage temporary server-side log watches.
     Watch {
         #[command(subcommand)]
@@ -392,6 +396,7 @@ impl Cli {
             | Some(Command::Version { json, .. })
             | Some(Command::Doctor { json, .. })
             | Some(Command::Ports { json }) => *json,
+            Some(Command::Dictionary(args)) => args.json,
             Some(Command::Watch { command }) => command.machine_output(),
             Some(Command::Sessions { command }) => command.machine_output(),
             Some(Command::Hello) | Some(Command::Update { .. }) | None => false,
@@ -550,6 +555,7 @@ async fn dispatch(cli: Cli) -> Result<()> {
             })
             .await
         }
+        Some(Command::Dictionary(args)) => cmd_dictionary(args).await,
         Some(Command::Watch { command }) => cmd_watch(command).await,
         Some(Command::Stop {
             instance,

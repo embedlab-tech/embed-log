@@ -594,6 +594,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "serialport",
+ "sha2",
  "slug",
  "sprintf",
  "thiserror 2.0.18",

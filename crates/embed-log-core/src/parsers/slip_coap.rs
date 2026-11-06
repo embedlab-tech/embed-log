@@ -71,8 +71,8 @@ fn format_frame(frame: &[u8]) -> String {
     let dst_port = u16::from_be_bytes([frame[2], frame[3]]);
     let payload = &frame[8..];
 
-    // Ports 5683/5684 are the CoAP/CoAP-DTLS defaults; label direction the
-    // same way the legacy sniffer does (I = inside device, O = outside device).
+    // Ports 5683/5684 are the CoAP/CoAP-DTLS defaults; retain legacy direction
+    // labels for compatibility.
     let direction = if src_port == 5683 || dst_port == 5684 {
         format!("I:{src_port:>5} --> O:{dst_port:>5}")
     } else if src_port == 5684 || dst_port == 5683 {

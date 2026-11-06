@@ -6,6 +6,7 @@
 - [CLI reference](cli.md) — commands, sessions, daemon, and agent schema.
 - [Terminal UI](tui.md) — launch modes and keybindings.
 - [Status API](api-status.md) — readiness and source discovery.
+- [Runtime dictionaries](runtime-dictionaries.md) — explicit per-UART staging, activation and FWU limitations.
 - [Architecture](architecture.md) — runtime and session design.
 - [Development](development.md) — local build and test workflow.
 - [Releasing](releasing.md) — release artifacts and installers.

@@ -2853,13 +2853,13 @@ mod tests {
     fn format_mini_entry_denoises_message() {
         let entry = serde_json::json!({
             "source_id": "RELAY",
-            "message": "node outside> \u{1b}[13D\u{1b}[J[00000000] <inf> rv8263: interrupt configured",
+            "message": "device> \u{1b}[8D\u{1b}[J[00000000] <inf> rtc: interrupt configured",
             "timestamp_iso": "2026-07-06T14:31:31.877+02:00",
         });
         let mut codes = ShortcodeTable::default();
         assert_eq!(
             format_mini_entry(&entry, &mut codes)["m"],
-            "node outside> [00000000] <inf> rv8263: interrupt configured"
+            "device> [00000000] <inf> rtc: interrupt configured"
         );
     }
 

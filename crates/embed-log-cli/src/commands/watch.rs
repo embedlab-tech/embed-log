@@ -340,14 +340,14 @@ fn instance_name(record: Option<&InstanceRecord>) -> Option<&str> {
     record.map(|record| record.instance.as_str())
 }
 
-struct ControlClient {
+pub(super) struct ControlClient {
     write: WsWrite,
     read: WsRead,
     next_id: u64,
 }
 
 impl ControlClient {
-    async fn connect(endpoint: &str) -> Result<Self> {
+    pub(super) async fn connect(endpoint: &str) -> Result<Self> {
         let ws_url = control_ws_url(endpoint)?;
         let (stream, _) = connect_async(&ws_url)
             .await
@@ -360,7 +360,7 @@ impl ControlClient {
         })
     }
 
-    async fn request(&mut self, mut command: Value) -> Result<Value> {
+    pub(super) async fn request(&mut self, mut command: Value) -> Result<Value> {
         let id = format!("watch-cli-{}", self.next_id);
         self.next_id += 1;
         command["id"] = Value::String(id.clone());
@@ -403,7 +403,7 @@ impl ControlClient {
         }
     }
 
-    async fn close(&mut self) {
+    pub(super) async fn close(&mut self) {
         let _ = self.write.send(Message::Close(None)).await;
     }
 }
