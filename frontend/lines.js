@@ -1125,7 +1125,20 @@ export function _linesSetupPane(id) {
     // Per-pane raw download
     const dlBtn = document.querySelector(`#pane-${id} .pane-download-btn`);
     if (dlBtn) {
+        dlBtn.title = window.__embedLogSession?.source_files?.[id]
+            ? "Download full saved source .log (including history before this connection)"
+            : "Download loaded pane logs (not the full server session)";
         dlBtn.addEventListener("click", () => {
+            const session = window.__embedLogSession;
+            const sourceFile = session?.source_files?.[id];
+            if (session?.id && sourceFile) {
+                const filename = sourceFile.split(/[\\/]/).pop();
+                const a = document.createElement("a");
+                a.href = `/sessions/${encodeURIComponent(session.id)}/${encodeURIComponent(filename)}`;
+                a.download = filename;
+                a.click();
+                return;
+            }
             const lines = state.rawLines[id] || [];
             if (!lines.length) return;
             const text = lines.map(entry => {

@@ -121,6 +121,7 @@ async function _handleConfigMessage(msg) {
     }
     window.__embedLogUpdateTimestampModeUi?.();
 
+    window.__embedLogSession = msg.session || null;
     window.__embedLogSetSession?.(msg.session || null);
     const paneLabels = msg.pane_labels && typeof msg.pane_labels === "object" ? msg.pane_labels : {};
     window.__embedLogPaneKinds = msg.pane_kinds && typeof msg.pane_kinds === "object" ? msg.pane_kinds : {};
@@ -220,6 +221,7 @@ function wsConnect() {
             });
             setTimestampMode(state.timestampMode);
             window.__embedLogUpdateTimestampModeUi?.();
+            window.__embedLogSession = msg.session || null;
             window.__embedLogSetSession?.(msg.session || null);
             window.__embedLogSchedulePersist?.();
             return;
