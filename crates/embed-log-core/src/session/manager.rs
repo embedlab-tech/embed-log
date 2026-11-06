@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -18,6 +18,7 @@ pub struct SessionManager {
     tabs: Vec<serde_json::Value>,
     source_files: HashMap<String, String>,
     combined_file: String,
+    combined_writer: Option<File>,
     pane_labels: HashMap<String, String>,
     pane_kinds: HashMap<String, String>,
     pane_commands: serde_json::Value,
@@ -66,6 +67,7 @@ impl SessionManager {
             tabs: tabs.to_vec(),
             source_files,
             combined_file: combined_file.into(),
+            combined_writer: None,
             pane_labels,
             pane_kinds,
             pane_commands,
@@ -208,16 +210,23 @@ impl SessionManager {
             object.insert("sequence".to_string(), json!(sequence));
             object.insert("session_id".to_string(), json!(self.session_id));
         }
-        let path = PathBuf::from(&self.combined_file);
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-            .with_context(|| format!("open combined.jsonl {}", path.display()))?;
-        let line = serde_json::to_string(entry)?;
-        use std::io::Write;
-        writeln!(file, "{line}")
-            .with_context(|| format!("append combined entry to {}", path.display()))?;
+        if self.combined_writer.is_none() {
+            self.combined_writer = Some(
+                OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&self.combined_file)
+                    .with_context(|| format!("open combined.jsonl {}", self.combined_file))?,
+            );
+        }
+        // Keep records visible before publication without separate JSON/newline writes.
+        let mut line = serde_json::to_vec(entry)?;
+        line.push(b'\n');
+        self.combined_writer
+            .as_mut()
+            .expect("combined writer initialized")
+            .write_all(&line)
+            .with_context(|| format!("append combined entry to {}", self.combined_file))?;
         self.next_sequence = next_sequence;
         Ok(sequence)
     }
@@ -553,6 +562,45 @@ mod tests {
         assert_eq!(parsed["session_id"], mgr.session_id());
         let second: serde_json::Value = serde_json::from_str(lines[1]).unwrap();
         assert_eq!(second["sequence"], 2);
+        drop(mgr);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn combined_entries_are_visible_in_order_before_manager_is_dropped() {
+        let dir = temp_session_dir("combined-burst");
+        let mut mgr = manager(dir.clone());
+        let started = std::time::Instant::now();
+        for index in 0..10_000 {
+            let mut record = json!({"source_id":"dut", "message":format!("record {index}: {}", "x".repeat(128))});
+            assert_eq!(mgr.append_combined_entry(&mut record).unwrap(), index + 1);
+        }
+        eprintln!("combined append: 10000 records in {:?}", started.elapsed());
+        let text = std::fs::read_to_string(dir.join("combined.jsonl")).unwrap();
+        assert_eq!(text.lines().count(), 10_000);
+        assert!(text.ends_with('\n'));
+        for (index, line) in text.lines().enumerate() {
+            let record: serde_json::Value = serde_json::from_str(line).unwrap();
+            assert_eq!(record["sequence"], index + 1);
+            assert_eq!(record["session_id"], mgr.session_id());
+        }
+        drop(mgr);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn failed_combined_open_can_be_retried_without_consuming_a_sequence() {
+        let dir = temp_session_dir("combined-open-error");
+        let mut mgr = manager(dir.clone());
+        let path = dir.join("combined.jsonl");
+        std::fs::create_dir(&path).unwrap();
+        let mut record = json!({"source_id":"dut", "message":"retry"});
+        assert!(mgr.append_combined_entry(&mut record).is_err());
+        assert_eq!(mgr.record_count(), 0);
+        std::fs::remove_dir(&path).unwrap();
+        assert_eq!(mgr.append_combined_entry(&mut record).unwrap(), 1);
+        assert_eq!(mgr.record_count(), 1);
+        drop(mgr);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
