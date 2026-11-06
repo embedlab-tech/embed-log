@@ -193,8 +193,10 @@ async fn uart_reconnect_recreates_parser_and_accepts_delayed_record() {
     std::os::unix::fs::symlink(old_name, &link).unwrap();
     drop(old_slave);
     let (tx, mut rx) = mpsc::channel(64);
+    let (cmd_tx, cmd_rx) = mpsc::channel(4);
     let source = UartSource::new_with_parser("dut", link.to_string_lossy(), 115200, "zephyr-dict")
-        .with_parser_database(Some(path.to_string_lossy().into_owned()));
+        .with_parser_database(Some(path.to_string_lossy().into_owned()))
+        .with_tx_receiver(cmd_rx);
     let task = tokio::spawn(Box::new(source).run(tx));
     tokio::time::sleep(Duration::from_millis(300)).await;
     let good = normal_record();
@@ -222,6 +224,29 @@ async fn uart_reconnect_recreates_parser_and_accepts_delayed_record() {
         .unwrap()
         .unwrap();
     assert_eq!(drop.message, "--- 69 messages dropped ---");
+    // TX must use the replacement handle, not the disconnected port.
+    let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
+    cmd_tx
+        .send(TxCommand {
+            data: b"help\n".to_vec(),
+            origin: "test".into(),
+            line_ending: true,
+            ack: Some(ack_tx),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        timeout(Duration::from_secs(2), ack_rx)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap(),
+        5
+    );
+    master.set_timeout(Duration::from_secs(1)).unwrap();
+    let mut bytes = [0; 5];
+    tokio::task::block_in_place(|| std::io::Read::read_exact(&mut master, &mut bytes)).unwrap();
+    assert_eq!(&bytes, b"help\r");
     task.abort();
     let _ = task.await;
     std::fs::remove_file(link).unwrap();

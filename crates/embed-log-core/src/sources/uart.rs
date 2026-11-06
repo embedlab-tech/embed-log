@@ -162,6 +162,8 @@ impl UartSource {
                     let mut guard = port.lock().await;
                     *guard = None;
                 }
+                // Avoid a tight reopen loop when a vanished device still has a node.
+                tokio::time::sleep(UART_RECONNECT_DELAY).await;
                 loop {
                     match self.open_path_port_once().await {
                         Ok(new_port) => {
@@ -180,7 +182,12 @@ impl UartSource {
                     }
                 }
             }
-            PortSource::PreOpened { .. } => Ok(()),
+            PortSource::PreOpened { .. } => {
+                anyhow::bail!(
+                    "[{}] serial port disconnected ({reason}); cannot reopen a pre-opened port",
+                    self.name
+                )
+            }
         }
     }
 }
@@ -290,14 +297,7 @@ impl LogSource for UartSource {
             // read into it are dropped with the closure (arrays are Copy).
             let read_result = match cloned {
                 Ok(mut port_clone) => {
-                    tokio::task::spawn_blocking(move || {
-                        let mut buf = [0u8; 4096];
-                        match port_clone.read(&mut buf) {
-                            Ok(n) => Ok((buf, n)),
-                            Err(e) => Err(e),
-                        }
-                    })
-                    .await?
+                    tokio::task::spawn_blocking(move || read_uart(&mut port_clone)).await?
                 }
                 Err(e) => {
                     this.reconnect_port(&port, &format!("clone error: {e}"))
@@ -369,6 +369,19 @@ impl LogSource for UartSource {
     fn set_tx_receiver(&mut self, rx: mpsc::Receiver<TxCommand>) {
         self.tx_rx = Some(rx);
     }
+}
+
+fn read_uart(reader: &mut impl std::io::Read) -> std::io::Result<([u8; 4096], usize)> {
+    let mut buf = [0u8; 4096];
+    let n = reader.read(&mut buf)?;
+    if n == 0 {
+        // A serial timeout is an error, not EOF; macOS USB unplug can return EOF.
+        return Err(std::io::Error::new(
+            ErrorKind::UnexpectedEof,
+            "serial port reached EOF",
+        ));
+    }
+    Ok((buf, n))
 }
 
 async fn open_path_port(
@@ -477,6 +490,28 @@ mod tests {
     /// `UartSource::from_port()` so both sides stay open for the test.
     fn create_pty_pair() -> (TTYPort, TTYPort) {
         TTYPort::pair().expect("TTYPort::pair failed")
+    }
+
+    #[test]
+    fn uart_eof_is_a_disconnect_not_idle() {
+        let error = read_uart(&mut std::io::empty()).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::UnexpectedEof);
+        let (bytes, len) = read_uart(&mut std::io::Cursor::new(b"hello")).unwrap();
+        assert_eq!(&bytes[..len], b"hello");
+    }
+
+    #[test]
+    fn uart_timeout_stays_idle() {
+        struct Timeout;
+        impl Read for Timeout {
+            fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::from(ErrorKind::TimedOut))
+            }
+        }
+        assert_eq!(
+            read_uart(&mut Timeout).unwrap_err().kind(),
+            ErrorKind::TimedOut
+        );
     }
 
     #[tokio::test]
