@@ -524,8 +524,7 @@ fn cleanup_stale_records() -> Result<()> {
         // A release install can replace the executable while an older daemon
         // remains alive. If its endpoint still answers, adopt the live
         // process instead of deleting the only way to stop it.
-        let live_executable = PathBuf::from(format!("/proc/{}/exe", record.pid));
-        if let Ok(actual) = fs::read_link(&live_executable) {
+        if let Some(actual) = process_executable(record.pid) {
             if http_get_json(&record.endpoint, "/api/v1/status").is_ok() {
                 record.executable = actual.display().to_string();
                 write_record(&record)?;
@@ -555,9 +554,33 @@ fn remove_record(instance: &str) -> Result<()> {
     }
 }
 
+#[cfg(target_os = "linux")]
+fn process_executable(pid: u32) -> Option<PathBuf> {
+    fs::read_link(format!("/proc/{pid}/exe")).ok()
+}
+
+#[cfg(target_os = "macos")]
+fn process_executable(pid: u32) -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+
+    let pid = i32::try_from(pid).ok().filter(|pid| *pid > 0)?;
+    let mut buffer = [0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    // proc_pidpath supplies the executable path without relying on Linux /proc.
+    let len = unsafe { libc::proc_pidpath(pid, buffer.as_mut_ptr().cast(), buffer.len() as u32) };
+    if len <= 0 {
+        return None;
+    }
+    let path = std::ffi::CStr::from_bytes_until_nul(&buffer).ok()?;
+    Some(PathBuf::from(std::ffi::OsStr::from_bytes(path.to_bytes())))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn process_executable(_pid: u32) -> Option<PathBuf> {
+    None
+}
+
 fn process_matches_record(record: &InstanceRecord) -> bool {
-    let proc_exe = PathBuf::from(format!("/proc/{}/exe", record.pid));
-    let Ok(actual) = fs::read_link(proc_exe) else {
+    let Some(actual) = process_executable(record.pid) else {
         return false;
     };
     let expected =
@@ -726,6 +749,35 @@ fn read_log_tail(path: &Path, lines: usize) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn process_executable_identifies_live_process_and_rejects_invalid_pid() {
+        let actual = process_executable(std::process::id()).unwrap();
+        assert_eq!(
+            fs::canonicalize(actual).unwrap(),
+            fs::canonicalize(std::env::current_exe().unwrap()).unwrap()
+        );
+        assert!(process_executable(u32::MAX).is_none());
+
+        let mut record = InstanceRecord {
+            instance: "test".into(),
+            pid: std::process::id(),
+            endpoint: String::new(),
+            bind_host: String::new(),
+            config_path: String::new(),
+            config_fingerprint: String::new(),
+            logs_dir: String::new(),
+            diagnostic_log: String::new(),
+            executable: std::env::current_exe().unwrap().display().to_string(),
+            started_at: String::new(),
+        };
+        assert!(process_matches_record(&record));
+        record.executable = "/not/the/daemon".into();
+        assert!(!process_matches_record(&record));
+        record.pid = u32::MAX;
+        assert!(!process_matches_record(&record));
+    }
 
     #[test]
     fn instance_names_are_safe_for_registry_paths() {

@@ -557,6 +557,7 @@ dependencies = [
  "embed-log-tui",
  "flate2",
  "futures",
+ "libc",
  "regex",
  "reqwest",
  "semver",
