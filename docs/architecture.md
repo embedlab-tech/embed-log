@@ -179,6 +179,8 @@ logs/
 
 Session HTML is self-contained: log data, CSS, JS, plugin metadata/scripts, markers, and static profile are embedded into one file. New exports read the complete newline-terminated prefix of canonical `combined.jsonl`, render behind the per-session lock, and rename a flushed temporary file into place. A failed export therefore leaves the previous complete report intact.
 
+For large sessions, export reads a size-bounded snapshot of canonical JSONL one record at a time and skips physical `.log` parsing entirely; source logs remain a fallback only when the canonical file is absent. Compact pane JSON is serialized incrementally instead of building another full pane-sized JSON tree. The offline viewer keeps compact arrays and virtualized rows, then removes the redundant embedded JSON tags after hydration.
+
 ## Frontend architecture
 
 The browser viewer is plain ES modules in `frontend/`. It supports:

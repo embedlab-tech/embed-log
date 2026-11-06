@@ -2,14 +2,14 @@ import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { collectPageErrors, openHtmlFile, saveDownload, waitForLineContaining, waitForRangePair, waitForSourceTestLine } from './helpers.js';
 
 async function openMore(page, paneId) {
   await page.locator(`#more-toggle-${paneId}`).click();
 }
 
-function generateMergedHtml(htmlPath, logPath) {
+function generateMergedHtml(htmlPath, logPath, overrides = {}) {
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
   const logsDir = path.join(path.dirname(htmlPath), 'recorded-sessions');
   const sessionId = 'large-export';
@@ -23,6 +23,7 @@ function generateMergedHtml(htmlPath, logPath) {
     pane_labels: { A: 'SENSOR' },
     source_files: { A: logPath },
     combined_file: path.join(sessionDir, 'combined.jsonl'),
+    ...overrides,
   }, null, 2));
   execFileSync('cargo', [
     'run', '--quiet', '--package', 'embed-log-cli', '--bin', 'embed-log', '--',
@@ -304,5 +305,51 @@ test('repeated Export captures newer log content that arrived after first export
 
   expect(html2).toContain('TEST src=SENSOR_A');
   expect(count2).toBeGreaterThan(count1);
+});
+
+test('50 MB merged export keeps complete compact data and bounded DOM', async ({ browser }, testInfo) => {
+  test.setTimeout(120_000);
+  const htmlPath = testInfo.outputPath('large-merged.html');
+  const sessionDir = path.join(path.dirname(htmlPath), 'recorded-sessions', 'large-export');
+  fs.mkdirSync(sessionDir, { recursive: true });
+  const sourceFiles = Object.fromEntries(['A', 'B'].map(id => [id, path.join(sessionDir, `${id}.log`)]));
+  for (const file of Object.values(sourceFiles)) fs.writeFileSync(file, 'legacy source log\n');
+  const records = Array.from({ length: 40_000 }, (_, index) => JSON.stringify({
+    sequence: index + 1,
+    source_id: index % 2 ? 'B' : 'A',
+    timestamp: '[2026-01-01 00:00:00.000]',
+    absTs: '[2026-01-01 00:00:00.000]',
+    absNum: 1767225600000 + index,
+    message: `row=${index} ${index === 39_999 ? 'RARE_MATCH ' : ''}${'x'.repeat(520)}`,
+  }));
+  fs.writeFileSync(path.join(sessionDir, 'combined.jsonl'), `${records.join('\n')}\n`);
+  generateMergedHtml(htmlPath, sourceFiles.A, {
+    tabs: [{ label: 'Sources', panes: ['A', 'B'] }, { label: 'Merged', panes: ['ALL'] }],
+    source_files: sourceFiles,
+    pane_labels: { A: 'ALPHA', B: 'BETA', ALL: 'Combined' },
+    merges: [{ name: 'ALL', of: ['A', 'B'] }],
+  });
+  expect(fs.statSync(htmlPath).size).toBeGreaterThan(50_000_000);
+  const exported = await browser.newPage();
+  try {
+    const errors = collectPageErrors(exported);
+    await exported.goto(pathToFileURL(htmlPath).href);
+    const storage = await exported.evaluate(() => ({
+      counts: Object.fromEntries(Object.entries(state.rawLines).map(([id, lines]) => [id, lines.length])),
+      compactCount: state.rawLines.ALL.filter(Array.isArray).length,
+    }));
+    expect(storage.counts).toMatchObject({ A: 20_000, B: 20_000, ALL: 40_000 });
+    expect(storage.compactCount).toBeGreaterThan(39_000);
+    await expect(exported.locator('script[type="application/json"][data-pane]')).toHaveCount(0);
+    expect(await exported.locator('.log-line').count()).toBeLessThan(300);
+    await exported.getByRole('button', { name: 'Merged', exact: true }).click();
+    await expect(exported.locator('#log-ALL [data-idx="39999"]')).toContainText('BETA: row=39999 RARE_MATCH');
+    await exported.locator('.filter-input[data-pane="ALL"]').fill('RARE_MATCH');
+    await expect(exported.locator('#log-ALL [data-idx="39999"]')).toBeVisible();
+    expect(await exported.locator('#log-ALL .log-line').count()).toBeLessThan(250);
+    expect(errors).toEqual([]);
+  } finally {
+    await exported.close();
+  }
 });
 });
