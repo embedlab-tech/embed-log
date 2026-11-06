@@ -98,6 +98,7 @@ export const state = {
     syncDeviceTs: null, // optional device anchor retained after device→system resolution
     syncTabSwitch: false, // true after explicit line sync; next tab switches follow syncTs
     filters:     {},
+    searches:    {},
     wrap:        {},
     rawLines:    {},
     markers:     {},       // paneId → [{lineIdx, numTs, description, createdAt}]
@@ -273,6 +274,7 @@ export function buildTimestampInfo(ts, meta = {}) {
 // Initialise per-pane state for every pane in the system
 PANES.forEach(id => {
     state.filters[id]     = null;
+    state.searches[id]    = null;
     state.rawLines[id]    = [];
     state.atBottom[id]    = true;
     state.behindLive[id]  = false;

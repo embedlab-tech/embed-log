@@ -3,6 +3,7 @@ import {
     lineHasTimestampMode, noteRelativeTimestampCandidate,
 } from './state.js';
 import { parseAnsi, isErasedConsoleLine } from './ansi.js';
+import { PhraseSearch, markPhraseMatches } from './search.js';
 import { analyzeLinePlugins, getLinePluginTooltip, getConfiguredPanePlugins, getPanePluginSettings, setPanePluginSetting } from './pluginRuntime.js';
 import { isEditableTarget, isComposingEvent } from './keyboard.js';
 import { findNearestCandidate, resolveSyncAnchor } from './timeSync.js';
@@ -328,6 +329,11 @@ export function applyLineDom(div, line, paneId, idx, filterRx) {
     }
     div.style.display = "";
     div.innerHTML = buildLineHtml(line, state.showTs, filterRx);
+    const search = state.searches[paneId];
+    if (search) {
+        const active = search.matches[search.cursor];
+        markPhraseMatches(div, search.phrase, active?.row === idx ? active.start : null);
+    }
 }
 
 
@@ -659,6 +665,7 @@ export function rerenderRenderedLines(paneId) {
 }
 
 function _renderVirtualWindow(paneId, { targetIdx, forceAtBottom } = {}) {
+    updatePaneSearch(paneId);
     const vp = _getVirtual(paneId);
     if (!vp) return;
     const lines = state.rawLines[paneId];
@@ -859,6 +866,11 @@ export function appendLineBatch(entries) {
 
     entries.forEach(({ paneId, ts, rawText, isTx, meta = null }) => {
         if (!state.rawLines[paneId]) return;
+        const previous = state.rawLines[paneId].at(-1);
+        const previousMeta = Array.isArray(previous) ? previous[3] : previous;
+        if (Number.isFinite(meta?.sequence) && Number.isFinite(previousMeta?.sequence)
+            && meta.sequence <= previousMeta.sequence
+            && (!meta.sessionId || !previousMeta.sessionId || meta.sessionId === previousMeta.sessionId)) return;
         noteRelativeTimestampCandidate(meta);
         state.rawLines[paneId].push([ts, rawText, isTx, meta]);
         if (!newByPane.has(paneId)) newByPane.set(paneId, []);
@@ -898,6 +910,50 @@ export function appendLineBatch(entries) {
         window.__embedLogUpdateTimestampModeUi?.();
         window.applyMarkers?.();
     }
+}
+
+export function updatePaneSearch(paneId) {
+    const search = state.searches[paneId];
+    if (!search) return;
+    search.update(state.rawLines[paneId] || []);
+    const bar = document.querySelector(`#pane-${paneId} .filter-bar`);
+    const counter = bar?.querySelector('.search-count');
+    if (counter) counter.textContent = search.loading ? 'Loading history…'
+        : (search.error ? 'History unavailable' : `${search.cursor + 1} / ${search.matches.length}`);
+    if (counter) counter.title = search.error || 'Phrase occurrences in the session (case-insensitive)';
+    bar?.querySelectorAll('.search-controls button').forEach(button => {
+        button.disabled = search.loading || !!search.error || !search.matches.length;
+    });
+}
+
+export function navigatePaneSearch(paneId, direction) {
+    const search = state.searches[paneId];
+    if (!search || search.loading || search.error) return;
+    search.update(state.rawLines[paneId] || []);
+    const match = search.move(direction);
+    if (!match) return;
+    state.atBottom[paneId] = false;
+    _scrollPaneToRawIndex(paneId, match.row);
+    document.querySelector(`#log-${paneId} .search-current`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+export function prependPaneHistory(paneId, rows) {
+    if (!rows.length) return;
+    const current = state.rawLines[paneId] || [];
+    const logEl = document.getElementById('log-' + paneId);
+    const vp = _getVirtual(paneId);
+    const rowH = _measureRowHeight(paneId);
+    const target = vp && logEl ? (_rawIndexAt(paneId, vp, Math.floor(logEl.scrollTop / rowH)) || 0) : 0;
+    state.rawLines[paneId] = rows.concat(current);
+    state.selected[paneId] = new Set([...state.selected[paneId]].map(index => index + rows.length));
+    if (Number.isFinite(state.highlightedIdx[paneId])) state.highlightedIdx[paneId] += rows.length;
+    window.__embedLogOnHistoryPrepended?.(paneId, rows.length);
+    if (vp) { vp.windowEl.innerHTML = ''; vp.rendered.clear(); }
+    _recordPaneBytes(paneId, rows);
+    _updatePaneStats(paneId);
+    _updateToolbarStats();
+    if (state.atBottom[paneId]) _renderVirtualWindow(paneId, { forceAtBottom: true });
+    else ensureLineVisible(paneId, target + rows.length, { align: 'top' });
 }
 
 export function rerenderPane(paneId) {
@@ -1201,6 +1257,8 @@ window.__embedLogRefreshPluginIndicators = refreshPluginIndicators;
 export function clearPane(paneId) {
     state.rawLines[paneId] = [];
     state.selected[paneId] = new Set();
+    if (state.searches[paneId]) state.searches[paneId] = new PhraseSearch(state.searches[paneId].phrase);
+    updatePaneSearch(paneId);
     const logEl = document.getElementById("log-" + paneId);
     if (logEl) {
         const windowEl = logEl.querySelector(".log-window");

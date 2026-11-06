@@ -558,7 +558,8 @@ button.active { background: var(--selection); border-color: var(--accent); color
 
 /* ---- Filter bar ---- */
 .filter-bar {
-    height: 26px;
+    min-height: 26px;
+    flex-wrap: wrap;
     background: var(--panel);
     border-bottom: 1px solid var(--border);
     display: flex;
@@ -571,6 +572,7 @@ button.active { background: var(--selection); border-color: var(--accent); color
 }
 .filter-input {
     flex: 1;
+    min-width: 80px;
     background: var(--input-bg);
     border: 1px solid var(--border);
     color: var(--text);
@@ -582,6 +584,17 @@ button.active { background: var(--selection); border-color: var(--accent); color
 }
 .filter-input:focus  { border-color: var(--accent); }
 .filter-input.invalid { border-color: var(--ansi-1); }
+.search-controls { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.search-controls[hidden] { display: none; }
+.search-mode, .search-controls button {
+    background: var(--input-bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 3px; font: inherit; font-size: 11px; cursor: pointer;
+}
+.search-mode[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.search-controls button:disabled { opacity: .45; cursor: default; }
+.search-count { font-size: 11px; }
+.search-hit { background: #f5df75; color: #171717; }
+.search-current { background: #ffae42; outline: 1px solid currentColor; }
 
 /* ---- Log area ---- */
 .pane-body {
