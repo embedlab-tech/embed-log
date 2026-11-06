@@ -36,7 +36,11 @@ pub(crate) fn schedule_browser_open(host: String, port: u16) {
 }
 
 fn browser_open_hint(url: &str) -> String {
-    format!("Could not open a browser; open {url} manually (VS Code: Ports tab). Use --no-open-browser to skip.")
+    let mut hint = format!("Could not open a browser; open {url} manually.");
+    if url.starts_with("http://") || url.starts_with("https://") {
+        hint.push_str(" VS Code: Ports tab. Use --no-open-browser to skip.");
+    }
+    hint
 }
 
 /// Open `url` detached, reporting launcher failure without leaking helper output.
@@ -98,6 +102,18 @@ pub(crate) fn open_url_in_default_browser(url: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browser_hint_distinguishes_live_urls_from_local_reports() {
+        assert!(browser_open_hint("http://localhost:8080/").contains("--no-open-browser"));
+        assert!(browser_open_hint("https://localhost:8080/").contains("Ports tab"));
+        for path in ["/tmp/report.html", r"C:\logs\report.html"] {
+            let hint = browser_open_hint(path);
+            assert!(hint.contains(path));
+            assert!(!hint.contains("--no-open-browser"));
+            assert!(!hint.contains("Ports tab"));
+        }
+    }
 
     #[tokio::test]
     async fn wait_for_port_returns_true_once_listening() {
