@@ -1,5 +1,6 @@
 import { state, TABS, PANES, paneLabel } from './state.js';
-import { rerenderPane, reanalyzePanePlugins, setTimestampMode, canDisplayTimestampMode, hidePluginOverlays } from './lines.js';
+import { rerenderPane, reanalyzePanePlugins, setTimestampMode, canDisplayTimestampMode, hidePluginOverlays, updatePaneSearch, navigatePaneSearch } from './lines.js';
+import { PhraseSearch } from './search.js';
 import { rebuildLayout } from './tabcreate.js';
 import { getPanePluginSettings, setPanePluginSetting } from './pluginRuntime.js';
 
@@ -332,7 +333,45 @@ function _buildSwapTargetOptions(select, fromPaneId) {
 export function _uiSetupPane(id) {
     const input = document.querySelector(`.filter-input[data-pane="${id}"]`);
     if (input) {
-        input.addEventListener("input", () => {
+        const mode = document.createElement('button');
+        mode.type = 'button';
+        mode.className = 'search-mode';
+        mode.textContent = 'Highlight';
+        mode.setAttribute('aria-pressed', String(!!state.searches[id]));
+        mode.title = 'Find and count a literal phrase without hiding surrounding lines';
+        const controls = document.createElement('span');
+        controls.className = 'search-controls';
+        controls.hidden = !state.searches[id];
+        controls.innerHTML = '<button type="button" class="search-prev" aria-label="Previous match" title="Previous match (Shift+Enter)">▲</button><span class="search-count" role="status" aria-live="polite"></span><button type="button" class="search-next" aria-label="Next match" title="Next match (Enter)">▼</button>';
+        input.after(mode, controls);
+        input.setAttribute('aria-label', 'Filter or highlight phrase');
+        controls.querySelector('.search-prev').addEventListener('click', () => navigatePaneSearch(id, -1));
+        controls.querySelector('.search-next').addEventListener('click', () => navigatePaneSearch(id, 1));
+        input.addEventListener('keydown', event => {
+            if (!event.isComposing && state.searches[id] && (event.key === 'Enter' || event.key === 'F3')) {
+                event.preventDefault();
+                navigatePaneSearch(id, event.shiftKey ? -1 : 1);
+            }
+        });
+        const apply = async () => {
+            if (mode.getAttribute('aria-pressed') === 'true') {
+                state.filters[id] = null;
+                input.classList.remove('invalid');
+                input.placeholder = 'Highlight phrase…';
+                const search = new PhraseSearch(input.value);
+                state.searches[id] = search;
+                search.loading = !!search.phrase && !!window.__embedLogLoadSearchHistory;
+                rerenderPane(id);
+                if (search.loading) {
+                    try { await window.__embedLogLoadSearchHistory(id); }
+                    catch (error) { search.error = error.message; }
+                    search.loading = false;
+                    if (state.searches[id] === search) rerenderPane(id);
+                }
+                return;
+            }
+            state.searches[id] = null;
+            input.placeholder = 'Filter (regex)…';
             const val = input.value.trim();
             if (!val) {
                 state.filters[id] = null;
@@ -349,7 +388,15 @@ export function _uiSetupPane(id) {
                 }
             }
             rerenderPane(id);
+        };
+        input.addEventListener('input', apply);
+        mode.addEventListener('click', () => {
+            const enabled = mode.getAttribute('aria-pressed') !== 'true';
+            mode.setAttribute('aria-pressed', String(enabled));
+            controls.hidden = !enabled;
+            apply();
         });
+        updatePaneSearch(id);
     }
 
 
