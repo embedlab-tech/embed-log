@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::Write;
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
@@ -128,36 +128,40 @@ impl SessionExporter {
         let css = self.read_frontend_asset("viewer.css").unwrap_or_default();
         let css = self.inline_font_urls(&css);
 
-        // Parse log files and build entries.
         let mut log_data: HashMap<String, Vec<LogEntry>> = HashMap::new();
-        for (source_name, log_path_str) in &self.source_files {
-            let log_path = Path::new(log_path_str);
-            if !log_path.exists() {
-                continue;
-            }
-            let content = std::fs::read_to_string(log_path)
-                .with_context(|| format!("read source log {}", log_path.display()))?;
-            let entries = parse_log_file(
-                &content,
-                Some(source_name.as_str()),
-                self.source_labels.get(source_name).map(|s| s.as_str()),
-            );
-            log_data.insert(source_name.clone(), entries);
-        }
 
         // New sessions use combined.jsonl as the single canonical export input
         // whether or not virtual merges are configured. Physical .log files are
         // retained only as a compatibility fallback for older sessions.
         if let Some(combined_file) = self.combined_file.as_ref().filter(|path| path.exists()) {
             let mut combined_data: HashMap<String, Vec<LogEntry>> = HashMap::new();
-            let combined = read_complete_jsonl(combined_file)?;
-            for (line_idx, line) in combined.lines().enumerate() {
+            let file = File::open(combined_file)
+                .with_context(|| format!("read combined JSONL {}", combined_file.display()))?;
+            // Bound the snapshot so parsing cannot chase a continuously growing live log.
+            let len = file
+                .metadata()
+                .with_context(|| format!("stat combined JSONL {}", combined_file.display()))?
+                .len();
+            let mut reader = BufReader::new(file.take(len));
+            let mut buffer = Vec::new();
+            let mut line_idx = 0;
+            loop {
+                buffer.clear();
+                reader
+                    .read_until(b'\n', &mut buffer)
+                    .with_context(|| format!("read combined JSONL {}", combined_file.display()))?;
+                // A live writer may not have finished its final record yet.
+                if !buffer.ends_with(b"\n") {
+                    break;
+                }
+                let line = std::str::from_utf8(&buffer).context("combined JSONL is not UTF-8")?;
+                line_idx += 1;
                 let record =
                     serde_json::from_str::<serde_json::Value>(line).with_context(|| {
                         format!(
                             "parse combined JSONL {} line {}",
                             combined_file.display(),
-                            line_idx + 1
+                            line_idx
                         )
                     })?;
                 if record.get("source_kind").and_then(|value| value.as_str()) == Some("merge") {
@@ -212,6 +216,21 @@ impl SessionExporter {
                     });
             }
             log_data = combined_data;
+        } else {
+            for (source_name, log_path_str) in &self.source_files {
+                let log_path = Path::new(log_path_str);
+                if !log_path.exists() {
+                    continue;
+                }
+                let content = std::fs::read_to_string(log_path)
+                    .with_context(|| format!("read source log {}", log_path.display()))?;
+                let entries = parse_log_file(
+                    &content,
+                    Some(source_name.as_str()),
+                    self.source_labels.get(source_name).map(|s| s.as_str()),
+                );
+                log_data.insert(source_name.clone(), entries);
+            }
         }
 
         // Build presentation-only merge panes from original source entries.
@@ -321,49 +340,47 @@ impl SessionExporter {
         // Build pane data tags (lazy mode).
         let mut pane_data_tags = String::new();
         for pane_id in &all_pane_ids {
-            let entries = log_data.get(pane_id);
-            let compact: Vec<serde_json::Value> = entries
-                .map(|es| {
-                    es.iter()
-                        .map(|e| {
-                            let mut meta = json!({});
-                            if let Some(ref abs_ts) = e.abs_ts {
-                                meta["absTs"] = json!(abs_ts);
-                            }
-                            if let Some(abs_num) = e.abs_num {
-                                meta["absNum"] = json!(abs_num);
-                            }
-                            if let Some(ref rel_ts) = e.rel_ts {
-                                meta["relTs"] = json!(rel_ts);
-                            }
-                            if let Some(rel_num) = e.rel_num {
-                                meta["relNum"] = json!(rel_num);
-                            }
-                            if let Some(time_domain) = &e.time_domain {
-                                meta["timeDomain"] = json!(time_domain);
-                            }
-                            if let Some(source_id) = &e.source_id {
-                                meta["sourceId"] = json!(source_id);
-                            }
-                            if let Some(sequence) = e.sequence {
-                                meta["sequence"] = json!(sequence);
-                            }
-                            let meta_val =
-                                if meta.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
-                                    meta
-                                } else {
-                                    json!(null)
-                                };
-                            json!([e.ts, e.text, e.is_tx, meta_val])
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            let compact_json = serde_json::to_string(&compact)?;
-            let escaped = compact_json.replace("</", "<\\/");
             pane_data_tags.push_str(&format!(
-                "<script type=\"application/json\" data-pane=\"{pane_id}\">{escaped}</script>\n"
+                "<script type=\"application/json\" data-pane=\"{}\">[",
+                html_escape(pane_id)
             ));
+            let compact = log_data.get(pane_id).into_iter().flatten().map(|e| {
+                let mut meta = json!({});
+                if let Some(ref abs_ts) = e.abs_ts {
+                    meta["absTs"] = json!(abs_ts);
+                }
+                if let Some(abs_num) = e.abs_num {
+                    meta["absNum"] = json!(abs_num);
+                }
+                if let Some(ref rel_ts) = e.rel_ts {
+                    meta["relTs"] = json!(rel_ts);
+                }
+                if let Some(rel_num) = e.rel_num {
+                    meta["relNum"] = json!(rel_num);
+                }
+                if let Some(time_domain) = &e.time_domain {
+                    meta["timeDomain"] = json!(time_domain);
+                }
+                if let Some(source_id) = &e.source_id {
+                    meta["sourceId"] = json!(source_id);
+                }
+                if let Some(sequence) = e.sequence {
+                    meta["sequence"] = json!(sequence);
+                }
+                let meta_val = if meta.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
+                    meta
+                } else {
+                    json!(null)
+                };
+                json!([e.ts, e.text, e.is_tx, meta_val])
+            });
+            for (index, entry) in compact.enumerate() {
+                if index > 0 {
+                    pane_data_tags.push(',');
+                }
+                pane_data_tags.push_str(&serde_json::to_string(&entry)?.replace("</", "<\\/"));
+            }
+            pane_data_tags.push_str("]</script>\n");
         }
 
         // Build bootstrap script.
@@ -674,17 +691,6 @@ fn html_escape(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
-fn read_complete_jsonl(path: &Path) -> Result<String> {
-    let mut bytes =
-        std::fs::read(path).with_context(|| format!("read combined JSONL {}", path.display()))?;
-    let complete_len = bytes
-        .iter()
-        .rposition(|byte| *byte == b'\n')
-        .map_or(0, |idx| idx + 1);
-    bytes.truncate(complete_len);
-    String::from_utf8(bytes).context("combined JSONL is not UTF-8")
-}
-
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     std::fs::create_dir_all(parent)?;
@@ -756,6 +762,12 @@ mod tests {
             "{\"sequence\":1,\"source_id\":\"DUT\",\"message\":\"COMMITTED_LINE_7a1\"}\n{\"sequence\":2,\"source_id\":\"DUT\",\"message\":\"UNCOMMITTED_TAIL_9f2",
         )
         .unwrap();
+        OpenOptions::new()
+            .append(true)
+            .open(&combined)
+            .unwrap()
+            .write_all(&[0xff])
+            .unwrap();
         let html_path = dir.join("session.html");
         SessionExporter::new(
             html_path.clone(),
@@ -772,6 +784,62 @@ mod tests {
         let html = std::fs::read_to_string(html_path).unwrap();
         assert!(html.contains("COMMITTED_LINE_7a1"));
         assert!(!html.contains("UNCOMMITTED_TAIL_9f2"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn canonical_export_skips_source_logs_and_preserves_compact_merge_data() {
+        let dir = std::env::temp_dir().join(format!(
+            "embed-log-export-canonical-{}-{}",
+            std::process::id(),
+            EXPORT_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("DUT.log");
+        std::fs::write(&source, [0xff]).unwrap();
+        let combined = dir.join("combined.jsonl");
+        let message = "CANONICAL_ONLY </script><img src=x>\nnext line";
+        std::fs::write(
+            &combined,
+            format!(
+                "{}\n",
+                json!({"sequence":1,"source_id":"DUT","message":message})
+            ),
+        )
+        .unwrap();
+        let html_path = dir.join("session.html");
+        SessionExporter::new(
+            html_path.clone(),
+            HashMap::from([("DUT".to_string(), source.display().to_string())]),
+            vec![json!({"label":"Main","panes":["DUT","ALL","EMPTY"]})],
+            HashMap::from([("DUT".to_string(), "Device".to_string())]),
+            PathBuf::from("frontend"),
+            "absolute".to_string(),
+            None,
+        )
+        .with_combined_file(combined)
+        .with_merges(json!([{"name":"ALL","of":["DUT"]}]))
+        .export()
+        .unwrap();
+        let html = std::fs::read_to_string(html_path).unwrap();
+        let data = Regex::new(
+            r#"<script type="application/json" data-pane="(DUT|ALL|EMPTY)">(.*?)</script>"#,
+        )
+        .unwrap();
+        let panes: HashMap<_, serde_json::Value> = data
+            .captures_iter(&html)
+            .map(|capture| {
+                (
+                    capture[1].to_string(),
+                    serde_json::from_str(&capture[2]).unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(panes["DUT"][0][1], message);
+        assert_eq!(panes["ALL"][0][1], format!("Device: {message}"));
+        assert_eq!(panes["ALL"][0][3]["sourceId"], "DUT");
+        assert_eq!(panes["ALL"][0][3]["sequence"], 1);
+        assert_eq!(panes["EMPTY"], json!([]));
         std::fs::remove_dir_all(dir).unwrap();
     }
 
