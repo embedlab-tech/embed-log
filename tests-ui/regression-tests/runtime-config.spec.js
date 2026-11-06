@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { expect, test } from '@playwright/test';
 
 test('live configuration shows effective source, parser and server settings', async ({ page }) => {
@@ -12,6 +13,7 @@ test('live configuration shows effective source, parser and server settings', as
   const summary = JSON.parse(await dialog.locator('pre').textContent());
   expect(summary.server.port).toBe(10800);
   expect(summary.logs_dir).toContain('logs');
+  expect(path.isAbsolute(summary.logs_dir)).toBe(true);
   expect(summary.sources.find(source => source.name === 'SENSOR_A')).toMatchObject({
     type: 'udp', port: 6000, parser: { type: 'hex-coap' },
   });

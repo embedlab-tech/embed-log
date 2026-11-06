@@ -642,15 +642,27 @@ impl LogServer {
 
 // Deliberate allowlist: do not publish the YAML, plugin options, scripts or environment.
 fn runtime_config_summary(config: &AppConfig, logs_root: &std::path::Path) -> serde_json::Value {
+    let cwd = std::env::current_dir().ok();
+    let absolute_path = |path: &Path| {
+        path.canonicalize().unwrap_or_else(|_| {
+            cwd.as_ref()
+                .map(|cwd| cwd.join(path))
+                .unwrap_or_else(|| path.to_path_buf())
+        })
+    };
     json!({
         "server": { "host": config.server.host, "port": config.server.ws_port,
             "timestamp_mode": config.server.timestamp_mode.to_string() },
-        "logs_dir": logs_root,
+        "logs_dir": absolute_path(logs_root),
         "sources": config.sources.iter().map(|source| json!({
             "name": source.name, "label": source.label, "type": source.source_type,
-            "port": source.port,
+            "port": match (source.source_type.as_str(), source.port.as_str()) {
+                ("file", Some(path)) => json!(absolute_path(Path::new(path))),
+                _ => json!(source.port),
+            },
             "baudrate": if source.source_type == "uart" { Some(source.baudrate.unwrap_or(config.baudrate)) } else { None },
-            "parser": { "type": source.parser.parser_type, "database": source.parser.database },
+            "parser": { "type": source.parser.parser_type,
+                "database": source.parser.database.as_deref().map(|path| absolute_path(Path::new(path))) },
         })).collect::<Vec<_>>(),
     })
 }
@@ -1392,26 +1404,55 @@ mod tests {
 
     #[test]
     fn runtime_summary_uses_effective_values_without_plugin_contents() {
+        let root = std::env::temp_dir().join("embed-log-runtime-summary");
+        let database = root.join("database.json");
+        let logs = root.join("logs");
         let config: AppConfig = serde_json::from_value(json!({
             "baudrate": 230400,
             "sources": [{"name":"DUT", "type":"uart", "port":"/dev/ttyUSB0",
-                "parser":{"type":"zephyr-dict", "database":"/build/database.json"}},
+                "parser":{"type":"zephyr-dict", "database":database}},
                 {"name":"HOST", "type":"uart", "port":"/dev/ttyUSB1", "baudrate":9600}],
             "frontend_plugins":{"private":{"path":"/private/not-for-publication.js"}},
             "logs":{"dir":"not-the-effective-directory"}
         }))
         .unwrap();
-        let summary = runtime_config_summary(&config, std::path::Path::new("/effective/logs"));
-        assert_eq!(summary["logs_dir"], "/effective/logs");
+        let summary = runtime_config_summary(&config, &logs);
+        assert_eq!(summary["logs_dir"], json!(logs));
         assert_eq!(summary["sources"][0]["baudrate"], 230400);
         assert_eq!(summary["sources"][1]["baudrate"], 9600);
-        assert_eq!(
-            summary["sources"][0]["parser"]["database"],
-            "/build/database.json"
-        );
+        assert_eq!(summary["sources"][0]["parser"]["database"], json!(database));
         assert!(!summary.to_string().contains("not-for-publication"));
         assert_eq!(summary.as_object().unwrap().len(), 3);
     }
+    #[test]
+    fn runtime_summary_resolves_relative_paths_without_rewriting_device_names_or_ports() {
+        let config: AppConfig = serde_json::from_value(json!({
+            "sources": [
+                {"name":"FILE", "type":"file", "port":"missing-input.log",
+                    "parser":{"type":"zephyr-dict", "database":"missing-dictionary.json"}},
+                {"name":"UART", "type":"uart", "port":"COM4"},
+                {"name":"UDP", "type":"udp", "port":9999}
+            ]
+        }))
+        .unwrap();
+        let cwd = std::env::current_dir().unwrap();
+        let summary = runtime_config_summary(&config, Path::new("missing-log-directory"));
+        assert_eq!(
+            summary["logs_dir"],
+            json!(cwd.join("missing-log-directory"))
+        );
+        assert_eq!(
+            summary["sources"][0]["port"],
+            json!(cwd.join("missing-input.log"))
+        );
+        assert_eq!(
+            summary["sources"][0]["parser"]["database"],
+            json!(cwd.join("missing-dictionary.json"))
+        );
+        assert_eq!(summary["sources"][1]["port"], "COM4");
+        assert_eq!(summary["sources"][2]["port"], 9999);
+    }
+
     use tokio::time::{sleep, Duration};
 
     fn temp_dir(name: &str) -> PathBuf {
