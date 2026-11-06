@@ -130,6 +130,9 @@ pub struct State {
     pub app_name: String,
     /// Active session metadata.
     pub session: SessionInfo,
+    pub runtime_config: serde_json::Value,
+    pub show_config: bool,
+    pub config_scroll: u16,
     /// Tabs (label + pane ids). Rebuilt on config.
     pub tabs: Vec<Tab>,
     /// All pane ids across all tabs (deduped, insertion order).
@@ -295,6 +298,8 @@ impl State {
     /// Apply a config message: rebuild tabs/panes/labels, reset per-pane stores.
     pub fn apply_config(&mut self, cfg: &ConfigMessage) {
         self.app_name = cfg.app_name.clone();
+        self.runtime_config = cfg.runtime_config.clone();
+        self.config_scroll = 0;
         self.session = serde_json::from_value(cfg.session.clone()).unwrap_or_default();
         self.pane_labels = cfg.pane_labels.clone();
         self.pane_kinds = cfg.pane_kinds.clone();

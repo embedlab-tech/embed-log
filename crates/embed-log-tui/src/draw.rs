@@ -34,6 +34,26 @@ pub fn draw(f: &mut Frame, state: &State) {
     if state.show_help {
         draw_help_overlay(f, area);
     }
+    if state.show_config {
+        let popup = area.inner(ratatui::layout::Margin::new(2, 1));
+        let text = if state.runtime_config.is_null() {
+            "Runtime configuration unavailable from this server.".to_string()
+        } else {
+            serde_json::to_string_pretty(&state.runtime_config).unwrap_or_default()
+        };
+        f.render_widget(Clear, popup);
+        f.render_widget(
+            Paragraph::new(text)
+                .wrap(ratatui::widgets::Wrap { trim: false })
+                .scroll((state.config_scroll, 0))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" Configuration — I/Esc: close, ↑/↓: scroll "),
+                ),
+            popup,
+        );
+    }
 }
 
 fn draw_help_overlay(f: &mut Frame, area: Rect) {
@@ -55,6 +75,7 @@ fn draw_help_overlay(f: &mut Frame, area: Rect) {
         Line::from("t / u / C        timestamp mode, unwrap, clear active pane"),
         Line::from("/                filter active pane (empty input clears)"),
         Line::from("x                export current session as HTML"),
+        Line::from("I                view runtime configuration"),
         Line::from(": or i           TX mode for writable UART panes"),
         Line::from("? / Esc          close this help"),
     ];
@@ -414,7 +435,7 @@ fn draw_status_bar(f: &mut Frame, state: &State, area: Rect) {
         Span::raw(" │ session "),
         Span::styled(session, Style::default().fg(Color::Cyan)),
         Span::raw(format!(
-            " │ {ts_mode} │ {active_label} │ {scope}{unwrap}{tx_hint} │ ?:help q=quit "
+            " │ {ts_mode} │ {active_label} │ {scope}{unwrap}{tx_hint} │ I:config ?:help q=quit "
         )),
     ]);
     f.render_widget(
@@ -509,6 +530,25 @@ mod tests {
             rows.push(row.trim_end().to_string());
         }
         rows.join("\n")
+    }
+
+    #[test]
+    fn configuration_overlay_uses_server_summary_and_handles_old_servers() {
+        let mut state = populated_state();
+        let cfg: ConfigMessage = serde_json::from_value(serde_json::json!({
+            "runtime_config": {"source":"/dev/ttyUSB0", "baudrate":115200}
+        }))
+        .unwrap();
+        state.apply_config(&cfg);
+        state.show_config = true;
+        let output = render(&state, 100, 24);
+        assert!(output.contains("/dev/ttyUSB0"), "{output}");
+        assert!(output.contains("115200"), "{output}");
+        let old: ConfigMessage = serde_json::from_value(serde_json::json!({})).unwrap();
+        state.apply_config(&old);
+        assert!(render(&state, 100, 24).contains("unavailable"));
+        // Very small terminals must not panic.
+        render(&state, 3, 2);
     }
 
     #[test]

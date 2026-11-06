@@ -583,6 +583,18 @@ button.active { background: var(--selection); border-color: var(--accent); color
 .filter-input:focus  { border-color: var(--accent); }
 .filter-input.invalid { border-color: var(--ansi-1); }
 
+.runtime-config-dialog {
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    max-width: 90vw;
+    max-height: 80vh;
+    overflow: auto;
+}
+.runtime-config-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.runtime-config-dialog::backdrop { background: #0008; }
+
 /* ---- Log area ---- */
 .pane-body {
     position: relative;

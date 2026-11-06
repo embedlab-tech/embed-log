@@ -65,7 +65,7 @@ Press `?` inside the TUI to show the built-in help overlay.
 | `Enter` | Sync panes to the current line timestamp |
 | `Space` | Toggle selection on current line |
 | `v` | Visual range selection |
-| `Esc` | Clear selection, or close help |
+| `Esc` | Clear selection, or close help/configuration |
 | `c` | Toggle exact/context selection scope |
 | `y` | Copy selected lines to clipboard |
 | `/` | Filter active pane with a regex; empty filter clears |
@@ -77,6 +77,7 @@ Press `?` inside the TUI to show the built-in help overlay.
 | `C` | Clear active pane in the UI |
 | `:`, `i` | Open TX input for writable UART panes |
 | `?` | Show/close help overlay |
+| `I` | View read-only runtime configuration; `↑`/`↓` or PageUp/PageDown scroll, `I`/Esc close |
 
 ## Related CLI commands
 
