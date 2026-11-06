@@ -745,6 +745,11 @@ function _renderVirtualWindow(paneId, { targetIdx, forceAtBottom } = {}) {
 
     _ensureRange(paneId, firstOrdinal, lastOrdinal, rx, rowH);
     _pruneToRawSet(paneId, keepRaw);
+    if (!wrapped) {
+        // Keep short rows clickable across the widest observed line, even after it is virtualized away.
+        const width = Math.max(0, ...Array.from(vp.rendered.values(), el => el.offsetWidth));
+        if (width > logEl.clientWidth) vp.windowEl.style.setProperty('--log-width', `${width}px`);
+    }
 
     // Wrapped rows can span multiple visual lines, so the fixed `ordinal * rowH`
     // layout above would overlap the next row. Re-stack the rendered window
@@ -1204,7 +1209,10 @@ export function clearPane(paneId) {
     const logEl = document.getElementById("log-" + paneId);
     if (logEl) {
         const windowEl = logEl.querySelector(".log-window");
-        if (windowEl) windowEl.innerHTML = "";
+        if (windowEl) {
+            windowEl.innerHTML = "";
+            windowEl.style.removeProperty('--log-width');
+        }
         const spacerEl = logEl.querySelector(".log-spacer");
         if (spacerEl) spacerEl.style.height = "0";
     }
