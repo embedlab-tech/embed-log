@@ -597,12 +597,13 @@ button.active { background: var(--selection); border-color: var(--accent); color
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    overflow-x: hidden;
+    overflow-x: auto;
     padding: 4px 0;
     scroll-behavior: auto;
     white-space: pre;
 }
-.log-area.wrap { white-space: pre-wrap; word-break: break-all; }
+.log-area.wrap { white-space: pre-wrap; word-break: break-all; overflow-x: hidden; }
+.log-area:not(.wrap) .log-line { min-width: max-content; }
 /* Virtual log rendering — spacer sets scrollbar height, window holds visible lines */
 .log-spacer { position: relative; }
 .log-window { position: relative; will-change: transform; }
