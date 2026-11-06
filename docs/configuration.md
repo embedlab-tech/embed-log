@@ -163,6 +163,13 @@ must change that name to `zephyr-dict-hex`; the formats are not auto-detected.
 
 The database path resolves relative to the configuration file and must match the firmware build that produced the logs.
 
+UART TX is independent of the receive parser. A dictionary configuration can
+still be used to send shell commands to plaintext firmware. If the database
+cannot be loaded, both dictionary parsers report the error once and preserve
+console text instead of discarding replies; dictionary records are **not decoded**
+in this state. Soft UART idle callbacks also flush non-newline-terminated shell
+prompts in both modes, without discarding partial dictionary frames.
+
 The binary parser also preserves console text, ANSI sequences, and UTF-8 between
 records. Firmware must serialize complete records with console output; the parser
 cannot repair byte-level interleaving. Once a record is recognized, its declared

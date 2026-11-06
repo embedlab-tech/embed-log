@@ -222,13 +222,16 @@ impl ZephyrDictParser {
             }
             return;
         }
-        if is_lower_hex(b) {
+        let can_decode = matches!(self.state, LoadState::Ready(_));
+        if can_decode && is_lower_hex(b) {
             self.try_flush_prompt_before_hex(lines);
         }
         self.text_buf.push(b);
-        self.try_split_on_separator(lines);
-        if self.mux_mode == MuxMode::Text {
-            self.try_promote_hex_text_buf(lines);
+        if can_decode {
+            self.try_split_on_separator(lines);
+            if self.mux_mode == MuxMode::Text {
+                self.try_promote_hex_text_buf(lines);
+            }
         }
         if self.mux_mode == MuxMode::Text && self.text_buf.len() >= MAX_TEXT_LINE_LEN {
             if let Some(line) = self.emit_text_line() {
@@ -274,21 +277,32 @@ impl ZephyrDictParser {
 
 impl StreamParser for ZephyrDictParser {
     fn feed(&mut self, data: &[u8]) -> Vec<String> {
-        if let LoadState::Failed(err) = &self.state {
-            if self.reported_load_error {
-                return Vec::new();
-            }
-            self.reported_load_error = true;
-            return vec![format!(
-                "[zephyr-dict: database not loaded ({err}); check parser.database — dropping incoming bytes]"
-            )];
-        }
-
         let mut lines = Vec::new();
+        if let LoadState::Failed(err) = &self.state {
+            if !self.reported_load_error {
+                self.reported_load_error = true;
+                lines.push(format!(
+                    "[zephyr-dict: database not loaded ({err}); check parser.database — dictionary decoding disabled, preserving console text]"
+                ));
+            }
+        }
         for &b in data {
             self.process_byte(b, &mut lines);
         }
         lines
+    }
+
+    fn on_idle(&mut self, _idle_for: std::time::Duration) -> Vec<String> {
+        // Flush shell prompts, but keep partial framing/HEX across idle periods.
+        let partial_frame = matches!(self.state, LoadState::Ready(_))
+            && ((1..LOG_HEX_SEP_BYTES.len())
+                .any(|len| self.text_buf.ends_with(&LOG_HEX_SEP_BYTES[..len]))
+                || self.text_buf.iter().all(|&b| is_lower_hex(b)));
+        if self.mux_mode == MuxMode::Text && !partial_frame {
+            self.emit_text_line().into_iter().collect()
+        } else {
+            Vec::new()
+        }
     }
 }
 
@@ -1872,13 +1886,19 @@ mod tests {
     }
 
     #[test]
-    fn missing_database_file_reports_error_once_then_drops_bytes() {
+    fn missing_database_reports_once_and_preserves_plaintext_replies() {
         let mut parser = ZephyrDictParser::new("/nonexistent/database.json");
-        let first = parser.feed(b"000102");
+        let first = parser.feed(b"shell rea");
         assert_eq!(first.len(), 1);
         assert!(first[0].contains("database not loaded"), "{}", first[0]);
-
-        let second = parser.feed(b"000102");
-        assert!(second.is_empty());
+        assert_eq!(parser.feed(b"dy\r\n"), vec!["shell ready"]);
+        // Without a dictionary, even hex-looking console lines must survive.
+        assert_eq!(parser.feed(b"deadbeef\r\n"), vec!["deadbeef"]);
+        assert!(parser.feed(b"uart:~$ ").is_empty());
+        assert_eq!(
+            parser.on_idle(std::time::Duration::from_secs(1)),
+            vec!["uart:~$ "]
+        );
+        assert!(parser.on_idle(std::time::Duration::from_secs(2)).is_empty());
     }
 }

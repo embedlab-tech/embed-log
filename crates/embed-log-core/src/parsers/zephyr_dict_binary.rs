@@ -156,16 +156,21 @@ impl ZephyrDictBinaryParser {
 
 impl StreamParser for ZephyrDictBinaryParser {
     fn feed(&mut self, data: &[u8]) -> Vec<String> {
-        if let LoadState::Failed(err) = &self.state {
-            if self.reported_load_error {
-                return Vec::new();
-            }
-            self.reported_load_error = true;
-            return vec![format!(
-                "[zephyr-dict: database not loaded ({err}); dropping incoming bytes]"
-            )];
-        }
         let mut lines = Vec::new();
+        if let LoadState::Failed(err) = &self.state {
+            if !self.reported_load_error {
+                self.reported_load_error = true;
+                lines.push(format!(
+                    "[zephyr-dict: database not loaded ({err}); dictionary decoding disabled, preserving console text]"
+                ));
+            }
+            for &byte in data {
+                if byte >= 0x20 || matches!(byte, b'\t' | b'\r' | b'\n' | 0x1b) {
+                    push_binary_console(&mut self.console_text, byte, &mut lines);
+                }
+            }
+            return lines;
+        }
         for chunk in data.chunks(4096) {
             self.pending.extend_from_slice(chunk);
             self.consume(&mut lines, false);
@@ -510,6 +515,12 @@ mod tests {
         let mut failed = ZephyrDictBinaryParser::new("/nonexistent/binary-dictionary.json");
         assert_eq!(failed.feed(&[0, 0, 0]).len(), 1);
         assert!(failed.feed(&[0, 0]).is_empty());
+        assert_eq!(failed.feed(b"shell ready\r\n"), vec!["shell ready"]);
+        assert!(failed.feed(b"uart:~$ ").is_empty());
+        assert_eq!(failed.on_idle(Duration::from_secs(1)), vec!["uart:~$ "]);
+        assert!(failed.on_idle(Duration::from_secs(2)).is_empty());
+        failed.feed(&vec![b'x'; 1024 * 1024]);
+        assert!(failed.console_text.len() < 64 * 1024);
         let dir = temp_dir("binary-bound");
         let db = write_test_db(&dir, &[(0x1000, "ok")]);
         let mut parser = ZephyrDictBinaryParser::new(&db);
