@@ -93,7 +93,7 @@ test.describe('embed-log deterministic demo smoke', () => {
 // Scenario: Per-pane download button triggers raw .log file with expected filename
 //   Given the SENSOR_A pane has received log lines
 //   When  the user clicks the pane-download-btn
-//   Then  a file named SENSOR_A.log is downloaded containing TEST src=SENSOR_A and kind=sync
+//   Then  the original saved source file is downloaded containing TEST src=SENSOR_A and kind=sync
 
   test('per-pane download button triggers raw .log download', async ({ page }, testInfo) => {
     await page.goto('/');
@@ -104,7 +104,8 @@ test.describe('embed-log deterministic demo smoke', () => {
     await page.locator('#pane-SENSOR_A .pane-download-btn').click();
     const download = await downloadPromise;
 
-    expect(download.suggestedFilename()).toBe('SENSOR_A.log');
+    const filename = await page.evaluate(() => window.__embedLogSession.source_files.SENSOR_A.split(/[\\/]/).pop());
+    expect(download.suggestedFilename()).toBe(filename);
     const saved = await saveDownload(download, testInfo);
     const text = fs.readFileSync(saved, 'utf-8');
     expect(text).toContain('TEST src=SENSOR_A');
@@ -114,7 +115,7 @@ test.describe('embed-log deterministic demo smoke', () => {
 // Scenario: Shift-click selects a range and per-pane download still works
 //   Given the user shift-clicks to select a range of lines in SENSOR_A
 //   When  they click the per-pane download button
-//   Then  the downloaded SENSOR_A.log contains the selected range content including kind=prefix-cleanup
+//   Then  the downloaded saved source log includes kind=prefix-cleanup regardless of the selection
 
   test('shift-click selects a deterministic range and per-pane download still works', async ({ page }, testInfo) => {
     await page.goto('/');
@@ -134,7 +135,8 @@ test.describe('embed-log deterministic demo smoke', () => {
     await page.locator('#pane-SENSOR_A .pane-download-btn').click();
     const download = await downloadPromise;
 
-    expect(download.suggestedFilename()).toBe('SENSOR_A.log');
+    const filename = await page.evaluate(() => window.__embedLogSession.source_files.SENSOR_A.split(/[\\/]/).pop());
+    expect(download.suggestedFilename()).toBe(filename);
     const downloadedPath = await saveDownload(download, testInfo);
 
     const text = fs.readFileSync(downloadedPath, 'utf-8');
