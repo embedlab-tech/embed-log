@@ -21,6 +21,29 @@ async function highlight(page, pane, phrase) {
   await page.locator(`.filter-input[data-pane="${pane}"]`).fill(phrase);
 }
 
+test('repeated pane setup keeps one highlight toggle with counter and navigation', async ({ page }) => {
+  const rows = [record(1, 'needle needle'), record(2, 'context'), record(3, 'needle')];
+  await page.route('**/sessions/repeated-setup/combined.jsonl', route => route.fulfill({
+    contentType: 'application/x-ndjson', body: rows.map(JSON.stringify).join('\n') + '\n',
+  }));
+  await page.routeWebSocket('**/ws', ws => ws.send(JSON.stringify(config('repeated-setup'))));
+  await page.goto('/');
+  await expect(page.locator('#pane-A')).toBeVisible();
+  await page.evaluate(async () => {
+    const { _uiSetupPane } = await import('/ui.js');
+    _uiSetupPane('A');
+    _uiSetupPane('A');
+  });
+  await expect(page.locator('#pane-A .search-mode')).toHaveCount(1);
+  await expect(page.locator('#pane-A .search-controls')).toHaveCount(1);
+  await highlight(page, 'A', 'needle');
+  await expect(page.locator('#pane-A .search-count')).toHaveText('0 / 3');
+  await page.locator('#pane-A .search-next').click();
+  await expect(page.locator('#pane-A .search-count')).toHaveText('1 / 3');
+  await page.locator('#pane-A .search-prev').click();
+  await expect(page.locator('#pane-A .search-count')).toHaveText('3 / 3');
+});
+
 test('session highlight loads history beyond replay, counts occurrences and navigates virtual rows without hiding context', async ({ page }) => {
   const errors = collectPageErrors(page);
   let socket;

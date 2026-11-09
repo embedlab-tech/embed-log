@@ -332,7 +332,8 @@ function _buildSwapTargetOptions(select, fromPaneId) {
 // ---------------------------------------------------------------------------
 export function _uiSetupPane(id) {
     const input = document.querySelector(`.filter-input[data-pane="${id}"]`);
-    if (input) {
+    if (input && !input.dataset.searchInitialized) {
+        input.dataset.searchInitialized = 'true';
         const mode = document.createElement('button');
         mode.type = 'button';
         mode.className = 'search-mode';
