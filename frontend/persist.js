@@ -32,6 +32,9 @@ function _snapshot() {
                 ts: line?.ts ?? '',
                 text: line?.rawText ?? '',
                 isTx: !!line?.isTx,
+                sequence: Number.isFinite(line?.sequence) ? line.sequence : null,
+                sessionId: line?.sessionId ?? null,
+                lineIdx: line?.serverLineIdx ?? null,
                 absTs: line?.absTs ?? null,
                 absNum: Number.isFinite(line?.absNum) ? line.absNum : null,
                 relTs: line?.relTs ?? null,
@@ -95,11 +98,16 @@ function _restoreIfPossible() {
     Object.entries(byPane).forEach(([paneId, entries]) => {
         if (!PANES.includes(paneId)) return;
         if (!Array.isArray(entries) || entries.length === 0) return;
+        // Legacy cache lacks replay identity; refill from the server, not guessed offsets.
+        if (entries.some(e => !Number.isFinite(e.sequence) || e.sessionId !== _currentSessionId)) return;
         if ((state.rawLines[paneId] || []).length > 0) return; // avoid duplicates
 
         state.atBottom[paneId] = false;
         entries.forEach(e => {
             appendLine(paneId, e.ts || '', e.text || '', !!e.isTx, {
+                sequence: e.sequence,
+                sessionId: e.sessionId,
+                lineIdx: e.lineIdx ?? null,
                 absTs: e.absTs ?? null,
                 absNum: e.absNum ?? null,
                 relTs: e.relTs ?? null,

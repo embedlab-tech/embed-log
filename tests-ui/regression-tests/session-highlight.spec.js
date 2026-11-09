@@ -21,6 +21,47 @@ async function highlight(page, pane, phrase) {
   await page.locator(`.filter-input[data-pane="${pane}"]`).fill(phrase);
 }
 
+for (const legacyCache of [false, true]) {
+  test(`highlight loads history after reload with ${legacyCache ? 'legacy' : 'current'} cache`, async ({ page }) => {
+    const session = 'cached-history';
+    const rows = [record(1, 'needle'), record(2, 'needle needle')];
+    await page.route('**/sessions/cached-history/combined.jsonl', route => route.fulfill({
+      contentType: 'application/x-ndjson', body: rows.map(JSON.stringify).join('\n') + '\n',
+    }));
+    await page.routeWebSocket('**/ws', ws => {
+      ws.send(JSON.stringify(config(session)));
+      for (const row of rows) ws.send(JSON.stringify({ ...row, data: row.message, session_id: session }));
+    });
+    await page.goto('/');
+    await expect.poll(() => page.evaluate(async () => (await import('/state.js')).state.rawLines.A.length)).toBe(2);
+    await page.evaluate(() => window.dispatchEvent(new Event('beforeunload')));
+    const cached = await page.evaluate(() => JSON.parse(localStorage.getItem('embed-log:session:cached-history:v1')));
+    expect(cached.lines.A.map(row => row.sequence)).toEqual([1, 2]);
+    expect(cached.lines.A.every(row => row.sessionId === session)).toBe(true);
+    if (legacyCache) {
+      await page.addInitScript(() => {
+        const key = 'embed-log:session:cached-history:v1';
+        const snapshot = JSON.parse(localStorage.getItem(key));
+        for (const rows of Object.values(snapshot.lines)) {
+          for (const row of rows) {
+            delete row.sequence;
+            delete row.sessionId;
+            delete row.lineIdx;
+          }
+        }
+        localStorage.setItem(key, JSON.stringify(snapshot));
+      });
+    }
+    await page.reload();
+    await expect(page.locator('#pane-A')).toBeVisible();
+    await highlight(page, 'A', 'needle');
+    await expect(page.locator('#pane-A .search-count')).toHaveText('0 / 3');
+    await expect.poll(() => page.evaluate(async () => (await import('/state.js')).state.rawLines.A.length)).toBe(2);
+    await page.locator('#pane-A .search-next').click();
+    await expect(page.locator('#pane-A .search-count')).toHaveText('1 / 3');
+  });
+}
+
 test('repeated pane setup keeps one highlight toggle with counter and navigation', async ({ page }) => {
   const rows = [record(1, 'needle needle'), record(2, 'context'), record(3, 'needle')];
   await page.route('**/sessions/repeated-setup/combined.jsonl', route => route.fulfill({
