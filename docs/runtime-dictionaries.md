@@ -41,7 +41,8 @@ All requests include `id` and `source_id`. Responses echo both, set `type` to
 * `dictionary.stage`: `dictionary_json` is a JSON **string containing file text**.
   Response `dictionary`: `{dictionary_id, build_id}`.
 * `dictionary.status`: response `status`: `{source_id, generation, parser_type,
-  dictionary, raw_file, raw_offset}`. Initial generation is 0.
+  dictionary, raw_file, raw_offset, raw_error}`. Initial generation is 0.
+  `raw_file` is an absolute path when capture has opened the file.
 * `dictionary.activate`: `dictionary_id`, required integer `expected_generation`,
   optional `parser_type`. Response `status` acknowledges application by the RX
   owner, with generation incremented. It does not merely acknowledge queuing.
@@ -55,7 +56,12 @@ The RX owner swaps fully validated parsers between feeds, discarding any old
 partial record and emitting an explicit boundary annotation. It never joins
 bytes across generations. The acknowledged parser survives UART reconnect.
 Other sources and UART TX are unaffected. `/api/v1/status` reports live dictionary
-state alongside each source's counters.
+state alongside each source's counters. Configuration views describe startup
+YAML; use dictionary status for the active runtime binding.
+
+A missing or invalid initial dictionary logs a warning with the source and path,
+but does not abort the server or alter the configured parser's fallback behavior.
+Runtime dictionary control is unavailable for that source until startup is fixed.
 
 ## Artifacts and limits
 
@@ -63,13 +69,18 @@ Successful explicit staging enables raw capture for that source from its next
 received bytes; raw capture is not enabled by ordinary startup. Bytes are
 written **before decoding** to the session's `dictionaries/<source SHA256>-uart.bin`.
 `raw_offset` is a byte offset, not a message count. This extra capture continues
-until capture stops; provision disk space accordingly. A raw-write failure stops
-that RX source rather than silently claiming a preserved stream.
+until capture stops; provision disk space accordingly. A raw-write failure disables
+only raw capture: normal UART decoding continues, a visible warning is emitted,
+and `raw_error` records the failure. The raw stream is incomplete from that point;
+`raw_offset` counts only fully written chunks. Explicit staging retries capture;
+a successful write clears the error.
 
 The same directory retains immutable `<dictionary SHA256>.json` snapshots,
 per-source `*-initial.json`, and `*-changes.jsonl` (previous/active state,
-timestamps, offsets, explicit partial-record discard). Rotation copies staged
-snapshots and creates a new raw stream/checkpoint. Existing sessions are not
+timestamps, offsets, explicit partial-record discard). When raw capture is enabled,
+the first RX after rotation copies staged snapshots and creates a new raw
+stream/checkpoint. Idle sources do not poll the filesystem for dictionaries;
+reconnect refreshes the active snapshot if necessary. Existing sessions are not
 cleaned up or restarted by activation. These files remain in the session tree;
 HTML export itself is decoded text, not a raw-UART archive.
 

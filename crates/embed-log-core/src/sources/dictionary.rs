@@ -35,7 +35,13 @@ pub struct DictionaryStatus {
     pub dictionary: Option<DictionaryInfo>,
     pub raw_file: Option<String>,
     pub raw_offset: u64,
+    pub raw_error: Option<String>,
 }
+
+type ActivationResult = (
+    Result<DictionaryStatus, String>,
+    oneshot::Sender<Result<DictionaryStatus, String>>,
+);
 
 struct Staged {
     info: DictionaryInfo,
@@ -85,6 +91,7 @@ impl DictionaryControl {
                 dictionary: None,
                 raw_file: None,
                 raw_offset: 0,
+                raw_error: None,
             })),
             session,
             artifact_name: format!("{:x}", Sha256::digest(source.as_bytes())),
@@ -255,7 +262,12 @@ impl DictionaryRuntime {
                 .map_err(|e| e.to_string())?;
             let offset = file.metadata().map_err(|e| e.to_string())?.len();
             let mut status = self.control.status.lock().unwrap();
-            status.raw_file = Some(path.to_string_lossy().into_owned());
+            status.raw_file = Some(
+                std::fs::canonicalize(&path)
+                    .map_err(|e| e.to_string())?
+                    .to_string_lossy()
+                    .into_owned(),
+            );
             status.raw_offset = offset;
             atomic_write_file(
                 &dir.join(format!("{}-initial.json", self.control.artifact_name)),
@@ -270,8 +282,17 @@ impl DictionaryRuntime {
             .1
             .write_all(bytes)
             .map_err(|e| e.to_string())?;
-        self.control.status.lock().unwrap().raw_offset += bytes.len() as u64;
+        let mut status = self.control.status.lock().unwrap();
+        status.raw_offset += bytes.len() as u64;
+        status.raw_error = None;
         Ok(())
+    }
+
+    /// A failed optional raw sink must not stop normal UART decoding.
+    pub fn disable_raw(&mut self, error: String) {
+        self.control.capture_raw.store(false, Ordering::Release);
+        self.raw = None;
+        self.control.status.lock().unwrap().raw_error = Some(error);
     }
 
     /// Called between complete RX feeds. Dropping the old parser intentionally
@@ -280,10 +301,7 @@ impl DictionaryRuntime {
         &mut self,
         parser: &mut Box<dyn StreamParser>,
         config: &mut ParserConfig,
-    ) -> Option<(
-        Result<DictionaryStatus, String>,
-        oneshot::Sender<Result<DictionaryStatus, String>>,
-    )> {
+    ) -> Option<ActivationResult> {
         let update = self.updates.try_recv().ok()?;
         let ack = update.ack;
         let result = (|| {
@@ -305,6 +323,7 @@ impl DictionaryRuntime {
                 dictionary: Some(update.info),
                 raw_file: status.raw_file.clone(),
                 raw_offset: status.raw_offset,
+                raw_error: status.raw_error.clone(),
             };
             let dir = self.control.directory();
             std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;

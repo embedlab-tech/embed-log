@@ -102,7 +102,7 @@ impl ZephyrDictParser {
     }
 
     fn try_flush_prompt_before_hex(&mut self, lines: &mut Vec<String>) {
-        if self.text_buf.ends_with(b"> ") {
+        if self.text_buf.ends_with(b"outside> ") || self.text_buf.ends_with(b"inside> ") {
             if let Some(line) = self.emit_text_line() {
                 lines.push(line);
             }
@@ -1705,11 +1705,11 @@ mod tests {
 
         let msg = encode_normal_message(3, 1, 1, 0x1000, &[], &[]);
         let hex: String = msg.iter().map(|b| format!("{b:02x}")).collect();
-        let input = format!("uart> {hex}help");
+        let input = format!("outside> {hex}help");
         let lines = parser.feed(input.as_bytes());
 
         assert!(
-            lines.iter().any(|l| l.trim() == "uart>"),
+            lines.iter().any(|l| l.trim() == "outside>"),
             "prompt not emitted separately: {lines:?}"
         );
         assert!(
@@ -1717,7 +1717,7 @@ mod tests {
             "dict not decoded: {lines:?}"
         );
         assert!(
-            !lines.iter().any(|l| l.contains("uart> 00")),
+            !lines.iter().any(|l| l.contains("outside> 00")),
             "hex leaked into text line: {lines:?}"
         );
     }

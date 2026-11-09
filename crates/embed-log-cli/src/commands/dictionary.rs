@@ -51,6 +51,47 @@ pub(crate) async fn cmd_dictionary(args: DictionaryArgs) -> Result<()> {
     }
 }
 
+async fn run(args: &DictionaryArgs) -> Result<()> {
+    let (_, endpoint) = resolve_mutating_endpoint(args.instance.as_deref(), args.url.as_deref())?;
+    let mut request = match &args.command {
+        DictionaryCommand::Stage { database } => {
+            let bytes =
+                std::fs::read(database).with_context(|| format!("read {}", database.display()))?;
+            anyhow::ensure!(
+                bytes.len() <= embed_log_core::sources::dictionary::MAX_DICTIONARY_BYTES,
+                "dictionary exceeds 8 MiB"
+            );
+            json!({"type": "dictionary.stage", "dictionary_json": String::from_utf8(bytes).context("dictionary must be UTF-8")?})
+        }
+        DictionaryCommand::Activate {
+            dictionary_id,
+            expected_generation,
+            parser_type,
+        } => {
+            json!({"type": "dictionary.activate", "dictionary_id": dictionary_id, "expected_generation": expected_generation, "parser_type": parser_type})
+        }
+        DictionaryCommand::Status => json!({"type": "dictionary.status"}),
+    };
+    request["source_id"] = json!(args.source);
+    let mut client = ControlClient::connect(&endpoint).await?;
+    let response = client.request(request).await?;
+    client.close().await;
+    anyhow::ensure!(
+        response.get("ok").and_then(|v| v.as_bool()) == Some(true),
+        "{}",
+        response
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("dictionary command failed")
+    );
+    if args.json {
+        println!("{}", serde_json::to_string(&response)?);
+    } else {
+        println!("{}", serde_json::to_string_pretty(&response)?);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,45 +139,4 @@ mod tests {
         ])
         .is_err());
     }
-}
-
-async fn run(args: &DictionaryArgs) -> Result<()> {
-    let (_, endpoint) = resolve_mutating_endpoint(args.instance.as_deref(), args.url.as_deref())?;
-    let mut request = match &args.command {
-        DictionaryCommand::Stage { database } => {
-            let bytes =
-                std::fs::read(database).with_context(|| format!("read {}", database.display()))?;
-            anyhow::ensure!(
-                bytes.len() <= embed_log_core::sources::dictionary::MAX_DICTIONARY_BYTES,
-                "dictionary exceeds 8 MiB"
-            );
-            json!({"type": "dictionary.stage", "dictionary_json": String::from_utf8(bytes).context("dictionary must be UTF-8")?})
-        }
-        DictionaryCommand::Activate {
-            dictionary_id,
-            expected_generation,
-            parser_type,
-        } => {
-            json!({"type": "dictionary.activate", "dictionary_id": dictionary_id, "expected_generation": expected_generation, "parser_type": parser_type})
-        }
-        DictionaryCommand::Status => json!({"type": "dictionary.status"}),
-    };
-    request["source_id"] = json!(args.source);
-    let mut client = ControlClient::connect(&endpoint).await?;
-    let response = client.request(request).await?;
-    client.close().await;
-    anyhow::ensure!(
-        response.get("ok").and_then(|v| v.as_bool()) == Some(true),
-        "{}",
-        response
-            .get("error")
-            .and_then(|v| v.as_str())
-            .unwrap_or("dictionary command failed")
-    );
-    if args.json {
-        println!("{}", serde_json::to_string(&response)?);
-    } else {
-        println!("{}", serde_json::to_string_pretty(&response)?);
-    }
-    Ok(())
 }

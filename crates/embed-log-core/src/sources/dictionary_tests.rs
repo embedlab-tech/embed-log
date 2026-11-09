@@ -135,6 +135,88 @@ async fn cancelled_or_expired_activation_does_not_apply_later() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn unused_runtime_does_not_write_rotated_session() {
+    let (dir, manager) = setup();
+    std::fs::create_dir_all(&dir).unwrap();
+    let initial = dir.join("initial.json");
+    std::fs::write(&initial, dictionary("image-A")).unwrap();
+    let config = ParserConfig {
+        parser_type: "zephyr-dict".into(),
+        database: Some(initial.to_string_lossy().into_owned()),
+    };
+    let (_, runtime) = DictionaryControl::new("UART_A", &config, manager.clone()).unwrap();
+    let (mut master, mut slave) = serialport::TTYPort::pair().unwrap();
+    slave.set_timeout(Duration::from_millis(100)).unwrap();
+    let (tx, mut rx) = mpsc::channel(16);
+    let mut source = UartSource::from_port("UART_A", Box::new(slave), "text").with_parser(config);
+    source.set_dictionary_runtime(runtime);
+    let task = tokio::spawn(Box::new(source).run(tx));
+    tokio::task::block_in_place(|| master.write_all(&record()).unwrap());
+    assert!(timeout(Duration::from_secs(3), rx.recv())
+        .await
+        .unwrap()
+        .unwrap()
+        .message
+        .ends_with("image-A"));
+    let rotated = dir.join("rotated");
+    *manager.lock().unwrap() = session(rotated.clone());
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    tokio::task::block_in_place(|| master.write_all(&record()).unwrap());
+    assert!(timeout(Duration::from_secs(3), rx.recv())
+        .await
+        .unwrap()
+        .unwrap()
+        .message
+        .ends_with("image-A"));
+    assert!(!rotated.join("dictionaries").exists());
+    task.abort();
+    let _ = task.await;
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn raw_write_failure_does_not_stop_uart() {
+    let (dir, manager) = setup();
+    let (control, runtime) =
+        DictionaryControl::new("UART_A", &ParserConfig::default(), manager).unwrap();
+    control.stage(&dictionary("image-A")).unwrap();
+    let raw = dir
+        .join("dictionaries")
+        .join(format!("{}-uart.bin", control.artifact_name));
+    std::os::unix::fs::symlink("/dev/full", raw).unwrap();
+    let (mut master, mut slave) = serialport::TTYPort::pair().unwrap();
+    slave.set_timeout(Duration::from_millis(100)).unwrap();
+    let (tx, mut rx) = mpsc::channel(16);
+    let mut source = UartSource::from_port("UART_A", Box::new(slave), "text");
+    source.set_dictionary_runtime(runtime);
+    let task = tokio::spawn(Box::new(source).run(tx));
+    tokio::task::block_in_place(|| master.write_all(b"first line\n").unwrap());
+    let warning = timeout(Duration::from_secs(3), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(warning.message.contains("raw capture disabled"));
+    let first = timeout(Duration::from_secs(3), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.message, "first line");
+    assert!(control.status().raw_error.is_some());
+    assert!(!control.capture_raw.load(Ordering::Acquire));
+    tokio::task::block_in_place(|| master.write_all(b"second line\n").unwrap());
+    let second = timeout(Duration::from_secs(3), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(second.message, "second line");
+    assert!(!task.is_finished());
+    task.abort();
+    let _ = task.await;
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn runtime_switch_is_acknowledged_per_uart_and_discards_partial_record() {
     let (dir, manager) = setup();
     std::fs::create_dir_all(&dir).unwrap();

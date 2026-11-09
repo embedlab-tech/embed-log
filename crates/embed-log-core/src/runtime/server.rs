@@ -258,14 +258,20 @@ impl LogServer {
 
             if self.config.server.control_api {
                 if let Some(config) = src.source.parser_config() {
-                    let (control, runtime) = crate::sources::dictionary::DictionaryControl::new(
+                    match crate::sources::dictionary::DictionaryControl::new(
                         &src.name,
                         config,
                         session_mgr.clone(),
-                    )
-                    .map_err(anyhow::Error::msg)?;
-                    dictionaries.insert(src.name.clone(), control);
-                    src.source.set_dictionary_runtime(runtime);
+                    ) {
+                        Ok((control, runtime)) => {
+                            dictionaries.insert(src.name.clone(), control);
+                            src.source.set_dictionary_runtime(runtime);
+                        }
+                        Err(e) => warn!(
+                            "[{}] runtime dictionary control unavailable (database {:?}): {e}; continuing with configured parser",
+                            src.name, config.database
+                        ),
+                    }
                 }
             }
 

@@ -297,9 +297,6 @@ impl LogSource for UartSource {
                     }
                     let _ = ack.send(result);
                 }
-                parser_cfg = runtime
-                    .current_config(parser_cfg)
-                    .map_err(anyhow::Error::msg)?;
             }
             // Clone the port under the lock, then release before the blocking read.
             let cloned = {
@@ -325,6 +322,11 @@ impl LogSource for UartSource {
                 Err(e) => {
                     this.reconnect_port(&port, &format!("clone error: {e}"))
                         .await?;
+                    if let Some(runtime) = &dictionary {
+                        parser_cfg = runtime
+                            .current_config(parser_cfg)
+                            .map_err(anyhow::Error::msg)?;
+                    }
                     parser = create_parser(&parser_cfg);
                     last_activity = tokio::time::Instant::now();
                     next_idle = last_activity + UART_PARSER_IDLE;
@@ -343,6 +345,11 @@ impl LogSource for UartSource {
                 Err(e) => {
                     this.reconnect_port(&port, &format!("read error: {e}"))
                         .await?;
+                    if let Some(runtime) = &dictionary {
+                        parser_cfg = runtime
+                            .current_config(parser_cfg)
+                            .map_err(anyhow::Error::msg)?;
+                    }
                     parser = create_parser(&parser_cfg);
                     last_activity = tokio::time::Instant::now();
                     next_idle = last_activity + UART_PARSER_IDLE;
@@ -362,7 +369,16 @@ impl LogSource for UartSource {
                 last_activity = tokio::time::Instant::now();
                 next_idle = last_activity + UART_PARSER_IDLE;
                 if let Some(runtime) = &mut dictionary {
-                    runtime.record_raw(&buf[..n]).map_err(anyhow::Error::msg)?;
+                    if let Err(e) = runtime.record_raw(&buf[..n]) {
+                        runtime.disable_raw(e.clone());
+                        let message = format!(
+                            "[dictionary: raw capture disabled: {e}; UART decoding continues]"
+                        );
+                        warn!("[{name}] {message}");
+                        let _ = tx
+                            .send(LogEntry::new(Local::now(), name.clone(), message))
+                            .await;
+                    }
                 }
                 parser.feed(&buf[..n])
             };

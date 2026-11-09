@@ -172,6 +172,46 @@ def e2e_server(embed_log_binary: Path, frontend_dir: Path, temp_dir: Path,
         server.stop()
 
 
+@pytest.mark.parametrize("parser_type", ["zephyr-dict", "zephyr-dict-hex"])
+@pytest.mark.parametrize("database_contents", [None, "invalid JSON"])
+def test_bad_initial_dictionary_does_not_abort_server(
+        embed_log_binary, frontend_dir, temp_dir, pty_pair,
+        parser_type, database_contents):
+    import urllib.request
+    import yaml
+
+    database = temp_dir / "bad-dictionary.json"
+    if database_contents is not None:
+        database.write_text(database_contents)
+    port = free_port()
+    config = {
+        "version": 2,
+        "server": {"listen": f"127.0.0.1:{port}"},
+        "logs": {"dir": str(temp_dir / "logs")},
+        "sources": {"DUT_UART": {
+            "type": "uart", "path": pty_pair[1], "baud": 115200,
+            "parser": {"type": parser_type, "database": str(database)},
+        }},
+        "ui": {"tabs": [{"title": "UART", "sources": ["DUT_UART"]}]},
+    }
+    config_path = temp_dir / "bad-dictionary.yml"
+    config_path.write_text(yaml.safe_dump(config))
+    server = E2eServer(embed_log_binary, config_path, frontend_dir,
+                       temp_dir / "logs", "127.0.0.1", port)
+    try:
+        server.start()
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/api/v1/status", timeout=3) as response:
+            status = json.load(response)
+        assert status["sources"]["DUT_UART"]["dictionary"] is None
+        output = "".join(server.stdout)
+        assert "runtime dictionary control unavailable" in output
+        assert str(database) in output
+        assert server.process.poll() is None
+    finally:
+        server.stop()
+
+
 def test_runtime_dictionary_sdk_and_cli(e2e_server, pty_pair, temp_dir):
     """Real WS/CLI + PTY: A->B, rejected CAS, raw bytes and uninterrupted TX."""
     import hashlib
