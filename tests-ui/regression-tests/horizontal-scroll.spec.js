@@ -8,6 +8,10 @@ test(`horizontal scrolling and wrap work with ${repeatSetup ? 'repeated' : 'init
   })));
   await page.goto('/');
   await expect(page.locator('#ws-status')).toContainText(/connected/i);
+  await expect(page.locator('#log-SENSOR_A')).toHaveClass(/wrap/);
+  await expect(page.locator('#pane-SENSOR_A .pane-wrap-btn')).toHaveClass(/active/);
+  await expect(page.locator('#pane-SENSOR_A .pane-wrap-btn')).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('#pane-SENSOR_A .pane-wrap-btn').click();
   await page.evaluate(async repeat => {
     const { clearPane, appendLine, _linesSetupPane } = await import('/lines.js');
     if (repeat) _linesSetupPane('SENSOR_A');

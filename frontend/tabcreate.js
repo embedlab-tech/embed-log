@@ -31,7 +31,7 @@ export function createTabWithPanes(label, paneIds, { switchTo = true, paneLabels
         state.highlightedIdx[paneId] = null;
         state.selected[paneId]    = new Set();
 
-    state.wrap[paneId]        = false;
+    state.wrap[paneId]        = true;
     });
 
     // ---- 2. DOM ----

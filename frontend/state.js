@@ -277,7 +277,7 @@ PANES.forEach(id => {
     state.atBottom[id]    = true;
     state.behindLive[id]  = false;
 
-    state.wrap[id]        = false;
+    state.wrap[id]        = true;
     state.highlighted[id] = null;
     state.highlightedIdx[id] = null;
     state.selected[id]    = new Set();
