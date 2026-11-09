@@ -1027,6 +1027,8 @@ export function scrollPaneToBottom(paneId) {
 }
 export function _linesSetupPane(id) {
     const logEl = document.getElementById("log-" + id);
+    if (!logEl || logEl.dataset.linesInitialized === "1") return;
+    logEl.dataset.linesInitialized = "1";
     if (window.ResizeObserver && logEl.dataset.resizeObserverBound !== "1") {
         logEl.dataset.resizeObserverBound = "1";
         const resizeObserver = new ResizeObserver(() => _scheduleVirtualResizeRefresh());
@@ -1117,10 +1119,16 @@ export function _linesSetupPane(id) {
     // Per-pane wrap toggle
     const wrapBtn = document.querySelector(`#pane-${id} .pane-wrap-btn`);
     if (wrapBtn) {
+        const syncWrap = () => {
+            wrapBtn.classList.toggle("active", !!state.wrap[id]);
+            wrapBtn.setAttribute("aria-pressed", String(!!state.wrap[id]));
+            logEl.classList.toggle("wrap", !!state.wrap[id]);
+            if (state.wrap[id]) logEl.scrollLeft = 0;
+        };
+        syncWrap();
         wrapBtn.addEventListener("click", () => {
             state.wrap[id] = !state.wrap[id];
-            wrapBtn.classList.toggle("active", state.wrap[id]);
-            document.getElementById("log-" + id)?.classList.toggle("wrap", state.wrap[id]);
+            syncWrap();
             // Rows are absolutely positioned assuming a fixed single-line height;
             // wrapping makes row height variable, so force a relayout.
             rerenderPane(id);
