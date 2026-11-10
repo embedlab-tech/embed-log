@@ -111,7 +111,7 @@ impl UartSource {
 
     /// Attach the `parser.database` path (used by e.g. `zephyr-dict`).
     pub fn with_parser_database(mut self, database: Option<String>) -> Self {
-        self.parser.database = database;
+        self.parser.database = database.map(Into::into);
         self
     }
 

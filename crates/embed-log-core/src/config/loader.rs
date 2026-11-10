@@ -508,15 +508,23 @@ fn validate_config(config: &mut AppConfig, config_path: &Path) -> Result<(), Con
             )));
         }
         if matches!(parser_type.as_str(), "zephyr-dict" | "zephyr-dict-hex") {
-            let db = src.parser.database.as_deref().unwrap_or("");
-            if db.trim().is_empty() {
+            let paths = src
+                .parser
+                .database
+                .as_ref()
+                .map(|db| db.paths())
+                .unwrap_or_default();
+            if paths.is_empty() || paths.iter().any(|path| path.trim().is_empty()) {
                 return Err(ConfigError::validation(format!(
                     "{}.parser.database is required for parser.type '{parser_type}'",
                     ctx()
                 )));
             }
-            let resolved = super::paths::resolve_relative_to_config(config_path, db);
-            src.parser.database = Some(resolved.display().to_string());
+            for path in src.parser.database.as_mut().unwrap().paths_mut() {
+                *path = super::paths::resolve_relative_to_config(config_path, path)
+                    .display()
+                    .to_string();
+            }
         }
     }
 
@@ -1042,6 +1050,41 @@ tabs:
             Some(expected_database)
         );
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn dictionary_path_lists_are_ordered_resolved_and_validated() {
+        for parser in ["zephyr-dict", "zephyr-dict-hex"] {
+            let path = std::env::temp_dir().join(format!(
+                "dictionary-list-{parser}-{}.yml",
+                std::process::id()
+            ));
+            let prefix = format!("version: 2\nsources:\n  UART_A:\n    type: uart\n    path: /dev/ttyUSB0\n    parser:\n      type: {parser}\n      database: ");
+            std::fs::write(&path, format!("{prefix}[first.json, second.json]\n")).unwrap();
+            let config = load_config(&path).unwrap();
+            let database = config.sources[0].parser.database.as_ref().unwrap();
+            assert_eq!(database.paths().len(), 2);
+            for (actual, relative) in database.paths().iter().zip(["first.json", "second.json"]) {
+                assert_eq!(
+                    *actual,
+                    crate::config::paths::resolve_relative_to_config(&path, relative)
+                        .display()
+                        .to_string()
+                );
+            }
+            assert_eq!(&**database, database.paths()[0]);
+            assert!(serde_json::to_value(database).unwrap().is_array());
+            for invalid in ["[]", "['']", "[first.json, ' ']", "[first.json, 7]"] {
+                std::fs::write(&path, format!("{prefix}{invalid}\n")).unwrap();
+                assert!(load_config(&path).is_err(), "{invalid}");
+            }
+            std::fs::write(&path, format!("{prefix}first.json\n")).unwrap();
+            let config = load_config(&path).unwrap();
+            assert!(serde_json::to_value(&config.sources[0].parser.database)
+                .unwrap()
+                .is_string());
+            std::fs::remove_file(path).unwrap();
+        }
     }
 
     #[test]

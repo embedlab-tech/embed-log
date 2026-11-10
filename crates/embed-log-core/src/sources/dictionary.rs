@@ -1,7 +1,7 @@
 //! Explicit, per-UART dictionary changes. No firmware-boundary guessing.
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -28,6 +28,13 @@ pub struct DictionaryInfo {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct ConfiguredDictionary {
+    pub path: String,
+    pub dictionary: Option<DictionaryInfo>,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct DictionaryStatus {
     pub source_id: String,
     pub generation: u64,
@@ -36,6 +43,7 @@ pub struct DictionaryStatus {
     pub raw_file: Option<String>,
     pub raw_offset: u64,
     pub raw_error: Option<String>,
+    pub configured: Vec<ConfiguredDictionary>,
 }
 
 type ActivationResult = (
@@ -92,6 +100,7 @@ impl DictionaryControl {
                 raw_file: None,
                 raw_offset: 0,
                 raw_error: None,
+                configured: Vec::new(),
             })),
             session,
             artifact_name: format!("{:x}", Sha256::digest(source.as_bytes())),
@@ -101,14 +110,38 @@ impl DictionaryControl {
             config.parser_type.as_str(),
             "zephyr-dict" | "zephyr-dict-hex"
         ) {
-            let path = config
+            let paths = config
                 .database
-                .as_deref()
-                .ok_or("dictionary path is missing")?;
-            let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-            let json = String::from_utf8(bytes).map_err(|e| e.to_string())?;
-            let info = control.stage_bytes(&json)?;
-            control.status.lock().unwrap().dictionary = Some(info);
+                .as_ref()
+                .ok_or("dictionary path is missing")?
+                .paths();
+            if paths.is_empty() {
+                return Err("dictionary path list is empty".into());
+            }
+            for (index, path) in paths.iter().enumerate() {
+                let staged = (|| {
+                    let mut json = String::new();
+                    File::open(path)
+                        .map_err(|e| e.to_string())?
+                        .take((MAX_DICTIONARY_BYTES + 1) as u64)
+                        .read_to_string(&mut json)
+                        .map_err(|e| e.to_string())?;
+                    control.stage_bytes(&json)
+                })();
+                if index == 0 {
+                    control.status.lock().unwrap().dictionary = Some(staged.clone()?);
+                }
+                control
+                    .status
+                    .lock()
+                    .unwrap()
+                    .configured
+                    .push(ConfiguredDictionary {
+                        path: path.clone(),
+                        dictionary: staged.as_ref().ok().cloned(),
+                        error: staged.err(),
+                    });
+            }
         }
         let runtime = DictionaryRuntime {
             control: control.clone(),
@@ -192,11 +225,12 @@ impl DictionaryControl {
             atomic_write_file(&path, db.json.as_bytes()).map_err(|e| e.to_string())?;
             ParserConfig {
                 parser_type: parser_type.into(),
-                database: Some(path.to_string_lossy().into_owned()),
+                database: Some(path.to_string_lossy().into_owned().into()),
             }
         };
         let parser = try_create_dictionary_parser(&config)?;
         let info = self.staged.lock().unwrap()[dictionary_id].info.clone();
+        self.capture_raw.store(true, Ordering::Release);
         let (ack, receive) = oneshot::channel();
         let deadline = Instant::now() + APPLY_TIMEOUT;
         let update = Update {
@@ -233,7 +267,7 @@ impl DictionaryRuntime {
                 atomic_write_file(&path, staged[&db.dictionary_id].json.as_bytes())
                     .map_err(|e| e.to_string())?;
             }
-            config.database = Some(path.to_string_lossy().into_owned());
+            config.database = Some(path.to_string_lossy().into_owned().into());
         }
         Ok(config)
     }
@@ -324,6 +358,7 @@ impl DictionaryRuntime {
                 raw_file: status.raw_file.clone(),
                 raw_offset: status.raw_offset,
                 raw_error: status.raw_error.clone(),
+                configured: status.configured.clone(),
             };
             let dir = self.control.directory();
             std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;

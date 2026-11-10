@@ -5,6 +5,44 @@ trusted-local `/api/v1/control` WebSocket. Control API must be enabled. This is 
 explicit, per-source operation, **not automatic firmware or reboot detection**.
 Do not expose the control API to untrusted networks.
 
+## YAML and live UI
+
+The existing `database` field accepts either one path or an ordered list:
+
+```yaml
+sources:
+  UART_A:
+    type: uart
+    path: /dev/ttyUSB0
+    baud: 115200
+    parser:
+      type: zephyr-dict
+      database:
+        - firmware-A/log_dictionary.json
+        - firmware-B/log_dictionary.json
+```
+
+`database: firmware-A/log_dictionary.json` remains supported and serializes as a
+single string. Lists must be nonempty and contain only nonblank paths. All paths
+are relative to the YAML file (absolute paths work too). Both `zephyr-dict` and
+`zephyr-dict-hex` accept lists. The first dictionary is active at startup.
+
+The backend validates and snapshots configured UART dictionaries on startup.
+Missing/invalid alternatives are listed as unavailable, with an error, and cannot
+be selected. A bad first dictionary keeps the existing startup-warning behavior
+(described below); it does not silently choose another dictionary.
+
+Each physical UART pane in the live UI shows a Dictionary selector and its actual
+active path. Selection uses the same owner-acknowledged API as CLI/SDK, without a
+restart. A rejected change keeps the previous binding. Reloading/rebuilding the UI
+reads backend state; it does not reset the dictionary. Other UARTs are unaffected.
+After restarting the logger, the first YAML entry is active again. Configured
+snapshots do not change if the original file is subsequently edited.
+
+There is **no fallback or automatic dictionary selection**. A manual choice can
+be wrong even if its output looks plausible. Earlier decoded logs are not rewritten.
+Non-UART sources use the first path only; runtime selection is UART-only.
+
 ## CLI
 
 ```sh
@@ -41,7 +79,9 @@ All requests include `id` and `source_id`. Responses echo both, set `type` to
 * `dictionary.stage`: `dictionary_json` is a JSON **string containing file text**.
   Response `dictionary`: `{dictionary_id, build_id}`.
 * `dictionary.status`: response `status`: `{source_id, generation, parser_type,
-  dictionary, raw_file, raw_offset, raw_error}`. Initial generation is 0.
+  dictionary, raw_file, raw_offset, raw_error, configured}`. Initial generation is 0.
+  `configured` contains `{path, dictionary, error}` for each YAML entry; unavailable
+  entries have no `dictionary`. Uploaded dictionaries need not be in this list.
   `raw_file` is an absolute path when capture has opened the file.
 * `dictionary.activate`: `dictionary_id`, required integer `expected_generation`,
   optional `parser_type`. Response `status` acknowledges application by the RX
@@ -65,8 +105,9 @@ Runtime dictionary control is unavailable for that source until startup is fixed
 
 ## Artifacts and limits
 
-Successful explicit staging enables raw capture for that source from its next
-received bytes; raw capture is not enabled by ordinary startup. Bytes are
+Successful explicit staging or an activation request enables raw capture for that
+source from its next received bytes; merely listing dictionaries at startup does
+not enable raw capture. Bytes are
 written **before decoding** to the session's `dictionaries/<source SHA256>-uart.bin`.
 `raw_offset` is a byte offset, not a message count. This extra capture continues
 until capture stops; provision disk space accordingly. A raw-write failure disables

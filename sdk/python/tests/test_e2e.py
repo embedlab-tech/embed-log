@@ -250,6 +250,61 @@ def test_runtime_dictionary_sdk_and_cli(e2e_server, pty_pair, temp_dir):
         assert ready and os.read(pty_pair[0], 128) == b"version\r"
 
 
+@pytest.mark.parametrize("parser_type", ["zephyr-dict", "zephyr-dict-hex"])
+def test_configured_dictionary_list_switches_without_upload(
+    embed_log_binary, frontend_dir, temp_dir, pty_pair, parser_type,
+):
+    """Configured snapshots survive input edits; selection is per UART, no guessing."""
+    import struct
+    from embed_log_sdk import EmbedLogClient
+
+    paths = []
+    for message in ["image-A", "image-B"]:
+        path = temp_dir / f"{message}.json"
+        path.write_text(json.dumps({"version": 3, "build_id": message,
+            "target": {"bits": 32, "little_endianness": True}, "arch": "arm",
+            "log_subsys": {"log_instances": {"1": {"name": "app"}}},
+            "string_mappings": {"4096": message}}))
+        paths.append(path.name)  # All paths are relative to the YAML, not the CWD.
+    master_b, slave_b = pty.openpty()
+    slave_name = os.ttyname(slave_b)
+    os.close(slave_b)
+    port = free_port()
+    config = {"version": 2, "server": {"listen": f"127.0.0.1:{port}"},
+        "logs": {"dir": str(temp_dir / "logs")}, "sources": {
+            name: {"type": "uart", "path": slave, "baud": 115200,
+                "parser": {"type": parser_type, "database": paths + ["missing.json"]}}
+            for name, slave in [("UART_A", pty_pair[1]), ("UART_B", slave_name)]}}
+    config_path = temp_dir / "dictionary-list.yml"
+    config_path.write_text(json.dumps(config))
+    server = E2eServer(embed_log_binary, config_path, frontend_dir,
+                      temp_dir / "logs", "127.0.0.1", port)
+    record = bytes([0, 0x30, 8, 0, 0, 0]) + struct.pack("<II", 1, 42) + bytes([2, 0, 0, 0]) + struct.pack("<I", 0x1000)
+    if parser_type == "zephyr-dict-hex":
+        record = b"##ZLOGV1##" + record.hex().encode() + b"\n"
+    try:
+        server.start()
+        with EmbedLogClient(server.ws_url()) as client:
+            client.subscribe(["UART_A", "UART_B"])
+            status = client.dictionary_status("UART_A")
+            assert status["generation"] == 0
+            assert status["dictionary"] == status["configured"][0]["dictionary"]
+            assert status["configured"][2]["error"]
+            (temp_dir / paths[1]).write_text("modified original")
+            choice = status["configured"][1]["dictionary"]["dictionary_id"]
+            client.activate_dictionary("UART_A", choice, 0, parser_type)
+            assert client.dictionary_status("UART_B")["generation"] == 0
+            os.write(pty_pair[0], record)
+            os.write(master_b, record)
+            messages = [entry.message for entry in client.entries(timeout=3)]
+            assert any(message.endswith("app: image-B") for message in messages), messages
+            assert any(message.endswith("app: image-A") for message in messages), messages
+            assert client.dictionary_status("UART_A")["raw_file"]
+    finally:
+        server.stop()
+        os.close(master_b)
+
+
 # ---- Tests --------------------------------------------------------------
 
 

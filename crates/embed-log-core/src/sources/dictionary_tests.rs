@@ -103,7 +103,7 @@ async fn cancelled_or_expired_activation_does_not_apply_later() {
         .join(format!("{}.json", info.dictionary_id));
     let config = ParserConfig {
         parser_type: "zephyr-dict".into(),
-        database: Some(path.to_string_lossy().into_owned()),
+        database: Some(path.to_string_lossy().into_owned().into()),
     };
     let mut current_config = ParserConfig::default();
     let mut current = create_parser(&current_config);
@@ -142,7 +142,7 @@ async fn unused_runtime_does_not_write_rotated_session() {
     std::fs::write(&initial, dictionary("image-A")).unwrap();
     let config = ParserConfig {
         parser_type: "zephyr-dict".into(),
-        database: Some(initial.to_string_lossy().into_owned()),
+        database: Some(initial.to_string_lossy().into_owned().into()),
     };
     let (_, runtime) = DictionaryControl::new("UART_A", &config, manager.clone()).unwrap();
     let (mut master, mut slave) = serialport::TTYPort::pair().unwrap();
@@ -216,6 +216,46 @@ async fn raw_write_failure_does_not_stop_uart() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+#[test]
+fn configured_dictionaries_are_snapshotted_and_bad_alternatives_are_visible() {
+    let (dir, manager) = setup();
+    std::fs::create_dir_all(&dir).unwrap();
+    let first = dir.join("first.json");
+    let second = dir.join("second.json");
+    let missing = dir.join("missing.json");
+    std::fs::write(&first, dictionary("image-A")).unwrap();
+    std::fs::write(&second, dictionary("image-B")).unwrap();
+    let config = ParserConfig {
+        parser_type: "zephyr-dict".into(),
+        database: Some(crate::config::models::DictionaryPaths::Multiple(
+            [&first, &second, &missing]
+                .iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect(),
+        )),
+    };
+    let (control, runtime) = DictionaryControl::new("UART_A", &config, manager).unwrap();
+    let status = control.status();
+    assert_eq!(status.configured.len(), 3);
+    assert_eq!(status.generation, 0);
+    assert_eq!(status.dictionary, status.configured[0].dictionary);
+    assert_ne!(status.dictionary, status.configured[1].dictionary);
+    assert!(status.configured[2].error.is_some());
+    assert!(status.configured[2].dictionary.is_none());
+    assert!(!control.capture_raw.load(Ordering::Acquire));
+    let second_id = &status.configured[1]
+        .dictionary
+        .as_ref()
+        .unwrap()
+        .dictionary_id;
+    std::fs::write(second, "modified original").unwrap();
+    assert!(control.staged.lock().unwrap()[second_id]
+        .json
+        .contains("image-B"));
+    assert!(runtime.current_config(config).unwrap().database.is_some());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn runtime_switch_is_acknowledged_per_uart_and_discards_partial_record() {
     let (dir, manager) = setup();
@@ -224,7 +264,7 @@ async fn runtime_switch_is_acknowledged_per_uart_and_discards_partial_record() {
     std::fs::write(&initial, dictionary("image-A")).unwrap();
     let config = ParserConfig {
         parser_type: "zephyr-dict".into(),
-        database: Some(initial.to_string_lossy().into_owned()),
+        database: Some(initial.to_string_lossy().into_owned().into()),
     };
     let (control_a, runtime_a) =
         DictionaryControl::new("UART_A", &config, manager.clone()).unwrap();

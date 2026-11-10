@@ -372,7 +372,7 @@ mod tests {
         ] {
             let config = crate::config::models::ParserConfig {
                 parser_type: name.into(),
-                database: Some(db.clone()),
+                database: Some(db.clone().into()),
             };
             let mut parser = crate::parsers::create_parser(&config);
             assert!(
