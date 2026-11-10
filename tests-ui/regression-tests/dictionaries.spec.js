@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 // These tests use real page widgets and control sockets, with a deterministic
 // control peer so delayed acknowledgements and rejection can be exercised.
-async function setup(page) {
+async function setup(page, firstCount = 3) {
   const states = {};
   for (const source of ['SENSOR_A', 'SENSOR_B']) {
     const configured = [
@@ -10,6 +10,7 @@ async function setup(page) {
       { path: '/images/B/database.json', dictionary: { dictionary_id: 'b', build_id: 'B' }, error: null },
       { path: '/images/missing.json', dictionary: null, error: 'File not found' },
     ];
+    if (source === 'SENSOR_A') configured.splice(firstCount);
     states[source] = { generation: 0, parser_type: 'zephyr-dict', dictionary: configured[0].dictionary, configured };
   }
   let rejectNext = false;
@@ -57,6 +58,19 @@ test('configured choices wait for ACK, remain per-source, and survive reload/reb
   await page.evaluate(async () => (await import('/tabcreate.js')).rebuildLayout());
   await expect(page.getByLabel('Dictionary for SENSOR_A', { exact: true })).toHaveCount(1);
   await expect(page.getByLabel('Dictionary for SENSOR_A', { exact: true })).toHaveValue('b');
+});
+
+test('single configured dictionary has no selector, including after a status update', async ({ page }) => {
+  const { states } = await setup(page, 1);
+  const single = page.getByLabel('Dictionary for SENSOR_A', { exact: true });
+  const multiple = page.getByLabel('Dictionary for SENSOR_B', { exact: true });
+  await expect(multiple).toHaveValue('a');
+  await expect(single).toHaveCount(0);
+  await page.evaluate(async () => (await import('/tabcreate.js')).rebuildLayout());
+  await expect(multiple).toHaveCount(1);
+  await expect(single).toHaveCount(0);
+  states.SENSOR_B.configured.splice(1);
+  await expect(multiple).toHaveCount(0, { timeout: 7000 });
 });
 
 test('rejected change preserves the active choice and displays the server error', async ({ page }) => {

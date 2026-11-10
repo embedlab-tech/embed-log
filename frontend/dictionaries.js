@@ -41,7 +41,7 @@ function render() {
         const source = pane.id.slice('pane-'.length);
         const status = sources[source]?.dictionary;
         let row = pane.querySelector('.dictionary-control');
-        if (!status?.configured?.length) {
+        if ((status?.configured?.length || 0) < 2) {
             if (row) row.remove();
             continue;
         }
