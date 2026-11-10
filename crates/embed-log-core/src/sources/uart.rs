@@ -288,11 +288,12 @@ impl LogSource for UartSource {
 
         loop {
             if let Some(runtime) = &mut dictionary {
-                while let Some((result, ack)) = runtime.apply_next(&mut parser, &mut parser_cfg) {
-                    if let Ok(status) = &result {
-                        let message = format!("[dictionary: generation {}; DB {}; partial record discarded; explicit boundary, not firmware detection]", status.generation, status.dictionary.as_ref().unwrap().dictionary_id);
+                while let Some((result, ack, lines)) =
+                    runtime.apply_next(&mut parser, &mut parser_cfg)
+                {
+                    for line in lines {
                         let _ = tx
-                            .send(LogEntry::new(Local::now(), name.clone(), message))
+                            .send(LogEntry::new(Local::now(), name.clone(), line))
                             .await;
                     }
                     let _ = ack.send(result);
@@ -320,6 +321,13 @@ impl LogSource for UartSource {
                     .await?
                 }
                 Err(e) => {
+                    if let Some(runtime) = &mut dictionary {
+                        for line in runtime.reset_anchor(&mut parser) {
+                            let _ = tx
+                                .send(LogEntry::new(Local::now(), name.clone(), line))
+                                .await;
+                        }
+                    }
                     this.reconnect_port(&port, &format!("clone error: {e}"))
                         .await?;
                     if let Some(runtime) = &dictionary {
@@ -343,6 +351,13 @@ impl LogSource for UartSource {
                     continue;
                 }
                 Err(e) => {
+                    if let Some(runtime) = &mut dictionary {
+                        for line in runtime.reset_anchor(&mut parser) {
+                            let _ = tx
+                                .send(LogEntry::new(Local::now(), name.clone(), line))
+                                .await;
+                        }
+                    }
                     this.reconnect_port(&port, &format!("read error: {e}"))
                         .await?;
                     if let Some(runtime) = &dictionary {
@@ -364,7 +379,11 @@ impl LogSource for UartSource {
                     continue;
                 }
                 next_idle = now + UART_PARSER_IDLE_REPEAT;
-                parser.on_idle(now.duration_since(last_activity))
+                if let Some(runtime) = &mut dictionary {
+                    runtime.on_idle(&mut parser, now.duration_since(last_activity))
+                } else {
+                    parser.on_idle(now.duration_since(last_activity))
+                }
             } else {
                 last_activity = tokio::time::Instant::now();
                 next_idle = last_activity + UART_PARSER_IDLE;
@@ -380,7 +399,11 @@ impl LogSource for UartSource {
                             .await;
                     }
                 }
-                parser.feed(&buf[..n])
+                if let Some(runtime) = &mut dictionary {
+                    runtime.feed(&mut parser, &mut parser_cfg, &buf[..n])
+                } else {
+                    parser.feed(&buf[..n])
+                }
             };
 
             for line in lines {

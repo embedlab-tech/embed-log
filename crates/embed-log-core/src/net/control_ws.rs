@@ -306,9 +306,17 @@ async fn handle_dictionary(
     let result = match command {
         "dictionary.status" => Ok(serde_json::json!({"status": control.status()})),
         "dictionary.stage" => match cmd.get("dictionary_json").and_then(|v| v.as_str()) {
-            Some(json) => control
-                .stage(json)
-                .map(|info| serde_json::json!({"dictionary": info})),
+            Some(json) => {
+                let regex = match cmd.get("activate_on_regex") {
+                    None | Some(serde_json::Value::Null) => None,
+                    Some(serde_json::Value::String(pattern)) => Some(pattern.as_str()),
+                    _ => return error("activate_on_regex must be a string or null"),
+                };
+                control
+                    .stage_with_regex(json, regex)
+                    .await
+                    .map(|info| serde_json::json!({"dictionary": info, "armed": control.status().armed.is_some()}))
+            }
             None => Err("missing dictionary_json UTF-8 string".into()),
         },
         "dictionary.activate" => {

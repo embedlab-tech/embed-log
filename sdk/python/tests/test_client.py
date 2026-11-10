@@ -152,6 +152,23 @@ def test_dictionary_commands_preserve_upload_and_generation(fake_ws, tmp_path, m
     client.close()
 
 
+@pytest.mark.parametrize("pattern", [None, "^RAW-READY:target$"])
+def test_dictionary_stage_optional_raw_anchor(fake_ws, tmp_path, pattern):
+    fake_ws.queue_send({"type": "hello.result", "id": "hello-init",
+                        "sources": {"UART_A": {"type": "uart", "writable": True}},
+                        "session": {"id": "s1"}})
+    database = tmp_path / "db.json"
+    database.write_text('{"version":3}')
+    with EmbedLogClient("ws://127.0.0.1:18080/api/v1/control") as client:
+        with patch.object(client, "_send_and_wait", return_value={"dictionary": {}}) as send:
+            client.stage_dictionary("UART_A", database, activate_on_regex=pattern)
+            extra = send.call_args.kwargs["extra"]
+            if pattern is None:
+                assert "activate_on_regex" not in extra
+            else:
+                assert extra["activate_on_regex"] == pattern
+
+
 def test_dictionary_activation_server_rejection_is_not_success(fake_ws):
     fake_ws.queue_send({"type": "hello.result", "id": "hello-init",
                         "sources": {"UART_A": {"type": "uart", "writable": True}},

@@ -2,7 +2,8 @@
 
 `dictionary.stage`, `dictionary.activate` and `dictionary.status` use the existing
 trusted-local `/api/v1/control` WebSocket. Control API must be enabled. This is an
-explicit, per-source operation, **not automatic firmware or reboot detection**.
+per-source operation, **not automatic firmware or reboot detection**. Optional
+raw-line anchors are configured explicitly by the consumer.
 Do not expose the control API to untrusted networks.
 
 ## YAML and live UI
@@ -39,8 +40,9 @@ reads backend state; it does not reset the dictionary. Other UARTs are unaffecte
 After restarting the logger, the first YAML entry is active again. Configured
 snapshots do not change if the original file is subsequently edited.
 
-There is **no fallback or automatic dictionary selection**. A manual choice can
-be wrong even if its output looks plausible. Earlier decoded logs are not rewritten.
+There is **no fallback or guessing from decoded output**. A consumer can explicitly
+arm one raw-line anchor as described below. A manual choice can be wrong even if
+its output looks plausible. Earlier decoded logs are not rewritten.
 Non-UART sources use the first path only; runtime selection is UART-only.
 
 ## CLI
@@ -69,7 +71,59 @@ Staging uploads the **exact UTF-8 JSON file bytes**, validates Zephyr v3, and re
 `dictionary_id` = SHA256 of those bytes plus informational `build_id`. A git SHA
 or `build_id` alone does not uniquely bind a dictionary to a firmware image.
 Limits: 8 MiB per upload, 64 MiB staged per source for the process lifetime.
-Invalid uploads leave the active parser unchanged. Staging does not activate.
+Invalid uploads leave the active parser unchanged. Plain staging does not activate.
+
+## Optional raw UART anchor
+
+```sh
+embed-log dictionary --instance bench --source UART_A --json stage target.json \
+  --activate-on-regex '^READY:target-specific-token$'
+```
+
+```python
+client.stage_dictionary("UART_A", "target.json",
+                        activate_on_regex=r"^READY:target-specific-token$")
+```
+
+The regex matches a complete **raw UTF-8 console line**, without its trailing
+CR/LF, before any dictionary decoding. No marker spelling or platform knowledge
+is built in. It does not match text reconstructed from a dictionary. This is not
+the shadow-parser/timestamp heuristic: no reboot inference or boot-log replay is
+performed. Bytes after the matching LF, even in the same UART read, use the
+staged parser. The marker itself becomes a dictionary boundary annotation, remains
+in raw capture and is recorded as `anchor_line` in history.
+
+The producer must emit a distinct, newline-terminated marker directly on UART,
+between records and **before the first dictionary record** of the new image.
+Prefix it with LF/CRLF to separate it from preceding bytes. Serialize the write
+against binary logging so the marker cannot interleave with a record. Bind the
+expected token to the actual firmware and dictionary; a common readiness message
+is not a build identity. Use an anchored regex and escape the token. The scanner
+cannot distinguish a literal marker embedded inside binary payload from a real
+marker: choose a sufficiently distinctive token and trust the producer/framing.
+
+Only the binary `zephyr-dict` UART parser supports arming. Regexes are limited to
+1024 characters and must not match an empty line. Compilation and owner-ACK
+failures leave the active parser unchanged. One matcher may be armed per source;
+a new regex replaces it, while staging without a regex leaves it alone. Arming
+the active dictionary is rejected. `status.armed` is null or contains
+`{dictionary_id, activate_on_regex}`. No UI change is required.
+
+Potential marker lines span UART chunks and are bounded to 16 KiB and 60 seconds
+from their first buffered byte (monotonic time, including silent UART). Nonmatches,
+binary/control bytes, overlong lines and timed-out fragments pass through the old
+parser; the matcher remains armed. This can briefly delay ordinary console text
+while awaiting LF. Reconnect/rearming flush pending bytes through the old parser
+and reset line matching; fragments are never joined across reconnects. A successful
+explicit activation, including idempotent confirmation, disarms the matcher.
+
+Auto-activation increments generation once and records `reason: "anchor"`,
+`anchor_line` and `anchor_raw_offset` (the byte just after LF, or null if raw
+capture failed). Explicit changes record `reason: "explicit"`. Both discard the
+old parser's partial record; neither claims that a shadow parser was retained.
+History-write failure prevents the switch and visibly disarms the matcher. Raw
+write failure alone does not prevent activation. A missing, late or dropped marker
+cannot recover earlier boot records; preserve raw/history and reconcile explicitly.
 
 ## Protocol
 
@@ -77,9 +131,10 @@ All requests include `id` and `source_id`. Responses echo both, set `type` to
 `<request type>.result`, and include `ok` (or `error` on failure).
 
 * `dictionary.stage`: `dictionary_json` is a JSON **string containing file text**.
-  Response `dictionary`: `{dictionary_id, build_id}`.
+  Optional `activate_on_regex` is a string; omitted/null keeps plain staging.
+  Response `dictionary`: `{dictionary_id, build_id}`, plus boolean `armed`.
 * `dictionary.status`: response `status`: `{source_id, generation, parser_type,
-  dictionary, raw_file, raw_offset, raw_error, configured}`. Initial generation is 0.
+  dictionary, raw_file, raw_offset, raw_error, configured, armed}`. Initial generation is 0.
   `configured` contains `{path, dictionary, error}` for each YAML entry; unavailable
   entries have no `dictionary`. Uploaded dictionaries need not be in this list.
   `raw_file` is an absolute path when capture has opened the file.
@@ -87,8 +142,10 @@ All requests include `id` and `source_id`. Responses echo both, set `type` to
   optional `parser_type`. Response `status` acknowledges application by the RX
   owner, with generation incremented. It does not merely acknowledge queuing.
 
-Concurrent requests must use compare-and-swap generation. A stale generation
-fails without changing the active parser. Timeout/disconnection is **not proof
+Concurrent changes must use compare-and-swap generation. A stale generation
+fails without changing the active parser, except that activating the already
+active dictionary and parser type is an idempotent confirmation: it succeeds
+without incrementing generation, swapping the parser or adding a history entry. Timeout/disconnection is **not proof
 of failure**: query status before retrying, because application and reply can
 race a lost connection. Queued expired/cancelled requests are not applied later.
 

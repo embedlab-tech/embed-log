@@ -25,8 +25,12 @@ pub(crate) struct DictionaryArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum DictionaryCommand {
-    /// Validate and upload exact dictionary bytes; does not activate them.
-    Stage { database: PathBuf },
+    /// Upload a dictionary, optionally arming activation on a raw UART line.
+    Stage {
+        database: PathBuf,
+        #[arg(long)]
+        activate_on_regex: Option<String>,
+    },
     /// Apply a staged dictionary at an explicit RX boundary (not firmware detection).
     Activate {
         dictionary_id: String,
@@ -54,14 +58,21 @@ pub(crate) async fn cmd_dictionary(args: DictionaryArgs) -> Result<()> {
 async fn run(args: &DictionaryArgs) -> Result<()> {
     let (_, endpoint) = resolve_mutating_endpoint(args.instance.as_deref(), args.url.as_deref())?;
     let mut request = match &args.command {
-        DictionaryCommand::Stage { database } => {
+        DictionaryCommand::Stage {
+            database,
+            activate_on_regex,
+        } => {
             let bytes =
                 std::fs::read(database).with_context(|| format!("read {}", database.display()))?;
             anyhow::ensure!(
                 bytes.len() <= embed_log_core::sources::dictionary::MAX_DICTIONARY_BYTES,
                 "dictionary exceeds 8 MiB"
             );
-            json!({"type": "dictionary.stage", "dictionary_json": String::from_utf8(bytes).context("dictionary must be UTF-8")?})
+            let mut request = json!({"type": "dictionary.stage", "dictionary_json": String::from_utf8(bytes).context("dictionary must be UTF-8")?});
+            if let Some(pattern) = activate_on_regex {
+                request["activate_on_regex"] = json!(pattern);
+            }
+            request
         }
         DictionaryCommand::Activate {
             dictionary_id,
@@ -101,6 +112,25 @@ mod tests {
     struct Cli {
         #[command(flatten)]
         args: DictionaryArgs,
+    }
+
+    #[test]
+    fn stage_accepts_raw_line_regex() {
+        let args = Cli::try_parse_from([
+            "dictionary",
+            "--source",
+            "UART_A",
+            "stage",
+            "target.json",
+            "--activate-on-regex",
+            "^READY:target$",
+        ])
+        .unwrap()
+        .args;
+        assert!(
+            matches!(args.command, DictionaryCommand::Stage { activate_on_regex: Some(pattern), .. }
+                         if pattern == "^READY:target$")
+        );
     }
 
     #[test]

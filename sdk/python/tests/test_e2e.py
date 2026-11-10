@@ -212,6 +212,48 @@ def test_bad_initial_dictionary_does_not_abort_server(
         server.stop()
 
 
+def test_raw_dictionary_anchor_sdk_cli_and_pty(e2e_server, pty_pair, temp_dir):
+    """A configured raw marker switches before the next record in the same write."""
+    import struct
+    from embed_log_sdk import EmbedLogClient
+
+    record = bytes([0, 0x30, 8, 0, 0, 0]) + struct.pack("<II", 1, 42) + bytes([2, 0, 0, 0]) + struct.pack("<I", 0x1000)
+    databases = []
+    for name in ["image-A", "image-B", "image-C"]:
+        path = temp_dir / (name + ".json")
+        path.write_text(json.dumps({"version": 3, "build_id": name,
+            "target": {"bits": 32, "little_endianness": True}, "arch": "arm",
+            "log_subsys": {"log_instances": {"1": {"name": "app"}}},
+            "string_mappings": {"4096": name}}))
+        databases.append(path)
+    with EmbedLogClient(e2e_server.ws_url()) as client:
+        client.subscribe(["DUT_UART"])
+        first = client.stage_dictionary("DUT_UART", databases[0])
+        client.activate_dictionary("DUT_UART", first["dictionary_id"], 0)
+        target = client.stage_dictionary("DUT_UART", databases[1], activate_on_regex="^RAW-READY:B$")
+        before = client.dictionary_status("DUT_UART")
+        assert before["generation"] == 1
+        assert before["armed"]["dictionary_id"] == target["dictionary_id"]
+        marker = b"\r\nRAW-READY:B\r\n"
+        os.write(pty_pair[0], record + marker + record)
+        entries = list(client.entries(timeout=3))
+        assert sum(e.message.endswith("app: image-A") for e in entries) == 1
+        assert sum(e.message.endswith("app: image-B") for e in entries) == 1
+        after = client.dictionary_status("DUT_UART")
+        assert after["generation"] == 2 and after["armed"] is None
+        assert after["dictionary"]["dictionary_id"] == target["dictionary_id"]
+        assert Path(after["raw_file"]).read_bytes() == record + marker + record
+        assert client.activate_dictionary("DUT_UART", target["dictionary_id"], 1)["generation"] == 2
+        cli = subprocess.run([str(e2e_server.binary), "dictionary", "--source", "DUT_UART",
+            "--url", f"http://127.0.0.1:{e2e_server.port}", "--json", "stage", str(databases[2]),
+            "--activate-on-regex", "^RAW-READY:C$"], capture_output=True, text=True, timeout=15, check=True)
+        assert json.loads(cli.stdout)["armed"] is True
+        assert client.dictionary_status("DUT_UART")["armed"]["activate_on_regex"] == "^RAW-READY:C$"
+        os.write(pty_pair[0], b"\r\nRAW-READY:C\r\n" + record)
+        assert any(e.message.endswith("app: image-C") for e in client.entries(timeout=3))
+        assert client.dictionary_status("DUT_UART")["generation"] == 3
+
+
 def test_runtime_dictionary_sdk_and_cli(e2e_server, pty_pair, temp_dir):
     """Real WS/CLI + PTY: A->B, rejected CAS, raw bytes and uninterrupted TX."""
     import hashlib
@@ -222,6 +264,7 @@ def test_runtime_dictionary_sdk_and_cli(e2e_server, pty_pair, temp_dir):
     record = bytes([0, 0x30, 8, 0, 0, 0]) + struct.pack("<II", 1, 42) + bytes([2, 0, 0, 0]) + struct.pack("<I", 0x1000)
     with EmbedLogClient(e2e_server.ws_url()) as client:
         client.subscribe(["DUT_UART"])
+        previous = None
         for generation, message in enumerate(["image-A", "image-B"]):
             database = temp_dir / f"{message}.json"
             payload = json.dumps({"version": 3, "build_id": message,
@@ -237,8 +280,11 @@ def test_runtime_dictionary_sdk_and_cli(e2e_server, pty_pair, temp_dir):
             os.write(pty_pair[0], record)
             entries = client.entries(timeout=3)
             assert any(entry.message.endswith("app: " + message) for entry in entries)
-            with pytest.raises(ServerError, match="generation conflict"):
-                client.activate_dictionary("DUT_UART", staged["dictionary_id"], generation)
+            assert client.activate_dictionary("DUT_UART", staged["dictionary_id"], generation)["generation"] == generation + 1
+            if previous is not None:
+                with pytest.raises(ServerError, match="generation conflict"):
+                    client.activate_dictionary("DUT_UART", previous, generation)
+            previous = staged["dictionary_id"]
         status = client.dictionary_status("DUT_UART")
         assert Path(status["raw_file"]).read_bytes() == record * 2
         cli = subprocess.run([str(e2e_server.binary), "dictionary", "--source", "DUT_UART",

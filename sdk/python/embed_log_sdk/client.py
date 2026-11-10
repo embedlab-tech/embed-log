@@ -204,17 +204,23 @@ class EmbedLogClient:
             return int(resp.get("bytes", len(data)))
         raise ServerError("tx.write", resp.get("error", "write failed"), source_id)
 
-    def stage_dictionary(self, source_id: str, database: str | Path) -> dict:
-        """Validate and upload a DB without changing the active parser.
+    def stage_dictionary(
+        self, source_id: str, database: str | Path, activate_on_regex: str | None = None,
+    ) -> dict:
+        """Upload a DB; optionally arm activation on an actual raw UART line.
 
         Uploads exact UTF-8 file bytes; returned dictionary_id is their SHA256.
         Enables raw UART capture for this source from the next received bytes.
+        activate_on_regex is matched before dictionary decoding, without CR/LF.
         """
         self.assert_writable(source_id)
         dictionary_json = Path(database).read_bytes().decode("utf-8")
+        extra = {"source_id": source_id, "dictionary_json": dictionary_json}
+        if activate_on_regex is not None:
+            extra["activate_on_regex"] = activate_on_regex
         return self._send_and_wait(
             f"dictionary-{time.time_ns()}", "dictionary.stage", "dictionary.stage.result",
-            extra={"source_id": source_id, "dictionary_json": dictionary_json},
+            extra=extra,
         )["dictionary"]
 
     def dictionary_status(self, source_id: str) -> dict:

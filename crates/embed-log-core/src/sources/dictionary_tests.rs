@@ -6,6 +6,9 @@ use crate::sources::uart::UartSource;
 use serialport::SerialPort;
 use tokio::time::timeout;
 
+#[path = "dictionary_anchor_tests.rs"]
+mod anchors;
+
 fn session(dir: PathBuf) -> SessionManager {
     SessionManager::new(
         "test",
@@ -119,12 +122,13 @@ async fn cancelled_or_expired_activation_does_not_apply_later() {
                 config: config.clone(),
                 info: info.clone(),
                 expected_generation: 0,
+                arm: None,
                 deadline: Instant::now() - Duration::from_secs(1),
                 ack,
             })
             .await
             .unwrap();
-        let (result, _) = runtime
+        let (result, _, _) = runtime
             .apply_next(&mut current, &mut current_config)
             .unwrap();
         assert!(result.is_err());
@@ -319,8 +323,22 @@ async fn runtime_switch_is_acknowledged_per_uart_and_discards_partial_record() {
         .activate("unknown", "zephyr-dict", 1)
         .await
         .is_err());
+    assert_eq!(
+        control_a
+            .activate(&info.dictionary_id, "zephyr-dict", 0)
+            .await
+            .unwrap()
+            .generation,
+        1
+    );
+    let old_id = control_a.status().configured[0]
+        .dictionary
+        .as_ref()
+        .unwrap()
+        .dictionary_id
+        .clone();
     assert!(control_a
-        .activate(&info.dictionary_id, "zephyr-dict", 0)
+        .activate(&old_id, "zephyr-dict", 0)
         .await
         .unwrap_err()
         .contains("generation conflict"));
