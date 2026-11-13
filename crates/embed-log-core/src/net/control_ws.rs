@@ -272,6 +272,9 @@ async fn handle_control_command(
         "unsubscribe" => Some(handle_unsubscribe(&cmd, state, subscribed_sources, msg_id)),
         "log.inject" => Some(handle_log_inject(&cmd, state, msg_id).await),
         "tx.write" => Some(handle_tx_write(&cmd, state, msg_id).await),
+        "dictionary.stage" | "dictionary.activate" | "dictionary.status" => {
+            Some(handle_dictionary(&cmd, state, cmd_type, msg_id).await)
+        }
         "marker.create" => Some(handle_marker_create(&cmd, state, msg_id).await),
         "watch.create" => Some(handle_watch_create(&cmd, state, msg_id)),
         "watch.get" => Some(handle_watch_get(&cmd, state, msg_id)),
@@ -286,6 +289,61 @@ async fn handle_control_command(
             }
             Some(resp.to_string())
         }
+    }
+}
+
+async fn handle_dictionary(
+    cmd: &serde_json::Value,
+    state: &super::ServerState,
+    command: &str,
+    msg_id: Option<&str>,
+) -> String {
+    let source = cmd.get("source_id").and_then(|v| v.as_str()).unwrap_or("");
+    let error = |message: &str| make_result_error(command, msg_id, source, message);
+    let Some(control) = state.dictionaries.get(source) else {
+        return error("unknown or unsupported physical UART source_id");
+    };
+    let result = match command {
+        "dictionary.status" => Ok(serde_json::json!({"status": control.status()})),
+        "dictionary.stage" => match cmd.get("dictionary_json").and_then(|v| v.as_str()) {
+            Some(json) => {
+                let regex = match cmd.get("activate_on_regex") {
+                    None | Some(serde_json::Value::Null) => None,
+                    Some(serde_json::Value::String(pattern)) => Some(pattern.as_str()),
+                    _ => return error("activate_on_regex must be a string or null"),
+                };
+                control
+                    .stage_with_regex(json, regex)
+                    .await
+                    .map(|info| serde_json::json!({"dictionary": info, "armed": control.status().armed.is_some()}))
+            }
+            None => Err("missing dictionary_json UTF-8 string".into()),
+        },
+        "dictionary.activate" => {
+            let Some(id) = cmd.get("dictionary_id").and_then(|v| v.as_str()) else {
+                return error("missing dictionary_id");
+            };
+            let Some(generation) = cmd.get("expected_generation").and_then(|v| v.as_u64()) else {
+                return error("missing expected_generation (query dictionary.status first)");
+            };
+            let parser = cmd
+                .get("parser_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("zephyr-dict");
+            control
+                .activate(id, parser, generation)
+                .await
+                .map(|status| serde_json::json!({"status": status}))
+        }
+        _ => unreachable!(),
+    };
+    match result {
+        Ok(mut data) => {
+            data["ok"] = serde_json::json!(true);
+            data["source_id"] = serde_json::json!(source);
+            make_response(&format!("{command}.result"), msg_id, data)
+        }
+        Err(message) => error(&message),
     }
 }
 
@@ -1040,6 +1098,7 @@ mod tests {
             stats: Arc::new(crate::net::ws_server::RuntimeStats::empty()),
             source_txs: Arc::new(source_txs),
             source_tx_senders: Arc::new(HashMap::new()),
+            dictionaries: Arc::new(HashMap::new()),
             source_metadata: Arc::new(source_metadata),
             line_counters: Arc::new(HashMap::new()),
             virtual_sources: Arc::new(HashMap::new()),
@@ -1613,6 +1672,7 @@ mod tests {
             stats: Arc::new(crate::net::ws_server::RuntimeStats::empty()),
             source_txs: Arc::new(source_txs),
             source_tx_senders: Arc::new(HashMap::new()),
+            dictionaries: Arc::new(HashMap::new()),
             source_metadata: Arc::new(source_metadata),
             line_counters: Arc::new(line_counters),
             virtual_sources: Arc::new(HashMap::new()),
@@ -1868,6 +1928,7 @@ mod tests {
             stats: Arc::new(crate::net::ws_server::RuntimeStats::empty()),
             source_txs: Arc::new(source_txs),
             source_tx_senders: Arc::new(HashMap::new()),
+            dictionaries: Arc::new(HashMap::new()),
             source_metadata: Arc::new(source_metadata),
             line_counters: Arc::new(line_counters),
             virtual_sources: Arc::new(HashMap::new()),

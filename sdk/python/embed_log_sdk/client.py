@@ -204,6 +204,50 @@ class EmbedLogClient:
             return int(resp.get("bytes", len(data)))
         raise ServerError("tx.write", resp.get("error", "write failed"), source_id)
 
+    def stage_dictionary(
+        self, source_id: str, database: str | Path, activate_on_regex: str | None = None,
+    ) -> dict:
+        """Upload a DB; optionally arm activation on an actual raw UART line.
+
+        Uploads exact UTF-8 file bytes; returned dictionary_id is their SHA256.
+        Enables raw UART capture for this source from the next received bytes.
+        activate_on_regex is matched before dictionary decoding, without CR/LF.
+        """
+        self.assert_writable(source_id)
+        dictionary_json = Path(database).read_bytes().decode("utf-8")
+        extra = {"source_id": source_id, "dictionary_json": dictionary_json}
+        if activate_on_regex is not None:
+            extra["activate_on_regex"] = activate_on_regex
+        return self._send_and_wait(
+            f"dictionary-{time.time_ns()}", "dictionary.stage", "dictionary.stage.result",
+            extra=extra,
+        )["dictionary"]
+
+    def dictionary_status(self, source_id: str) -> dict:
+        """Read active DB, generation and raw capture position for one UART."""
+        self.assert_writable(source_id)
+        return self._send_and_wait(
+            f"dictionary-{time.time_ns()}", "dictionary.status", "dictionary.status.result",
+            extra={"source_id": source_id},
+        )["status"]
+
+    def activate_dictionary(
+        self, source_id: str, dictionary_id: str, expected_generation: int,
+        parser_type: str = "zephyr-dict",
+    ) -> dict:
+        """Apply a staged DB between RX feeds, abandoning any partial record.
+
+        Success acknowledges application, not a detected firmware transition.
+        On timeout query dictionary_status before retrying; a racing request
+        may already have applied. Reconnect retains the acknowledged DB.
+        """
+        self.assert_writable(source_id)
+        return self._send_and_wait(
+            f"dictionary-{time.time_ns()}", "dictionary.activate", "dictionary.activate.result",
+            extra={"source_id": source_id, "dictionary_id": dictionary_id,
+                   "expected_generation": expected_generation, "parser_type": parser_type},
+        )["status"]
+
     def subscribe(self, sources: list[str]) -> None:
         """Subscribe to selected sources as structured ``log.entry`` messages."""
         body: dict = {"sources": sources}

@@ -1,3 +1,4 @@
+pub mod dictionary;
 pub mod file;
 pub mod traits;
 pub mod uart;

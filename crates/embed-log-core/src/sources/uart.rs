@@ -46,6 +46,7 @@ pub struct UartSource {
     parser: ParserConfig,
     port_source: PortSource,
     tx_rx: Option<mpsc::Receiver<TxCommand>>,
+    dictionary: Option<super::dictionary::DictionaryRuntime>,
 }
 
 impl UartSource {
@@ -70,6 +71,7 @@ impl UartSource {
                 baudrate,
             },
             tx_rx: None,
+            dictionary: None,
         }
     }
 
@@ -92,6 +94,7 @@ impl UartSource {
                 port: Arc::new(tokio::sync::Mutex::new(Some(port))),
             },
             tx_rx: None,
+            dictionary: None,
         }
     }
 
@@ -108,7 +111,7 @@ impl UartSource {
 
     /// Attach the `parser.database` path (used by e.g. `zephyr-dict`).
     pub fn with_parser_database(mut self, database: Option<String>) -> Self {
-        self.parser.database = database;
+        self.parser.database = database.map(Into::into);
         self
     }
 
@@ -197,7 +200,8 @@ impl LogSource for UartSource {
     async fn run(self: Box<Self>, tx: mpsc::Sender<LogEntry>) -> Result<()> {
         let mut this = self;
         let name = this.name.clone();
-        let parser_cfg = this.parser.clone();
+        let mut dictionary = this.dictionary.take();
+        let mut parser_cfg = this.parser.clone();
 
         // Obtain the serial port (open by path or use pre-opened).
         let port = this.get_port().await?;
@@ -280,11 +284,28 @@ impl LogSource for UartSource {
             });
         }
 
+        if let Some(runtime) = &dictionary {
+            parser_cfg = runtime
+                .current_config(parser_cfg)
+                .map_err(anyhow::Error::msg)?;
+        }
         let mut parser = create_parser(&parser_cfg);
         let mut last_activity = tokio::time::Instant::now();
         let mut next_idle = last_activity + UART_PARSER_IDLE;
 
         loop {
+            if let Some(runtime) = &mut dictionary {
+                while let Some((result, ack, lines)) =
+                    runtime.apply_next(&mut parser, &mut parser_cfg)
+                {
+                    for line in lines {
+                        let _ = tx
+                            .send(LogEntry::new(Local::now(), name.clone(), line))
+                            .await;
+                    }
+                    let _ = ack.send(result);
+                }
+            }
             // Clone the port under the lock, then release before the blocking read.
             let cloned = {
                 let guard = port.lock().await;
@@ -300,8 +321,20 @@ impl LogSource for UartSource {
                     tokio::task::spawn_blocking(move || read_uart(&mut port_clone)).await?
                 }
                 Err(e) => {
+                    if let Some(runtime) = &mut dictionary {
+                        for line in runtime.reset_anchor(&mut parser) {
+                            let _ = tx
+                                .send(LogEntry::new(Local::now(), name.clone(), line))
+                                .await;
+                        }
+                    }
                     this.reconnect_port(&port, &format!("clone error: {e}"))
                         .await?;
+                    if let Some(runtime) = &dictionary {
+                        parser_cfg = runtime
+                            .current_config(parser_cfg)
+                            .map_err(anyhow::Error::msg)?;
+                    }
                     parser = create_parser(&parser_cfg);
                     last_activity = tokio::time::Instant::now();
                     next_idle = last_activity + UART_PARSER_IDLE;
@@ -318,8 +351,20 @@ impl LogSource for UartSource {
                     continue;
                 }
                 Err(e) => {
+                    if let Some(runtime) = &mut dictionary {
+                        for line in runtime.reset_anchor(&mut parser) {
+                            let _ = tx
+                                .send(LogEntry::new(Local::now(), name.clone(), line))
+                                .await;
+                        }
+                    }
                     this.reconnect_port(&port, &format!("read error: {e}"))
                         .await?;
+                    if let Some(runtime) = &dictionary {
+                        parser_cfg = runtime
+                            .current_config(parser_cfg)
+                            .map_err(anyhow::Error::msg)?;
+                    }
                     parser = create_parser(&parser_cfg);
                     last_activity = tokio::time::Instant::now();
                     next_idle = last_activity + UART_PARSER_IDLE;
@@ -334,11 +379,31 @@ impl LogSource for UartSource {
                     continue;
                 }
                 next_idle = now + UART_PARSER_IDLE_REPEAT;
-                parser.on_idle(now.duration_since(last_activity))
+                if let Some(runtime) = &mut dictionary {
+                    runtime.on_idle(&mut parser, now.duration_since(last_activity))
+                } else {
+                    parser.on_idle(now.duration_since(last_activity))
+                }
             } else {
                 last_activity = tokio::time::Instant::now();
                 next_idle = last_activity + UART_PARSER_IDLE;
-                parser.feed(&buf[..n])
+                if let Some(runtime) = &mut dictionary {
+                    if let Err(e) = runtime.record_raw(&buf[..n]) {
+                        runtime.disable_raw(e.clone());
+                        let message = format!(
+                            "[dictionary: raw capture disabled: {e}; UART decoding continues]"
+                        );
+                        warn!("[{name}] {message}");
+                        let _ = tx
+                            .send(LogEntry::new(Local::now(), name.clone(), message))
+                            .await;
+                    }
+                }
+                if let Some(runtime) = &mut dictionary {
+                    runtime.feed(&mut parser, &mut parser_cfg, &buf[..n])
+                } else {
+                    parser.feed(&buf[..n])
+                }
             };
 
             for line in lines {
@@ -364,6 +429,14 @@ impl LogSource for UartSource {
 
     fn writable(&self) -> bool {
         true
+    }
+
+    fn parser_config(&self) -> Option<&ParserConfig> {
+        Some(&self.parser)
+    }
+
+    fn set_dictionary_runtime(&mut self, runtime: super::dictionary::DictionaryRuntime) {
+        self.dictionary = Some(runtime);
     }
 
     fn set_tx_receiver(&mut self, rx: mpsc::Receiver<TxCommand>) {

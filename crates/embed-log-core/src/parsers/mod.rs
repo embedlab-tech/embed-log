@@ -9,7 +9,23 @@ pub use slip_coap::SlipCoapParser;
 pub use text::TextParser;
 pub use traits::StreamParser;
 pub use zephyr_dict::binary::ZephyrDictBinaryParser;
-pub use zephyr_dict::ZephyrDictParser;
+pub use zephyr_dict::{validate_dictionary, ZephyrDictParser};
+
+/// Fallible construction for runtime replacement; never replace a working parser
+/// with one that only reports a load error after receiving bytes.
+pub fn try_create_dictionary_parser(
+    parser: &ParserConfig,
+) -> Result<Box<dyn StreamParser>, String> {
+    let path = parser
+        .database
+        .as_deref()
+        .ok_or("dictionary path is missing")?;
+    match parser.parser_type.as_str() {
+        "zephyr-dict" => Ok(Box::new(ZephyrDictBinaryParser::try_new(path)?)),
+        "zephyr-dict-hex" => Ok(Box::new(ZephyrDictParser::try_new(path)?)),
+        _ => Err("parser_type must be zephyr-dict or zephyr-dict-hex".into()),
+    }
+}
 
 use crate::config::models::ParserConfig;
 

@@ -61,6 +61,14 @@ enum LoadState {
 }
 
 impl ZephyrDictParser {
+    pub fn try_new(database_path: &str) -> Result<Self, String> {
+        let parser = Self::new(database_path);
+        if let LoadState::Failed(err) = &parser.state {
+            return Err(err.clone());
+        }
+        Ok(parser)
+    }
+
     pub fn new(database_path: &str) -> Self {
         let state = match Database::load(database_path) {
             Ok(db) => LoadState::Ready(db),
@@ -1249,6 +1257,14 @@ struct Section {
     data: Vec<u8>,
 }
 
+pub fn validate_dictionary(text: &str) -> Result<(), String> {
+    let db = Database::from_json(text)?;
+    if db.string_mappings.is_empty() && db.sections.is_empty() {
+        return Err("dictionary contains no strings or sections".into());
+    }
+    Ok(())
+}
+
 struct Database {
     is_64bit: bool,
     little_endian: bool,
@@ -1273,8 +1289,14 @@ impl Database {
 
     fn load(path: &str) -> Result<Self, String> {
         let text = std::fs::read_to_string(path).map_err(|e| format!("read {path:?}: {e}"))?;
-        let raw: RawDatabase =
-            serde_json::from_str(&text).map_err(|e| format!("parse {path:?}: {e}"))?;
+        Self::from_json(&text).map_err(|e| format!("parse {path:?}: {e}"))
+    }
+
+    fn from_json(text: &str) -> Result<Self, String> {
+        let raw: RawDatabase = serde_json::from_str(text).map_err(|e| e.to_string())?;
+        if raw.target.bits.is_some_and(|bits| !matches!(bits, 32 | 64)) {
+            return Err("dictionary target.bits must be 32 or 64".into());
+        }
 
         if raw.version != 3 {
             return Err(format!(
@@ -1635,13 +1657,10 @@ mod tests {
 
         let msg = encode_normal_message(3, 1, 1, 0x1000, &[], &[]);
         let hex: String = msg.iter().map(|b| format!("{b:02x}")).collect();
-        let input = format!("node outside> help\n{LOG_HEX_SEP}{hex}Available commands:\n");
+        let input = format!("uart> help\n{LOG_HEX_SEP}{hex}Available commands:\n");
         let lines = parser.feed(input.as_bytes());
 
-        assert!(
-            lines.iter().any(|l| l.contains("node outside> help")),
-            "{lines:?}"
-        );
+        assert!(lines.iter().any(|l| l.contains("uart> help")), "{lines:?}");
         assert!(lines.iter().any(|l| l.contains("boot ok")), "{lines:?}");
         assert!(
             lines.iter().any(|l| l == "Available commands:"),
@@ -1685,14 +1704,11 @@ mod tests {
 
         let msg = encode_normal_message(3, 1, 1, 0x1000, &[], &[]);
         let hex: String = msg.iter().map(|b| format!("{b:02x}")).collect();
-        let input = format!("{LOG_HEX_SEP}{hex}node outside> \r");
+        let input = format!("{LOG_HEX_SEP}{hex}uart> \r");
         let lines = parser.feed(input.as_bytes());
 
         assert!(lines.iter().any(|l| l.contains("logged")), "{lines:?}");
-        assert!(
-            lines.iter().any(|l| l.trim() == "node outside>"),
-            "{lines:?}"
-        );
+        assert!(lines.iter().any(|l| l.trim() == "uart>"), "{lines:?}");
     }
 
     #[test]
@@ -1703,11 +1719,11 @@ mod tests {
 
         let msg = encode_normal_message(3, 1, 1, 0x1000, &[], &[]);
         let hex: String = msg.iter().map(|b| format!("{b:02x}")).collect();
-        let input = format!("node outside> {hex}help");
+        let input = format!("outside> {hex}help");
         let lines = parser.feed(input.as_bytes());
 
         assert!(
-            lines.iter().any(|l| l.trim() == "node outside>"),
+            lines.iter().any(|l| l.trim() == "outside>"),
             "prompt not emitted separately: {lines:?}"
         );
         assert!(
@@ -1715,7 +1731,7 @@ mod tests {
             "dict not decoded: {lines:?}"
         );
         assert!(
-            !lines.iter().any(|l| l.contains("node outside> 00")),
+            !lines.iter().any(|l| l.contains("outside> 00")),
             "hex leaked into text line: {lines:?}"
         );
     }

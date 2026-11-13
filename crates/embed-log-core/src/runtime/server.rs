@@ -235,6 +235,7 @@ impl LogServer {
         ));
         let mut source_txs: HashMap<String, mpsc::Sender<LogEntry>> = HashMap::new();
         let mut source_tx_senders: HashMap<String, mpsc::Sender<TxCommand>> = HashMap::new();
+        let mut dictionaries = HashMap::new();
 
         let mut join_handles: Vec<JoinHandle<()>> = Vec::new();
 
@@ -253,6 +254,25 @@ impl LogServer {
                 let (tx_sender, tx_receiver) = mpsc::channel::<TxCommand>(32);
                 source_tx_senders.insert(src.name.clone(), tx_sender);
                 src.source.set_tx_receiver(tx_receiver);
+            }
+
+            if self.config.server.control_api {
+                if let Some(config) = src.source.parser_config() {
+                    match crate::sources::dictionary::DictionaryControl::new(
+                        &src.name,
+                        config,
+                        session_mgr.clone(),
+                    ) {
+                        Ok((control, runtime)) => {
+                            dictionaries.insert(src.name.clone(), control);
+                            src.source.set_dictionary_runtime(runtime);
+                        }
+                        Err(e) => warn!(
+                            "[{}] runtime dictionary control unavailable (database {:?}): {e}; continuing with configured parser",
+                            src.name, config.database
+                        ),
+                    }
+                }
             }
 
             // Spawn the physical source reader directly into its sole writer.
@@ -362,6 +382,7 @@ impl LogServer {
             stats: stats.clone(),
             source_txs: Arc::new(source_txs),
             source_tx_senders: Arc::new(source_tx_senders),
+            dictionaries: Arc::new(dictionaries),
             source_metadata: Arc::new(source_metadata),
             line_counters: Arc::new(line_counters),
             watches,

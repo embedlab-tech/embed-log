@@ -4,15 +4,53 @@ use serde::{Deserialize, Serialize};
 
 use crate::models::TimestampMode;
 
+/// One dictionary path (legacy format) or an ordered list; the first is preferred.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum DictionaryPaths {
+    Single(String),
+    Multiple(Vec<String>),
+}
+
+impl DictionaryPaths {
+    pub fn paths(&self) -> &[String] {
+        match self {
+            Self::Single(path) => std::slice::from_ref(path),
+            Self::Multiple(paths) => paths,
+        }
+    }
+
+    pub fn paths_mut(&mut self) -> &mut [String] {
+        match self {
+            Self::Single(path) => std::slice::from_mut(path),
+            Self::Multiple(paths) => paths,
+        }
+    }
+}
+
+impl std::ops::Deref for DictionaryPaths {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        self.paths().first().map(String::as_str).unwrap_or_default()
+    }
+}
+
+impl From<String> for DictionaryPaths {
+    fn from(path: String) -> Self {
+        Self::Single(path)
+    }
+}
+
 /// Parser configuration attached to a source.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParserConfig {
     #[serde(rename = "type", default = "ParserConfig::default_type")]
     pub parser_type: String,
-    /// Path to a Zephyr dictionary-logging `database.json`. Required when
+    /// Path or ordered paths to Zephyr dictionary-logging databases. Required when
     /// `type: zephyr-dict` (binary) or `zephyr-dict-hex`; ignored otherwise.
     #[serde(default)]
-    pub database: Option<String>,
+    pub database: Option<DictionaryPaths>,
 }
 
 impl ParserConfig {

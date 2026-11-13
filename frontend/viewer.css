@@ -3,6 +3,20 @@
    Themes: Whitesand (warm light, default) · One Dark (dark default)
    ============================================================ */
 
+.dictionary-control {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+    padding: 4px 10px;
+    font-size: 11px;
+    min-width: 0;
+}
+.dictionary-control label { min-width: 0; }
+.dictionary-control select { max-width: 100%; }
+.dictionary-active { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.dictionary-error { color: var(--ansi-1); }
+
 /* Bundled so the UI renders correctly even when JetBrains Mono isn't
    installed system-wide. Font files: fonts/JetBrainsMono-*.woff2
    (SIL OFL 1.1, see fonts/OFL.txt). */

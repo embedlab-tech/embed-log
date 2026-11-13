@@ -22,6 +22,14 @@ pub struct ZephyrDictBinaryParser {
 }
 
 impl ZephyrDictBinaryParser {
+    pub fn try_new(database_path: &str) -> Result<Self, String> {
+        let parser = Self::new(database_path);
+        if let LoadState::Failed(err) = &parser.state {
+            return Err(err.clone());
+        }
+        Ok(parser)
+    }
+
     pub fn new(database_path: &str) -> Self {
         Self {
             state: match Database::load(database_path) {
@@ -369,7 +377,7 @@ mod tests {
         ] {
             let config = crate::config::models::ParserConfig {
                 parser_type: name.into(),
-                database: Some(db.clone()),
+                database: Some(db.clone().into()),
             };
             let mut parser = crate::parsers::create_parser(&config);
             assert!(

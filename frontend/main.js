@@ -13,4 +13,5 @@ import './fontsize.js';
 import './persist.js';
 import './pluginRuntime.js';
 import './ws.js';
+import './dictionaries.js';
 import './export.js';
