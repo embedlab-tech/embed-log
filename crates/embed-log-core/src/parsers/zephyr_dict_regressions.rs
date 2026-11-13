@@ -87,6 +87,26 @@ fn assert_both_transports(db: &TestDb, pkg: &[u8], body: &str) {
     }
 }
 #[test]
+fn hex_idle_flushes_shell_prompt_without_discarding_partial_frames() {
+    let db = TestDb::new(&[(0x1000, "ready")]);
+    let bytes = record(&package(&[], &[]), &[]);
+    let wire = format!(
+        "##ZLOGV1##{}\n",
+        bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
+    );
+    for split in 1..wire.len() {
+        let mut parser = ZephyrDictParser::new(db.path());
+        let mut got = parser.feed(&wire.as_bytes()[..split]);
+        got.extend(parser.on_idle(Duration::from_secs(1)));
+        got.extend(parser.feed(&wire.as_bytes()[split..]));
+        assert_eq!(got, vec!["[00000042] <inf> app: ready"], "split {split}");
+        assert!(parser.feed(b"uart:~$ ").is_empty());
+        assert_eq!(parser.on_idle(Duration::from_secs(1)), vec!["uart:~$ "]);
+        assert!(parser.on_idle(Duration::from_secs(2)).is_empty());
+    }
+}
+
+#[test]
 fn stale_incomplete_record_cannot_hold_later_known_records_hostage() {
     let db = TestDb::new(&[(0x1000, "current firmware")]);
     let good = record(&package(&[], &[]), &[]);

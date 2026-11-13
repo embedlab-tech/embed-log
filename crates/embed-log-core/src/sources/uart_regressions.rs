@@ -122,6 +122,74 @@ async fn incomplete_source_does_not_block_peer_or_boot_output() {
     std::fs::remove_file(path).unwrap();
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dictionary_config_keeps_plaintext_shell_tx_and_replies() {
+    use std::io::Read;
+
+    for available in [true, false] {
+        for parser_type in ["zephyr-dict", "zephyr-dict-hex"] {
+            let path = test_dictionary("plaintext-shell");
+            if !available {
+                std::fs::remove_file(&path).unwrap();
+            }
+            let (mut master, mut slave) = serialport::TTYPort::pair().unwrap();
+            master.set_timeout(Duration::from_secs(1)).unwrap();
+            slave.set_timeout(Duration::from_millis(100)).unwrap();
+            let (tx, mut rx) = mpsc::channel(64);
+            let (cmd_tx, cmd_rx) = mpsc::channel(4);
+            let source = UartSource::from_port("dut", Box::new(slave), parser_type)
+                .with_parser_database(Some(path.to_string_lossy().into_owned()))
+                .with_tx_receiver(cmd_rx);
+            let task = tokio::spawn(Box::new(source).run(tx));
+            let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
+            cmd_tx
+                .send(TxCommand {
+                    data: b"help\n".to_vec(),
+                    origin: "test".into(),
+                    line_ending: true,
+                    ack: Some(ack_tx),
+                })
+                .await
+                .unwrap();
+            assert_eq!(
+                timeout(Duration::from_secs(2), ack_rx)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap(),
+                5
+            );
+            let mut wire = [0; 5];
+            tokio::task::block_in_place(|| master.read_exact(&mut wire)).unwrap();
+            assert_eq!(&wire, b"help\r");
+            feed(&mut master, b"help\r\nAvailable commands\r\nuart:~$ ");
+            let result = timeout(Duration::from_secs(3), async {
+                let mut reply = false;
+                while let Some(entry) = rx.recv().await {
+                    if entry.source == "dut" && entry.message.contains("Available commands") {
+                        reply = true;
+                    }
+                    if reply && entry.source == "dut" && entry.message.contains("uart:~$") {
+                        return;
+                    }
+                }
+                panic!("source stopped before the shell reply");
+            })
+            .await;
+            task.abort();
+            let _ = task.await;
+            drop((master, cmd_tx));
+            if available {
+                std::fs::remove_file(&path).unwrap();
+            }
+            assert!(
+                result.is_ok(),
+                "shell reply lost: {parser_type}, dictionary available={available}"
+            );
+        }
+    }
+}
+
 fn test_dictionary(label: &str) -> std::path::PathBuf {
     let path = std::env::temp_dir().join(format!("embed-log-{label}-{}.json", unique_suffix()));
     std::fs::write(&path, r#"{"version":3,"target":{"bits":32,"little_endianness":true},"arch":"arm","log_subsys":{"log_instances":{"1":{"name":"app"}}},"string_mappings":{"4096":"alive"}}"#).unwrap();
