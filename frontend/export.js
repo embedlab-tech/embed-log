@@ -514,7 +514,8 @@ export function hydratePanesFromJson() {
             // Keep compact tuples in state; lines are parsed/analyzed lazily
             // when the virtual renderer needs to display a raw index.
             state.rawLines[paneId] = tuples;
-
+            // The compact arrays own the data now; release the duplicate JSON payload.
+            script.remove();
 
             // Scroll to top on initial load (consistent with legacy behavior)
             state.atBottom[paneId] = false;
