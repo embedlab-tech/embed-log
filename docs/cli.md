@@ -103,7 +103,7 @@ Current behavior:
 - fails with config/quick-run guidance if the resolved config does not exist
 - starts `LogServer`
 - serves UI/API on the configured `server.listen` endpoint
-- opens the browser unless `--no-open-browser` is passed
+- opens the browser unless `--no-open-browser` is passed; if the launcher fails, suppresses helper output and prints a manual URL hint (in VS Code containers, use the Ports tab)
 - writes session artifacts under `logs.dir`
 - exports `session.html` on Ctrl-C shutdown
 
