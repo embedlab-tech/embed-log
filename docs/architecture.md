@@ -6,6 +6,8 @@ This document describes the current Rust implementation.
 
 All source writers share one commit lock. Within that serialized section Embed-log selects the active session, assigns its next global `sequence`, appends `combined.jsonl`, updates replay, matches temporary watches, and publishes the live record. Combined-file, replay, and live log-record order therefore agree even when sources emit concurrently. Titled rotation takes the same lock while swapping paths/session state and resets global sequence to 1 and source-local line counters to 0.
 
+Each session lazily opens and reuses one append handle for `combined.jsonl`. JSON and its terminating newline are submitted together, without a user-space buffer that could hide published records from readers or exports. Replacing the session manager on rotation closes the old handle. This does not add an `fsync` durability guarantee.
+
 ## High-level shape
 
 ```text
