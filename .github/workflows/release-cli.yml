@@ -43,14 +43,16 @@ jobs:
             deb: true
           - name: macOS Apple Silicon
             id: macos-arm64
-            os: macos-14
+            # macos-14 was retired by GitHub on 2026-11-02.
+            os: macos-26
             target: aarch64-apple-darwin
             archive: tar.gz
             binary: embed-log
             deb: false
           - name: macOS Intel
             id: macos-x64
-            os: macos-14
+            # Native Intel runner: tests run on x86_64 without relying on Rosetta.
+            os: macos-26-intel
             target: x86_64-apple-darwin
             archive: tar.gz
             binary: embed-log
