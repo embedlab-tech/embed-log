@@ -152,6 +152,8 @@ The Axum server serves API routes first, then static frontend assets from `front
 | `/api/stats` | `GET` | Runtime counters and WebSocket/replay state. |
 | `/sessions/{session_id}/{filename}` | `GET` | Serve session artifacts such as logs, `manifest.json`, `session.html`. |
 
+In a live physical-source pane, **Download** fetches the complete saved source `.log` from the current session, including history older than the browser replay buffer. Downloads stream the on-disk bytes unchanged (ANSI, whitespace and line endings included); this is the persisted log, not a serial-wire capture. A live file includes bytes written so far, not future records. Virtual merged panes and offline HTML keep the loaded-data download because there is no original merged `.log` file.
+
 WebSocket commands currently handled by the server:
 
 | Command | Purpose |

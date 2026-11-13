@@ -22,6 +22,7 @@ const categories = {
   sessions: [
     'regression-tests/export-replay.spec.js',
     'regression-tests/relative-time-replay.spec.js',
+    'regression-tests/raw-session-download.spec.js',
   ],
 };
 

@@ -939,13 +939,27 @@ async fn session_file_handler(
         "application/octet-stream"
     };
 
-    match std::fs::read_to_string(&canonical_file) {
-        Ok(body) => (
-            StatusCode::OK,
-            [(axum::http::header::CONTENT_TYPE, content_type)],
-            body,
-        )
-            .into_response(),
+    // Stream the original bytes, including ANSI and non-UTF-8 data, without
+    // loading a potentially large live log into server memory.
+    let request = axum::http::Request::new(axum::body::Body::empty());
+    match tower_http::services::ServeFile::new(&canonical_file)
+        .try_call(request)
+        .await
+    {
+        Ok(response) => {
+            let mut response = response.into_response();
+            response.headers_mut().insert(
+                axum::http::header::CONTENT_TYPE,
+                axum::http::HeaderValue::from_static(content_type),
+            );
+            if filename.ends_with(".log") || filename.ends_with(".txt") {
+                response.headers_mut().insert(
+                    axum::http::header::CONTENT_DISPOSITION,
+                    axum::http::HeaderValue::from_static("attachment"),
+                );
+            }
+            response
+        }
         Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "read error".to_string()).into_response(),
     }
 }
@@ -1054,6 +1068,51 @@ mod tests {
             control_api: true,
         };
         (state, rx)
+    }
+
+    #[tokio::test]
+    async fn session_log_download_preserves_bytes_and_rejects_escape() {
+        let dir = temp_session_dir("raw-download");
+        let session = dir.join("session-1");
+        std::fs::create_dir_all(&session).unwrap();
+        let bytes = b"old history\r\n\x1b[31mred\x1b[0m  \xff\n";
+        std::fs::write(session.join("dut.log"), bytes).unwrap();
+        let (state, _) = test_state(dir.clone());
+        let response = session_file_handler(
+            AxumPath(("session-1".into(), "dut.log".into())),
+            State(state.clone()),
+        )
+        .await
+        .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["content-disposition"], "attachment");
+        let body = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .unwrap();
+        assert_eq!(&body[..], bytes);
+        let response = session_file_handler(
+            AxumPath(("..".into(), "dut.log".into())),
+            State(state.clone()),
+        )
+        .await
+        .into_response();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(
+                std::env::current_exe().unwrap(),
+                session.join("escape.log"),
+            )
+            .unwrap();
+            let response = session_file_handler(
+                AxumPath(("session-1".into(), "escape.log".into())),
+                State(state),
+            )
+            .await
+            .into_response();
+            assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[tokio::test]
