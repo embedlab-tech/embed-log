@@ -109,6 +109,14 @@ writer task
        └─ Control WebSocket clients use `/api/v1/control` for subscribe, inject, TX, and markers
 ```
 
+## Browser phrase highlighting
+
+Each pane keeps its existing regex filter. Enable **Highlight** beside it to find a literal, case-insensitive phrase in message text without hiding surrounding lines. The counter counts non-overlapping occurrences, including multiple matches in one line; `0 / total` means no occurrence is selected yet. Use the arrows, Enter/F3, or Shift+Enter/Shift+F3 to navigate, wrapping at either end. Middle-click synchronization remains available.
+
+In live sessions, the first nonempty Highlight query explicitly reads the session's `combined.jsonl` through the existing session-file endpoint, filling history older than the bounded WebSocket replay. Virtual merges select their physical member sources. Loading/errors are shown instead of a misleading partial total. Live appends extend the index; reconnects and session changes invalidate the history snapshot. Clearing a pane clears its current index; changing the Highlight query reloads session history. Full-history search necessarily uses memory proportional to that pane's session size, but keeps virtual rendering and compact tuples; it is not loaded until requested.
+
+Locally imported `.log` files and standalone HTML search all records included in that file/export, without fetching live history. Highlighting operates on text nodes, preserving ANSI spans and escaping user/log text rather than rewriting HTML markup. Timestamps are excluded from phrase matching.
+
 ## Source types
 
 | Config `type` | Implementation | Notes |

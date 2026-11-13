@@ -34,9 +34,9 @@ export async function exportHtmlSnapshot(options = {}) {
         // whatever the browser has cached from a previous page load.
         // ------------------------------------------------------------------
         const ASSETS = [
-            "profile.js", "renderPane.js", "renderToolbar.js", "viewer.css",
+            "profile.js", "keyboard.js", "renderPane.js", "renderToolbar.js", "viewer.css",
             "pluginRuntime.js", "state.js", "themes.js", "settings.js", "fontsize.js",
-            "ansi.js", "timeSync.js", "lines.js", "tabs.js", "tabcreate.js",
+            "ansi.js", "search.js", "timeSync.js", "lines.js", "tabs.js", "tabcreate.js",
             "ui.js", "export.js", "postprocess.js", "selection.js", "tsparse.js", "import.js",
         ];
 
@@ -66,8 +66,8 @@ export async function exportHtmlSnapshot(options = {}) {
             const src = await r.text();
             return a.endsWith(".js") ? _escJs(_stripModuleSyntax(src)) : src;
         }));
-        const [profileJs, renderPaneJs, renderToolbarJs, css, pluginRuntimeJs, stateJs, themesJs, settingsJs, fontsizeJs,
-               ansiJs, linesJs, tabsJs, tabcreateJs, uiJs, exportJs, postprocessJs, selectionJs, tsparseJs, importJs] = texts;
+        const [profileJs, keyboardJs, renderPaneJs, renderToolbarJs, css, pluginRuntimeJs, stateJs, themesJs, settingsJs, fontsizeJs,
+               ansiJs, searchJs, timeSyncJs, linesJs, tabsJs, tabcreateJs, uiJs, exportJs, postprocessJs, selectionJs, tsparseJs, importJs] = texts;
 
 
         // ------------------------------------------------------------------
@@ -274,6 +274,7 @@ ${tabContentsHtml}
 <script>${configJs}</script>
 ${paneDataTags}
 <script>${profileJs}</script>
+<script>${keyboardJs}</script>
 <script>${renderPaneJs}</script>
 <script>${renderToolbarJs}</script>
 <script>${pluginRuntimeJs}</script>
@@ -283,6 +284,8 @@ ${pluginScriptTags}
 <script>${settingsJs}</script>
 <script>${fontsizeJs}</script>
 <script>${ansiJs}</script>
+<script>${searchJs}</script>
+<script>${timeSyncJs}</script>
 <script>${linesJs}</script>
 <script>${tabsJs}</script>
 <script>${tabcreateJs}</script>

@@ -420,6 +420,7 @@ impl SessionExporter {
             "settings.js",
             "fontsize.js",
             "ansi.js",
+            "search.js",
             "timeSync.js",
             "lines.js",
             "tabs.js",

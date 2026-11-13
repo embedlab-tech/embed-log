@@ -780,6 +780,10 @@ function _exportHtml(paneId) {
 // Pointer drag — selection
 // ---------------------------------------------------------------------------
 let _drag = null;          // { paneId, startIdx, startY, lineEl, active }
+window.__embedLogOnHistoryPrepended = (paneId, count) => {
+    if (_drag?.paneId === paneId) _drag.startIdx += count;
+    if (_rangeAnchor?.paneId === paneId) _rangeAnchor.idx += count;
+};
 let _suppressClick = false;
 let _rangeAnchor = null;   // { paneId, idx } set by a normal line click for Shift+Click range selection
 let _nativeSelectionFromDrag = false;

@@ -1,5 +1,5 @@
 import { state, TABS, PANES, PANE_LABELS, setTimestampContext, resetRelativeTimestampBase } from './state.js';
-import { appendLineBatch, clearPane, rerenderPane, setTimestampMode, refreshStatsUi } from './lines.js';
+import { appendLineBatch, clearPane, rerenderPane, setTimestampMode, refreshStatsUi, prependPaneHistory } from './lines.js';
 import { createTabWithPanes } from './tabcreate.js';
 import { configurePanePlugins, resetPanePlugins } from './pluginRuntime.js';
 
@@ -15,8 +15,65 @@ let pendingLogFlush = false;
 let configReady = false;
 let virtualMerges = [];
 const LOG_FLUSH_MAX_LINES = 1000;
+const searchHistoryRequests = new Map();
+const searchHistoryLoaded = new Set();
+let searchHistoryGeneration = 0;
+
+// Replay is bounded; explicitly requested full-session search must also read older records.
+window.__embedLogLoadSearchHistory = function (paneId) {
+    if (searchHistoryLoaded.has(paneId)) return Promise.resolve();
+    if (searchHistoryRequests.has(paneId)) return searchHistoryRequests.get(paneId);
+    const sessionId = currentSessionId;
+    const generation = searchHistoryGeneration;
+    const request = (async () => {
+        if (!sessionId) throw new Error('Session metadata is unavailable');
+        const response = await fetch(`/sessions/${encodeURIComponent(sessionId)}/combined.jsonl`, { cache: 'no-store' });
+        if (!response.ok) throw new Error(`Cannot load full session history (HTTP ${response.status})`);
+        // shortcut: history is loaded in memory; use paged reads if sessions outgrow browser memory.
+        const text = await response.text();
+        if (generation !== searchHistoryGeneration || sessionId !== currentSessionId || !state.searches[paneId]) return;
+        const current = state.rawLines[paneId] || [];
+        const first = current[0];
+        const firstMeta = Array.isArray(first) ? first[3] : first;
+        if (first && !Number.isFinite(firstMeta?.sequence)) throw new Error('Replay has no sequence metadata; clear this pane and retry');
+        const cutoff = first ? firstMeta.sequence : Infinity;
+        const merge = virtualMerges.find(item => item.name === paneId);
+        const sources = merge ? merge.of : [paneId];
+        const rows = [];
+        const complete = text.slice(0, text.lastIndexOf('\n') + 1);
+        for (const line of complete.split('\n')) {
+            if (!line) continue;
+            const record = JSON.parse(line);
+            if (record.source_kind === 'merge' || !sources.includes(record.source_id)) continue;
+            if (!Number.isFinite(record.sequence) || typeof record.message !== 'string') throw new Error('Invalid session history record');
+            if (record.sequence >= cutoff) continue;
+            const label = PANE_LABELS[record.source_id] || record.source_id;
+            rows.push([record.timestamp || record.absTs || '',
+                (merge ? `${label}: ` : '') + record.message,
+                record.type === 'tx' || record.is_tx === true,
+                { sourceId: record.source_id, sequence: record.sequence, sessionId,
+                    lineIdx: record.line_idx, absTs: record.absTs, absNum: record.absNum,
+                    relTs: record.relTs, relNum: record.relNum,
+                    timestampIso: record.timestamp_iso, numTs: record.timestamp_num }]);
+        }
+        prependPaneHistory(paneId, rows);
+        searchHistoryLoaded.add(paneId);
+    })();
+    searchHistoryRequests.set(paneId, request);
+    request.finally(() => {
+        if (searchHistoryRequests.get(paneId) === request) searchHistoryRequests.delete(paneId);
+    }).catch(() => {});
+    return request;
+};
+
+function invalidateSearchHistory() {
+    searchHistoryGeneration++;
+    searchHistoryRequests.clear();
+    searchHistoryLoaded.clear();
+}
 
 function resetLayoutForNewSession() {
+    invalidateSearchHistory();
     const container = document.getElementById("container");
     if (container) container.innerHTML = "";
 
@@ -28,6 +85,7 @@ function resetLayoutForNewSession() {
     state.syncTs = null;
     state.syncTabSwitch = false;
     state.filters = {};
+    state.searches = {};
     state.rawLines = {};
     state.atBottom = {};
     state.highlighted = {};
@@ -53,6 +111,7 @@ export function wsSend(obj) {
 window.wsSend = wsSend;
 
 function clearAllPaneContents({ resetRelative = false } = {}) {
+    invalidateSearchHistory();
     discardPendingLogMessages();
     if (resetRelative) {
         resetRelativeTimestampBase();
@@ -157,6 +216,17 @@ async function _handleConfigMessage(msg) {
         requestAnimationFrame(flushLogMessages);
     }
 
+    for (const paneId of PANES) {
+        const search = state.searches[paneId];
+        if (!search?.phrase) continue;
+        search.loading = true;
+        search.error = '';
+        window.__embedLogLoadSearchHistory(paneId).catch(error => { search.error = error.message; }).finally(() => {
+            search.loading = false;
+            if (state.searches[paneId] === search) rerenderPane(paneId);
+        });
+    }
+
     // Load plugins in the background.  Lines rendered before plugins are
     // ready won't have plugin data, but a re-render is triggered below.
     try {
@@ -244,6 +314,7 @@ function wsConnect() {
         if (msg.type === "clear_logs") {
             const pane = typeof msg.pane === "string" && msg.pane ? msg.pane : null;
             if (pane && pane !== "all") {
+                invalidateSearchHistory();
                 clearPane(pane);
             } else {
                 clearAllPaneContents({ resetRelative: true });
