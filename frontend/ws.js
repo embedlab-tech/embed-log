@@ -96,6 +96,8 @@ function flushLogMessages() {
 }
 
 async function _handleConfigMessage(msg) {
+    window.__embedLogRuntimeConfig = msg.runtime_config || null;
+    window.__embedLogUpdateRuntimeConfig?.();
     if (typeof msg.app_name === "string" && msg.app_name.trim()) {
         const appNameEl = document.querySelector("#toolbar .app-name");
         if (appNameEl) appNameEl.textContent = msg.app_name.trim();

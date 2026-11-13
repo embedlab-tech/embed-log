@@ -44,6 +44,27 @@ pub fn handle_key(
     if key.is_quit() {
         return KeyAction::Quit;
     }
+    if state.show_config {
+        // shortcut: byte-length bounds allow blank overscroll; measure wrapped rows if exact bounds are needed.
+        let max_scroll = serde_json::to_string_pretty(&state.runtime_config)
+            .map(|text| text.len().saturating_sub(1).min(u16::MAX as usize) as u16)
+            .unwrap_or(0);
+        match key.code {
+            KeyCode::Char('I') | KeyCode::Esc => state.show_config = false,
+            KeyCode::Down | KeyCode::Char('j') => {
+                state.config_scroll = state.config_scroll.saturating_add(1).min(max_scroll)
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                state.config_scroll = state.config_scroll.saturating_sub(1)
+            }
+            KeyCode::PageDown => {
+                state.config_scroll = state.config_scroll.saturating_add(10).min(max_scroll)
+            }
+            KeyCode::PageUp => state.config_scroll = state.config_scroll.saturating_sub(10),
+            _ => {}
+        }
+        return KeyAction::Continue;
+    }
     if state.show_help {
         match key.code {
             KeyCode::Char('?') | KeyCode::Esc => state.show_help = false,
@@ -57,6 +78,10 @@ pub fn handle_key(
     match key.code {
         // ── Help / TX open ──
         KeyCode::Char('?') => state.show_help = true,
+        KeyCode::Char('I') => {
+            state.show_config = true;
+            state.config_scroll = 0;
+        }
         KeyCode::Char('/') => {
             state.filter_mode = true;
             state.filter_buffer.clear();
@@ -346,6 +371,40 @@ fn cycle_tab(state: &mut State, forward: bool) {
 mod tests {
     use super::*;
     use crate::protocol::{ConfigMessage, TabDef};
+
+    #[tokio::test]
+    async fn configuration_opens_scrolls_and_closes_without_changing_log_state() {
+        let mut state = State {
+            runtime_config: serde_json::json!({"sources":["DUT"]}),
+            ..Default::default()
+        };
+        let mut client = crate::client::spawn_client("ws://127.0.0.1:0".into());
+        for code in [KeyCode::Char('I'), KeyCode::Down] {
+            handle_key(
+                &mut state,
+                &mut client,
+                &InputKey {
+                    code,
+                    modifiers: KeyModifiers::NONE,
+                },
+                24,
+            );
+        }
+        assert!(state.show_config);
+        assert_eq!(state.config_scroll, 1);
+        assert_eq!(state.active_tab, 0);
+        handle_key(
+            &mut state,
+            &mut client,
+            &InputKey {
+                code: KeyCode::Esc,
+                modifiers: KeyModifiers::NONE,
+            },
+            24,
+        );
+        assert!(!state.show_config);
+        client.stop();
+    }
 
     #[test]
     fn cycle_tab_wraps_and_resets_active_pane() {

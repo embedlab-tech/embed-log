@@ -63,6 +63,9 @@ pub struct ConfigMessage {
     /// Current session metadata (id, paths, html_status, first_log_at, …).
     #[serde(default)]
     pub session: Value,
+    /// Allowlisted effective runtime configuration (absent on older servers).
+    #[serde(default)]
+    pub runtime_config: Value,
     /// `pane_id → human label`.
     #[serde(default)]
     pub pane_labels: HashMap<String, String>,

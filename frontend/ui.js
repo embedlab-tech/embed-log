@@ -65,6 +65,33 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
     update();
 })();
 // ---------------------------------------------------------------------------
+// Settings panel — read-only effective configuration (never raw YAML).
+// ---------------------------------------------------------------------------
+(function () {
+    const panel = document.getElementById("settings-panel");
+    if (!panel) return;
+    const btn = document.createElement("button");
+    btn.id = "btn-runtime-config";
+    btn.textContent = "Configuration";
+    btn.title = "View runtime configuration summary (requires a live server)";
+    const dialog = document.createElement("dialog");
+    dialog.className = "runtime-config-dialog";
+    dialog.setAttribute("aria-labelledby", "runtime-config-title");
+    dialog.innerHTML = '<h2 id="runtime-config-title">Runtime configuration (read-only)</h2><pre></pre><button type="button">Close</button>';
+    const update = () => {
+        const config = window.__embedLogRuntimeConfig;
+        btn.disabled = !config;
+        dialog.querySelector("pre").textContent = config ? JSON.stringify(config, null, 2) : "Configuration unavailable from this server.";
+    };
+    window.__embedLogUpdateRuntimeConfig = update;
+    btn.addEventListener("click", () => { update(); dialog.showModal(); });
+    dialog.querySelector("button").addEventListener("click", () => dialog.close());
+    panel.appendChild(btn);
+    document.body.appendChild(dialog);
+    update();
+})();
+
+// ---------------------------------------------------------------------------
 // Settings panel — clear cached session (localStorage restore cache)
 // ---------------------------------------------------------------------------
 (function () {
