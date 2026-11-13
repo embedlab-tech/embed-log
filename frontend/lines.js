@@ -745,6 +745,11 @@ function _renderVirtualWindow(paneId, { targetIdx, forceAtBottom } = {}) {
 
     _ensureRange(paneId, firstOrdinal, lastOrdinal, rx, rowH);
     _pruneToRawSet(paneId, keepRaw);
+    if (!wrapped) {
+        // Keep short rows clickable across the widest observed line, even after it is virtualized away.
+        const width = Math.max(0, ...Array.from(vp.rendered.values(), el => el.offsetWidth));
+        if (width > logEl.clientWidth) vp.windowEl.style.setProperty('--log-width', `${width}px`);
+    }
 
     // Wrapped rows can span multiple visual lines, so the fixed `ordinal * rowH`
     // layout above would overlap the next row. Re-stack the rendered window
@@ -1022,6 +1027,8 @@ export function scrollPaneToBottom(paneId) {
 }
 export function _linesSetupPane(id) {
     const logEl = document.getElementById("log-" + id);
+    if (!logEl || logEl.dataset.linesInitialized === "1") return;
+    logEl.dataset.linesInitialized = "1";
     if (window.ResizeObserver && logEl.dataset.resizeObserverBound !== "1") {
         logEl.dataset.resizeObserverBound = "1";
         const resizeObserver = new ResizeObserver(() => _scheduleVirtualResizeRefresh());
@@ -1112,10 +1119,16 @@ export function _linesSetupPane(id) {
     // Per-pane wrap toggle
     const wrapBtn = document.querySelector(`#pane-${id} .pane-wrap-btn`);
     if (wrapBtn) {
+        const syncWrap = () => {
+            wrapBtn.classList.toggle("active", !!state.wrap[id]);
+            wrapBtn.setAttribute("aria-pressed", String(!!state.wrap[id]));
+            logEl.classList.toggle("wrap", !!state.wrap[id]);
+            if (state.wrap[id]) logEl.scrollLeft = 0;
+        };
+        syncWrap();
         wrapBtn.addEventListener("click", () => {
             state.wrap[id] = !state.wrap[id];
-            wrapBtn.classList.toggle("active", state.wrap[id]);
-            document.getElementById("log-" + id)?.classList.toggle("wrap", state.wrap[id]);
+            syncWrap();
             // Rows are absolutely positioned assuming a fixed single-line height;
             // wrapping makes row height variable, so force a relayout.
             rerenderPane(id);
@@ -1204,7 +1217,10 @@ export function clearPane(paneId) {
     const logEl = document.getElementById("log-" + paneId);
     if (logEl) {
         const windowEl = logEl.querySelector(".log-window");
-        if (windowEl) windowEl.innerHTML = "";
+        if (windowEl) {
+            windowEl.innerHTML = "";
+            windowEl.style.removeProperty('--log-width');
+        }
         const spacerEl = logEl.querySelector(".log-spacer");
         if (spacerEl) spacerEl.style.height = "0";
     }

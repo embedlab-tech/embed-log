@@ -142,6 +142,10 @@ test.describe('layout and time synchronization', () => {
     await waitForLineContaining(page, 'SENSOR_A', 'kind=warning');
     await expect(page.locator('#log-SENSOR_A .log-line').first()).toBeVisible();
 
+    // Disable the default wrapping to capture the unwrapped height first.
+    await page.locator('#pane-SENSOR_A .pane-wrap-btn').click();
+    await expect(page.locator('#log-SENSOR_A')).not.toHaveClass(/wrap/);
+
     // Capture log area scroll height before wrapping (full-width, no wrap)
     const { scrollBefore } = await page.evaluate(() => {
       const log = document.getElementById('log-SENSOR_A');
@@ -171,8 +175,8 @@ test.describe('layout and time synchronization', () => {
 
 // Scenario: Per-pane wrap does not affect sibling pane wrapping state
 //   Given two panes SENSOR_A and SENSOR_B
-//   When  wrap is toggled on SENSOR_A only
-//   Then  SENSOR_B does not have wrap class or active wrap button, while SENSOR_A does
+//   When  default wrapping is disabled on SENSOR_A only
+//   Then  SENSOR_B remains wrapped, while SENSOR_A does not
 
   test('per-pane wrap does not affect sibling pane', async ({ page }) => {
     await page.goto('/');
@@ -180,16 +184,13 @@ test.describe('layout and time synchronization', () => {
 
     await waitForLineContaining(page, 'SENSOR_A', 'kind=warning');
 
-    // Toggle wrap on SENSOR_A only
+    // Disable the default wrapping on SENSOR_A only.
     await page.locator('#pane-SENSOR_A .pane-wrap-btn').click();
 
-    // SENSOR_B should NOT get wrap
-    await expect(page.locator('#log-SENSOR_B')).not.toHaveClass(/wrap/);
-    await expect(page.locator('#pane-SENSOR_B .pane-wrap-btn')).not.toHaveClass(/active/);
-
-    // SENSOR_A SHOULD have wrap
-    await expect(page.locator('#log-SENSOR_A')).toHaveClass(/wrap/);
-    await expect(page.locator('#pane-SENSOR_A .pane-wrap-btn')).toHaveClass(/active/);
+    await expect(page.locator('#log-SENSOR_B')).toHaveClass(/wrap/);
+    await expect(page.locator('#pane-SENSOR_B .pane-wrap-btn')).toHaveClass(/active/);
+    await expect(page.locator('#log-SENSOR_A')).not.toHaveClass(/wrap/);
+    await expect(page.locator('#pane-SENSOR_A .pane-wrap-btn')).not.toHaveClass(/active/);
 });
 
 });
