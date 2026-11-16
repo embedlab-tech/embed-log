@@ -1,10 +1,15 @@
 import { expect, test } from '@playwright/test';
 import fs from 'node:fs';
 
-async function setup(page) {
+// The session is part of the mocked config so that a WebSocket reconnect (which
+// re-sends config) cannot reset window.__embedLogSession in the middle of a test.
+const SAVED_SESSION = { id: 'saved', source_files: { SENSOR_A: 'A.log' } };
+
+async function setup(page, session = null) {
   await page.routeWebSocket('**/ws', ws => ws.send(JSON.stringify({
     type: 'config', tabs: [{ label: 'Main', panes: ['SENSOR_A'] }, { label: 'Hidden', panes: ['SENSOR_B'] }],
     pane_kinds: { SENSOR_A: 'udp', SENSOR_B: 'udp' },
+    ...(session ? { session } : {}),
   })));
   await page.goto('/');
   await expect(page.locator('#ws-status')).toContainText(/connected/i);
@@ -60,11 +65,10 @@ test('variable-height scrolling and wrap toggles leave neither blank rows nor a 
 
 for (const savedSession of [false, true]) {
 test(`per-pane ZIP includes hidden tabs and ${savedSession ? 'saved history' : 'all loaded records'}`, async ({ page }, testInfo) => {
-  await setup(page);
   if (savedSession) {
     await page.route('**/sessions/saved/A.log', route => route.fulfill({ body: 'older saved record\nlatest saved record\n' }));
-    await page.evaluate(() => { window.__embedLogSession = { id: 'saved', source_files: { SENSOR_A: 'A.log' } }; });
   }
+  await setup(page, savedSession ? SAVED_SESSION : null);
   await page.locator('#btn-settings').click();
   await page.locator('#btn-download-raw').click();
   const pending = page.waitForEvent('download');
@@ -92,9 +96,8 @@ test(`per-pane ZIP includes hidden tabs and ${savedSession ? 'saved history' : '
 }
 
 test('a failed saved-log fetch cannot silently produce an incomplete ZIP', async ({ page }) => {
-  await setup(page);
   await page.route('**/sessions/saved/A.log', route => route.fulfill({ status: 404 }));
-  await page.evaluate(() => { window.__embedLogSession = { id: 'saved', source_files: { SENSOR_A: 'A.log' } }; });
+  await setup(page, SAVED_SESSION);
   const downloads = [];
   page.on('download', d => downloads.push(d));
   const alert = page.waitForEvent('dialog');
