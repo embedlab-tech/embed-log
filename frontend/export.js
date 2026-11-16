@@ -427,6 +427,7 @@ function downloadRawMerged() {
 // ---------------------------------------------------------------------------
 async function downloadRawSplit() {
     const files = [];
+    const names = new Set();
     try {
         for (const id of PANES) {
             const session = window.__embedLogSession;
@@ -435,7 +436,7 @@ async function downloadRawSplit() {
                 const filename = sourceFile.split(/[\\/]/).pop();
                 const response = await fetch(`/sessions/${encodeURIComponent(session.id)}/${encodeURIComponent(filename)}`);
                 if (!response.ok) throw new Error(`Cannot read saved logs for ${id}: HTTP ${response.status}`);
-                files.push({ name: encodeURIComponent(id) + '.log', data: new Uint8Array(await response.arrayBuffer()) });
+                files.push({ name: _zipEntryName(id, names), data: new Uint8Array(await response.arrayBuffer()) });
                 continue;
             }
             const lines = state.rawLines[id] || [];
@@ -444,7 +445,7 @@ async function downloadRawSplit() {
                 const line = getLine(id, idx);
                 return line ? `[${line.ts}] ${_cleanMessage(line.rawText)}` : "";
             }).filter(Boolean).join("\n");
-            files.push({ name: encodeURIComponent(id) + '.log', data: new TextEncoder().encode(text + '\n') });
+            files.push({ name: _zipEntryName(id, names), data: new TextEncoder().encode(text + '\n') });
         }
         if (!files.length) return;
         const url = URL.createObjectURL(_zipLogs(files));
@@ -458,6 +459,40 @@ async function downloadRawSplit() {
     }
 }
 
+// Readable, portable file name for a pane inside the ZIP: whitespace becomes
+// "_", characters that are invalid on Windows/macOS/Linux become "_", Windows
+// device names get a "_" suffix, and remaining (case-insensitive) collisions
+// get a numeric suffix.
+function _zipEntryName(paneId, used) {
+    const base = String(paneId)
+        .replace(/\s+/g, "_")
+        .replace(/[\\/:*?"<>|\x00-\x1f\x7f]/g, "_")
+        .replace(/^\.+/, "_") || "pane";
+    // Windows refuses device names as file names, even with an extension.
+    const safeBase = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/i.test(base) ? `${base}_` : base;
+    let name = `${safeBase}.log`;
+    for (let n = 2; used.has(name.toLowerCase()); n++) name = `${safeBase}_${n}.log`;
+    used.add(name.toLowerCase());
+    return name;
+}
+
+// Table-driven CRC-32 (IEEE 802.3): about 8x faster than the bitwise loop,
+// which matters because hashing runs on the UI thread.
+let _crcTable = null;
+function _crc32(data) {
+    if (!_crcTable) {
+        _crcTable = new Uint32Array(256);
+        for (let n = 0; n < 256; n++) {
+            let c = n;
+            for (let bit = 0; bit < 8; bit++) c = (c >>> 1) ^ ((c & 1) ? 0xedb88320 : 0);
+            _crcTable[n] = c >>> 0;
+        }
+    }
+    let crc = 0xffffffff;
+    for (let i = 0; i < data.length; i++) crc = _crcTable[(crc ^ data[i]) & 0xff] ^ (crc >>> 8);
+    return (crc ^ 0xffffffff) >>> 0;
+}
+
 // Stored ZIP needs no external library and works in offline HTML exports.
 function _zipLogs(files) {
     const parts = [], directory = [];
@@ -469,12 +504,7 @@ function _zipLogs(files) {
         if (filename.length > 65535 || offset + data.length + filename.length + 30 > 0xffffffff) {
             throw new Error('Logs exceed the 4 GiB ZIP limit');
         }
-        let crc = 0xffffffff;
-        for (const byte of data) {
-            crc ^= byte;
-            for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
-        }
-        crc = (crc ^ 0xffffffff) >>> 0;
+        const crc = _crc32(data);
         const local = new Uint8Array(30), lv = new DataView(local.buffer);
         lv.setUint32(0, 0x04034b50, true);
         lv.setUint16(4, 20, true);
