@@ -261,7 +261,7 @@ export async function exportHtmlSnapshot(options = {}) {
     <div class="download-raw-head">Download raw logs</div>
     <div class="download-raw-body">
         <button id="btn-download-merged" class="download-raw-opt">Merged (.log) — all panes interleaved</button>
-        <button id="btn-download-split" class="download-raw-opt">Per pane (.log files) — one file per source</button>
+        <button id="btn-download-split" class="download-raw-opt">Per pane (.zip) — all sources</button>
     </div>
 </div>
 
@@ -425,22 +425,89 @@ function downloadRawMerged() {
 // ---------------------------------------------------------------------------
 // Download raw — popup menu (merged or per pane)
 // ---------------------------------------------------------------------------
-function downloadRawSplit() {
-    PANES.forEach(id => {
-        const lines = state.rawLines[id] || [];
-        if (!lines.length) return;
-        const text = lines.map((_, idx) => {
-            const line = getLine(id, idx);
-            return line ? `[${line.ts}] ${_cleanMessage(line.rawText)}` : "";
-        }).filter(Boolean).join("\n");
-        const blob = new Blob([text + "\n"], { type: "text/plain" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
+async function downloadRawSplit() {
+    const files = [];
+    try {
+        for (const id of PANES) {
+            const session = window.__embedLogSession;
+            const sourceFile = session?.source_files?.[id];
+            if (session?.id && sourceFile) {
+                const filename = sourceFile.split(/[\\/]/).pop();
+                const response = await fetch(`/sessions/${encodeURIComponent(session.id)}/${encodeURIComponent(filename)}`);
+                if (!response.ok) throw new Error(`Cannot read saved logs for ${id}: HTTP ${response.status}`);
+                files.push({ name: encodeURIComponent(id) + '.log', data: new Uint8Array(await response.arrayBuffer()) });
+                continue;
+            }
+            const lines = state.rawLines[id] || [];
+            if (!lines.length) continue;
+            const text = lines.map((_, idx) => {
+                const line = getLine(id, idx);
+                return line ? `[${line.ts}] ${_cleanMessage(line.rawText)}` : "";
+            }).filter(Boolean).join("\n");
+            files.push({ name: encodeURIComponent(id) + '.log', data: new TextEncoder().encode(text + '\n') });
+        }
+        if (!files.length) return;
+        const url = URL.createObjectURL(_zipLogs(files));
+        const a = document.createElement('a');
         a.href = url;
-        a.download = `${id}.log`;
+        a.download = 'embed-log-panes.zip';
         a.click();
-        URL.revokeObjectURL(url);
-    });
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+        alert(`Unable to download logs: ${error.message}`);
+    }
+}
+
+// Stored ZIP needs no external library and works in offline HTML exports.
+function _zipLogs(files) {
+    const parts = [], directory = [];
+    let offset = 0, directorySize = 0;
+    if (files.length > 65535) throw new Error('Too many panes for ZIP');
+    for (const { name, data } of files) {
+        const filename = new TextEncoder().encode(name);
+        // shortcut: classic ZIP is limited to 4 GiB; use ZIP64 for larger browser exports.
+        if (filename.length > 65535 || offset + data.length + filename.length + 30 > 0xffffffff) {
+            throw new Error('Logs exceed the 4 GiB ZIP limit');
+        }
+        let crc = 0xffffffff;
+        for (const byte of data) {
+            crc ^= byte;
+            for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+        }
+        crc = (crc ^ 0xffffffff) >>> 0;
+        const local = new Uint8Array(30), lv = new DataView(local.buffer);
+        lv.setUint32(0, 0x04034b50, true);
+        lv.setUint16(4, 20, true);
+        lv.setUint16(6, 0x800, true);
+        lv.setUint16(12, 33, true); // 1980-01-01
+        lv.setUint32(14, crc, true);
+        lv.setUint32(18, data.length, true);
+        lv.setUint32(22, data.length, true);
+        lv.setUint16(26, filename.length, true);
+        parts.push(local, filename, data);
+        const central = new Uint8Array(46), cv = new DataView(central.buffer);
+        cv.setUint32(0, 0x02014b50, true);
+        cv.setUint16(4, 20, true);
+        cv.setUint16(6, 20, true);
+        cv.setUint16(8, 0x800, true);
+        cv.setUint16(14, 33, true);
+        cv.setUint32(16, crc, true);
+        cv.setUint32(20, data.length, true);
+        cv.setUint32(24, data.length, true);
+        cv.setUint16(28, filename.length, true);
+        cv.setUint32(42, offset, true);
+        directory.push(central, filename);
+        offset += local.length + filename.length + data.length;
+        directorySize += central.length + filename.length;
+    }
+    if (offset + directorySize + 22 > 0xffffffff) throw new Error('Logs exceed the 4 GiB ZIP limit');
+    const end = new Uint8Array(22), ev = new DataView(end.buffer);
+    ev.setUint32(0, 0x06054b50, true);
+    ev.setUint16(8, files.length, true);
+    ev.setUint16(10, files.length, true);
+    ev.setUint32(12, directorySize, true);
+    ev.setUint32(16, offset, true);
+    return new Blob([...parts, ...directory, end], { type: 'application/zip' });
 }
 
 function _toggleRawMenu() {

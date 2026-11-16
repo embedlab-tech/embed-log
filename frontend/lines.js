@@ -374,6 +374,8 @@ function _getVirtual(paneId) {
         firstRendered: -1,
         lastRendered: -1,
         rowHeight: 0,
+        heights: new Map(),
+        offsets: null,
         visibleIndices: null,
         projectionRows: null,
         projectionFilter: undefined,
@@ -388,30 +390,41 @@ function _measureRowHeight(paneId) {
     const vp = _getVirtual(paneId);
     if (!vp) return 20;
     if (vp.rowHeight > 0) return vp.rowHeight;
-    for (const el of vp.rendered.values()) {
-        if (el.offsetHeight > 0) {
-            vp.rowHeight = el.offsetHeight;
-            return vp.rowHeight;
-        }
+    vp.heights.clear();
+    vp.offsets = null;
+    const div = document.createElement("div");
+    div.className = "log-line";
+    div.style.position = "absolute";
+    div.style.visibility = "hidden";
+    div.textContent = "M";
+    vp.windowEl.appendChild(div);
+    vp.rowHeight = div.offsetHeight || 20;
+    div.remove();
+    return vp.rowHeight;
+}
+
+function _updateRowOffsets(paneId, vp, count) {
+    if (!state.wrap[paneId]) { vp.offsets = null; return; }
+    if (vp.offsets?.length !== count + 1) vp.offsets = new Float64Array(count + 1);
+    for (let ordinal = 0; ordinal < count; ordinal++) {
+        const rawIdx = _rawIndexAt(paneId, vp, ordinal);
+        vp.offsets[ordinal + 1] = vp.offsets[ordinal] + (vp.heights.get(rawIdx) || vp.rowHeight);
     }
-    const lines = state.rawLines[paneId];
-    if (lines && lines.length > 0) {
-        const entry = lines[0];
-        const line = _isRawTuple(entry) ? getLine(paneId, 0) : entry;
-        if (line) {
-            const div = document.createElement("div");
-            div.className = "log-line";
-            div.style.position = "absolute";
-            div.style.visibility = "hidden";
-            div.innerHTML = buildLineHtml(line, state.showTs, null);
-            vp.windowEl.appendChild(div);
-            vp.rowHeight = div.offsetHeight || 20;
-            vp.windowEl.removeChild(div);
-            return vp.rowHeight;
-        }
+}
+
+function _rowTop(vp, ordinal) {
+    return vp.offsets ? vp.offsets[ordinal] : ordinal * vp.rowHeight;
+}
+
+function _ordinalAtOffset(vp, offset, count) {
+    if (!vp.offsets) return Math.max(0, Math.min(count - 1, Math.floor(offset / vp.rowHeight)));
+    let lo = 0, hi = Math.min(count, vp.offsets.length - 1);
+    while (lo < hi) {
+        const mid = Math.ceil((lo + hi) / 2);
+        if (vp.offsets[mid] <= offset) lo = mid;
+        else hi = mid - 1;
     }
-    vp.rowHeight = 20;
-    return 20;
+    return Math.min(count - 1, lo);
 }
 
 function _isRawTuple(entry) {
@@ -703,7 +716,9 @@ function _renderVirtualWindow(paneId, { targetIdx, forceAtBottom } = {}) {
     targetIdx = Math.max(0, Math.min(lines.length - 1, targetIdx));
 
     const rowH = _measureRowHeight(paneId);
-    const totalH = totalCount * rowH;
+    _updateRowOffsets(paneId, vp, totalCount);
+    const anchorOrdinal = _ordinalAtOffset(vp, logEl.scrollTop, totalCount);
+    const anchorOffset = logEl.scrollTop - _rowTop(vp, anchorOrdinal);
     const viewH = logEl.clientHeight || rowH;
     const viewportCount = Math.max(1, Math.ceil(viewH / rowH));
     const targetOrdinal = forceAtBottom
@@ -728,8 +743,6 @@ function _renderVirtualWindow(paneId, { targetIdx, forceAtBottom } = {}) {
     }
     vp.firstOrdinal = firstOrdinal;
     vp.lastOrdinal = lastOrdinal;
-
-    vp.spacerEl.style.height = totalH + "px";
 
     const rx = state.filters[paneId];
     const keepRaw = new Set();
@@ -758,27 +771,26 @@ function _renderVirtualWindow(paneId, { targetIdx, forceAtBottom } = {}) {
         if (width > logEl.clientWidth) vp.windowEl.style.setProperty('--log-width', `${width}px`);
     }
 
-    // Wrapped rows can span multiple visual lines, so the fixed `ordinal * rowH`
-    // layout above would overlap the next row. Re-stack the rendered window
-    // using each row's actual measured height instead. Rows outside this
-    // window still assume rowH for the spacer/scroll math (an approximation,
-    // same tradeoff virtualized lists with variable row height typically make).
+    // Share measured offsets between row positioning, scroll lookup and the spacer.
     if (wrapped) {
-        let top = firstOrdinal * rowH;
+        for (const [idx, el] of vp.rendered) vp.heights.set(idx, el.offsetHeight || rowH);
+        _updateRowOffsets(paneId, vp, totalCount);
         for (let ordinal = firstOrdinal; ordinal <= lastOrdinal; ordinal++) {
             const rawIndex = _rawIndexAt(paneId, vp, ordinal);
             const el = rawIndex !== undefined ? vp.rendered.get(rawIndex) : null;
             if (!el) continue;
             el.style.position = "absolute";
-            el.style.top = top + "px";
+            el.style.top = _rowTop(vp, ordinal) + "px";
             el.style.left = "0";
             el.style.right = "0";
-            top += el.offsetHeight || rowH;
         }
     }
 
+    vp.spacerEl.style.height = _rowTop(vp, totalCount) + "px";
     if (forceAtBottom) {
         logEl.scrollTop = logEl.scrollHeight;
+    } else if (wrapped) {
+        logEl.scrollTop = _rowTop(vp, anchorOrdinal) + anchorOffset;
     }
 
     state.atBottom[paneId] = forceAtBottom || (logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40);
@@ -900,7 +912,7 @@ export function appendLineBatch(entries) {
         if (!state.atBottom[paneId]) state.behindLive[paneId] = true;
 
         const rowH = _measureRowHeight(paneId);
-        const midOrdinal = Math.max(0, Math.floor((logEl.scrollTop + logEl.clientHeight / 2) / rowH));
+        const midOrdinal = _ordinalAtOffset(vp, logEl.scrollTop + logEl.clientHeight / 2, _visibleCount(paneId, vp));
         const targetIdx = state.atBottom[paneId]
             ? lines.length - 1
             : (_rawIndexAt(paneId, vp, midOrdinal) ?? Math.min(lines.length - 1, midOrdinal));
@@ -948,12 +960,12 @@ export function prependPaneHistory(paneId, rows) {
     const logEl = document.getElementById('log-' + paneId);
     const vp = _getVirtual(paneId);
     const rowH = _measureRowHeight(paneId);
-    const target = vp && logEl ? (_rawIndexAt(paneId, vp, Math.floor(logEl.scrollTop / rowH)) || 0) : 0;
+    const target = vp && logEl ? (_rawIndexAt(paneId, vp, _ordinalAtOffset(vp, logEl.scrollTop, _visibleCount(paneId, vp))) || 0) : 0;
     state.rawLines[paneId] = rows.concat(current);
     state.selected[paneId] = new Set([...state.selected[paneId]].map(index => index + rows.length));
     if (Number.isFinite(state.highlightedIdx[paneId])) state.highlightedIdx[paneId] += rows.length;
     window.__embedLogOnHistoryPrepended?.(paneId, rows.length);
-    if (vp) { vp.windowEl.innerHTML = ''; vp.rendered.clear(); }
+    if (vp) { vp.windowEl.innerHTML = ''; vp.rendered.clear(); vp.rowHeight = 0; }
     _recordPaneBytes(paneId, rows);
     _updatePaneStats(paneId);
     _updateToolbarStats();
@@ -981,7 +993,7 @@ export function rerenderPane(paneId) {
     }
 
     const rowH = _measureRowHeight(paneId);
-    const midOrdinal = Math.max(0, Math.floor((logEl.scrollTop + logEl.clientHeight / 2) / rowH));
+    const midOrdinal = _ordinalAtOffset(vp, logEl.scrollTop + logEl.clientHeight / 2, _visibleCount(paneId, vp));
     const targetIdx = state.atBottom[paneId]
         ? lines.length - 1
         : Math.min(lines.length - 1, midOrdinal);
@@ -1101,13 +1113,13 @@ export function _linesSetupPane(id) {
         const rowH = vp.rowHeight > 0 ? vp.rowHeight : _measureRowHeight(id);
         const totalCount = _visibleCount(id, vp);
         if (!totalCount) return;
-        let midOrdinal = Math.round(viewMid / rowH);
+        let midOrdinal = _ordinalAtOffset(vp, viewMid, totalCount);
         midOrdinal = Math.max(0, Math.min(totalCount - 1, midOrdinal));
 
         const firstOrdinal = Number.isFinite(vp.firstOrdinal) ? vp.firstOrdinal : 0;
         const lastOrdinal = Number.isFinite(vp.lastOrdinal) ? vp.lastOrdinal : firstOrdinal;
-        const firstVisible = Math.max(0, Math.floor(logEl.scrollTop / rowH));
-        const lastVisible = Math.min(totalCount - 1, Math.ceil((logEl.scrollTop + logEl.clientHeight) / rowH));
+        const firstVisible = _ordinalAtOffset(vp, logEl.scrollTop, totalCount);
+        const lastVisible = _ordinalAtOffset(vp, logEl.scrollTop + logEl.clientHeight, totalCount);
 
         // A wheel/trackpad fling can move the viewport well outside the prior
         // overscan window before the next animation frame. Render immediately
@@ -1185,6 +1197,8 @@ export function _linesSetupPane(id) {
         wrapBtn.addEventListener("click", () => {
             state.wrap[id] = !state.wrap[id];
             syncWrap();
+            const vp = _getVirtual(id);
+            if (vp) vp.rowHeight = 0;
             // Rows are absolutely positioned assuming a fixed single-line height;
             // wrapping makes row height variable, so force a relayout.
             rerenderPane(id);
