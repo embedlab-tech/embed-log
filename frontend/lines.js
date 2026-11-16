@@ -18,6 +18,7 @@ const OVERSCAN = 60;
 
 // paneId → virtual render controller for spacer/window geometry and raw-index DOM cache
 const _virtualPanes = new Map();
+const _renderedLineContent = new WeakMap();
 // paneId → boolean — rAF debounce guard for scroll-triggered window shifts
 const _pendingRaf = new Map();
 // paneId → running UTF-8 byte total for stats display
@@ -325,14 +326,21 @@ export function applyLineDom(div, line, paneId, idx, filterRx) {
     if (!matchesFilter(line, filterRx)) {
         div.style.display = "none";
         div.innerHTML = "";
+        _renderedLineContent.delete(div);
         return;
     }
     div.style.display = "";
-    div.innerHTML = buildLineHtml(line, state.showTs, filterRx);
+    const html = buildLineHtml(line, state.showTs, filterRx);
     const search = state.searches[paneId];
-    if (search) {
-        const active = search.matches[search.cursor];
-        markPhraseMatches(div, search.phrase, active?.row === idx ? active.start : null);
+    const phrase = search?.phrase || "";
+    const active = search?.matches[search.cursor];
+    const activeStart = active?.row === idx ? active.start : null;
+    const previous = _renderedLineContent.get(div);
+    // Replacing unchanged text nodes destroys the browser's native selection.
+    if (previous?.html !== html || previous?.phrase !== phrase || previous?.activeStart !== activeStart) {
+        div.innerHTML = html;
+        if (phrase) markPhraseMatches(div, phrase, activeStart);
+        _renderedLineContent.set(div, { html, phrase, activeStart });
     }
 }
 
