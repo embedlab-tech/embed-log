@@ -638,16 +638,29 @@ button.active { background: var(--selection); border-color: var(--accent); color
     overflow-y: auto;
     overflow-x: auto;
     scrollbar-gutter: stable;
-    scrollbar-width: thin;
-    scrollbar-color: transparent transparent;
     padding: 4px 0;
     scroll-behavior: auto;
     white-space: pre;
 }
-.log-area:hover { scrollbar-color: var(--border) transparent; }
+/* Always-visible classic scrollbars. Styling ::-webkit-scrollbar makes
+   Chrome/Safari use a scrollbar that takes its own layout space instead of a
+   macOS overlay scrollbar, so absolutely positioned (selected/highlighted)
+   rows end before the scrollbar and can never paint over it. The standard
+   properties are deliberately NOT set for these engines: in Chrome they would
+   disable the ::-webkit-scrollbar rules. Firefox gets the standard ones. */
 .log-area::-webkit-scrollbar { width: 10px; height: 10px; }
-.log-area::-webkit-scrollbar-thumb { background: transparent; border-radius: 5px; }
-.log-area:hover::-webkit-scrollbar-thumb { background: var(--border); }
+.log-area::-webkit-scrollbar-track,
+.log-area::-webkit-scrollbar-corner { background: transparent; }
+.log-area::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border: 2px solid transparent;
+    border-radius: 5px;
+    background-clip: padding-box;
+}
+.log-area::-webkit-scrollbar-thumb:hover { background-color: var(--accent); }
+@supports not selector(::-webkit-scrollbar) {
+    .log-area { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+}
 .log-area.wrap { white-space: pre-wrap; word-break: break-all; overflow-x: hidden; }
 .log-area:not(.wrap) .log-line { min-width: max-content; }
 .log-area:not(.wrap) .log-window { width: max(100%, var(--log-width, 0px)); }
