@@ -607,6 +607,27 @@ button.active { background: var(--selection); border-color: var(--accent); color
 .search-mode[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 .search-controls button:disabled { opacity: .45; cursor: default; }
 .search-count { font-size: 11px; }
+.level-filter { position: relative; display: inline-flex; }
+.level-filter[hidden] { display: none; }
+.level-mode, .level-show-all {
+    background: var(--input-bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 3px; font: inherit; font-size: 11px; cursor: pointer;
+}
+.level-mode.filtered { border-color: var(--accent); color: var(--accent); }
+.level-menu {
+    position: absolute; top: calc(100% + 4px); right: 0; z-index: 50;
+    display: flex; flex-direction: column; gap: 2px; min-width: 180px; padding: 6px;
+    background: var(--panel); color: var(--text); border: 1px solid var(--border);
+    border-radius: 4px; box-shadow: 0 4px 14px rgba(0, 0, 0, .25); font-size: 11px;
+}
+.level-menu[hidden] { display: none; }
+.level-menu label {
+    display: flex; align-items: center; gap: 6px; padding: 2px 4px;
+    border-radius: 3px; white-space: nowrap; cursor: pointer;
+}
+.level-menu label:hover { background: var(--selection); }
+.level-count { margin-left: auto; padding-left: 12px; opacity: .7; font-variant-numeric: tabular-nums; }
+.level-show-all { margin-top: 4px; align-self: flex-end; }
 .search-hit { background: #f5df75; color: #171717; }
 .search-current { background: #ffae42; outline: 1px solid currentColor; }
 

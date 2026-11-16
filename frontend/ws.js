@@ -1,6 +1,7 @@
 import { state, TABS, PANES, PANE_LABELS, setTimestampContext, resetRelativeTimestampBase } from './state.js';
 import { appendLineBatch, clearPane, rerenderPane, setTimestampMode, refreshStatsUi, prependPaneHistory } from './lines.js';
 import { createTabWithPanes } from './tabcreate.js';
+import { refreshLevelDefinitions } from './levels.js';
 import { configurePanePlugins, resetPanePlugins } from './pluginRuntime.js';
 
 import { switchTab } from './tabs.js';
@@ -54,7 +55,8 @@ window.__embedLogLoadSearchHistory = function (paneId) {
                 { sourceId: record.source_id, sequence: record.sequence, sessionId,
                     lineIdx: record.line_idx, absTs: record.absTs, absNum: record.absNum,
                     relTs: record.relTs, relNum: record.relNum,
-                    timestampIso: record.timestamp_iso, numTs: record.timestamp_num }]);
+                    timestampIso: record.timestamp_iso, numTs: record.timestamp_num,
+                    ...(typeof record.level === 'string' ? { level: record.level } : {}) }]);
         }
         prependPaneHistory(paneId, rows);
         searchHistoryLoaded.add(paneId);
@@ -189,6 +191,13 @@ async function _handleConfigMessage(msg) {
     window.__embedLogPaneCommands = msg.pane_commands && typeof msg.pane_commands === "object" ? msg.pane_commands : {};
     virtualMerges = Array.isArray(msg.merges) ? msg.merges : [];
     window.__embedLogMerges = virtualMerges;
+    // Older servers do not send level profiles; levels.js then falls back to
+    // the built-in Zephyr levels and classifies lines itself.
+    window.__embedLogSourceLevels = msg.source_levels && typeof msg.source_levels === "object"
+        ? msg.source_levels : undefined;
+    refreshLevelDefinitions();
+    window.__embedLogRefreshLevelControls?.();
+    PANES.forEach(paneId => { if ((state.rawLines[paneId] || []).length) rerenderPane(paneId); });
     Object.keys(PANE_LABELS).forEach(key => delete PANE_LABELS[key]);
     Object.assign(PANE_LABELS, paneLabels);
 
@@ -327,7 +336,7 @@ function wsConnect() {
         if (msg.type !== "rx" && msg.type !== "tx") return;
 
         const { type, data, timestamp, timestamp_iso, timestamp_num, source_id,
-                absTs, absNum, relTs, relNum, line_idx, sequence, session_id } = msg;
+                absTs, absNum, relTs, relNum, line_idx, sequence, session_id, level } = msg;
         if (!source_id) return;
 
         const destinations = [];
@@ -358,6 +367,7 @@ function wsConnect() {
                 lineIdx: line_idx,
                 ...(Number.isFinite(sequence) ? { sequence } : {}),
                 ...(session_id ? { sessionId: session_id } : {}),
+                ...(typeof level === "string" && level ? { level } : {}),
             },
         }));
     });

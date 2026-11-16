@@ -20,12 +20,15 @@ export class PhraseSearch {
         this.error = '';
     }
 
-    update(rows) {
-        if (this.rows !== rows || rows.length < this.scanned) {
+    // `isVisible` (optional) excludes rows hidden by the level filter; a new
+    // `filterVersion` means visibility changed and the scan starts over.
+    update(rows, isVisible = null, filterVersion = null) {
+        if (this.rows !== rows || rows.length < this.scanned || this.filterVersion !== filterVersion) {
             this.rows = rows;
             this.scanned = 0;
             this.matches = [];
             this.cursor = -1;
+            this.filterVersion = filterVersion;
         }
         if (!this.phrase) { this.scanned = rows.length; return; }
         for (let row = this.scanned; row < rows.length; row++) {
@@ -33,6 +36,7 @@ export class PhraseSearch {
             const raw = Array.isArray(entry) ? entry[1] : entry.rawText;
             const isTx = Array.isArray(entry) ? entry[2] : entry.isTx;
             if (!isTx && isErasedConsoleLine(raw)) continue;
+            if (isVisible && !isVisible(entry)) continue;
             const text = raw.replace(/\x1b(?:\[[0-9;]*[A-Za-z]|\][^\x07]*\x07|[^[\]])/g, '');
             for (const match of textMatches(text, this.phrase)) this.matches.push({ row, ...match });
         }

@@ -23,6 +23,8 @@ pub(super) struct LogEntry {
     pub(super) rel_ts: Option<String>,
     pub(super) rel_num: Option<i64>,
     pub(super) time_domain: Option<String>,
+    /// Level id from the canonical record (`level` field); none for legacy logs.
+    pub(super) level: Option<String>,
 }
 
 pub(super) fn parse_log_file(
@@ -61,6 +63,7 @@ pub(super) fn parse_log_file(
                 rel_ts,
                 rel_num,
                 time_domain: None,
+                level: None,
             });
         } else if raw_line.trim().is_empty() {
             continue;

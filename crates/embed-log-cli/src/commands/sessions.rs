@@ -1984,7 +1984,13 @@ pub(crate) fn export_session_html(session: &SessionRecord, output: PathBuf) -> R
         .cloned()
         .unwrap_or_else(|| serde_json::json!([]));
 
-    let exporter = SessionExporter::new(
+    let source_levels = session
+        .manifest
+        .get("source_levels")
+        .filter(|levels| levels.is_object())
+        .cloned();
+
+    let mut exporter = SessionExporter::new(
         output.clone(),
         source_files,
         tabs,
@@ -1997,6 +2003,9 @@ pub(crate) fn export_session_html(session: &SessionRecord, output: PathBuf) -> R
     .with_merges(merges)
     .with_plugins(frontend_plugins, pane_plugins, plugin_scripts)
     .with_markers(markers);
+    if let Some(source_levels) = source_levels {
+        exporter = exporter.with_source_levels(source_levels);
+    }
     exporter.export()?;
     if output == session.dir.join("session.html") {
         mark_recorded_html_ready(session, &output)?;

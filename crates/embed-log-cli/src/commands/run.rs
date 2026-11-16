@@ -157,6 +157,7 @@ fn quick_run_config(
                 parser: Default::default(),
                 baudrate: (kind == "UART").then_some(baudrate),
                 label: Some(label),
+                levels: None,
             });
         }
     }

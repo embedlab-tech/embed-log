@@ -218,7 +218,8 @@ impl LogServer {
             self.config.server.timestamp_mode.to_string(),
             None,
             serde_json::to_value(&self.config.merges).unwrap_or_else(|_| json!([])),
-        );
+        )
+        .with_source_levels(crate::levels::source_levels_json(&self.config));
         session_mgr.write_manifest()?;
         let markers = session_mgr.load_markers();
         let session_mgr = Arc::new(Mutex::new(session_mgr));
@@ -309,6 +310,7 @@ impl LogServer {
                     app_name: self.config.server.app_name.clone(),
                     job_id: self.config.server.job_id.clone(),
                 },
+                level_detector: self.level_detector_for(&src.name),
             };
             let writer_handle = tokio::spawn(async move {
                 run_writer(writer_name, log_path, entry_rx, writer_runtime).await;
@@ -334,6 +336,7 @@ impl LogServer {
             session_mgr: session_mgr.clone(),
             first_log_at: first_log_at.clone(),
             merges: serde_json::to_value(&self.config.merges).unwrap_or_else(|_| json!([])),
+            source_levels: crate::levels::source_levels_json(&self.config),
         };
         let on_export: ExportCallback = Arc::new(move || export_session(&export_ctx));
 
@@ -361,6 +364,7 @@ impl LogServer {
             timestamp_mode: self.config.server.timestamp_mode.to_string(),
             config_msg: shared_config_msg.clone(),
             runtime_config: runtime_config_summary(&self.config, &self.logs_root),
+            source_levels: crate::levels::source_levels_json(&self.config),
             default_light_theme: self.config.server.default_light_theme.clone(),
             default_dark_theme: self.config.server.default_dark_theme.clone(),
             export_on_rotate: self.export_on_shutdown,
@@ -612,6 +616,21 @@ impl LogServer {
         Ok(sources)
     }
 
+    /// Per-source level classifier. Sources not present in the config (should
+    /// not happen) and `levels: off` get none.
+    fn level_detector_for(&self, source_name: &str) -> Option<crate::levels::LevelDetector> {
+        let source = self.config.sources.iter().find(|s| s.name == source_name)?;
+        let profile = crate::levels::resolve_source_profile(&self.config, source)?;
+        match crate::levels::LevelDetector::new(&profile, &format!("sources.{source_name}.levels"))
+        {
+            Ok(detector) => Some(detector),
+            Err(error) => {
+                warn!("[{source_name}] log level detection disabled: {error}");
+                None
+            }
+        }
+    }
+
     fn build_config_message(
         &self,
         pane_labels: &HashMap<String, String>,
@@ -648,6 +667,7 @@ impl LogServer {
             default_dark_theme: &self.config.server.default_dark_theme,
             session_info,
             runtime_config: runtime_config_summary(&self.config, &self.logs_root),
+            source_levels: crate::levels::source_levels_json(&self.config),
             pane_labels,
             pane_kinds,
             pane_commands,
@@ -694,6 +714,7 @@ struct WsConfigParts<'a> {
     default_dark_theme: &'a Option<String>,
     session_info: serde_json::Value,
     runtime_config: serde_json::Value,
+    source_levels: serde_json::Value,
     pane_labels: &'a HashMap<String, String>,
     pane_kinds: &'a HashMap<String, String>,
     pane_commands: serde_json::Value,
@@ -743,6 +764,7 @@ fn build_ws_config_message(parts: WsConfigParts<'_>) -> serde_json::Value {
         },
         "session": parts.session_info,
         "runtime_config": parts.runtime_config,
+        "source_levels": parts.source_levels,
         "pane_labels": parts.pane_labels,
         "pane_kinds": parts.pane_kinds,
         "pane_commands": parts.pane_commands,
@@ -767,6 +789,7 @@ struct ExportContext {
     session_mgr: Arc<Mutex<SessionManager>>,
     first_log_at: Arc<Mutex<Option<DateTime<Local>>>>,
     merges: serde_json::Value,
+    source_levels: serde_json::Value,
 }
 
 /// Export the current session to HTML from the latest complete canonical
@@ -792,6 +815,7 @@ fn export_session(ctx: &ExportContext) -> Result<String, String> {
     )
     .with_combined_file(combined_file)
     .with_merges(ctx.merges.clone())
+    .with_source_levels(ctx.source_levels.clone())
     .with_plugins(
         ctx.plugins.definitions.clone(),
         ctx.plugins.pane_plugins.clone(),
@@ -840,6 +864,7 @@ struct RotationContext {
     timestamp_mode: String,
     config_msg: Arc<Mutex<String>>,
     runtime_config: serde_json::Value,
+    source_levels: serde_json::Value,
     default_light_theme: Option<String>,
     default_dark_theme: Option<String>,
     export_on_rotate: bool,
@@ -910,7 +935,8 @@ fn rotate_session(
         None,
         ctx.merges.clone(),
     )
-    .with_title(title);
+    .with_title(title)
+    .with_source_levels(ctx.source_levels.clone());
     new_manager
         .write_manifest()
         .map_err(|err| err.to_string())?;
@@ -937,6 +963,7 @@ fn rotate_session(
         default_dark_theme: &ctx.default_dark_theme,
         session_info: new_session.clone(),
         runtime_config: ctx.runtime_config.clone(),
+        source_levels: ctx.source_levels.clone(),
         pane_labels: &ctx.pane_labels,
         pane_kinds: &ctx.pane_kinds,
         pane_commands: ctx.pane_commands.clone(),
@@ -971,6 +998,7 @@ fn rotate_session(
             let old_export_ts_mode = ctx.timestamp_mode.clone();
             let old_export_plugins = ctx.plugins.clone();
             let old_export_merges = ctx.merges.clone();
+            let old_export_source_levels = ctx.source_levels.clone();
             std::thread::spawn(move || {
                 let exporter = SessionExporter::new(
                     old_html_path.clone(),
@@ -983,6 +1011,7 @@ fn rotate_session(
                 )
                 .with_combined_file(old_html_path.parent().unwrap().join("combined.jsonl"))
                 .with_merges(old_export_merges)
+                .with_source_levels(old_export_source_levels)
                 .with_plugins(
                     old_export_plugins.definitions,
                     old_export_plugins.pane_plugins,
@@ -1117,6 +1146,8 @@ struct WriterRuntime {
     watches: Arc<RwLock<HashMap<String, crate::net::watch::TemporaryWatch>>>,
     commit_lock: Arc<Mutex<()>>,
     source_meta: SourceRuntimeMeta,
+    /// Level classifier for received lines; `None` when `levels: off`.
+    level_detector: Option<crate::levels::LevelDetector>,
 }
 
 fn merge_label(merge: &crate::config::MergeConfig) -> String {
@@ -1191,6 +1222,7 @@ async fn run_writer(
     };
 
     let clock = SessionClock::new(runtime.ts_mode);
+    let mut level_detector = runtime.level_detector;
     let mut lines_since_flush = 0usize;
     use std::io::Write;
 
@@ -1347,6 +1379,15 @@ async fn run_writer(
         ) {
             for (key, value) in meta_obj {
                 payload_obj.insert(key.clone(), value.clone());
+            }
+        }
+
+        // Classify received lines once, here, so live clients, replay,
+        // combined.jsonl and reports share one result. TX echoes have no
+        // level; an explicit `level` in injected metadata is kept as-is.
+        if !is_tx && payload.get("level").is_none() {
+            if let Some(level) = level_detector.as_mut().and_then(|d| d.detect(&message)) {
+                payload["level"] = json!(level);
             }
         }
 
@@ -1613,6 +1654,7 @@ mod tests {
             watches: Arc::new(RwLock::new(HashMap::new())),
             commit_lock: Arc::new(Mutex::new(())),
             source_meta: test_source_meta("session-1"),
+            level_detector: None,
         };
         let handle = tokio::spawn(run_writer(
             "dut".to_string(),
@@ -1688,19 +1730,36 @@ mod tests {
             watches: Arc::new(RwLock::new(HashMap::new())),
             commit_lock: Arc::new(Mutex::new(())),
             source_meta: test_source_meta("session-1"),
+            level_detector: Some(
+                crate::levels::LevelDetector::new(&crate::levels::builtin_zephyr_profile(), "test")
+                    .unwrap(),
+            ),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
 
-        entry_tx
-            .send(LogEntry::new(
-                Local::now(),
-                "dut".to_string(),
-                "boot complete".to_string(),
-            ))
-            .await
-            .unwrap();
-        wait_file_contains(&combined_path, "\"source_label\":\"DUT\"").await;
+        for (source, message) in [
+            ("dut", "boot complete"),
+            ("dut", "[00:00:01.000,000] <dbg> net: rx"),
+            ("TX::ui", "<dbg> echoed command"),
+        ] {
+            entry_tx
+                .send(LogEntry::new(
+                    Local::now(),
+                    source.to_string(),
+                    message.to_string(),
+                ))
+                .await
+                .unwrap();
+        }
+        wait_file_contains(&combined_path, "echoed command").await;
         let line = std::fs::read_to_string(&combined_path).unwrap();
+        let records: Vec<serde_json::Value> = line
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert!(records[0].get("level").is_none(), "{}", records[0]);
+        assert_eq!(records[1]["level"], "dbg");
+        assert!(records[2].get("level").is_none(), "TX lines have no level");
         let first = line.lines().next().unwrap();
         let parsed: serde_json::Value = serde_json::from_str(first).unwrap();
         assert_eq!(parsed["source_id"], "dut");
@@ -1747,6 +1806,7 @@ mod tests {
             line_counter: Some(line_counter),
             watches: watches.clone(),
             commit_lock: commit_lock.clone(),
+            level_detector: None,
             source_meta: SourceRuntimeMeta {
                 source_id: source_id.to_string(),
                 source_label: source_id.to_string(),
@@ -1867,6 +1927,7 @@ mod tests {
             pane_kinds,
             pane_commands: json!({}),
             runtime_config: json!({"sources": [{"name": "dut", "type": "uart"}]}),
+            source_levels: json!({"dut": crate::levels::profile_summary(&crate::levels::builtin_zephyr_profile())}),
             plugins: empty_plugins(),
             app_name: "embed-log".to_string(),
             job_id: None,
@@ -1904,6 +1965,7 @@ mod tests {
         let rotated_config: serde_json::Value =
             serde_json::from_str(&config_msg.lock().unwrap()).unwrap();
         assert_eq!(rotated_config["runtime_config"], ctx.runtime_config);
+        assert_eq!(rotated_config["source_levels"], ctx.source_levels);
         let manifest: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(new_dir.join("manifest.json")).unwrap())
                 .unwrap();
@@ -1938,6 +2000,7 @@ mod tests {
             session_mgr: Arc::new(Mutex::new(mgr)),
             first_log_at: Arc::new(Mutex::new(None)),
             merges: json!([]),
+            source_levels: json!({}),
         };
 
         let path = export_session(&ctx).unwrap();
