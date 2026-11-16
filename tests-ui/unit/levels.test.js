@@ -31,6 +31,14 @@ test('Zephyr fallback reads the header, not tags quoted in the message body', ()
         ['[not-a-timestamp] <dbg> app: text', NO_LEVEL],
         ['<dbg] mismatched delimiters', NO_LEVEL],
         ['[DEBUG> mismatched delimiters', NO_LEVEL],
+        ['device> \x1b[8D\x1b[J[00000000] <inf> rtc: interrupt configured', 'inf'],
+        ['uart:~$ \x1b[8D\x1b[J[00:00:01.000,000] <wrn> net: slow', 'wrn'],
+        ['\r[00:00:01.000,000] <err> main: cr', 'err'],
+        ['\x00[0000000001] <err> main: nul', 'err'],
+        ['[    1.234567] <err> main: linux', 'err'],
+        ['[1970-01-01 00:00:01.234,567] <err> main: date', 'err'],
+        ['[1970-01-01T00:00:01,234567Z] <err> main: iso', 'err'],
+        ['a> b <dbg> x', NO_LEVEL],
     ]) assert.equal(detectZephyrLevel(text), expected, text);
 });
 

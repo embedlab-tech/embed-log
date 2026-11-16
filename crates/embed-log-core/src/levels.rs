@@ -37,7 +37,12 @@ fn level(id: &str, label: &str, regex: &str, default_visible: bool) -> LevelDefi
 /// to the record above them.
 pub fn builtin_zephyr_profile() -> LevelProfile {
     // Only a leading header counts; tags quoted in the message are data.
-    let header = r"^(?:\[[0-9][0-9T:.,+Z-]*\]:?[ \t]*)?";
+    // The header may follow stray control bytes (NUL, CR) and a shell prompt
+    // that Zephyr erased with cursor escapes (`uart:~$ \x1b[8D\x1b[J…`, ANSI
+    // is stripped before matching). Timestamps cover every log_output.c
+    // format: ticks, `[00:00:01.234,567]`, Linux `[    1.234567]`, date
+    // `[1970-01-01 00:00:01.234,567]`, ISO 8601 and the decoder's `[…Z]:`.
+    let header = r"^[\x00-\x1f]*(?:[^\s\[<]*[>$#] )?(?:\[[0-9 ][0-9 T:.,+Z-]*\]:?[ \t]*)?";
     LevelProfile {
         levels: vec![
             level(
@@ -404,6 +409,25 @@ mod tests {
             ("[not-a-timestamp] <dbg> app: text", None),
             ("<dbg] mismatched delimiters", None),
             ("[DEBUG> mismatched delimiters", None),
+            // Headers after an erased shell prompt, control bytes and every
+            // Zephyr timestamp format.
+            (
+                "device> \u{1b}[8D\u{1b}[J[00000000] <inf> rtc: interrupt configured",
+                Some("inf"),
+            ),
+            (
+                "uart:~$ \u{1b}[8D\u{1b}[J[00:00:01.000,000] <wrn> net: slow",
+                Some("wrn"),
+            ),
+            ("\r[00:00:01.000,000] <err> main: cr", Some("err")),
+            ("\0[0000000001] <err> main: nul", Some("err")),
+            ("[    1.234567] <err> main: linux", Some("err")),
+            (
+                "[1970-01-01 00:00:01.234,567] <err> main: date",
+                Some("err"),
+            ),
+            ("[1970-01-01T00:00:01,234567Z] <err> main: iso", Some("err")),
+            ("a> b <dbg> x", None),
         ] {
             assert_eq!(detector.detect(text), expected, "{text}");
         }

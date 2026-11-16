@@ -21,7 +21,7 @@ const ZEPHYR_PROFILE = {
     ],
 };
 // Keep header recognition in sync with builtin_zephyr_profile in levels.rs.
-const ZEPHYR_RE = /^(?:\[[0-9][0-9T:.,+Z-]*\]:?[ \t]*)?(?:<(err|wrn|inf|dbg)>|\[(err|error|wrn|warn|warning|inf|info|dbg|debug)\])/i;
+const ZEPHYR_RE = /^[\x00-\x1f]*(?:[^\s[<]*[>$#] )?(?:\[[0-9 ][0-9 T:.,+Z-]*\]:?[ \t]*)?(?:<(err|wrn|inf|dbg)>|\[(err|error|wrn|warn|warning|inf|info|dbg|debug)\])/i;
 const ZEPHYR_ALIASES = { error: "err", warn: "wrn", warning: "wrn", info: "inf", debug: "dbg" };
 const ANSI_RE = /\x1b(?:\[[0-9;]*[A-Za-z]|\][^\x07]*\x07|[^[\]])/g;
 
