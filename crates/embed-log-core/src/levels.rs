@@ -36,12 +36,34 @@ fn level(id: &str, label: &str, regex: &str, default_visible: bool) -> LevelDefi
 /// bracket tags. Dictionary hexdump rows (`    01 02 03 ...  |ascii`) belong
 /// to the record above them.
 pub fn builtin_zephyr_profile() -> LevelProfile {
+    // Only a leading header counts; tags quoted in the message are data.
+    let header = r"^(?:\[[0-9][0-9T:.,+Z-]*\]:?[ \t]*)?";
     LevelProfile {
         levels: vec![
-            level("err", "Error", r"<err>|\[(?:err|error)\]", true),
-            level("wrn", "Warning", r"<wrn>|\[(?:wrn|warn|warning)\]", true),
-            level("inf", "Info", r"<inf>|\[(?:inf|info)\]", true),
-            level("dbg", "Debug", r"<dbg>|\[(?:dbg|debug)\]", false),
+            level(
+                "err",
+                "Error",
+                &format!(r"{header}(?:<err>|\[(?:err|error)\])"),
+                true,
+            ),
+            level(
+                "wrn",
+                "Warning",
+                &format!(r"{header}(?:<wrn>|\[(?:wrn|warn|warning)\])"),
+                true,
+            ),
+            level(
+                "inf",
+                "Info",
+                &format!(r"{header}(?:<inf>|\[(?:inf|info)\])"),
+                true,
+            ),
+            level(
+                "dbg",
+                "Debug",
+                &format!(r"{header}(?:<dbg>|\[(?:dbg|debug)\])"),
+                false,
+            ),
         ],
         case_insensitive: true,
         pattern: None,
@@ -357,6 +379,34 @@ mod tests {
                 .map(|e| e.map(str::to_owned))
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn zephyr_tags_in_message_bodies_do_not_override_the_header() {
+        let mut detector = LevelDetector::new(&builtin_zephyr_profile(), "test").unwrap();
+        for (text, expected) in [
+            ("<dbg> app: received [ERROR]", Some("dbg")),
+            ("[00000012] <dbg> app: received [ERROR]", Some("dbg")),
+            ("[0000000000000012] <wrn> app: received <err>", Some("wrn")),
+            (
+                "[00:00:01.234,567] <inf> app: received [ERROR]",
+                Some("inf"),
+            ),
+            (
+                "[2024-01-01T00:00:00Z]: <dbg> app: received [ERROR]",
+                Some("dbg"),
+            ),
+            ("[DEBUG] app: received [ERROR]", Some("dbg")),
+            ("[warning] app: received <err>", Some("wrn")),
+            ("help: use <dbg> to enable diagnostics", None),
+            ("response contains [ERROR]", None),
+            ("[00000012] help: use <dbg>", None),
+            ("[not-a-timestamp] <dbg> app: text", None),
+            ("<dbg] mismatched delimiters", None),
+            ("[DEBUG> mismatched delimiters", None),
+        ] {
+            assert_eq!(detector.detect(text), expected, "{text}");
+        }
     }
 
     #[test]

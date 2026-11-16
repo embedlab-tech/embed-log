@@ -15,6 +15,25 @@ test('built-in Zephyr detection recognises log and bracket tags, ignoring ANSI',
     assert.equal(detectZephyrLevel(''), NO_LEVEL);
 });
 
+test('Zephyr fallback reads the header, not tags quoted in the message body', () => {
+    const { detectZephyrLevel, NO_LEVEL } = levels;
+    for (const [text, expected] of [
+        ['<dbg> app: received [ERROR]', 'dbg'],
+        ['[00000012] <dbg> app: received [ERROR]', 'dbg'],
+        ['[0000000000000012] <wrn> app: received <err>', 'wrn'],
+        ['[00:00:01.234,567] <inf> app: received [ERROR]', 'inf'],
+        ['[2024-01-01T00:00:00Z]: <dbg> app: received [ERROR]', 'dbg'],
+        ['[DEBUG] app: received [ERROR]', 'dbg'],
+        ['[warning] app: received <err>', 'wrn'],
+        ['help: use <dbg> to enable diagnostics', NO_LEVEL],
+        ['response contains [ERROR]', NO_LEVEL],
+        ['[00000012] help: use <dbg>', NO_LEVEL],
+        ['[not-a-timestamp] <dbg> app: text', NO_LEVEL],
+        ['<dbg] mismatched delimiters', NO_LEVEL],
+        ['[DEBUG> mismatched delimiters', NO_LEVEL],
+    ]) assert.equal(detectZephyrLevel(text), expected, text);
+});
+
 test('entry level prefers server levels, skips TX, and falls back to Zephyr only without server profiles', () => {
     const { entryLevel, NO_LEVEL, refreshLevelDefinitions, paneLevelDefs } = levels;
     delete window.__embedLogSourceLevels;

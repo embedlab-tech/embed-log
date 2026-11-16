@@ -115,11 +115,15 @@ test('regex filter and level filter combine; merged panes offer the union of the
 test('without server level definitions the UI falls back to Zephyr detection; null disables the control', async ({ page }) => {
   const s = 'levels-fallback';
   await serve(page, s, [live(s, 1, '<dbg> hidden by default'), live(s, 2, '<wrn> shown'),
-    live(s, 3, '<dbg> off source', { source_id: 'B' })]);
+    live(s, 3, '<dbg> off source', { source_id: 'B' }),
+    live(s, 4, 'help: use <dbg> to enable diagnostics'),
+    live(s, 5, '[2024-01-01T00:00:00Z]: <dbg> quoted [ERROR]')]);
   await page.goto('/');
-  await expect.poll(() => page.evaluate(async () => (await import('/state.js')).state.rawLines.A.length)).toBe(2);
+  await expect.poll(() => page.evaluate(async () => (await import('/state.js')).state.rawLines.A.length)).toBe(4);
   await expect(page.locator('#pane-A .level-mode')).toHaveText('Levels 4/5');
   await expect.poll(async () => (await paneText(page, 'A')).join('\n')).not.toContain('hidden by default');
+  await expect.poll(async () => (await paneText(page, 'A')).join('\n')).toContain('help: use <dbg>');
+  await expect.poll(async () => (await paneText(page, 'A')).join('\n')).not.toContain('quoted [ERROR]');
 
   await page.evaluate(async () => {
     window.__embedLogSourceLevels = { A: null, B: null };

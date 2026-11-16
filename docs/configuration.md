@@ -300,6 +300,8 @@ Sources without a `levels` key use the built-in `zephyr` profile:
 | `inf` | Info | `<inf>`, `[inf]`, `[info]` | yes |
 | `dbg` | Debug | `<dbg>`, `[dbg]`, `[debug]` | **no** |
 
+Tags must appear at the start of the line, optionally after a Zephyr timestamp (uptime ticks, `[00:00:01.234,567]`, or `[2024-01-01T00:00:00Z]:`). Tags quoted inside a message do not change its level.
+
 Hexdump rows printed by Zephyr after a log message (`    01 02 03 … |....`) inherit the level of the message. Lines without a tag (shell prompts, `printk` output) are **No level** and stay visible. ANSI color codes are ignored when matching.
 
 ### Per-source configuration
