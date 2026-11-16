@@ -382,8 +382,15 @@ function _getVirtual(paneId) {
         firstRendered: -1,
         lastRendered: -1,
         rowHeight: 0,
-        heights: new Map(),
+        // Measured wrapped heights by raw index (0 = not measured yet).
+        heights: new Float32Array(0),
+        // Prefix sums of wrapped row heights: offsets[i] is the top of ordinal i.
+        // Only entries 0..offsetsCount are valid; the buffer grows geometrically.
         offsets: null,
+        offsetsCount: 0,
+        offsetsDirtyFrom: 0,
+        offsetsProjection: null,
+        offsetsRowHeight: 0,
         visibleIndices: null,
         projectionRows: null,
         projectionFilter: undefined,
@@ -398,8 +405,9 @@ function _measureRowHeight(paneId) {
     const vp = _getVirtual(paneId);
     if (!vp) return 20;
     if (vp.rowHeight > 0) return vp.rowHeight;
-    vp.heights.clear();
+    vp.heights = new Float32Array(0);
     vp.offsets = null;
+    vp.offsetsDirtyFrom = 0;
     const div = document.createElement("div");
     div.className = "log-line";
     div.style.position = "absolute";
@@ -413,11 +421,28 @@ function _measureRowHeight(paneId) {
 
 function _updateRowOffsets(paneId, vp, count) {
     if (!state.wrap[paneId]) { vp.offsets = null; return; }
-    if (vp.offsets?.length !== count + 1) vp.offsets = new Float64Array(count + 1);
-    for (let ordinal = 0; ordinal < count; ordinal++) {
-        const rawIdx = _rawIndexAt(paneId, vp, ordinal);
-        vp.offsets[ordinal + 1] = vp.offsets[ordinal] + (vp.heights.get(rawIdx) || vp.rowHeight);
+    const visible = _getVisibleIndices(paneId, vp);
+    // Recompute only the suffix that can have changed: appends keep the same
+    // projection array (extended in place), so earlier prefix sums stay valid.
+    // A new projection (filter, prepend, clear) or row height restarts at 0.
+    let from = Math.min(vp.offsetsDirtyFrom, vp.offsetsCount);
+    if (!vp.offsets || vp.offsetsProjection !== visible || vp.offsetsRowHeight !== vp.rowHeight
+        || count < vp.offsetsCount) {
+        from = 0;
     }
+    if (!vp.offsets || vp.offsets.length < count + 1) {
+        const grown = new Float64Array(Math.max(count + 1, (vp.offsets?.length || 0) * 2, 1024));
+        if (vp.offsets && from > 0) grown.set(vp.offsets.subarray(0, from + 1));
+        vp.offsets = grown;
+    }
+    if (from === 0) vp.offsets[0] = 0;
+    for (let ordinal = from; ordinal < count; ordinal++) {
+        vp.offsets[ordinal + 1] = vp.offsets[ordinal] + (vp.heights[visible[ordinal]] || vp.rowHeight);
+    }
+    vp.offsetsCount = count;
+    vp.offsetsDirtyFrom = Infinity;
+    vp.offsetsProjection = visible;
+    vp.offsetsRowHeight = vp.rowHeight;
 }
 
 function _rowTop(vp, ordinal) {
@@ -426,7 +451,7 @@ function _rowTop(vp, ordinal) {
 
 function _ordinalAtOffset(vp, offset, count) {
     if (!vp.offsets) return Math.max(0, Math.min(count - 1, Math.floor(offset / vp.rowHeight)));
-    let lo = 0, hi = Math.min(count, vp.offsets.length - 1);
+    let lo = 0, hi = Math.min(count, vp.offsetsCount);
     while (lo < hi) {
         const mid = Math.ceil((lo + hi) / 2);
         if (vp.offsets[mid] <= offset) lo = mid;
@@ -781,7 +806,21 @@ function _renderVirtualWindow(paneId, { targetIdx, forceAtBottom } = {}) {
 
     // Share measured offsets between row positioning, scroll lookup and the spacer.
     if (wrapped) {
-        for (const [idx, el] of vp.rendered) vp.heights.set(idx, el.offsetHeight || rowH);
+        for (let ordinal = firstOrdinal; ordinal <= lastOrdinal; ordinal++) {
+            const rawIndex = _rawIndexAt(paneId, vp, ordinal);
+            const el = rawIndex !== undefined ? vp.rendered.get(rawIndex) : null;
+            if (!el) continue;
+            const height = el.offsetHeight || rowH;
+            if ((vp.heights[rawIndex] || rowH) !== height) {
+                vp.offsetsDirtyFrom = Math.min(vp.offsetsDirtyFrom, ordinal);
+            }
+            if (rawIndex >= vp.heights.length) {
+                const grown = new Float32Array(Math.max(rawIndex + 1, vp.heights.length * 2, 1024));
+                grown.set(vp.heights);
+                vp.heights = grown;
+            }
+            vp.heights[rawIndex] = height;
+        }
         _updateRowOffsets(paneId, vp, totalCount);
         for (let ordinal = firstOrdinal; ordinal <= lastOrdinal; ordinal++) {
             const rawIndex = _rawIndexAt(paneId, vp, ordinal);
