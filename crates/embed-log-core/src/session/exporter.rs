@@ -227,6 +227,10 @@ impl SessionExporter {
                             .get("level")
                             .and_then(|value| value.as_str())
                             .map(str::to_string),
+                        event: record
+                            .get("event")
+                            .and_then(|value| value.as_str())
+                            .map(str::to_string),
                     });
             }
             log_data = combined_data;
@@ -391,6 +395,9 @@ impl SessionExporter {
                 }
                 if let Some(level) = &e.level {
                     meta["level"] = json!(level);
+                }
+                if let Some(event) = &e.event {
+                    meta["event"] = json!(event);
                 }
                 let meta_val = if meta.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
                     meta
@@ -828,7 +835,7 @@ mod tests {
             format!(
                 "{}\n{}\n",
                 json!({"sequence":1,"source_id":"DUT","message":"<dbg> a","level":"dbg"}),
-                json!({"sequence":2,"source_id":"DUT","message":"shell"})
+                json!({"sequence":2,"source_id":"DUT","message":"*** Booting Zephyr OS ***","event":"boot"})
             ),
         )
         .unwrap();
@@ -857,6 +864,8 @@ mod tests {
             let rows: serde_json::Value = serde_json::from_str(&capture[2]).unwrap();
             assert_eq!(rows[0][3]["level"], "dbg", "{}", &capture[1]);
             assert!(rows[1][3].get("level").is_none());
+            assert!(rows[0][3].get("event").is_none());
+            assert_eq!(rows[1][3]["event"], "boot", "{}", &capture[1]);
         }
         std::fs::remove_dir_all(dir).unwrap();
     }

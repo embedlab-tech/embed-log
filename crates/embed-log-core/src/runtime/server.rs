@@ -311,6 +311,7 @@ impl LogServer {
                     job_id: self.config.server.job_id.clone(),
                 },
                 level_detector: self.level_detector_for(&src.name),
+                event_detector: crate::events::EventDetector::new(),
             };
             let writer_handle = tokio::spawn(async move {
                 run_writer(writer_name, log_path, entry_rx, writer_runtime).await;
@@ -1148,6 +1149,8 @@ struct WriterRuntime {
     source_meta: SourceRuntimeMeta,
     /// Level classifier for received lines; `None` when `levels: off`.
     level_detector: Option<crate::levels::LevelDetector>,
+    /// Boot and crash detection for received lines.
+    event_detector: crate::events::EventDetector,
 }
 
 fn merge_label(merge: &crate::config::MergeConfig) -> String {
@@ -1223,6 +1226,7 @@ async fn run_writer(
 
     let clock = SessionClock::new(runtime.ts_mode);
     let mut level_detector = runtime.level_detector;
+    let mut event_detector = runtime.event_detector;
     let mut lines_since_flush = 0usize;
     use std::io::Write;
 
@@ -1390,11 +1394,26 @@ async fn run_writer(
                 payload["level"] = json!(level);
             }
         }
+        let event = if is_tx {
+            None
+        } else {
+            event_detector.detect(&message, entry.timestamp)
+        };
+        if let Some(event) = event {
+            payload["event"] = json!(event);
+        }
 
         let mut combined_entry = build_combined_log_entry(&payload, &runtime.source_meta);
+        let mut events_message = None;
         let (sequence, active_session_id) = match runtime.session_manager.lock() {
             Ok(mut manager) => match manager.append_combined_entry(&mut combined_entry) {
-                Ok(sequence) => (sequence, manager.session_id().to_string()),
+                Ok(sequence) => {
+                    if let Some(event) = event {
+                        manager.record_event(&runtime.source_meta.source_id, event);
+                        events_message = Some(manager.source_events_message().to_string());
+                    }
+                    (sequence, manager.session_id().to_string())
+                }
                 Err(error) => {
                     error!("[{source_name}] failed to append combined entry: {error}");
                     continue;
@@ -1431,6 +1450,9 @@ async fn run_writer(
 
         // Broadcast to WS clients (ignore if no receivers)
         let _ = runtime.broadcast_tx.send(payload_str);
+        if let Some(message) = events_message {
+            let _ = runtime.broadcast_tx.send(message);
+        }
     }
 
     let _ = file.flush();
@@ -1655,6 +1677,7 @@ mod tests {
             commit_lock: Arc::new(Mutex::new(())),
             source_meta: test_source_meta("session-1"),
             level_detector: None,
+            event_detector: crate::events::EventDetector::new(),
         };
         let handle = tokio::spawn(run_writer(
             "dut".to_string(),
@@ -1703,6 +1726,91 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn writer_marks_boots_and_crashes_and_broadcasts_counts() {
+        let root = temp_dir("events");
+        let session_dir = root.join("session-1");
+        std::fs::create_dir_all(&session_dir).unwrap();
+        let log_path = session_dir.join("main__dut__session-1.log");
+        let combined_path = session_dir.join("combined.jsonl");
+        let (entry_tx, entry_rx) = mpsc::channel(16);
+        let (broadcast_tx, mut broadcast_rx) = broadcast::channel(64);
+        let manager = Arc::new(Mutex::new(test_manager(
+            "session-1",
+            session_dir.clone(),
+            log_path.clone(),
+        )));
+        let runtime = WriterRuntime {
+            broadcast_tx,
+            replay: Arc::new(Mutex::new(VecDeque::new())),
+            first_log_at: Arc::new(Mutex::new(None)),
+            session_manager: manager.clone(),
+            stats: None,
+            ts_mode: TimestampMode::Absolute,
+            line_counter: None,
+            watches: Arc::new(RwLock::new(HashMap::new())),
+            commit_lock: Arc::new(Mutex::new(())),
+            source_meta: test_source_meta("session-1"),
+            level_detector: None,
+            event_detector: crate::events::EventDetector::new(),
+        };
+        let handle = tokio::spawn(run_writer(
+            "dut".to_string(),
+            Arc::new(Mutex::new(log_path)),
+            entry_rx,
+            runtime,
+        ));
+        for (source, message) in [
+            ("dut", "*** Booting Zephyr OS build v3.7.0 ***"),
+            ("dut", "<inf> main: ready"),
+            ("TX::ui", "*** Booting typed by a user"),
+            ("dut", "<err> os: ***** HARD FAULT *****"),
+            (
+                "dut",
+                "<err> os: >>> ZEPHYR FATAL ERROR 3: Kernel oops on CPU 0",
+            ),
+        ] {
+            entry_tx
+                .send(LogEntry::new(
+                    Local::now(),
+                    source.to_string(),
+                    message.to_string(),
+                ))
+                .await
+                .unwrap();
+        }
+        wait_file_contains(&combined_path, "FATAL ERROR").await;
+        let records: Vec<serde_json::Value> = std::fs::read_to_string(&combined_path)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let events: Vec<_> = records.iter().map(|r| r.get("event").cloned()).collect();
+        assert_eq!(
+            events,
+            vec![Some(json!("boot")), None, None, Some(json!("crash")), None]
+        );
+
+        let mut counts = Vec::new();
+        while let Ok(message) = broadcast_rx.try_recv() {
+            let value: serde_json::Value = serde_json::from_str(&message).unwrap();
+            if value["type"] == "source_events" {
+                counts.push(value["counts"]["dut"].clone());
+            }
+        }
+        assert_eq!(
+            counts,
+            vec![
+                json!({"boot": 1, "crash": 0}),
+                json!({"boot": 1, "crash": 1})
+            ]
+        );
+        assert!(manager.lock().unwrap().has_events());
+        drop(entry_tx);
+        handle.await.unwrap();
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[tokio::test]
     async fn writer_appends_combined_jsonl_with_source_metadata() {
         let root = temp_dir("combined-jsonl");
         let session_dir = root.join("session-1");
@@ -1734,6 +1842,7 @@ mod tests {
                 crate::levels::LevelDetector::new(&crate::levels::builtin_zephyr_profile(), "test")
                     .unwrap(),
             ),
+            event_detector: crate::events::EventDetector::new(),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
 
@@ -1807,6 +1916,7 @@ mod tests {
             watches: watches.clone(),
             commit_lock: commit_lock.clone(),
             level_detector: None,
+            event_detector: crate::events::EventDetector::new(),
             source_meta: SourceRuntimeMeta {
                 source_id: source_id.to_string(),
                 source_label: source_id.to_string(),

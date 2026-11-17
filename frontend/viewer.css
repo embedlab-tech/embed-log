@@ -635,6 +635,41 @@ button.active { background: var(--selection); border-color: var(--accent); color
 .level-menu label:hover { background: var(--selection); }
 .level-count { margin-left: auto; padding-left: 12px; opacity: .7; font-variant-numeric: tabular-nums; }
 .level-show-all { margin-top: 4px; align-self: flex-end; }
+/* Device restarts / crashes */
+.pane-events { position: relative; display: inline-flex; }
+.pane-events[hidden] { display: none; }
+.pane-events-btn {
+    display: inline-flex; gap: 8px; align-items: center;
+    background: var(--input-bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 3px; font: inherit; font-size: 11px; padding: 1px 7px; cursor: pointer;
+}
+.pane-events-btn.has-crash { border-color: var(--ansi-1); }
+.ev-boot { color: var(--accent); }
+.ev-crash { color: var(--ansi-1); font-weight: 600; }
+.events-menu {
+    position: absolute; top: calc(100% + 4px); left: 0; z-index: 50;
+    display: flex; flex-direction: column; min-width: 340px; max-width: 560px; max-height: 320px;
+    overflow-y: auto; padding: 4px; background: var(--panel); color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 4px 14px rgba(0, 0, 0, .25);
+    font-size: 11px;
+}
+.events-menu[hidden] { display: none; }
+.events-item {
+    display: grid; grid-template-columns: 14px 52px auto 1fr; gap: 6px; align-items: baseline;
+    width: 100%; padding: 3px 6px; background: none; color: inherit; border: 0; border-radius: 3px;
+    font: inherit; text-align: left; cursor: pointer;
+}
+.events-item:hover, .events-item:focus-visible { background: var(--selection); outline: none; }
+.events-boot .events-icon, .events-boot .events-kind { color: var(--accent); }
+.events-crash .events-icon, .events-crash .events-kind { color: var(--ansi-1); font-weight: 600; }
+.events-time { opacity: .7; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.events-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.events-note { padding: 4px 6px; opacity: .7; }
+.log-line.event-boot { box-shadow: inset 0 2px 0 var(--accent); }
+.log-line.event-crash {
+    background: color-mix(in srgb, var(--ansi-1) 14%, transparent);
+    box-shadow: inset 3px 0 0 var(--ansi-1);
+}
 .search-hit { background: #f5df75; color: #171717; }
 .search-current { background: #ffae42; outline: 1px solid currentColor; }
 

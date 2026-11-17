@@ -288,6 +288,17 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<ServerState>) -> i
     ws.on_upgrade(move |socket| handle_ws_client(socket, state))
 }
 
+fn subscribe_with_events(state: &ServerState) -> (broadcast::Receiver<String>, Option<String>) {
+    let rx = state.broadcast_tx.subscribe();
+    let events = state.session_manager.as_ref().and_then(|manager| {
+        let manager = manager.lock().ok()?;
+        manager
+            .has_events()
+            .then(|| manager.source_events_message().to_string())
+    });
+    (rx, events)
+}
+
 async fn handle_ws_client(mut socket: WebSocket, state: ServerState) {
     state.ws_client_count.fetch_add(1, Ordering::Relaxed);
     let _client_count_guard = WsClientCountGuard {
@@ -301,10 +312,14 @@ async fn handle_ws_client(mut socket: WebSocket, state: ServerState) {
         return;
     }
 
-    // 2. Subscribe before reading the replay buffer: a record published
-    //    between the two steps would otherwise be in neither and never reach
-    //    this client. Records that end up in both are skipped below.
-    let mut rx = state.broadcast_tx.subscribe();
+    // Subscribe before snapshotting event counts as well as replay. Neither
+    // updates during the snapshot nor records during replay may fall in a gap.
+    let (mut rx, events_message) = subscribe_with_events(&state);
+    if let Some(message) = events_message {
+        if socket.send(Message::Text(message.into())).await.is_err() {
+            return;
+        }
+    }
 
     // 3. Send replay buffer so the client catches up.
     let replay_msgs = drain_replay(&state.replay);
@@ -1133,6 +1148,42 @@ pub(crate) mod tests {
             control_api: true,
         };
         (state, rx)
+    }
+
+    #[test]
+    fn event_update_during_connect_snapshot_is_not_lost() {
+        let dir = temp_session_dir("events-connect-race");
+        let (state, _existing_rx) = test_state(dir.clone());
+        // Hold the snapshot lock so the connecting client pauses exactly at
+        // the boundary where an event used to be lost before subscribing.
+        let mut manager = state.session_manager.as_ref().unwrap().lock().unwrap();
+        let connecting = state.clone();
+        let worker = std::thread::spawn(move || subscribe_with_events(&connecting));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while state.broadcast_tx.receiver_count() < 2 && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        let subscribed = state.broadcast_tx.receiver_count() == 2;
+        manager.record_event("dut", crate::events::CRASH);
+        let update = manager.source_events_message().to_string();
+        state.broadcast_tx.send(update.clone()).unwrap();
+        drop(manager);
+        let (mut receiver, snapshot) = worker.join().unwrap();
+        assert!(
+            subscribed,
+            "client must subscribe before reading the counters"
+        );
+        let snapshot: serde_json::Value = serde_json::from_str(&snapshot.unwrap()).unwrap();
+        assert_eq!(snapshot["counts"]["dut"]["crash"], 1);
+        assert_eq!(receiver.try_recv().unwrap(), update);
+        // Updates after the snapshot must still be delivered without another connect.
+        let mut manager = state.session_manager.as_ref().unwrap().lock().unwrap();
+        manager.record_event("dut", crate::events::BOOT);
+        let later = manager.source_events_message().to_string();
+        state.broadcast_tx.send(later.clone()).unwrap();
+        assert_eq!(receiver.try_recv().unwrap(), later);
+        drop(manager);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[tokio::test]

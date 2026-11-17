@@ -643,6 +643,7 @@ export function hydratePanesFromJson() {
     });
 
     window.__embedLogUpdateTimestampModeUi?.();
+    window.__embedLogRefreshEventBadges?.();
 }
 
 window.__embedLogHydratePanes = hydratePanesFromJson;

@@ -66,6 +66,7 @@ export function buildStoredLine(paneId, ts, rawText, isTx, meta = null) {
         sessionId: lineMeta.sessionId || null,
         sourceId: lineMeta.sourceId || null,
         level: typeof lineMeta.level === "string" && lineMeta.level ? lineMeta.level : null,
+        event: typeof lineMeta.event === "string" && lineMeta.event ? lineMeta.event : null,
         html,
         rawText,
         isTx,
@@ -96,6 +97,7 @@ export function _lineClass(line, idx, paneId) {
     return "log-line"
         + (line.isTx ? " tx-line" : "")
         + _lineLevelClass(line, paneId)
+        + (line.event === "boot" || line.event === "crash" ? ` event-${line.event}` : "")
         + pluginClasses
         + (state.selected[paneId].has(idx) ? " selected" : "");
 }
@@ -339,7 +341,7 @@ export function applyLineDom(div, line, paneId, idx, filterRx) {
     } else {
         delete div.dataset.markerTooltip;
     }
-    if (!matchesFilter(line, filterRx, paneId)) {
+    if (_eventRevealIndex(paneId) !== idx && !matchesFilter(line, filterRx, paneId)) {
         div.style.display = "none";
         div.innerHTML = "";
         _renderedLineContent.delete(div);
@@ -557,6 +559,20 @@ function _getNumTs(entry, paneId = null, idx = -1) {
 // rows (displayed timestamp, plugin filter text), so filtered projections are
 // rebuilt instead of only extended.
 let _projectionEpoch = 0;
+// Event navigation temporarily reveals one exact row through text/level filters.
+// A subsequent filter edit or clearing the pane removes this exception.
+const _eventReveals = new Map();
+
+function _eventRevealIndex(paneId) {
+    const reveal = _eventReveals.get(paneId);
+    if (reveal && (reveal.filter !== (state.filters[paneId] || null)
+        || reveal.levelVersion !== levelFilterVersion(paneId))) {
+        _eventReveals.delete(paneId);
+        return -1;
+    }
+    return reveal?.rawIndex ?? -1;
+}
+
 
 const _ANSI_SEQUENCE_RE = /\x1b(?:\[([0-9;]*)([A-Za-z])|\][^\x07]*\x07|[^[\]])/g;
 
@@ -594,9 +610,10 @@ function _getVisibleIndices(paneId, vp) {
     const lines = state.rawLines[paneId] || [];
     const rx = state.filters[paneId] || null;
     const levelVersion = levelFilterVersion(paneId);
+    const revealedIndex = _eventRevealIndex(paneId);
     const sameProjection = vp.projectionRows === lines && vp.projectionFilter === rx
         && vp.projectionLevel === levelVersion && vp.projectionEpoch === _projectionEpoch
-        && Array.isArray(vp.visibleIndices);
+        && vp.projectionReveal === revealedIndex && Array.isArray(vp.visibleIndices);
     // Preserve raw rows/indices for export, selection and debugging, but don't
     // allocate visual rows for terminal text erased before the next record or
     // for levels hidden in this pane. Extend the projection on append instead
@@ -613,6 +630,10 @@ function _getVisibleIndices(paneId, vp) {
     // data), which doubled memory and dominated the first keystroke.
     const plainFilter = !!rx && !paneHasPlugins(paneId);
     for (let rawIndex = extend ? vp.projectionSourceLen : 0; rawIndex < lines.length; rawIndex++) {
+        if (rawIndex === revealedIndex) {
+            indices.push(rawIndex);
+            continue;
+        }
         if (!rx) {
             const entry = lines[rawIndex];
             const rawText = _isRawTuple(entry) ? entry[1] : entry.rawText;
@@ -640,6 +661,7 @@ function _getVisibleIndices(paneId, vp) {
     vp.projectionFilter = rx;
     vp.projectionLevel = levelVersion;
     vp.projectionEpoch = _projectionEpoch;
+    vp.projectionReveal = revealedIndex;
     vp.projectionSourceLen = lines.length;
     return indices;
 }
@@ -1069,6 +1091,7 @@ export function appendLineBatch(entries) {
     for (const [paneId, batch] of newByPane) {
         _recordPaneBytes(paneId, batch);
         _updatePaneStats(paneId);
+        if (batch.some(_entryEvent)) window.__embedLogRefreshEventBadges?.(paneId);
     }
 
     touched.forEach(paneId => {
@@ -1134,6 +1157,8 @@ export function prependPaneHistory(paneId, rows) {
     const rowH = _measureRowHeight(paneId);
     const target = vp && logEl ? (_rawIndexAt(paneId, vp, _ordinalAtOffset(vp, logEl.scrollTop, _visibleCount(paneId, vp))) || 0) : 0;
     state.rawLines[paneId] = rows.concat(current);
+    const reveal = _eventReveals.get(paneId);
+    if (reveal) reveal.rawIndex += rows.length;
     state.selected[paneId] = new Set([...state.selected[paneId]].map(index => index + rows.length));
     if (Number.isFinite(state.highlightedIdx[paneId])) state.highlightedIdx[paneId] += rows.length;
     window.__embedLogOnHistoryPrepended?.(paneId, rows.length);
@@ -1143,6 +1168,7 @@ export function prependPaneHistory(paneId, rows) {
     _updateToolbarStats();
     if (state.atBottom[paneId]) _renderVirtualWindow(paneId, { forceAtBottom: true });
     else ensureLineVisible(paneId, target + rows.length, { align: 'top' });
+    if (rows.some(_entryEvent)) window.__embedLogRefreshEventBadges?.(paneId);
 }
 
 export function rerenderPane(paneId) {
@@ -1469,6 +1495,7 @@ window.__embedLogRefreshPluginIndicators = refreshPluginIndicators;
 // ---------------------------------------------------------------------------
 
 export function clearPane(paneId) {
+    _eventReveals.delete(paneId);
     state.rawLines[paneId] = [];
     state.selected[paneId] = new Set();
     if (state.searches[paneId]) state.searches[paneId] = new PhraseSearch(state.searches[paneId].phrase);
@@ -1493,6 +1520,7 @@ export function clearPane(paneId) {
     document.getElementById("more-dropdown-" + paneId)?.classList.remove("open");
     window.__embedLogSchedulePersist?.();
     window.__embedLogUpdateTimestampModeUi?.();
+    window.__embedLogRefreshEventBadges?.(paneId);
 }
 
 document.getElementById("btn-jump-all")?.addEventListener("click", () => {
@@ -1599,6 +1627,45 @@ function _visibleRawIndexNear(paneId, rawIdx) {
     const vp = _getVirtual(paneId);
     if (!vp) return rawIdx;
     return _rawIndexAt(paneId, vp, _ordinalForRawIndex(paneId, vp, rawIdx));
+}
+
+// ── Device events (boot / crash) ───────────────────────────────────
+
+function _entryEvent(entry) {
+    const meta = _isRawTuple(entry) ? entry[3] : entry;
+    const event = meta && typeof meta === "object" ? meta.event : null;
+    return event === "boot" || event === "crash" ? event : null;
+}
+
+/**
+ * Boot/crash events among the pane's loaded lines, oldest first:
+ * `{ rawIndex, event, ts, text }`.
+ */
+export function paneEvents(paneId) {
+    const out = [];
+    const lines = state.rawLines[paneId] || [];
+    for (let rawIndex = 0; rawIndex < lines.length; rawIndex++) {
+        const event = _entryEvent(lines[rawIndex]);
+        if (!event) continue;
+        const line = getLine(paneId, rawIndex);
+        out.push({
+            rawIndex,
+            event,
+            ts: line?.ts || "",
+            text: String(line?.rawText || "").replace(/\x1b(?:\[[0-9;]*[A-Za-z]|\][^\x07]*\x07|[^[\]])/g, ""),
+        });
+    }
+    return out;
+}
+
+/** Scroll a pane to a raw line and highlight it (event list, navigation). */
+export function revealRawLine(paneId, rawIndex) {
+    if (!_entryEvent((state.rawLines[paneId] || [])[rawIndex])) return;
+    _eventReveals.set(paneId, {
+        rawIndex, filter: state.filters[paneId] || null,
+        levelVersion: levelFilterVersion(paneId),
+    });
+    _scrollPaneToRawIndex(paneId, rawIndex);
 }
 
 function _scrollPaneToRawIndex(paneId, requestedIdx) {

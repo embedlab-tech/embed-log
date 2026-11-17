@@ -25,6 +25,8 @@ pub(super) struct LogEntry {
     pub(super) time_domain: Option<String>,
     /// Level id from the canonical record (`level` field); none for legacy logs.
     pub(super) level: Option<String>,
+    /// Detected device event (`boot` / `crash`, see `crate::events`).
+    pub(super) event: Option<String>,
 }
 
 pub(super) fn parse_log_file(
@@ -64,6 +66,7 @@ pub(super) fn parse_log_file(
                 rel_num,
                 time_domain: None,
                 level: None,
+                event: None,
             });
         } else if raw_line.trim().is_empty() {
             continue;

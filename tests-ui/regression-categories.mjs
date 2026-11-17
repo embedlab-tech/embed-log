@@ -20,6 +20,7 @@ const categories = {
     'regression-tests/session-highlight.spec.js',
     'regression-tests/stream-gap-and-history-limits.spec.js',
     'regression-tests/level-filter.spec.js',
+    'regression-tests/device-events.spec.js',
     'regression-tests/live-filter-incremental.spec.js',
     'regression-tests/filter-compact-rows.spec.js',
     'regression-tests/layout-sync.spec.js',
