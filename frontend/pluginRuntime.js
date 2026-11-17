@@ -226,6 +226,11 @@ function _pluginRefsForPane(paneId) {
     return _panePlugins[paneId] || [];
 }
 
+/** Whether any frontend plugin analyzes lines of this pane. */
+export function paneHasPlugins(paneId) {
+    return _pluginRefsForPane(paneId).length > 0;
+}
+
 function _sanitizeStringArray(value) {
     if (!Array.isArray(value)) return [];
     return value

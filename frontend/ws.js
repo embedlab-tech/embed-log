@@ -303,8 +303,10 @@ async function _handleConfigMessage(msg) {
         resetPanePlugins();
     }
 
-    // Re-render all panes so plugin data attaches to already-visible lines.
+    // Re-render all panes so plugin data attaches to already-visible lines,
+    // and re-filter: plugin text is part of what a filter matches.
     PANES.forEach(id => {
+        invalidatePaneFilterProjection(id);
         try { rerenderPane(id); } catch (_) {}
     });
     window.__embedLogAfterConfig?.(msg.tabs || []);
