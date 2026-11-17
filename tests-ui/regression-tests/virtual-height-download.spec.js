@@ -100,12 +100,16 @@ test('a failed saved-log fetch cannot silently produce an incomplete ZIP', async
   await setup(page, SAVED_SESSION);
   const downloads = [];
   page.on('download', d => downloads.push(d));
-  const alert = page.waitForEvent('dialog');
+  // Dismiss the alert from the handler: the 404 can arrive before the click
+  // action returns, and an open dialog blocks the page until it is handled.
+  let message = null;
+  page.once('dialog', async dialog => {
+    message = dialog.message();
+    await dialog.dismiss();
+  });
   await page.locator('#btn-settings').click();
   await page.locator('#btn-download-raw').click();
   await page.locator('#btn-download-split').click();
-  const dialog = await alert;
-  expect(dialog.message()).toContain('HTTP 404');
-  await dialog.dismiss();
+  await expect.poll(() => message).toContain('HTTP 404');
   expect(downloads).toHaveLength(0);
 });
