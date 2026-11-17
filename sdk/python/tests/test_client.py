@@ -460,3 +460,76 @@ def test_entries_drains_buffer_every_iteration():
     assert entries[0].message == "buffered-1"
     assert entries[1].message == "buffered-2"
     assert client._msg_buffer == deque()  # all drained
+
+
+# ── restarts, crashes and crash decoding ──
+
+HELLO = json.dumps({
+    "type": "hello.result", "id": "hello-init",
+    "sources": {"DUT_UART": {"type": "uart", "label": "DUT", "writable": True}},
+    "session": {"id": "s1"},
+})
+
+
+def test_list_events_returns_events_and_counts(fake_ws):
+    fake_ws.queue_send(HELLO)
+    fake_ws.queue_send("AUTO:events.result")
+    client = EmbedLogClient("ws://127.0.0.1:18080/api/v1/control")
+    # Replace the AUTO frame with a full response carrying the request id.
+    fake_ws._recv_queue.clear()
+
+    def respond():
+        req = json.loads(fake_ws._sent[-1])
+        assert req["type"] == "events.list" and req["kind"] == "crash" and req["source_id"] == "DUT_UART"
+        return json.dumps({
+            "type": "events.result", "id": req["id"],
+            "counts": {"DUT_UART": {"boot": 2, "crash": 1}},
+            "events": [{"sequence": 61, "source_id": "DUT_UART", "event": "crash",
+                        "message": "<err> os: ***** MPU FAULT *****", "timestamp_iso": "t"}],
+        })
+
+    fake_ws.recv = respond
+    events, counts = client.list_events("DUT_UART", kind="crash")
+    assert [(e.sequence, e.is_crash) for e in events] == [(61, True)]
+    assert counts["DUT_UART"].boot == 2 and counts["DUT_UART"].crash == 1
+    with pytest.raises(ValueError):
+        client.list_events(kind="reboot")
+    client.close()
+
+
+def test_decode_crash_parses_the_report(fake_ws):
+    fake_ws.queue_send(HELLO)
+    client = EmbedLogClient("ws://127.0.0.1:18080/api/v1/control")
+
+    def respond():
+        req = json.loads(fake_ws._sent[-1])
+        assert req["type"] == "crash.decode" and req["sequence"] == 61
+        return json.dumps({"type": "crash.result", "id": req["id"], "report": {
+            "source": "DUT_UART", "sequence": 61, "elf": "symbols/DUT_UART.elf",
+            "lines": ["<err> os: ***** MPU FAULT *****"],
+            "addresses": [{"label": "pc", "address": 0x102a, "is_return": False, "line": "pc", "frames": [
+                {"function": "scale_sample", "file": "app.c", "line": 7, "inlined": True},
+                {"function": "process_sample", "file": "app.c", "line": 12, "inlined": False},
+            ]}],
+        }})
+
+    fake_ws.recv = respond
+    report = client.decode_crash("DUT_UART", 61)
+    assert report.addresses[0].frames[0].function == "scale_sample"
+    assert report.backtrace == [
+        "pc 0x0000102a scale_sample (app.c:7) [inlined] <- process_sample (app.c:12)"
+    ]
+    client.close()
+
+
+def test_wait_for_event_returns_the_first_matching_entry(fake_ws):
+    fake_ws.queue_send(HELLO)
+    fake_ws.queue_send("AUTO:subscribe.result:ok=True")
+    fake_ws.queue_send(json.dumps({"type": "log.entry", "source_id": "DUT_UART", "message": "*** Booting ***",
+                                   "event": "boot", "sequence": 1, "line_idx": 0, "timestamp_iso": "t1"}))
+    fake_ws.queue_send(json.dumps({"type": "log.entry", "source_id": "DUT_UART", "message": "ASSERTION FAIL",
+                                   "event": "crash", "sequence": 2, "line_idx": 1, "timestamp_iso": "t2"}))
+    client = EmbedLogClient("ws://127.0.0.1:18080/api/v1/control")
+    event = client.wait_for_event("crash", "DUT_UART", timeout=2)
+    assert event is not None and (event.sequence, event.message) == (2, "ASSERTION FAIL")
+    client.close()

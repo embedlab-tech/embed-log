@@ -665,6 +665,56 @@ button.active { background: var(--selection); border-color: var(--accent); color
 .events-time { opacity: .7; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .events-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .events-note { padding: 4px 6px; opacity: .7; }
+.events-entry { display: flex; align-items: center; gap: 4px; }
+.events-entry .events-item { flex: 1; min-width: 0; }
+.events-decode {
+    flex: none; background: var(--input-bg); color: var(--ansi-1); border: 1px solid var(--ansi-1);
+    border-radius: 3px; font: inherit; font-size: 10px; padding: 1px 6px; cursor: pointer;
+}
+.events-decode:hover { background: color-mix(in srgb, var(--ansi-1) 14%, transparent); }
+.events-boot-filter {
+    flex: none; background: var(--input-bg); color: var(--accent); border: 1px solid var(--accent);
+    border-radius: 3px; font: inherit; font-size: 10px; padding: 1px 6px; cursor: pointer; white-space: nowrap;
+}
+.events-boot-filter:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.boot-chip {
+    display: inline-flex; align-items: center; gap: 2px; padding: 0 2px 0 4px; white-space: nowrap;
+    border: 1px solid var(--accent); border-radius: 3px; color: var(--accent); font-size: 11px;
+}
+.boot-chip[hidden] { display: none; }
+.boot-chip button {
+    background: none; border: 0; color: inherit; font: inherit; cursor: pointer; padding: 0 4px;
+}
+.boot-chip button:disabled { opacity: .35; cursor: default; }
+.boot-label { padding: 0 2px; }
+#crash-dialog {
+    width: min(860px, calc(100vw - 32px)); max-height: calc(100vh - 64px); padding: 0;
+    background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, .35); font-size: 12px;
+}
+#crash-dialog::backdrop { background: rgba(0, 0, 0, .35); }
+.crash-head {
+    display: flex; align-items: center; justify-content: space-between; padding: 10px 14px;
+    border-bottom: 1px solid var(--border); font-weight: 600; color: var(--ansi-1);
+}
+.crash-close { background: none; border: 0; color: var(--text); font: inherit; cursor: pointer; opacity: .7; }
+.crash-close:hover { opacity: 1; }
+.crash-meta { padding: 8px 14px 0; opacity: .75; }
+.crash-body { padding: 10px 14px 14px; overflow: auto; }
+.crash-frames { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.crash-frames th { text-align: left; font-weight: 600; opacity: .7; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.crash-frames td { padding: 4px 8px; vertical-align: top; white-space: nowrap; }
+.crash-frames tbody tr:not(.crash-inline-row) td { border-top: 1px solid var(--border); }
+.crash-frames td:nth-child(3) { color: var(--accent); font-weight: 600; }
+.crash-inline-row td:nth-child(3) { padding-left: 24px; }
+.crash-inlined {
+    font-size: 10px; font-weight: 400; color: var(--text); opacity: .7;
+    border: 1px solid var(--border); border-radius: 3px; padding: 0 4px;
+}
+.crash-note { margin: 0; opacity: .75; }
+.crash-dump { margin-top: 12px; }
+.crash-dump summary { cursor: pointer; opacity: .8; }
+.crash-dump pre { margin: 6px 0 0; padding: 8px; background: var(--input-bg); border-radius: 4px; overflow: auto; font-size: 11px; }
 .log-line.event-boot { box-shadow: inset 0 2px 0 var(--accent); }
 .log-line.event-crash {
     background: color-mix(in srgb, var(--ansi-1) 14%, transparent);

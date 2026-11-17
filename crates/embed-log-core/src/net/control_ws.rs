@@ -218,7 +218,7 @@ fn build_log_entry(parsed: &serde_json::Value, source_id: &str) -> serde_json::V
         .cloned()
         .unwrap_or(serde_json::Value::Null);
 
-    serde_json::json!({
+    let mut entry = serde_json::json!({
         "type": "log.entry",
         "source_id": source_id,
         "origin": origin,
@@ -229,7 +229,14 @@ fn build_log_entry(parsed: &serde_json::Value, source_id: &str) -> serde_json::V
         "session_id": session_id,
         "color": color,
         "is_tx": is_tx,
-    })
+    });
+    // Detected level and restart/crash event, when present.
+    for key in ["level", "event"] {
+        if let Some(value) = parsed.get(key).filter(|value| value.is_string()) {
+            entry[key] = value.clone();
+        }
+    }
+    entry
 }
 
 /// Handle a single command from a control client.
@@ -279,6 +286,8 @@ async fn handle_control_command(
         "watch.create" => Some(handle_watch_create(&cmd, state, msg_id)),
         "watch.get" => Some(handle_watch_get(&cmd, state, msg_id)),
         "watch.delete" => Some(handle_watch_delete(&cmd, state, msg_id)),
+        "events.list" => Some(handle_events_list(&cmd, state, msg_id).await),
+        "crash.decode" => Some(handle_crash_decode(&cmd, state, msg_id).await),
         _ => {
             let mut resp = serde_json::json!({
                 "type": "error",
@@ -289,6 +298,150 @@ async fn handle_control_command(
             }
             Some(resp.to_string())
         }
+    }
+}
+
+fn command_error(msg_id: Option<&str>, error: impl Into<String>) -> String {
+    let mut resp = serde_json::json!({ "type": "error", "error": error.into() });
+    if let Some(id) = msg_id {
+        resp["id"] = serde_json::Value::String(id.to_string());
+    }
+    resp.to_string()
+}
+
+/// `(session_dir, journal)` of the running session.
+fn current_journal(state: &super::ServerState) -> Option<(std::path::PathBuf, std::path::PathBuf)> {
+    let manager = state.session_manager.as_ref()?.lock().ok()?;
+    Some((manager.session_dir().to_path_buf(), manager.combined_file()))
+}
+
+/// `events.list`: restarts/crashes of the session so far, oldest first.
+/// Optional filters: `source_id`, `kind` (`boot`/`crash`), `since_sequence`.
+async fn handle_events_list(
+    cmd: &serde_json::Value,
+    state: &super::ServerState,
+    msg_id: Option<&str>,
+) -> String {
+    let Some((_, journal)) = current_journal(state) else {
+        return command_error(msg_id, "no active session");
+    };
+    let source = cmd
+        .get("source_id")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let kind = cmd.get("kind").and_then(|v| v.as_str()).map(str::to_string);
+    let since = cmd
+        .get("since_sequence")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let read = tokio::task::spawn_blocking(move || -> std::io::Result<Vec<serde_json::Value>> {
+        use std::io::BufRead;
+        let file = std::fs::File::open(&journal)?;
+        let mut events = Vec::new();
+        for line in std::io::BufReader::new(file).lines() {
+            let line = line?;
+            if !line.contains("\"event\":") {
+                continue;
+            }
+            let Ok(record) = serde_json::from_str::<serde_json::Value>(&line) else {
+                continue;
+            };
+            let field = |key: &str| record.get(key).and_then(|v| v.as_str()).map(str::to_string);
+            let (Some(event), Some(source_id), Some(sequence)) = (
+                field("event"),
+                field("source_id"),
+                record.get("sequence").and_then(|v| v.as_u64()),
+            ) else {
+                continue;
+            };
+            if sequence <= since
+                || source.as_ref().is_some_and(|s| *s != source_id)
+                || kind.as_ref().is_some_and(|k| *k != event)
+            {
+                continue;
+            }
+            events.push(serde_json::json!({
+                "sequence": sequence,
+                "source_id": source_id,
+                "event": event,
+                "timestamp_iso": field("timestamp_iso"),
+                "message": crate::postprocess::strip_ansi(&field("message").unwrap_or_default()),
+            }));
+        }
+        Ok(events)
+    })
+    .await;
+    let events = match read {
+        Ok(Ok(events)) => events,
+        Ok(Err(error)) => {
+            return command_error(msg_id, format!("cannot read session journal: {error}"))
+        }
+        Err(error) => return command_error(msg_id, error.to_string()),
+    };
+    let counts = state
+        .session_manager
+        .as_ref()
+        .and_then(|manager| {
+            manager
+                .lock()
+                .ok()
+                .map(|m| m.source_events_message()["counts"].clone())
+        })
+        .unwrap_or_else(|| serde_json::json!({}));
+    let mut resp =
+        serde_json::json!({ "type": "events.result", "counts": counts, "events": events });
+    if let Some(id) = msg_id {
+        resp["id"] = serde_json::Value::String(id.to_string());
+    }
+    resp.to_string()
+}
+
+/// `crash.decode`: symbolize the crash record `sequence` of `source_id` with
+/// the session's firmware ELF snapshot.
+async fn handle_crash_decode(
+    cmd: &serde_json::Value,
+    state: &super::ServerState,
+    msg_id: Option<&str>,
+) -> String {
+    let Some(source) = cmd
+        .get("source_id")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+    else {
+        return command_error(msg_id, "missing 'source_id'");
+    };
+    let Some(sequence) = cmd.get("sequence").and_then(|v| v.as_u64()) else {
+        return command_error(msg_id, "missing or invalid 'sequence'");
+    };
+    let Some((session_dir, journal)) = current_journal(state) else {
+        return command_error(msg_id, "no active session");
+    };
+    let decoded = tokio::task::spawn_blocking(move || {
+        let manifest: serde_json::Value =
+            std::fs::read_to_string(session_dir.join("manifest.json"))
+                .ok()
+                .and_then(|text| serde_json::from_str(&text).ok())
+                .unwrap_or_default();
+        let elf = crate::symbols::manifest_elf(&session_dir, &manifest, &source)?;
+        let mut report = crate::symbols::decode_crash(&journal, &source, sequence, &elf)?;
+        report.elf = elf
+            .strip_prefix(&session_dir)
+            .unwrap_or(&elf)
+            .to_string_lossy()
+            .replace('\\', "/");
+        Ok::<_, String>(report)
+    })
+    .await;
+    match decoded {
+        Ok(Ok(report)) => {
+            let mut resp = serde_json::json!({ "type": "crash.result", "report": report });
+            if let Some(id) = msg_id {
+                resp["id"] = serde_json::Value::String(id.to_string());
+            }
+            resp.to_string()
+        }
+        Ok(Err(error)) => command_error(msg_id, error),
+        Err(error) => command_error(msg_id, error.to_string()),
     }
 }
 
@@ -1683,6 +1836,67 @@ mod tests {
             control_api: true,
         };
         (state, dir)
+    }
+
+    #[tokio::test]
+    async fn events_list_and_crash_decode_read_the_session() {
+        let (state, dir) = test_state_with_session("events-decode");
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/cortex-m4-fault.elf");
+        let symbols = crate::symbols::snapshot_elfs(&dir, &[("DUT_UART".into(), fixture)]);
+        let mut manifest: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap())
+                .unwrap();
+        manifest["symbols"] = symbols;
+        std::fs::write(dir.join("manifest.json"), manifest.to_string()).unwrap();
+        let records = [
+            serde_json::json!({"source_id":"DUT_UART","sequence":1,"message":"*** Booting Zephyr OS ***","event":"boot"}),
+            serde_json::json!({"source_id":"DUT_UART","sequence":2,"message":"<err> os: ***** MPU FAULT *****","event":"crash"}),
+            serde_json::json!({"source_id":"DUT_UART","sequence":3,"message":"<err> os: Faulting instruction address (r15/pc): 0x0000102a"}),
+        ];
+        let journal: String = records.iter().map(|r| format!("{r}\n")).collect();
+        std::fs::write(dir.join("combined.jsonl"), journal).unwrap();
+        let mut sub = ControlSubscription::new();
+
+        let response = handle_control_command(
+            r#"{"id":"e1","type":"events.list","kind":"crash"}"#,
+            &state,
+            &mut sub,
+        )
+        .await
+        .unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(resp["type"], "events.result", "{resp}");
+        assert_eq!(resp["id"], "e1");
+        assert_eq!(resp["events"].as_array().unwrap().len(), 1);
+        assert_eq!(resp["events"][0]["sequence"], 2);
+
+        let response = handle_control_command(
+            r#"{"id":"d1","type":"crash.decode","source_id":"DUT_UART","sequence":2}"#,
+            &state,
+            &mut sub,
+        )
+        .await
+        .unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(resp["type"], "crash.result", "{resp}");
+        assert_eq!(
+            resp["report"]["addresses"][0]["frames"][1]["function"],
+            "process_sample"
+        );
+        assert_eq!(resp["report"]["elf"], manifest["symbols"]["DUT_UART"]);
+
+        let response = handle_control_command(
+            r#"{"id":"d2","type":"crash.decode","source_id":"DUT_UART","sequence":1}"#,
+            &state,
+            &mut sub,
+        )
+        .await
+        .unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(resp["type"], "error");
+        assert_eq!(resp["id"], "d2");
+        std::fs::remove_dir_all(dir).ok();
     }
 
     #[tokio::test]

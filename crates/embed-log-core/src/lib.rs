@@ -11,3 +11,4 @@ pub mod postprocess;
 pub mod runtime;
 pub mod session;
 pub mod sources;
+pub mod symbols;

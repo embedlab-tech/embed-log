@@ -76,6 +76,10 @@ struct V2SourceConfig {
     parser: ParserConfig,
     #[serde(default)]
     levels: Option<SourceLevels>,
+    #[serde(default)]
+    elf: Option<String>,
+    #[serde(default)]
+    events: Option<SourceEvents>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -199,6 +203,8 @@ fn parse_v2_config(raw: serde_yaml::Value) -> Result<AppConfig, ConfigError> {
             baudrate: source.baud,
             label: source.label,
             levels: source.levels,
+            elf: source.elf,
+            events: source.events,
         });
     }
 
@@ -264,6 +270,12 @@ pub fn config_to_v2_yaml(config: &AppConfig) -> anyhow::Result<String> {
         }
         if let Some(levels) = &source.levels {
             value.insert("levels".to_string(), serde_json::to_value(levels)?);
+        }
+        if let Some(elf) = &source.elf {
+            value.insert("elf".to_string(), serde_json::to_value(elf)?);
+        }
+        if let Some(events) = &source.events {
+            value.insert("events".to_string(), serde_json::to_value(events)?);
         }
         source_map.insert(source.name.clone(), serde_json::Value::Object(value));
     }
@@ -435,6 +447,13 @@ fn validate_config(config: &mut AppConfig, config_path: &Path) -> Result<(), Con
     }
 
     crate::levels::validate_level_config(config).map_err(ConfigError::validation)?;
+    for source in &config.sources {
+        crate::events::EventDetector::for_source(
+            source.events.as_ref(),
+            &format!("sources.{}.events", source.name),
+        )
+        .map_err(ConfigError::validation)?;
+    }
 
     let mut source_names = HashSet::new();
 
@@ -538,6 +557,28 @@ fn validate_config(config: &mut AppConfig, config_path: &Path) -> Result<(), Con
                 *path = super::paths::resolve_relative_to_config(config_path, path)
                     .display()
                     .to_string();
+            }
+        }
+        if let Some(elf) = src.elf.as_mut() {
+            let elf_ctx = format!("sources.{}.elf", src.name);
+            if elf.trim().is_empty() {
+                return Err(ConfigError::validation(format!(
+                    "{elf_ctx} must not be empty"
+                )));
+            }
+            *elf = super::paths::resolve_relative_to_config(config_path, elf)
+                .display()
+                .to_string();
+            // A missing ELF (firmware not built yet) only disables decoding;
+            // a file that is not a usable ELF is a configuration error.
+            let path = std::path::Path::new(elf.as_str());
+            if path.exists() {
+                crate::symbols::validate_elf(path, &elf_ctx).map_err(ConfigError::validation)?;
+            } else {
+                tracing::warn!(
+                    "{elf_ctx}: {} does not exist; crash dumps of this source cannot be decoded",
+                    path.display()
+                );
             }
         }
     }
@@ -785,6 +826,81 @@ sources: {}
     }
 
     #[test]
+    fn event_rules_and_firmware_elf_are_loaded_validated_and_round_tripped() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/cortex-m4-fault.elf")
+            .display()
+            .to_string()
+            .replace('\\', "/");
+        let yaml = format!(
+            r#"
+version: 2
+sources:
+  DUT:
+    type: udp
+    port: 16000
+    elf: {fixture}
+    events:
+      boot: ['^APP START']
+      crash: ['PANIC:']
+      group_window_ms: 2000
+  HOST:
+    type: udp
+    port: 16001
+    events: off
+    elf: missing-firmware.elf
+"#
+        );
+        let config = load_yaml("events-elf-ok", &yaml).unwrap();
+        let dut = config.sources.iter().find(|s| s.name == "DUT").unwrap();
+        assert_eq!(
+            dut.elf.as_deref().map(|p| p.replace('\\', "/")),
+            Some(fixture.clone())
+        );
+        match dut.events.as_ref().unwrap() {
+            SourceEvents::Rules(rules) => {
+                assert!(rules.builtin);
+                assert_eq!(rules.crash, vec!["PANIC:".to_string()]);
+                assert_eq!(rules.group_window_ms, Some(2000));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        let host = config.sources.iter().find(|s| s.name == "HOST").unwrap();
+        assert_eq!(host.events, Some(SourceEvents::Named("off".into())));
+        assert!(
+            host.elf
+                .as_deref()
+                .unwrap()
+                .ends_with("missing-firmware.elf"),
+            "a missing ELF only disables decoding"
+        );
+        let reloaded =
+            load_yaml("events-elf-roundtrip", &config_to_v2_yaml(&config).unwrap()).unwrap();
+        let again = reloaded.sources.iter().find(|s| s.name == "DUT").unwrap();
+        assert_eq!(again.events, dut.events);
+
+        let bad_rule = yaml.replace("'PANIC:'", "'(PANIC'");
+        let err = load_yaml("events-bad-rule", &bad_rule)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("sources.DUT.events.crash[0] is not a valid regex"),
+            "{err}"
+        );
+        let not_elf = std::env::temp_dir().join(format!("not-an-elf-{}.elf", std::process::id()));
+        std::fs::write(&not_elf, "text").unwrap();
+        let bad_elf = yaml.replace(&fixture, &not_elf.display().to_string().replace('\\', "/"));
+        let err = load_yaml("events-bad-elf", &bad_elf)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("sources.DUT.elf") && err.contains("not an ELF"),
+            "{err}"
+        );
+        std::fs::remove_file(not_elf).ok();
+    }
+
+    #[test]
     fn level_profiles_resolve_per_source_and_round_trip() {
         let yaml = r#"
 version: 2
@@ -892,6 +1008,8 @@ sources:
             baudrate: Some(115_200),
             label: None,
             levels: None,
+            elf: None,
+            events: None,
         });
         cfg.tabs.push(TabConfig {
             label: "DUT".to_string(),

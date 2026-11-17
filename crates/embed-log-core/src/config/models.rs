@@ -73,6 +73,36 @@ pub enum SourceLevels {
     Inline(LevelProfile),
 }
 
+/// Custom restart/crash rules of a source (`sources.<ID>.events`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EventRules {
+    /// Keep the built-in Zephyr rules in addition to these.
+    #[serde(default = "default_true")]
+    pub builtin: bool,
+    /// Regexes of restart lines (boot banners).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub boot: Vec<String>,
+    /// Regexes of the first line of a crash.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub crash: Vec<String>,
+    /// Matches of the same kind closer together are one event (default 5000).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_window_ms: Option<u64>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// `events:` of a source: `zephyr` (default), `off`, or custom rules.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SourceEvents {
+    Named(String),
+    Rules(EventRules),
+}
+
 /// One dictionary path (legacy format) or an ordered list; the first is preferred.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -153,6 +183,12 @@ pub struct SourceConfig {
     /// Log level detection; `None` means the built-in `zephyr` profile.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub levels: Option<SourceLevels>,
+    /// Firmware ELF used to symbolize crash dumps (`crate::symbols`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elf: Option<String>,
+    /// Restart/crash detection; `None` means the built-in Zephyr rules.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub events: Option<SourceEvents>,
 }
 
 /// Frontend plugin definition.

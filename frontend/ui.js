@@ -1,5 +1,5 @@
 import { state, TABS, PANES, paneLabel } from './state.js';
-import { rerenderPane, reanalyzePanePlugins, setTimestampMode, canDisplayTimestampMode, hidePluginOverlays, updatePaneSearch, navigatePaneSearch, paneEvents, revealRawLine } from './lines.js';
+import { rerenderPane, reanalyzePanePlugins, setTimestampMode, canDisplayTimestampMode, hidePluginOverlays, updatePaneSearch, navigatePaneSearch, paneEvents, revealRawLine, bootFilter, setBootFilter } from './lines.js';
 import { PhraseSearch } from './search.js';
 import {
     countLevels, hiddenLevelCount, hiddenLevels, paneLevelDefs, setLevelVisible, showAllLevels,
@@ -564,7 +564,37 @@ function _setupEventBadge(id) {
                 button.setAttribute("aria-expanded", "false");
                 revealRawLine(id, item.rawIndex);
             });
-            menu.append(row);
+            const entry = document.createElement("div");
+            entry.className = "events-entry";
+            entry.append(row);
+            if (item.event === "boot" && Number.isFinite(item.sequence)) {
+                const only = document.createElement("button");
+                only.type = "button";
+                only.className = "events-boot-filter";
+                only.textContent = "Only this boot";
+                only.title = "Show only the lines from this restart until the next restart of the same device";
+                only.addEventListener("click", () => {
+                    menu.hidden = true;
+                    button.setAttribute("aria-expanded", "false");
+                    _applyBootFilter(id, item.sourceId, item.sequence);
+                });
+                entry.append(only);
+            }
+            if (item.event === "crash" && _canDecode(item)) {
+                const decode = document.createElement("button");
+                decode.type = "button";
+                decode.className = "events-decode";
+                decode.textContent = "Decode";
+                decode.title = "Symbolize this crash dump with the firmware ELF";
+                decode.addEventListener("click", () => {
+                    menu.hidden = true;
+                    button.setAttribute("aria-expanded", "false");
+                    revealRawLine(id, item.rawIndex);
+                    _showCrashDecode(item);
+                });
+                entry.append(decode);
+            }
+            menu.append(entry);
         }
         const missing = counts.boot + counts.crash - events.length;
         if (missing > 0 || !events.length) {
@@ -615,7 +645,177 @@ function _setupEventBadge(id) {
     refresh();
 }
 
+// ── Boot filter (one restart-to-restart range) ──
+/** Restarts of one source in a pane, oldest first, with their sequence ranges. */
+function _paneBoots(paneId, sourceId) {
+    const boots = paneEvents(paneId).filter(e => e.event === "boot" && e.sourceId === sourceId && Number.isFinite(e.sequence));
+    return boots.map((boot, i) => ({
+        ...boot,
+        number: i + 1,
+        total: boots.length,
+        toSequence: i + 1 < boots.length ? boots[i + 1].sequence : null,
+    }));
+}
+
+function _applyBootFilter(paneId, sourceId, sequence) {
+    const boot = _paneBoots(paneId, sourceId).find(b => b.sequence === sequence);
+    if (!boot) return;
+    setBootFilter(paneId, {
+        sourceId, fromSequence: boot.sequence, toSequence: boot.toSequence,
+        number: boot.number, total: boot.total, ts: boot.ts,
+    });
+}
+
+function _setupBootChip(id) {
+    const bar = document.querySelector(`#pane-${id} .filter-bar`);
+    if (!bar || bar.querySelector(".boot-chip")) return;
+    const chip = document.createElement("span");
+    chip.className = "boot-chip";
+    chip.hidden = true;
+    chip.innerHTML = '<button type="button" class="boot-prev" aria-label="Previous boot" title="Previous boot">\u2039</button>'
+        + '<span class="boot-label"></span>'
+        + '<button type="button" class="boot-next" aria-label="Next boot" title="Next boot">\u203a</button>'
+        + '<button type="button" class="boot-clear" aria-label="Show all boots" title="Show all boots">\u2715</button>';
+    bar.append(chip);
+    const step = direction => {
+        const filter = bootFilter(id);
+        if (!filter) return;
+        const boots = _paneBoots(id, filter.sourceId);
+        const at = boots.findIndex(b => b.sequence === filter.fromSequence);
+        const next = boots[at + direction];
+        if (next) _applyBootFilter(id, filter.sourceId, next.sequence);
+    };
+    chip.querySelector(".boot-prev").addEventListener("click", () => step(-1));
+    chip.querySelector(".boot-next").addEventListener("click", () => step(1));
+    chip.querySelector(".boot-clear").addEventListener("click", () => setBootFilter(id, null));
+    _bootChips.set(id, () => {
+        const filter = bootFilter(id);
+        chip.hidden = !filter;
+        if (!filter) return;
+        const boots = _paneBoots(id, filter.sourceId);
+        const at = boots.findIndex(b => b.sequence === filter.fromSequence);
+        const merged = _paneEventSources(id).length > 1 ? `${paneLabel(filter.sourceId)} ` : "";
+        chip.querySelector(".boot-label").textContent =
+            `\u27f3 ${merged}boot ${at + 1}/${boots.length} \u00b7 ${filter.ts}${filter.toSequence === null ? " \u2192 now" : ""}`;
+        chip.querySelector(".boot-prev").disabled = at <= 0;
+        chip.querySelector(".boot-next").disabled = at < 0 || at >= boots.length - 1;
+    });
+    _bootChips.get(id)();
+}
+
+const _bootChips = new Map();
+window.__embedLogOnBootFilterChange = paneId => _bootChips.get(paneId)?.();
+
+// ── Crash decoding with the firmware ELF (live server only) ──
+function _canDecode(item) {
+    const session = window.__embedLogSession;
+    return !!(session?.id && Number.isFinite(item.sequence) && session.symbols?.[item.sourceId]);
+}
+
+function _crashDialog() {
+    let dialog = document.getElementById("crash-dialog");
+    if (dialog) return dialog;
+    dialog = document.createElement("dialog");
+    dialog.id = "crash-dialog";
+    dialog.innerHTML = '<div class="crash-head"><span class="crash-title"></span>'
+        + '<button type="button" class="crash-close" aria-label="Close">\u2715</button></div>'
+        + '<div class="crash-meta"></div><div class="crash-body"></div>';
+    dialog.querySelector(".crash-close").addEventListener("click", () => dialog.close());
+    dialog.addEventListener("click", event => { if (event.target === dialog) dialog.close(); });
+    document.body.append(dialog);
+    return dialog;
+}
+
+function _frameLocation(frame) {
+    if (!frame.file) return "??";
+    const file = frame.file.split(/[\\/]/).slice(-2).join("/");
+    return frame.line ? `${file}:${frame.line}` : file;
+}
+
+async function _showCrashDecode(item) {
+    const dialog = _crashDialog();
+    const label = paneLabel(item.sourceId);
+    dialog.querySelector(".crash-title").textContent = `Crash on ${label}`;
+    dialog.querySelector(".crash-meta").textContent = `${item.ts} \u00b7 decoding\u2026`;
+    const body = dialog.querySelector(".crash-body");
+    body.replaceChildren();
+    if (!dialog.open) dialog.showModal();
+    const session = window.__embedLogSession;
+    let report;
+    try {
+        const response = await fetch(`/api/sessions/${encodeURIComponent(session.id)}/crashes/${item.sequence}?source=${encodeURIComponent(item.sourceId)}`, { cache: "no-store" });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result.report) throw new Error(result.error || `HTTP ${response.status}`);
+        report = result.report;
+    } catch (error) {
+        dialog.querySelector(".crash-meta").textContent = `${item.ts} \u00b7 cannot decode: ${error.message}`;
+        return;
+    }
+    dialog.querySelector(".crash-meta").textContent = `${item.ts} \u00b7 record #${report.sequence} \u00b7 ELF ${report.elf}`;
+    const table = document.createElement("table");
+    table.className = "crash-frames";
+    table.innerHTML = "<thead><tr><th>Register</th><th>Address</th><th>Function</th><th>Location</th></tr></thead>";
+    const tbody = document.createElement("tbody");
+    for (const address of report.addresses) {
+        const frames = address.frames.length ? address.frames : [null];
+        frames.forEach((frame, i) => {
+            const tr = document.createElement("tr");
+            if (i > 0) tr.className = "crash-inline-row";
+            const cells = [
+                i === 0 ? address.label : "",
+                i === 0 ? `0x${address.address.toString(16).padStart(8, "0")}` : "",
+                frame ? (frame.function || "??") : "?? (not in this ELF)",
+                frame ? _frameLocation(frame) : "",
+            ];
+            cells.forEach((text, c) => {
+                const td = document.createElement("td");
+                td.textContent = text;
+                if (c === 2 && frame?.inlined) {
+                    const tag = document.createElement("span");
+                    tag.className = "crash-inlined";
+                    tag.textContent = "inlined";
+                    td.append(" ", tag);
+                }
+                if (c === 3 && frame?.file) td.title = frame.file;
+                tr.append(td);
+            });
+            tbody.append(tr);
+        });
+    }
+    table.append(tbody);
+    if (!report.addresses.length) {
+        const note = document.createElement("p");
+        note.className = "crash-note";
+        note.textContent = "No code addresses (pc, lr, call trace) were found in this fault dump.";
+        body.append(note);
+    } else {
+        body.append(table);
+    }
+    const dump = document.createElement("details");
+    dump.className = "crash-dump";
+    const summary = document.createElement("summary");
+    summary.textContent = `Fault dump (${report.lines.length} lines)`;
+    const pre = document.createElement("pre");
+    pre.textContent = report.lines.join("\n");
+    dump.append(summary, pre);
+    body.append(dump);
+}
+
+// A filter on the latest boot ("→ now") ends when the device restarts again.
+function _closeOpenBootFilter(paneId) {
+    const filter = bootFilter(paneId);
+    if (!filter || filter.toSequence !== null) return;
+    const boot = _paneBoots(paneId, filter.sourceId).find(b => b.sequence === filter.fromSequence);
+    if (boot && boot.toSequence !== null) {
+        setBootFilter(paneId, { ...filter, toSequence: boot.toSequence, total: boot.total });
+    }
+}
+
 window.__embedLogRefreshEventBadges = paneId => {
+    for (const id of paneId ? [paneId, ...(window.__embedLogMerges || []).filter(m => m?.of?.includes(paneId)).map(m => m.name)] : _bootChips.keys()) {
+        _closeOpenBootFilter(id);
+        _bootChips.get(id)?.();
+    }
     if (paneId) {
         _eventBadges.get(paneId)?.refresh();
         // A source's events also count in merged panes that include it.
@@ -631,6 +831,7 @@ const FILTER_INPUT_DEBOUNCE_MS = 150;
 
 export function _uiSetupPane(id) {
     _setupEventBadge(id);
+    _setupBootChip(id);
     const input = document.querySelector(`.filter-input[data-pane="${id}"]`);
     if (input && !input.dataset.searchInitialized) {
         input.dataset.searchInitialized = 'true';

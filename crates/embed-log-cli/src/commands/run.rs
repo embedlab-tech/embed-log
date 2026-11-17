@@ -158,6 +158,8 @@ fn quick_run_config(
                 baudrate: (kind == "UART").then_some(baudrate),
                 label: Some(label),
                 levels: None,
+                elf: None,
+                events: None,
             });
         }
     }

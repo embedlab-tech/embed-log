@@ -207,6 +207,10 @@ pub async fn start_server(
         )
         .route("/api/sessions", axum::routing::get(api_sessions_handler))
         .route(
+            "/api/sessions/{session_id}/crashes/{sequence}",
+            axum::routing::get(crate::net::crash::crash_decode_handler),
+        )
+        .route(
             "/api/sessions/{session_id}/history",
             axum::routing::get(crate::net::history::session_history_handler),
         )
@@ -1150,28 +1154,28 @@ pub(crate) mod tests {
     fn event_update_during_connect_snapshot_is_not_lost() {
         let dir = temp_session_dir("events-connect-race");
         let (state, _existing_rx) = test_state(dir.clone());
-        // Hold the snapshot lock so the connecting client pauses exactly at
-        // the boundary where an event used to be lost before subscribing.
-        let mut manager = state.session_manager.as_ref().unwrap().lock().unwrap();
+        let commit = state.commit_lock.lock().unwrap();
         let connecting = state.clone();
-        let worker = std::thread::spawn(move || subscribe_with_events(&connecting));
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        while state.broadcast_tx.receiver_count() < 2 && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
-        let subscribed = state.broadcast_tx.receiver_count() == 2;
+        let worker = std::thread::spawn(move || stream_snapshot(&connecting, None).unwrap());
+        let mut manager = state.session_manager.as_ref().unwrap().lock().unwrap();
         manager.record_event("dut", crate::events::CRASH);
-        let update = manager.source_events_message().to_string();
-        state.broadcast_tx.send(update.clone()).unwrap();
+        state
+            .broadcast_tx
+            .send(manager.source_events_message().to_string())
+            .unwrap();
         drop(manager);
-        let (mut receiver, snapshot) = worker.join().unwrap();
-        assert!(
-            subscribed,
-            "client must subscribe before reading the counters"
-        );
-        let snapshot: serde_json::Value = serde_json::from_str(&snapshot.unwrap()).unwrap();
+        drop(commit);
+        let StreamSnapshot {
+            events,
+            rx: mut receiver,
+            ..
+        } = worker.join().unwrap();
+        let snapshot: serde_json::Value = serde_json::from_str(&events.unwrap()).unwrap();
         assert_eq!(snapshot["counts"]["dut"]["crash"], 1);
-        assert_eq!(receiver.try_recv().unwrap(), update);
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
         // Updates after the snapshot must still be delivered without another connect.
         let mut manager = state.session_manager.as_ref().unwrap().lock().unwrap();
         manager.record_event("dut", crate::events::BOOT);
