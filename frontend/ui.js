@@ -1,5 +1,5 @@
 import { state, TABS, PANES, paneLabel } from './state.js';
-import { rerenderPane, reanalyzePanePlugins, setTimestampMode, canDisplayTimestampMode, hidePluginOverlays, updatePaneSearch, navigatePaneSearch } from './lines.js';
+import { rerenderPane, reanalyzePanePlugins, setTimestampMode, canDisplayTimestampMode, hidePluginOverlays, updatePaneSearch, navigatePaneSearch, paneEvents, revealRawLine } from './lines.js';
 import { PhraseSearch } from './search.js';
 import {
     countLevels, hiddenLevelCount, hiddenLevels, paneLevelDefs, setLevelVisible, showAllLevels,
@@ -472,9 +472,165 @@ window.__embedLogRefreshLevelControls = () => {
     for (const refresh of _levelControlRefreshers.values()) refresh();
 };
 
+// ---------------------------------------------------------------------------
+// Device events: restart / crash counter in the pane header
+// ---------------------------------------------------------------------------
+const EVENT_LABELS = { boot: "Restart", crash: "Crash" };
+const EVENT_ICONS = { boot: "\u27f3", crash: "\u2716" };
+const MAX_LISTED_EVENTS = 300;
+const _eventBadges = new Map(); // paneId -> { refresh, menu }
+
+function _paneEventSources(paneId) {
+    const merge = (window.__embedLogMerges || []).find(m => m && m.name === paneId);
+    return merge && Array.isArray(merge.of) ? merge.of : [paneId];
+}
+
+/**
+ * Session-wide counts from the server in live mode; counted from the loaded
+ * lines in exported reports (which contain the whole session).
+ */
+function _paneEventCounts(paneId) {
+    const server = window.__embedLogSourceEvents;
+    if (server && typeof server === "object") {
+        const counts = { boot: 0, crash: 0 };
+        for (const source of _paneEventSources(paneId)) {
+            counts.boot += Number(server[source]?.boot) || 0;
+            counts.crash += Number(server[source]?.crash) || 0;
+        }
+        return counts;
+    }
+    const counts = { boot: 0, crash: 0 };
+    for (const { event } of paneEvents(paneId)) counts[event]++;
+    return counts;
+}
+
+function _closeEventMenus(except = null) {
+    document.querySelectorAll(".pane-events").forEach(wrap => {
+        if (wrap === except) return;
+        const menu = wrap.querySelector(".events-menu");
+        if (menu && !menu.hidden) {
+            menu.hidden = true;
+            wrap.querySelector(".pane-events-btn")?.setAttribute("aria-expanded", "false");
+        }
+    });
+}
+document.addEventListener("click", event => {
+    _closeEventMenus(event.target.closest?.(".pane-events") || null);
+});
+
+function _setupEventBadge(id) {
+    const header = document.querySelector(`#pane-${id} .pane-header`);
+    if (!header || header.querySelector(".pane-events")) return;
+    const wrap = document.createElement("span");
+    wrap.className = "pane-events";
+    wrap.hidden = true;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "pane-events-btn";
+    button.setAttribute("aria-haspopup", "true");
+    button.setAttribute("aria-expanded", "false");
+    const menu = document.createElement("div");
+    menu.className = "events-menu";
+    menu.hidden = true;
+    menu.setAttribute("role", "menu");
+    menu.setAttribute("aria-label", "Device restarts and crashes");
+    wrap.append(button, menu);
+    (header.querySelector(".pane-stats") || header.firstElementChild)?.after(wrap);
+
+    const renderMenu = () => {
+        const counts = _paneEventCounts(id);
+        const events = paneEvents(id).reverse();
+        menu.replaceChildren();
+        for (const item of events.slice(0, MAX_LISTED_EVENTS)) {
+            const row = document.createElement("button");
+            row.type = "button";
+            row.className = `events-item events-${item.event}`;
+            row.setAttribute("role", "menuitem");
+            const icon = document.createElement("span");
+            icon.className = "events-icon";
+            icon.textContent = EVENT_ICONS[item.event];
+            const label = document.createElement("span");
+            label.className = "events-kind";
+            label.textContent = EVENT_LABELS[item.event];
+            const time = document.createElement("span");
+            time.className = "events-time";
+            time.textContent = item.ts;
+            const text = document.createElement("span");
+            text.className = "events-text";
+            text.textContent = item.text;
+            row.append(icon, label, time, text);
+            row.addEventListener("click", () => {
+                menu.hidden = true;
+                button.setAttribute("aria-expanded", "false");
+                revealRawLine(id, item.rawIndex);
+            });
+            menu.append(row);
+        }
+        const missing = counts.boot + counts.crash - events.length;
+        if (missing > 0 || !events.length) {
+            const note = document.createElement("div");
+            note.className = "events-note";
+            note.textContent = missing > 0
+                ? `${missing} earlier event${missing === 1 ? " is" : "s are"} older than the loaded lines`
+                : "No events in the loaded lines";
+            menu.append(note);
+        }
+    };
+    const refresh = () => {
+        const counts = _paneEventCounts(id);
+        wrap.hidden = counts.boot + counts.crash === 0;
+        button.classList.toggle("has-crash", counts.crash > 0);
+        button.replaceChildren();
+        for (const event of ["boot", "crash"]) {
+            if (!counts[event]) continue;
+            const part = document.createElement("span");
+            part.className = `ev-${event}`;
+            part.textContent = `${EVENT_ICONS[event]} ${counts[event].toLocaleString("en-US")}`;
+            button.append(part);
+        }
+        const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+        button.title = `${plural(counts.boot, "restart", "restarts")}, ${plural(counts.crash, "crash", "crashes")}`
+            + " detected in this session. Click to list them.";
+        if (!menu.hidden) renderMenu();
+    };
+    button.addEventListener("click", () => {
+        if (menu.hidden) {
+            renderMenu();
+            menu.hidden = false;
+            button.setAttribute("aria-expanded", "true");
+            menu.querySelector("button")?.focus();
+        } else {
+            menu.hidden = true;
+            button.setAttribute("aria-expanded", "false");
+        }
+    });
+    menu.addEventListener("keydown", event => {
+        if (event.key !== "Escape") return;
+        event.stopPropagation();
+        menu.hidden = true;
+        button.setAttribute("aria-expanded", "false");
+        button.focus();
+    });
+    _eventBadges.set(id, { refresh });
+    refresh();
+}
+
+window.__embedLogRefreshEventBadges = paneId => {
+    if (paneId) {
+        _eventBadges.get(paneId)?.refresh();
+        // A source's events also count in merged panes that include it.
+        for (const merge of window.__embedLogMerges || []) {
+            if (merge?.of?.includes(paneId)) _eventBadges.get(merge.name)?.refresh();
+        }
+        return;
+    }
+    for (const badge of _eventBadges.values()) badge.refresh();
+};
+
 const FILTER_INPUT_DEBOUNCE_MS = 150;
 
 export function _uiSetupPane(id) {
+    _setupEventBadge(id);
     const input = document.querySelector(`.filter-input[data-pane="${id}"]`);
     if (input && !input.dataset.searchInitialized) {
         input.dataset.searchInitialized = 'true';

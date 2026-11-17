@@ -3,12 +3,12 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
+use axum::Router;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{Path as AxumPath, Query, State, WebSocketUpgrade};
-use axum::http::{header, StatusCode};
+use axum::http::{StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::Router;
 use futures::StreamExt;
 use serde::Deserialize;
 use tokio::sync::{broadcast, mpsc};
@@ -16,7 +16,7 @@ use tower_http::services::ServeDir;
 use tracing::{info, warn};
 
 use crate::frontend_assets::FrontendAssets;
-use crate::net::control_ws::{control_ws_handler, SourceInfo};
+use crate::net::control_ws::{SourceInfo, control_ws_handler};
 use crate::session::SessionManager;
 use crate::sources::TxCommand;
 
@@ -293,6 +293,7 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<ServerState>) -> i
 struct StreamSnapshot {
     session_id: String,
     config: String,
+    events: Option<String>,
     replay: Vec<String>,
     rx: broadcast::Receiver<String>,
 }
@@ -312,10 +313,17 @@ fn stream_snapshot(state: &ServerState, unless_session: Option<&str>) -> Option<
     if unless_session == Some(session_id.as_str()) {
         return None;
     }
-    // Replay and the live receiver share one commit boundary, so they never overlap.
+    // Events, replay and the live receiver share one writer boundary.
+    let events = state.session_manager.as_ref().and_then(|manager| {
+        let manager = manager.lock().ok()?;
+        manager
+            .has_events()
+            .then(|| manager.source_events_message().to_string())
+    });
     Some(StreamSnapshot {
         session_id,
         config,
+        events,
         replay: drain_replay(&state.replay),
         rx: state.broadcast_tx.subscribe(),
     })
@@ -324,9 +332,10 @@ fn stream_snapshot(state: &ServerState, unless_session: Option<&str>) -> Option<
 async fn send_stream_snapshot(
     socket: &mut WebSocket,
     config: String,
+    events: Option<String>,
     replay: Vec<String>,
 ) -> Result<(), axum::Error> {
-    for message in std::iter::once(config).chain(replay) {
+    for message in std::iter::once(config).chain(events).chain(replay) {
         socket.send(Message::Text(message.into())).await?;
     }
     Ok(())
@@ -341,10 +350,11 @@ async fn handle_ws_client(mut socket: WebSocket, state: ServerState) {
     let StreamSnapshot {
         mut session_id,
         config,
+        events,
         replay,
         mut rx,
     } = stream_snapshot(&state, None).unwrap();
-    if send_stream_snapshot(&mut socket, config, replay)
+    if send_stream_snapshot(&mut socket, config, events, replay)
         .await
         .is_err()
     {
@@ -371,7 +381,7 @@ async fn handle_ws_client(mut socket: WebSocket, state: ServerState) {
                         if let Some(snapshot) = stream_snapshot(&state, Some(&session_id)) {
                             session_id = snapshot.session_id;
                             rx = snapshot.rx;
-                            if send_stream_snapshot(&mut socket, snapshot.config, snapshot.replay)
+                            if send_stream_snapshot(&mut socket, snapshot.config, snapshot.events, snapshot.replay)
                                 .await.is_err() {
                                 break;
                             }
@@ -827,7 +837,7 @@ async fn api_marker_handler(
                 StatusCode::SERVICE_UNAVAILABLE,
                 axum::Json(serde_json::json!({"ok": false, "error": "session lock unavailable"})),
             )
-                .into_response()
+                .into_response();
         }
     };
     let mut markers = manager.load_markers();
@@ -977,7 +987,7 @@ async fn session_file_handler(
     let canonical_root = match std::fs::canonicalize(&state.logs_root) {
         Ok(p) => p,
         Err(_) => {
-            return (StatusCode::INTERNAL_SERVER_ERROR, "bad root".to_string()).into_response()
+            return (StatusCode::INTERNAL_SERVER_ERROR, "bad root".to_string()).into_response();
         }
     };
     let canonical_file = match std::fs::canonicalize(&file_path) {
@@ -1134,6 +1144,42 @@ pub(crate) mod tests {
             control_api: true,
         };
         (state, rx)
+    }
+
+    #[test]
+    fn event_update_during_connect_snapshot_is_not_lost() {
+        let dir = temp_session_dir("events-connect-race");
+        let (state, _existing_rx) = test_state(dir.clone());
+        // Hold the snapshot lock so the connecting client pauses exactly at
+        // the boundary where an event used to be lost before subscribing.
+        let mut manager = state.session_manager.as_ref().unwrap().lock().unwrap();
+        let connecting = state.clone();
+        let worker = std::thread::spawn(move || subscribe_with_events(&connecting));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while state.broadcast_tx.receiver_count() < 2 && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        let subscribed = state.broadcast_tx.receiver_count() == 2;
+        manager.record_event("dut", crate::events::CRASH);
+        let update = manager.source_events_message().to_string();
+        state.broadcast_tx.send(update.clone()).unwrap();
+        drop(manager);
+        let (mut receiver, snapshot) = worker.join().unwrap();
+        assert!(
+            subscribed,
+            "client must subscribe before reading the counters"
+        );
+        let snapshot: serde_json::Value = serde_json::from_str(&snapshot.unwrap()).unwrap();
+        assert_eq!(snapshot["counts"]["dut"]["crash"], 1);
+        assert_eq!(receiver.try_recv().unwrap(), update);
+        // Updates after the snapshot must still be delivered without another connect.
+        let mut manager = state.session_manager.as_ref().unwrap().lock().unwrap();
+        manager.record_event("dut", crate::events::BOOT);
+        let later = manager.source_events_message().to_string();
+        state.broadcast_tx.send(later.clone()).unwrap();
+        assert_eq!(receiver.try_recv().unwrap(), later);
+        drop(manager);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[tokio::test]

@@ -378,6 +378,17 @@ Regexes use Rust [`regex`](https://docs.rs/regex/latest/regex/#syntax) syntax: n
 
 Records injected through the control API keep an explicit `level` from their metadata. HTML exports embed the level definitions, so the Levels button works offline; sessions recorded by older versions fall back to Zephyr tag detection in the browser.
 
+## Restarts and crashes
+
+Embed-log detects device restarts and crashes in received console lines. Each pane header shows a counter such as **⟳ 2 ✖ 1** once something was detected; clicking it lists the events (newest first) and jumps to the line. Restart lines get a separator above them and crash lines a red marker. A merged pane adds up its sources. In live sessions the counts cover the whole session, including events older than the lines loaded in the browser; HTML reports count the lines they contain.
+
+| Event | Detected from |
+| --- | --- |
+| Restart | Boot banners: `*** Booting Zephyr OS …`, `*** Booting nRF Connect SDK …`, `*** Booting MCUboot …` |
+| Crash | `>>> ZEPHYR FATAL ERROR`, `ASSERTION FAIL`, Cortex-M fault banners (`***** HARD FAULT *****`, `***** MPU FAULT *****`, …), `Fatal fault in ISR/thread`, `Kernel panic` / `Kernel oops` |
+
+Lines of the same kind less than 5 seconds apart are one event, so a single fault dump counts as one crash and a reset through MCUboot (two banners) as one restart. A restart ends a crash. TX lines are never events. Detection runs on the server; the record keeps `"event": "boot"` or `"crash"` in `combined.jsonl` and in HTML exports.
+
 ## Version 1 migration
 
 | Version 1 | Version 2 |

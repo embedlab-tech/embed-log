@@ -38,6 +38,8 @@ pub struct SessionManager {
     next_sequence: u64,
     merges: serde_json::Value,
     source_levels: serde_json::Value,
+    /// Boots and crashes detected per source in this session.
+    event_counts: std::collections::BTreeMap<String, crate::events::EventCounts>,
 }
 
 impl SessionManager {
@@ -88,7 +90,32 @@ impl SessionManager {
             next_sequence: 1,
             merges,
             source_levels: serde_json::Value::Null,
+            event_counts: std::collections::BTreeMap::new(),
         }
+    }
+
+    /// Count a detected `crate::events` event of `source`.
+    pub fn record_event(&mut self, source: &str, event: &str) {
+        let counts = self.event_counts.entry(source.to_string()).or_default();
+        match event {
+            crate::events::BOOT => counts.boot += 1,
+            crate::events::CRASH => counts.crash += 1,
+            _ => {}
+        }
+    }
+
+    /// `source_events` WebSocket message with this session's event counts.
+    pub fn source_events_message(&self) -> serde_json::Value {
+        json!({
+            "type": "source_events",
+            "session_id": self.session_id,
+            "counts": self.event_counts,
+        })
+    }
+
+    /// Whether any boot or crash was detected in this session.
+    pub fn has_events(&self) -> bool {
+        !self.event_counts.is_empty()
     }
 
     /// Level profile summaries per source (`levels::source_levels_json`), kept

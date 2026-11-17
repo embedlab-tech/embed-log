@@ -92,7 +92,8 @@ window.__embedLogLoadSearchHistory = function (paneId) {
                     lineIdx: record.line_idx, absTs: record.absTs, absNum: record.absNum,
                     relTs: record.relTs, relNum: record.relNum,
                     timestampIso: record.timestamp_iso, numTs: record.timestamp_num,
-                    ...(typeof record.level === 'string' ? { level: record.level } : {}) }]);
+                    ...(typeof record.level === 'string' ? { level: record.level } : {}),
+                    ...(typeof record.event === 'string' ? { event: record.event } : {}) }]);
         }
         prependPaneHistory(paneId, rows);
         searchHistoryLoaded.add(paneId);
@@ -339,6 +340,9 @@ function wsConnect() {
     ws.addEventListener("open", () => {
         // UX policy: never show stale in-memory lines after reconnect/open.
         clearAllPaneContents();
+        // Live mode: counts come from the server.
+        window.__embedLogSourceEvents = {};
+        window.__embedLogRefreshEventBadges?.();
         wsSetStatus("connected", "connected");
         wsRetryDelay = 1000;
     });
@@ -371,6 +375,8 @@ function wsConnect() {
             const sessionId = msg.session?.id;
             if (sessionId && sessionId !== currentSessionId) hideStreamGap();
             currentSessionId = sessionId || currentSessionId;
+            window.__embedLogSourceEvents = {};
+            window.__embedLogRefreshEventBadges?.();
             state.syncTs = null;
             state.syncTabSwitch = false;
             clearAllPaneContents();
@@ -417,10 +423,19 @@ function wsConnect() {
             return;
         }
 
+        // Session-wide boot/crash counts per source (sent on connect and on change).
+        if (msg.type === "source_events") {
+            if (!msg.session_id || msg.session_id === currentSessionId) {
+                window.__embedLogSourceEvents = msg.counts && typeof msg.counts === "object" ? msg.counts : {};
+                window.__embedLogRefreshEventBadges?.();
+            }
+            return;
+        }
+
         if (msg.type !== "rx" && msg.type !== "tx") return;
 
         const { type, data, timestamp, timestamp_iso, timestamp_num, source_id,
-                absTs, absNum, relTs, relNum, line_idx, sequence, session_id, level } = msg;
+                absTs, absNum, relTs, relNum, line_idx, sequence, session_id, level, event } = msg;
         if (!source_id) return;
 
         const destinations = [];
@@ -446,6 +461,7 @@ function wsConnect() {
             lineIdx: line_idx,
             sessionId: session_id || currentSessionId,
             ...(hasMerge ? { originalBytes: messageEncoder.encode(text).length } : {}),
+            ...(typeof event === "string" && event ? { event } : {}),
             ...(Number.isFinite(sequence) ? { sequence } : { recordOrdinal: nextRecordOrdinal++ }),
             ...(typeof level === "string" && level ? { level } : {}),
         };
