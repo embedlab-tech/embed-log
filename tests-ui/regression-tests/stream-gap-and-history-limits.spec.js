@@ -53,7 +53,7 @@ test('highlight marks results incomplete when a journal record is inside a live 
   const session = 'interior-gap';
   const rows = [1, 2, 3].map(i => record(session, i, `needle ${i}`));
   let socket;
-  await page.route(`**/sessions/${session}/combined.jsonl`, route => route.fulfill({
+  await page.route(`**/api/sessions/${session}/history*`, route => route.fulfill({
     body: rows.map(row => JSON.stringify(row) + '\n').join(''),
   }));
   await page.routeWebSocket('**/ws', ws => {
@@ -90,29 +90,36 @@ test('pane byte statistics count UTF-8 bytes without encoding', async ({ page })
   for (const [got, expected] of result) expect(got).toBe(expected);
 });
 
-for (const [name, body, length, message] of [
-  ['a too large', 'x', String(0x1fffffe8 + 1), /too large to load in the browser \(512 MB\)/],
-  ['an unreadable', '', '4096', /could not be read in the browser/],
-  ['an unreadable lengthless', '', null, /could not be read in the browser/],
-]) {
-  test(`highlight reports ${name} session history instead of showing partial counts`, async ({ page }) => {
-    await page.addInitScript(([body, length]) => {
-      const original = window.fetch;
-      window.fetch = (input, init) => String(input).includes('/combined.jsonl')
-        ? Promise.resolve(new Response(body, { status: 200, headers: length === null ? {} : { 'content-length': length } }))
-        : original(input, init);
-    }, [body, length]);
-    await page.routeWebSocket('**/ws', ws => {
-      ws.send(JSON.stringify(config('limits')));
-      ws.send(JSON.stringify(record('limits', 10, 'needle in replay')));
-    });
-    await page.goto('/');
-    await expect(page.locator('#log-A .log-line')).toHaveCount(1);
-    await page.locator('#pane-A .search-mode').click();
-    await page.locator('.filter-input[data-pane="A"]').fill('needle');
-    await page.locator('.filter-input[data-pane="A"]').press('Enter');
-    const counter = page.locator('#pane-A .search-count');
-    await expect(counter).toHaveText('History unavailable');
-    await expect(counter).toHaveAttribute('title', message);
+test('highlight loads history for the pane sources before the replay and reports failures', async ({ page }) => {
+  const requests = [];
+  let fail = true;
+  await page.route('**/api/sessions/limits/history*', route => {
+    requests.push(new URL(route.request().url()));
+    if (fail) return route.fulfill({ status: 500, body: 'boom' });
+    const rows = [record('limits', 3, 'needle old'), record('limits', 9, 'needle older')].map(row => JSON.stringify(row));
+    // The last line has no newline yet: a record still being written is ignored.
+    return route.fulfill({ contentType: 'application/x-ndjson', body: rows.join('\n') + '\n{"partial' });
   });
-}
+  await page.routeWebSocket('**/ws', ws => {
+    ws.send(JSON.stringify(config('limits')));
+    ws.send(JSON.stringify(record('limits', 10, 'needle in replay')));
+  });
+  await page.goto('/');
+  await expect(page.locator('#log-A .log-line')).toHaveCount(1);
+  await page.locator('#pane-A .search-mode').click();
+  const input = page.locator('.filter-input[data-pane="A"]');
+  await input.fill('needle');
+  await input.press('Enter');
+  const counter = page.locator('#pane-A .search-count');
+  await expect(counter).toHaveText('History unavailable');
+  await expect(counter).toHaveAttribute('title', /HTTP 500/);
+  expect(requests[0].searchParams.get('sources')).toBe('A');
+  expect(requests[0].searchParams.get('before')).toBe('10');
+
+  // Turning Highlight off and on retries.
+  fail = false;
+  await page.locator('#pane-A .search-mode').click();
+  await page.locator('#pane-A .search-mode').click();
+  await expect(counter).toHaveText('0 / 3');
+  await expect.poll(() => page.evaluate(async () => (await import('/state.js')).state.rawLines.A.length)).toBe(3);
+});

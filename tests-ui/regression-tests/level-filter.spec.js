@@ -25,7 +25,7 @@ const zephyrSources = {
 };
 
 async function serve(page, session, rows, extra = {}) {
-  await page.route(`**/sessions/${session}/combined.jsonl`, route => route.fulfill({
+  await page.route(`**/api/sessions/${session}/history*`, route => route.fulfill({
     contentType: 'application/x-ndjson', body: rows.map(JSON.stringify).join('\n') + '\n',
   }));
   await page.routeWebSocket('**/ws', ws => {

@@ -25,8 +25,34 @@ let nextRecordOrdinal = 0;
 const messageEncoder = new TextEncoder();
 
 // Replay is bounded; explicitly requested full-session search must also read older records.
-// V8's maximum string length (0x1fffffe8 UTF-16 units).
-const MAX_HISTORY_CHARS = 0x1fffffe8;
+// The server streams only this pane's sources from the session journal
+// (GET /api/sessions/{id}/history), so history size is not limited by the
+// browser's maximum string length.
+
+/** Newline-delimited JSON from a streamed response, one parsed value per line. */
+async function* readJsonLines(response) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffered = '';
+    for (;;) {
+        const { value, done } = await reader.read();
+        buffered += done ? decoder.decode() : decoder.decode(value, { stream: true });
+        let newline;
+        while ((newline = buffered.indexOf('\n')) >= 0) {
+            const line = buffered.slice(0, newline);
+            buffered = buffered.slice(newline + 1);
+            if (line) yield JSON.parse(line);
+        }
+        if (done) return; // a trailing line without newline is incomplete
+    }
+}
+
+function paneHistoryCutoff(paneId) {
+    const first = (state.rawLines[paneId] || [])[0];
+    const firstMeta = Array.isArray(first) ? first[3] : first;
+    if (first && !Number.isFinite(firstMeta?.sequence)) throw new Error('Replay has no sequence metadata; clear this pane and retry');
+    return first ? firstMeta.sequence : Infinity;
+}
 
 window.__embedLogLoadSearchHistory = function (paneId) {
     if (searchHistoryLoaded.has(paneId)) return Promise.resolve();
@@ -35,32 +61,25 @@ window.__embedLogLoadSearchHistory = function (paneId) {
     const generation = searchHistoryGeneration;
     const request = (async () => {
         if (!sessionId) throw new Error('Session metadata is unavailable');
-        const response = await fetch(`/sessions/${encodeURIComponent(sessionId)}/combined.jsonl`, { cache: 'no-store' });
-        if (!response.ok) throw new Error(`Cannot load full session history (HTTP ${response.status})`);
-        // shortcut: history is loaded in memory; use paged reads if sessions outgrow browser memory.
-        // Browsers cap a string at about 512 MiB; Chromium then resolves text()
-        // to "" instead of failing, which would look like a session without history.
-        const contentLength = response.headers.get('content-length');
-        const length = Number(contentLength);
-        if (length > MAX_HISTORY_CHARS) {
-            response.body?.cancel().catch(() => {});
-            throw new Error(`Session history is too large to load in the browser (${Math.round(length / 1048576)} MB)`);
-        }
-        const text = await response.text();
-        if (!text && contentLength !== '0') throw new Error('Session history could not be read in the browser');
-        if (generation !== searchHistoryGeneration || sessionId !== currentSessionId || !state.searches[paneId]) return;
-        const current = state.rawLines[paneId] || [];
-        const first = current[0];
-        const firstMeta = Array.isArray(first) ? first[3] : first;
-        if (first && !Number.isFinite(firstMeta?.sequence)) throw new Error('Replay has no sequence metadata; clear this pane and retry');
-        const cutoff = first ? firstMeta.sequence : Infinity;
         const merge = virtualMerges.find(item => item.name === paneId);
         const sources = merge ? merge.of : [paneId];
+        const params = new URLSearchParams({ sources: sources.join(',') });
+        const requestedCutoff = paneHistoryCutoff(paneId);
+        if (Number.isFinite(requestedCutoff)) params.set('before', String(requestedCutoff));
+        const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/history?${params}`, { cache: 'no-store' });
+        if (!response.ok || !response.body) throw new Error(`Cannot load full session history (HTTP ${response.status})`);
+        const records = [];
+        for await (const record of readJsonLines(response)) {
+            if (generation !== searchHistoryGeneration || sessionId !== currentSessionId || !state.searches[paneId]) {
+                response.body.cancel().catch(() => {});
+                return;
+            }
+            records.push(record);
+        }
+        if (generation !== searchHistoryGeneration || sessionId !== currentSessionId || !state.searches[paneId]) return;
+        const cutoff = paneHistoryCutoff(paneId);
         const rows = [];
-        const complete = text.slice(0, text.lastIndexOf('\n') + 1);
-        for (const line of complete.split('\n')) {
-            if (!line) continue;
-            const record = JSON.parse(line);
+        for (const record of records) {
             if (record.source_kind === 'merge' || !sources.includes(record.source_id)) continue;
             if (!Number.isFinite(record.sequence) || typeof record.message !== 'string') throw new Error('Invalid session history record');
             if (record.sequence >= cutoff) continue;

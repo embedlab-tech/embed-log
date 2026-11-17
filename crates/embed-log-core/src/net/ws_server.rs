@@ -206,6 +206,10 @@ pub async fn start_server(
             axum::routing::post(api_rotate_handler),
         )
         .route("/api/sessions", axum::routing::get(api_sessions_handler))
+        .route(
+            "/api/sessions/{session_id}/history",
+            axum::routing::get(crate::net::history::session_history_handler),
+        )
         .route("/api/stats", axum::routing::get(api_stats_handler))
         .route(
             "/sessions/{session_id}/{filename}",
@@ -1031,7 +1035,7 @@ pub fn drain_replay(replay: &Arc<Mutex<VecDeque<String>>>) -> Vec<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::collections::HashMap;
 
@@ -1105,7 +1109,7 @@ mod tests {
         )))
     }
 
-    fn test_state(dir: PathBuf) -> (ServerState, broadcast::Receiver<String>) {
+    pub(crate) fn test_state(dir: PathBuf) -> (ServerState, broadcast::Receiver<String>) {
         let (broadcast_tx, rx) = broadcast::channel::<String>(16);
         let manager = test_manager(dir.clone());
         let state = ServerState {
