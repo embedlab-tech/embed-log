@@ -900,16 +900,32 @@ function _updatePaneStats(paneId) {
         : "";
 }
 
+// The toolbar total counts each received line once. A merged pane repeats
+// the lines of its member sources, so its rows only count when the member is
+// not shown in a pane of its own.
+const _paneTotals = new Map(); // paneId -> { lines, bytes } that count toward the toolbar
+
+function _mergePaneIds() {
+    return new Set((window.__embedLogMerges || []).map(merge => merge && merge.name).filter(Boolean));
+}
+
 function _updateToolbarStats() {
     const el = document.getElementById("toolbar-stats");
     if (!el) return;
+    const merges = _mergePaneIds();
     let totalLines = 0;
     let totalBytes = 0;
     for (const paneId of PANES) {
         const lines = state.rawLines[paneId];
         if (!lines) continue;
-        totalLines += lines.length;
-        totalBytes += _paneBytes.get(paneId) || 0;
+        const counted = _paneTotals.get(paneId);
+        if (counted) {
+            totalLines += counted.lines;
+            totalBytes += counted.bytes;
+        } else if (!merges.has(paneId)) {
+            totalLines += lines.length;
+            totalBytes += _paneBytes.get(paneId) || 0;
+        }
     }
     el.textContent = totalLines
         ? `· ${_formatStatsText(totalLines, totalBytes)}`
@@ -918,16 +934,27 @@ function _updateToolbarStats() {
 
 function _recordPaneBytes(paneId, newLines) {
     if (!newLines || newLines.length === 0) return;
+    const isMerge = _mergePaneIds().has(paneId);
+    const shown = isMerge ? new Set(PANES) : null;
+    const totals = _paneTotals.get(paneId) || { lines: 0, bytes: 0 };
     let delta = 0;
     for (const line of newLines) {
         // state.rawLines entries are [ts, rawText, isTx, meta]
-        delta += _byteSize(line && line[1]);
+        const bytes = _byteSize(line && line[1]);
+        delta += bytes;
+        const sourceId = line && line[3] && line[3].sourceId;
+        if (!isMerge || !sourceId || !shown.has(sourceId)) {
+            totals.lines += 1;
+            totals.bytes += bytes;
+        }
     }
     _paneBytes.set(paneId, (_paneBytes.get(paneId) || 0) + delta);
+    _paneTotals.set(paneId, totals);
 }
 
 function _resetPaneStats(paneId) {
     _paneBytes.set(paneId, 0);
+    _paneTotals.set(paneId, { lines: 0, bytes: 0 });
     _updatePaneStats(paneId);
 }
 

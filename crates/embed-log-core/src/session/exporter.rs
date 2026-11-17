@@ -692,7 +692,7 @@ fn render_toolbar() -> String {
         "<div id=\"toolbar\">",
         "    <div class=\"toolbar-group toolbar-left\">",
         "        <span class=\"app-name\">embed-log</span>",
-        "        <button id=\"btn-unwrap\" title=\"Unwrap multi-pane tabs into single-pane tabs\">Unwrap</button>",
+        "        <button id=\"btn-unwrap\" title=\"Show every pane of multi-pane tabs as a separate tab\" aria-pressed=\"false\">Split tabs</button>",
         "        <button id=\"btn-timestamp-mode\" title=\"Switch timestamps\">Absolute</button>",
         "        <div class=\"sep\"></div>",
         "        <button id=\"btn-theme\" title=\"Toggle light / dark theme\">&#x1F319;</button>",

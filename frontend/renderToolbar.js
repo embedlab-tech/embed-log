@@ -6,7 +6,7 @@
 const ACTIONS = [
     { id: 'btn-clear',         label: 'Clear',        title: 'Clear the current view without deleting the saved session',       cap: 'clearView' },
     { id: 'btn-export',        label: 'Export HTML',  title: 'Export current session as a self-contained HTML file',          cap: 'exportHtml' },
-    { id: 'btn-unwrap',        label: 'Unwrap',       title: 'Unwrap multi-pane tabs into single-pane tabs',                  cap: 'unwrap' },
+    { id: 'btn-unwrap',        label: 'Split tabs',   title: 'Show every pane of multi-pane tabs as a separate tab',          cap: 'unwrap' },
     { id: 'btn-timestamp-mode', label: 'Absolute',    title: 'Switch timestamps' },
     '__sep__',
     { id: 'btn-theme',         label: '\u{1F319}',    title: 'Toggle light / dark theme',                                    cap: 'themeToggle' },

@@ -30,10 +30,10 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
     const btn = document.getElementById("btn-unwrap");
     if (btn) {
         btn.classList.toggle("active", state.unwrap);
-        btn.textContent = state.unwrap ? "Wrap" : "Unwrap";
+        btn.setAttribute("aria-pressed", String(state.unwrap));
         btn.title = state.unwrap
-            ? "Wrap single-pane tabs back into tab groups"
-            : "Unwrap multi-pane tabs into single-pane tabs";
+            ? "Panes are shown as separate tabs. Click to group them back into their tabs"
+            : "Show every pane of multi-pane tabs as a separate tab";
     }
     rebuildLayout(wasUnwrapped);
 });
