@@ -553,20 +553,27 @@ function _getNumTs(entry, paneId = null, idx = -1) {
     return entry.numTs;
 }
 
+// Bumped when something a regex filter matches against changes for existing
+// rows (displayed timestamp, plugin filter text), so filtered projections are
+// rebuilt instead of only extended.
+let _projectionEpoch = 0;
+
 function _getVisibleIndices(paneId, vp) {
     const lines = state.rawLines[paneId] || [];
     const rx = state.filters[paneId] || null;
     const levelVersion = levelFilterVersion(paneId);
     const sameProjection = vp.projectionRows === lines && vp.projectionFilter === rx
-        && vp.projectionLevel === levelVersion && Array.isArray(vp.visibleIndices);
+        && vp.projectionLevel === levelVersion && vp.projectionEpoch === _projectionEpoch
+        && Array.isArray(vp.visibleIndices);
     // Preserve raw rows/indices for export, selection and debugging, but don't
     // allocate visual rows for terminal text erased before the next record or
     // for levels hidden in this pane. Extend the projection on append instead
-    // of rescanning the entire session (the level filter is on by default).
-    if (rx && sameProjection && vp.projectionSourceLen === lines.length) {
+    // of rescanning the entire session, with or without a regex filter: a row's
+    // visibility depends only on the row itself.
+    if (sameProjection && vp.projectionSourceLen === lines.length) {
         return vp.visibleIndices;
     }
-    const extend = !rx && sameProjection && vp.projectionSourceLen <= lines.length;
+    const extend = sameProjection && vp.projectionSourceLen <= lines.length;
     const indices = extend ? vp.visibleIndices : [];
     const levelVisible = levelPredicate(paneId);
     for (let rawIndex = extend ? vp.projectionSourceLen : 0; rawIndex < lines.length; rawIndex++) {
@@ -586,6 +593,7 @@ function _getVisibleIndices(paneId, vp) {
     vp.projectionRows = lines;
     vp.projectionFilter = rx;
     vp.projectionLevel = levelVersion;
+    vp.projectionEpoch = _projectionEpoch;
     vp.projectionSourceLen = lines.length;
     return indices;
 }
@@ -1087,6 +1095,7 @@ export function reanalyzePanePlugins(paneId) {
     lines.forEach(entry => {
         if (!_isRawTuple(entry)) analyzeLinePlugins(paneId, entry);
     });
+    _projectionEpoch++;
     rerenderPane(paneId);
 }
 export function setTimestampMode(mode) {
@@ -1097,6 +1106,7 @@ export function setTimestampMode(mode) {
     state.showTs = nextMode !== "hidden";
     state.syncTs = null;
     state.syncTabSwitch = false;
+    _projectionEpoch++;
 
     PANES.forEach(paneId => {
         const lines = state.rawLines[paneId] || [];
