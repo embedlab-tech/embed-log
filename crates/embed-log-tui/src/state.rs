@@ -23,6 +23,9 @@ use crate::protocol::{ConfigMessage, LogPayload, Marker, SessionInfo};
 /// but a terminal viewer rarely needs more than this in memory; older lines are
 /// dropped (the on-disk session log retains everything).
 const MAX_LINES_PER_PANE: usize = 100_000;
+/// A full pane may grow this far past the cap before old lines are dropped,
+/// so the front of the `Vec` is shifted once per batch, not once per line.
+const TRIM_SLACK: usize = MAX_LINES_PER_PANE / 10;
 
 /// A stored log line (the post-parse, pre-render form).
 ///
@@ -249,12 +252,43 @@ impl State {
     }
 
     /// Append a log line to its pane, enforcing the per-pane cap.
+    ///
+    /// Old lines are dropped in batches of `TRIM_SLACK` (amortised O(1) per
+    /// line); dropping one line per append moved the whole buffer every time.
+    /// Positional state of the pane (scroll offset, selection, visual anchor)
+    /// is shifted so it keeps pointing at the same lines.
     pub fn append_line(&mut self, pane_id: &str, line: StoredLine) {
         let v = self.raw_lines.entry(pane_id.to_string()).or_default();
         v.push(line);
-        if v.len() > MAX_LINES_PER_PANE {
-            let drop = v.len() - MAX_LINES_PER_PANE;
-            v.drain(..drop);
+        if v.len() <= MAX_LINES_PER_PANE + TRIM_SLACK {
+            return;
+        }
+        let drop = v.len() - MAX_LINES_PER_PANE;
+        v.drain(..drop);
+        self.shift_pane_positions(pane_id, drop);
+    }
+
+    /// Move positional per-pane state back by `drop` lines after the oldest
+    /// `drop` lines were removed.
+    fn shift_pane_positions(&mut self, pane_id: &str, drop: usize) {
+        let following = self.at_bottom.get(pane_id).copied().unwrap_or(true);
+        if !following {
+            if let Some(scroll) = self.scroll.get_mut(pane_id) {
+                *scroll = scroll.saturating_sub(drop);
+            }
+        }
+        let drop = drop as u64;
+        if let Some(selected) = self.selected.get_mut(pane_id) {
+            *selected = selected
+                .iter()
+                .filter(|&&idx| idx >= drop)
+                .map(|&idx| idx - drop)
+                .collect();
+        }
+        if self.active_pane_id().as_deref() == Some(pane_id) {
+            self.visual_anchor = self
+                .visual_anchor
+                .and_then(|anchor| anchor.checked_sub(drop));
         }
     }
 
@@ -831,7 +865,8 @@ mod tests {
     fn append_line_caps_per_pane() {
         let mut s = State::default();
         s.apply_config(&cfg_with(vec![("T", vec!["DUT"])]));
-        for i in 0..(MAX_LINES_PER_PANE + 50) {
+        let total = MAX_LINES_PER_PANE + TRIM_SLACK + 1;
+        for i in 0..total {
             s.append_line(
                 "DUT",
                 StoredLine {
@@ -840,12 +875,75 @@ mod tests {
                     ..Default::default()
                 },
             );
+            assert!(s.raw_lines["DUT"].len() <= MAX_LINES_PER_PANE + TRIM_SLACK);
         }
         let v = s.raw_lines.get("DUT").unwrap();
         assert_eq!(v.len(), MAX_LINES_PER_PANE);
         // Oldest dropped; newest retained.
-        assert_eq!(v.first().unwrap().line_idx, 50);
-        assert_eq!(v.last().unwrap().line_idx, (MAX_LINES_PER_PANE + 49) as u64);
+        assert_eq!(v.first().unwrap().line_idx, (TRIM_SLACK + 1) as u64);
+        assert_eq!(v.last().unwrap().line_idx, (total - 1) as u64);
+    }
+
+    #[test]
+    fn trimming_a_full_pane_keeps_scroll_and_selection_on_the_same_lines() {
+        let mut s = State::default();
+        s.apply_config(&cfg_with(vec![("T", vec!["DUT"])]));
+        let line = |i: usize| StoredLine {
+            line_idx: i as u64,
+            ..Default::default()
+        };
+        for i in 0..MAX_LINES_PER_PANE + TRIM_SLACK {
+            s.append_line("DUT", line(i));
+        }
+        // Reading (not following) around raw line 50_000, two lines selected.
+        s.scroll.insert("DUT".into(), 50_000);
+        s.at_bottom.insert("DUT".into(), false);
+        s.selected
+            .insert("DUT".into(), [10, 50_000, 50_001].into_iter().collect());
+        s.visual_anchor = Some(50_000);
+
+        s.append_line("DUT", line(MAX_LINES_PER_PANE + TRIM_SLACK)); // triggers a trim
+        let dropped = TRIM_SLACK + 1;
+        let lines = &s.raw_lines["DUT"];
+        assert_eq!(s.scroll_of("DUT"), 50_000 - dropped);
+        assert_eq!(lines[s.scroll_of("DUT")].line_idx, 50_000);
+        let selected: Vec<u64> = s.selected["DUT"].iter().copied().collect();
+        assert_eq!(
+            selected,
+            vec![(50_000 - dropped) as u64, (50_001 - dropped) as u64]
+        );
+        assert_eq!(s.visual_anchor, Some((50_000 - dropped) as u64));
+    }
+
+    #[test]
+    fn appending_to_a_full_pane_is_cheap() {
+        let mut s = State::default();
+        s.apply_config(&cfg_with(vec![("T", vec!["DUT"])]));
+        for i in 0..MAX_LINES_PER_PANE {
+            s.append_line(
+                "DUT",
+                StoredLine {
+                    line_idx: i as u64,
+                    ..Default::default()
+                },
+            );
+        }
+        let started = std::time::Instant::now();
+        for i in 0..50_000 {
+            s.append_line(
+                "DUT",
+                StoredLine {
+                    line_idx: i,
+                    ..Default::default()
+                },
+            );
+        }
+        // One shift per line took ~1 ms each (tens of seconds here).
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "{:?}",
+            started.elapsed()
+        );
     }
 
     #[test]
