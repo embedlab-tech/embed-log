@@ -878,12 +878,27 @@ function _renderVirtualWindow(paneId, { targetIdx, forceAtBottom } = {}) {
 // Stats (line count + UTF-8 byte count per pane; toolbar total)
 // ---------------------------------------------------------------------------
 
-const _textEncoder = new TextEncoder();
-
-function _byteSize(text) {
+/**
+ * UTF-8 length of a string without encoding it. Pane statistics count every
+ * received line, and TextEncoder allocated a buffer per line.
+ */
+export function utf8ByteLength(text) {
     if (!text) return 0;
-    return _textEncoder.encode(text).length;
+    let bytes = text.length;
+    for (let i = 0; i < text.length; i++) {
+        const code = text.charCodeAt(i);
+        if (code < 0x80) continue;
+        if (code < 0x800) bytes += 1;
+        else if (code >= 0xd800 && code <= 0xdbff && i + 1 < text.length
+            && (text.charCodeAt(i + 1) & 0xfc00) === 0xdc00) {
+            bytes += 2; // surrogate pair: 2 UTF-16 units, 4 UTF-8 bytes
+            i++;
+        } else bytes += 2; // other BMP characters (lone surrogates encode as U+FFFD)
+    }
+    return bytes;
 }
+
+const _byteSize = utf8ByteLength;
 
 function _formatInt(n) {
     return n.toLocaleString("en-US");
