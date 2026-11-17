@@ -18,6 +18,7 @@ const categories = {
     'regression-tests/filter-keyboard.spec.js',
     'regression-tests/session-highlight.spec.js',
     'regression-tests/level-filter.spec.js',
+    'regression-tests/live-filter-incremental.spec.js',
     'regression-tests/layout-sync.spec.js',
     'regression-tests/horizontal-scroll.spec.js',
     'regression-tests/virtual-height-download.spec.js',
