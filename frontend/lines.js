@@ -8,7 +8,7 @@ import {
     entryLevel, hasLevelProfile, isEntryVisible, levelClass, levelColor, levelFilterVersion,
     levelPredicate,
 } from './levels.js';
-import { analyzeLinePlugins, getLinePluginTooltip, getConfiguredPanePlugins, getPanePluginSettings, setPanePluginSetting } from './pluginRuntime.js';
+import { analyzeLinePlugins, getLinePluginTooltip, getConfiguredPanePlugins, getPanePluginSettings, setPanePluginSetting, paneHasPlugins } from './pluginRuntime.js';
 import { isEditableTarget, isComposingEvent } from './keyboard.js';
 import { findNearestCandidate, resolveSyncAnchor } from './timeSync.js';
 
@@ -558,6 +558,38 @@ function _getNumTs(entry, paneId = null, idx = -1) {
 // rebuilt instead of only extended.
 let _projectionEpoch = 0;
 
+const _ANSI_SEQUENCE_RE = /\x1b(?:\[([0-9;]*)([A-Za-z])|\][^\x07]*\x07|[^[\]])/g;
+
+/**
+ * The text matchesFilter() tests, for a compact `[ts, rawText, isTx, meta]`
+ * row of a pane without plugins: rendered text (HTML-escaped, ANSI removed),
+ * raw text and the displayed timestamp. `null` when the displayed timestamp
+ * needs the full timestamp logic of buildTimestampInfo().
+ */
+function _tupleFilterText(entry) {
+    const [, rawText, , meta] = entry;
+    if (state.useClientRelativeBase || !meta || typeof meta !== "object") return null;
+    const absTs = typeof meta.absTs === "string" && meta.absTs ? meta.absTs : null;
+    const relTs = typeof meta.relTs === "string" && meta.relTs ? meta.relTs : null;
+    // With timestamps hidden a line keeps the timestamp of the previous mode,
+    // which a compact row does not know; use the full path then.
+    if (state.timestampMode === "hidden") return null;
+    let shown;
+    if (state.timestampMode === "relative" && relTs) shown = relTs;
+    else if (absTs) shown = absTs;
+    else return null;
+    const raw = typeof rawText === "string" ? rawText : "";
+    const rendered = raw
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(_ANSI_SEQUENCE_RE, "");
+    return `${rendered} ${raw} ${shown} `;
+}
+
+/** Rebuild filtered projections, e.g. after plugins finished loading. */
+export function invalidateFilterProjections() {
+    _projectionEpoch++;
+}
+
 function _getVisibleIndices(paneId, vp) {
     const lines = state.rawLines[paneId] || [];
     const rx = state.filters[paneId] || null;
@@ -576,6 +608,10 @@ function _getVisibleIndices(paneId, vp) {
     const extend = sameProjection && vp.projectionSourceLen <= lines.length;
     const indices = extend ? vp.visibleIndices : [];
     const levelVisible = levelPredicate(paneId);
+    // Without plugins the filtered text can be built from a compact row, so
+    // filtering does not turn every row into a full line object (HTML, plugin
+    // data), which doubled memory and dominated the first keystroke.
+    const plainFilter = !!rx && !paneHasPlugins(paneId);
     for (let rawIndex = extend ? vp.projectionSourceLen : 0; rawIndex < lines.length; rawIndex++) {
         if (!rx) {
             const entry = lines[rawIndex];
@@ -585,8 +621,18 @@ function _getVisibleIndices(paneId, vp) {
                 indices.push(rawIndex);
             }
         } else {
-            const line = getLine(paneId, rawIndex);
-            if (line && matchesFilter(line, rx, paneId)) indices.push(rawIndex);
+            const entry = lines[rawIndex];
+            const text = plainFilter && _isRawTuple(entry) ? _tupleFilterText(entry) : null;
+            if (text !== null) {
+                // Same test as matchesFilter(), on a row that stays compact.
+                if ((entry[2] || !isErasedConsoleLine(entry[1]))
+                    && (!levelVisible || levelVisible(entry)) && rx.test(text)) {
+                    indices.push(rawIndex);
+                }
+            } else {
+                const line = getLine(paneId, rawIndex);
+                if (line && matchesFilter(line, rx, paneId)) indices.push(rawIndex);
+            }
         }
     }
     vp.visibleIndices = indices;
@@ -596,6 +642,12 @@ function _getVisibleIndices(paneId, vp) {
     vp.projectionEpoch = _projectionEpoch;
     vp.projectionSourceLen = lines.length;
     return indices;
+}
+
+/** Raw indices of the rows a pane currently shows (filters applied). */
+export function visibleRowIndices(paneId) {
+    const vp = _getVirtual(paneId);
+    return vp ? _getVisibleIndices(paneId, vp).slice() : [];
 }
 
 function _visibleCount(paneId, vp) {

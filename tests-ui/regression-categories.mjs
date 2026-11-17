@@ -21,6 +21,7 @@ const categories = {
     'regression-tests/stream-gap-and-history-limits.spec.js',
     'regression-tests/level-filter.spec.js',
     'regression-tests/live-filter-incremental.spec.js',
+    'regression-tests/filter-compact-rows.spec.js',
     'regression-tests/layout-sync.spec.js',
     'regression-tests/toolbar-clarity.spec.js',
     'regression-tests/horizontal-scroll.spec.js',

@@ -1,5 +1,5 @@
 import { state, TABS, PANES, PANE_LABELS, setTimestampContext, resetRelativeTimestampBase } from './state.js';
-import { appendLineBatch, clearPane, rerenderPane, setTimestampMode, refreshStatsUi, prependPaneHistory } from './lines.js';
+import { appendLineBatch, clearPane, rerenderPane, setTimestampMode, refreshStatsUi, prependPaneHistory, invalidateFilterProjections } from './lines.js';
 import { createTabWithPanes } from './tabcreate.js';
 import { refreshLevelDefinitions } from './levels.js';
 import { configurePanePlugins, resetPanePlugins } from './pluginRuntime.js';
@@ -285,7 +285,9 @@ async function _handleConfigMessage(msg) {
         resetPanePlugins();
     }
 
-    // Re-render all panes so plugin data attaches to already-visible lines.
+    // Re-render all panes so plugin data attaches to already-visible lines,
+    // and re-filter: plugin text is part of what a filter matches.
+    invalidateFilterProjections();
     PANES.forEach(id => {
         try { rerenderPane(id); } catch (_) {}
     });
