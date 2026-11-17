@@ -472,6 +472,8 @@ window.__embedLogRefreshLevelControls = () => {
     for (const refresh of _levelControlRefreshers.values()) refresh();
 };
 
+const FILTER_INPUT_DEBOUNCE_MS = 150;
+
 export function _uiSetupPane(id) {
     const input = document.querySelector(`.filter-input[data-pane="${id}"]`);
     if (input && !input.dataset.searchInitialized) {
@@ -490,9 +492,13 @@ export function _uiSetupPane(id) {
         input.setAttribute('aria-label', 'Filter or highlight phrase');
         controls.querySelector('.search-prev').addEventListener('click', () => navigatePaneSearch(id, -1));
         controls.querySelector('.search-next').addEventListener('click', () => navigatePaneSearch(id, 1));
-        input.addEventListener('keydown', event => {
+        input.addEventListener('keydown', async event => {
+            // Enter applies what was typed right away instead of after the debounce.
+            const applying = !event.isComposing && event.key === 'Enter' ? flushPendingApply() : null;
             if (!event.isComposing && state.searches[id] && (event.key === 'Enter' || event.key === 'F3')) {
                 event.preventDefault();
+                // A new phrase may still be loading history; navigate once it is counted.
+                if (applying) await applying;
                 navigatePaneSearch(id, event.shiftKey ? -1 : 1);
             }
         });
@@ -532,8 +538,25 @@ export function _uiSetupPane(id) {
             }
             rerenderPane(id);
         };
-        input.addEventListener('input', apply);
+        // Filtering or highlighting scans every line of the pane, so apply it
+        // once typing pauses rather than on every keystroke.
+        let pendingApply = null;
+        function flushPendingApply() {
+            if (pendingApply === null) return null;
+            clearTimeout(pendingApply);
+            pendingApply = null;
+            return apply();
+        }
+        input.addEventListener('input', () => {
+            clearTimeout(pendingApply);
+            pendingApply = setTimeout(() => {
+                pendingApply = null;
+                apply();
+            }, FILTER_INPUT_DEBOUNCE_MS);
+        });
         mode.addEventListener('click', () => {
+            clearTimeout(pendingApply);
+            pendingApply = null;
             const enabled = mode.getAttribute('aria-pressed') !== 'true';
             mode.setAttribute('aria-pressed', String(enabled));
             controls.hidden = !enabled;
