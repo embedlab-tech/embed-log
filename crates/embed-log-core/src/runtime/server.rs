@@ -219,7 +219,11 @@ impl LogServer {
             None,
             serde_json::to_value(&self.config.merges).unwrap_or_else(|_| json!([])),
         )
-        .with_source_levels(crate::levels::source_levels_json(&self.config));
+        .with_source_levels(crate::levels::source_levels_json(&self.config))
+        .with_symbols(crate::symbols::snapshot_elfs(
+            &session_dir,
+            &symbol_elfs(&self.config),
+        ));
         session_mgr.write_manifest()?;
         let markers = session_mgr.load_markers();
         let session_mgr = Arc::new(Mutex::new(session_mgr));
@@ -311,7 +315,7 @@ impl LogServer {
                     job_id: self.config.server.job_id.clone(),
                 },
                 level_detector: self.level_detector_for(&src.name),
-                event_detector: crate::events::EventDetector::new(),
+                event_detector: self.event_detector_for(&src.name),
             };
             let writer_handle = tokio::spawn(async move {
                 run_writer(writer_name, log_path, entry_rx, writer_runtime).await;
@@ -366,6 +370,7 @@ impl LogServer {
             config_msg: shared_config_msg.clone(),
             runtime_config: runtime_config_summary(&self.config, &self.logs_root),
             source_levels: crate::levels::source_levels_json(&self.config),
+            symbol_elfs: symbol_elfs(&self.config),
             default_light_theme: self.config.server.default_light_theme.clone(),
             default_dark_theme: self.config.server.default_dark_theme.clone(),
             export_on_rotate: self.export_on_shutdown,
@@ -632,6 +637,22 @@ impl LogServer {
         }
     }
 
+    /// Restart/crash detector of a source (built-in Zephyr rules by default;
+    /// `None` for `events: off`). Rules were validated with the config.
+    fn event_detector_for(&self, source_name: &str) -> Option<crate::events::EventDetector> {
+        let events = self
+            .config
+            .sources
+            .iter()
+            .find(|s| s.name == source_name)
+            .and_then(|source| source.events.as_ref());
+        crate::events::EventDetector::for_source(events, &format!("sources.{source_name}.events"))
+            .unwrap_or_else(|error| {
+                warn!("[{source_name}] restart/crash detection disabled: {error}");
+                None
+            })
+    }
+
     fn build_config_message(
         &self,
         pane_labels: &HashMap<String, String>,
@@ -842,7 +863,17 @@ fn export_session(ctx: &ExportContext) -> Result<String, String> {
 }
 
 /// Everything the rotation callback needs, captured once when the server starts.
+/// `(source, configured ELF)` for sources that name a firmware ELF.
+fn symbol_elfs(config: &AppConfig) -> Vec<(String, PathBuf)> {
+    config
+        .sources
+        .iter()
+        .filter_map(|source| Some((source.name.clone(), PathBuf::from(source.elf.as_ref()?))))
+        .collect()
+}
+
 struct RotationContext {
+    symbol_elfs: Vec<(String, PathBuf)>,
     logs_root: PathBuf,
     tab_label: String,
     source_names: Vec<String>,
@@ -937,7 +968,11 @@ fn rotate_session(
         ctx.merges.clone(),
     )
     .with_title(title)
-    .with_source_levels(ctx.source_levels.clone());
+    .with_source_levels(ctx.source_levels.clone())
+    .with_symbols(crate::symbols::snapshot_elfs(
+        &new_session_dir,
+        &ctx.symbol_elfs,
+    ));
     new_manager
         .write_manifest()
         .map_err(|err| err.to_string())?;
@@ -1149,8 +1184,8 @@ struct WriterRuntime {
     source_meta: SourceRuntimeMeta,
     /// Level classifier for received lines; `None` when `levels: off`.
     level_detector: Option<crate::levels::LevelDetector>,
-    /// Boot and crash detection for received lines.
-    event_detector: crate::events::EventDetector,
+    /// Restart/crash detection for received lines; `None` when `events: off`.
+    event_detector: Option<crate::events::EventDetector>,
 }
 
 fn merge_label(merge: &crate::config::MergeConfig) -> String {
@@ -1397,7 +1432,9 @@ async fn run_writer(
         let event = if is_tx {
             None
         } else {
-            event_detector.detect(&message, entry.timestamp)
+            event_detector
+                .as_mut()
+                .and_then(|detector| detector.detect(&message, entry.timestamp))
         };
         if let Some(event) = event {
             payload["event"] = json!(event);
@@ -1677,7 +1714,7 @@ mod tests {
             commit_lock: Arc::new(Mutex::new(())),
             source_meta: test_source_meta("session-1"),
             level_detector: None,
-            event_detector: crate::events::EventDetector::new(),
+            event_detector: Some(crate::events::EventDetector::new()),
         };
         let handle = tokio::spawn(run_writer(
             "dut".to_string(),
@@ -1751,7 +1788,7 @@ mod tests {
             commit_lock: Arc::new(Mutex::new(())),
             source_meta: test_source_meta("session-1"),
             level_detector: None,
-            event_detector: crate::events::EventDetector::new(),
+            event_detector: Some(crate::events::EventDetector::new()),
         };
         let handle = tokio::spawn(run_writer(
             "dut".to_string(),
@@ -1842,7 +1879,7 @@ mod tests {
                 crate::levels::LevelDetector::new(&crate::levels::builtin_zephyr_profile(), "test")
                     .unwrap(),
             ),
-            event_detector: crate::events::EventDetector::new(),
+            event_detector: Some(crate::events::EventDetector::new()),
         };
         let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
 
@@ -1916,7 +1953,7 @@ mod tests {
             watches: watches.clone(),
             commit_lock: commit_lock.clone(),
             level_detector: None,
-            event_detector: crate::events::EventDetector::new(),
+            event_detector: Some(crate::events::EventDetector::new()),
             source_meta: SourceRuntimeMeta {
                 source_id: source_id.to_string(),
                 source_label: source_id.to_string(),
@@ -2020,6 +2057,7 @@ mod tests {
         pane_kinds.insert("dut".to_string(), "udp".to_string());
 
         let ctx = RotationContext {
+            symbol_elfs: Vec::new(),
             logs_root: root.clone(),
             tab_label: "main".to_string(),
             source_names: vec!["dut".to_string()],

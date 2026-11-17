@@ -29,6 +29,8 @@ libc = "0.2"
 sprintf = "0.4.3"
 base64 = "0.22"
 sha2.workspace = true
+# Crash dump symbolization from firmware ELF files (DWARF line tables, inlined frames).
+addr2line = { version = "0.24", default-features = false, features = ["std", "loader", "rustc-demangle"] }
 
 [dev-dependencies]
 serde_yaml.workspace = true

@@ -387,7 +387,54 @@ Embed-log detects device restarts and crashes in received console lines. Each pa
 | Restart | Boot banners: `*** Booting Zephyr OS …`, `*** Booting nRF Connect SDK …`, `*** Booting MCUboot …` |
 | Crash | `>>> ZEPHYR FATAL ERROR`, `ASSERTION FAIL`, Cortex-M fault banners (`***** HARD FAULT *****`, `***** MPU FAULT *****`, …), `Fatal fault in ISR/thread`, `Kernel panic` / `Kernel oops` |
 
-Lines of the same kind less than 5 seconds apart are one event, so a single fault dump counts as one crash and a reset through MCUboot (two banners) as one restart. A restart ends a crash. TX lines are never events. Detection runs on the server; the record keeps `"event": "boot"` or `"crash"` in `combined.jsonl` and in HTML exports.
+Lines of the same kind less than 5 seconds apart are one event, so a single fault dump counts as one crash and a reset through MCUboot (two banners) as one restart. A restart ends a crash group, and a crash ends a restart group, so fast crash/reboot loops retain every restart. TX lines are never events. Detection runs on the server; the record keeps `"event": "boot"` or `"crash"` in `combined.jsonl` and in HTML exports.
+
+Clicking an event temporarily reveals its exact line even if a text, level or boot filter hides it. The filters stay set; editing a filter or clearing the pane removes the temporary reveal.
+
+In the event list, **Only this boot** next to a restart shows only the lines from that restart until the next restart of the same device; the chip in the filter bar steps to the previous or next boot and ✕ shows everything again.
+
+### Custom rules
+
+```yaml
+sources:
+  DUT:
+    type: uart
+    path: /dev/ttyACM0
+    events:
+      builtin: true              # keep the Zephyr rules (default true)
+      boot: ['^APP START v\d+', 'Reset cause: \w+']
+      crash: ['Guru Meditation Error', 'PANIC:']
+      group_window_ms: 3000      # default 5000
+  HOST:
+    type: udp
+    port: 16000
+    events: off                  # no restart/crash detection
+```
+
+`events` accepts `zephyr` (the default), `off`, or rules. Rules use Rust [`regex`](https://docs.rs/regex/latest/regex/#syntax) syntax and are matched against the line without ANSI codes; a boot rule is checked before the crash rules. Invalid rules fail at startup with their location, for example `sources.DUT.events.crash[1] is not a valid regex`.
+
+### Decoding crashes with the firmware ELF
+
+```yaml
+sources:
+  DUT:
+    type: uart
+    path: /dev/ttyACM0
+    elf: build/zephyr/zephyr.elf   # relative to this file
+```
+
+With `elf` set, crash rows in the event list get a **Decode** button. The fault dump (same source, at most 80 lines total and within 5 s of the crash banner) is searched for code addresses. Register and call-trace lines immediately before the banner are included for software panic/oops dumps; context never crosses another restart or crash. Each address is resolved to function, file and line with the ELF's DWARF information, including inlined functions:
+
+| Dump line | Address |
+| --- | --- |
+| `Faulting instruction address (r15/pc): 0x…` (Cortex-M) | `pc` |
+| `r14/lr: 0x…` (Cortex-M) | `lr`, looked up as a return address |
+| `mepc: 0x…` (RISC-V), `ELR_ELn: 0x…` (ARM64), `EIP: 0x…` (x86) | `pc` |
+| `N: fp: 0x… ra: 0x…` / `N: sp: 0x… ra: 0x…` call trace (`CONFIG_EXCEPTION_STACK_TRACE`) | `frame N` |
+
+Build the firmware with debug information (Zephyr's default `CONFIG_DEBUG_INFO=y`). The ELF is copied into the session as `symbols/<SOURCE-PREFIX>-<SHA256-of-source-id>.elf` when the session starts (and on rotation). The hash keeps distinct source IDs separate even when their filename-safe prefixes coincide or the filesystem ignores case. The manifest stores the actual snapshot path; older manifests using `symbols/<SOURCE>.elf` still work. This means a crash can be decoded later with the binary that was running; rebuild-then-decode of an old session needs `--elf` on the CLI. An address outside the ELF is shown as "not in this ELF", which usually means the firmware and the ELF do not match. A missing ELF file only disables decoding; a file that is not an ELF with debug information is a configuration error.
+
+The same decoding is available from the CLI (`embed-log sessions decode`), the control API (`crash.decode`) and the Python SDK (`decode_crash`).
 
 ## Version 1 migration
 

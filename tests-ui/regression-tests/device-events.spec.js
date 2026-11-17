@@ -15,7 +15,7 @@ async function serve(page, { counts, levels = { A: null, B: null } }) {
   await page.routeWebSocket('**/ws', ws => {
     socket = ws;
     ws.send(JSON.stringify({
-      type: 'config', session: { id: 'events' },
+      type: 'config', session: { id: 'events', symbols: { A: 'symbols/A.elf' } },
       tabs: [{ label: 'Devices', panes: ['A', 'B'] }, { label: 'Merged', panes: ['ALL'] }],
       pane_labels: { A: 'Main MCU', B: 'Network core' }, pane_kinds: { A: 'uart', B: 'uart' },
       merges: [{ name: 'ALL', of: ['A', 'B'] }], source_levels: levels,
@@ -124,4 +124,97 @@ test('event reveal follows history prepends and is removed on clear', async ({ p
   });
   expect(result.shifted).toEqual([60]);
   expect(result.afterClear).toEqual([]);
+});
+
+test('a crash is decoded with the firmware ELF in a dialog', async ({ page }) => {
+  let requested = null;
+  await page.route('**/api/sessions/events/crashes/**', route => {
+    requested = new URL(route.request().url());
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ok: true, report: {
+      source: 'A', sequence: 60, elf: 'symbols/A.elf',
+      lines: ['<err> os: ***** MPU FAULT *****', '<err> os: Faulting instruction address (r15/pc): 0x0000102a'],
+      addresses: [
+        { label: 'pc', address: 0x102a, is_return: false, line: '', frames: [
+          { function: 'scale_sample', file: '/src/app/src/sensor.c', line: 7, inlined: true },
+          { function: 'process_sample', file: '/src/app/src/sensor.c', line: 12, inlined: false }] },
+        { label: 'lr', address: 0x104b, is_return: true, line: '', frames: [
+          { function: 'sensor_task', file: '/src/app/src/sensor.c', line: 20, inlined: false }] },
+        { label: 'frame 1', address: 0x8000000, is_return: true, line: '', frames: [] },
+      ] } }) });
+  });
+  await serve(page, { counts: { A: { boot: 2, crash: 1 } } });
+  await page.locator('#pane-A .pane-events-btn').click();
+  await expect(page.locator('#pane-A .events-decode')).toHaveCount(1);
+  await expect(page.locator('#pane-B .events-decode')).toHaveCount(0);
+  await page.locator('#pane-A .events-decode').click();
+  const dialog = page.locator('#crash-dialog');
+  await expect(dialog).toBeVisible();
+  expect(requested.pathname).toBe('/api/sessions/events/crashes/60');
+  expect(requested.searchParams.get('source')).toBe('A');
+  await expect(dialog.locator('.crash-title')).toHaveText('Crash on Main MCU');
+  await expect(dialog.locator('.crash-meta')).toContainText('ELF symbols/A.elf');
+  const rows = dialog.locator('.crash-frames tbody tr');
+  await expect(rows).toHaveCount(4);
+  await expect(rows.nth(0)).toContainText('pc');
+  await expect(rows.nth(0)).toContainText('0x0000102a');
+  await expect(rows.nth(0)).toContainText('scale_sample');
+  await expect(rows.nth(0)).toContainText('inlined');
+  await expect(rows.nth(0)).toContainText('src/sensor.c:7');
+  await expect(rows.nth(1)).toContainText('process_sample');
+  await expect(rows.nth(2)).toContainText('sensor_task');
+  await expect(rows.nth(3)).toContainText('?? (not in this ELF)');
+  await expect(page.locator('#log-A .log-line.event-crash')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+});
+
+test('a pane can show one boot at a time', async ({ page }) => {
+  await serve(page, { counts: { A: { boot: 2, crash: 1 } } });
+  const visibleSequences = () => page.evaluate(async () => {
+    const { visibleRowIndices } = await import('/lines.js');
+    const { state } = await import('/state.js');
+    return visibleRowIndices('A').map(i => {
+      const entry = state.rawLines.A[i];
+      return Array.isArray(entry) ? entry[3].sequence : entry.sequence;
+    });
+  });
+  await page.locator('#pane-A .pane-events-btn').click();
+  // Oldest restart is listed last.
+  await page.locator('#pane-A .events-boot-filter').last().click();
+  const chip = page.locator('#pane-A .boot-chip');
+  await expect(chip).toBeVisible();
+  await expect(chip.locator('.boot-label')).toContainText('boot 1/2');
+  let seq = await visibleSequences();
+  expect(seq[0]).toBe(1);
+  expect(seq.at(-1)).toBe(61);
+  await expect(chip.locator('.boot-prev')).toBeDisabled();
+
+  await chip.locator('.boot-next').click();
+  await expect(chip.locator('.boot-label')).toContainText('boot 2/2');
+  await expect(chip.locator('.boot-label')).toContainText('now');
+  seq = await visibleSequences();
+  expect(seq[0]).toBe(62);
+  expect(seq.at(-1)).toBe(119);
+
+  await chip.locator('.boot-clear').click();
+  await expect(chip).toBeHidden();
+  expect((await visibleSequences()).length).toBe(119);
+});
+
+
+test('event navigation reveals a crash outside the selected boot', async ({ page }) => {
+  await serve(page, { counts: { A: { boot: 2, crash: 1 } } });
+  await page.locator('#pane-A .pane-events-btn').click();
+  await page.locator('#pane-A .events-boot-filter').first().click();
+  await expect(page.locator('#pane-A .boot-label')).toContainText('boot 2/2');
+  await expect(page.locator('#log-A .event-crash')).toHaveCount(0);
+  await page.locator('#pane-A .pane-events-btn').click();
+  await page.locator('#pane-A .events-item.events-crash').click();
+  await expect(page.locator('#log-A .event-crash')).toBeVisible();
+  expect(await page.evaluate(async () => (await import('/state.js')).state.highlightedIdx.A)).toBe(59);
+  await expect(page.locator('#pane-A .boot-label')).toContainText('boot 2/2');
+  // Explicitly selecting another boot removes the temporary exception.
+  await page.locator('#pane-A .boot-prev').click();
+  await page.locator('#pane-A .boot-next').click();
+  await expect(page.locator('#log-A .event-crash')).toHaveCount(0);
 });

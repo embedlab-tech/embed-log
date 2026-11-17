@@ -112,7 +112,7 @@ impl HistoryFilter {
 }
 
 /// The journal of a session under `logs_root`, refusing paths that escape it.
-fn journal_path(logs_root: &Path, session_id: &str) -> Result<PathBuf, StatusCode> {
+pub(crate) fn journal_path(logs_root: &Path, session_id: &str) -> Result<PathBuf, StatusCode> {
     if session_id.is_empty() || session_id.contains("..") || session_id.contains(['/', '\\']) {
         return Err(StatusCode::FORBIDDEN);
     }

@@ -205,6 +205,10 @@ pub async fn start_server(
         )
         .route("/api/sessions", axum::routing::get(api_sessions_handler))
         .route(
+            "/api/sessions/{session_id}/crashes/{sequence}",
+            axum::routing::get(crate::net::crash::crash_decode_handler),
+        )
+        .route(
             "/api/sessions/{session_id}/history",
             axum::routing::get(crate::net::history::session_history_handler),
         )

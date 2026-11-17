@@ -33,7 +33,7 @@ from .exceptions import (
     ServerError,
     UnknownSourceError,
 )
-from .models import HelloResult, LogEntry, SessionInfo, SourceInfo
+from .models import CrashReport, DeviceEvent, EventCounts, HelloResult, LogEntry, SessionInfo, SourceInfo
 
 try:
     from websocket import WebSocket, WebSocketException
@@ -291,6 +291,92 @@ class EmbedLogClient:
             "marker.result",
             extra=body,
         )
+
+    # ── Restarts, crashes and crash decoding ──
+
+    def list_events(
+        self,
+        source_id: Optional[str] = None,
+        kind: Optional[str] = None,
+        since_sequence: int = 0,
+    ) -> tuple[list[DeviceEvent], dict[str, EventCounts]]:
+        """Restarts/crashes detected in the current session (oldest first) and
+        per-source counts. ``kind`` is ``"boot"`` or ``"crash"``."""
+        extra: dict = {"since_sequence": since_sequence}
+        if source_id is not None:
+            self.get_source(source_id)
+            extra["source_id"] = source_id
+        if kind is not None:
+            if kind not in ("boot", "crash"):
+                raise ValueError("kind must be 'boot' or 'crash'")
+            extra["kind"] = kind
+        resp = self._send_and_wait(f"events-{time.time_ns()}", "events.list", "events.result", extra=extra)
+        events = [DeviceEvent.from_dict(item) for item in resp.get("events", [])]
+        counts = {
+            source: EventCounts(boot=value.get("boot", 0), crash=value.get("crash", 0))
+            for source, value in (resp.get("counts") or {}).items()
+        }
+        return events, counts
+
+    def wait_for_event(
+        self,
+        kind: str = "crash",
+        source_id: Optional[str] = None,
+        timeout: float = 30.0,
+    ) -> Optional[DeviceEvent]:
+        """Wait for the next restart (``"boot"``) or crash of a source (or any
+        source), received after this call. Returns ``None`` on timeout.
+
+        Subscribes to the source(s) if needed; other entries received while
+        waiting are dropped from :meth:`entries`."""
+        if kind not in ("boot", "crash"):
+            raise ValueError("kind must be 'boot' or 'crash'")
+        sources = [source_id] if source_id is not None else [
+            name for name, info in self._sources.items() if info.source_type != "merge"
+        ]
+        if source_id is not None:
+            self.get_source(source_id)
+        self.subscribe(sources)
+        deadline = time.time() + timeout
+        while True:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                return None
+            for entry in self.entries(timeout=remaining):
+                if entry.event == kind and (source_id is None or entry.source_id == source_id):
+                    return DeviceEvent(
+                        sequence=entry.sequence or 0,
+                        source_id=entry.source_id,
+                        event=entry.event,
+                        message=entry.message,
+                        timestamp_iso=entry.timestamp_iso,
+                    )
+                if time.time() >= deadline:
+                    return None
+
+    def assert_no_crash(self, since_sequence: int = 0, source_id: Optional[str] = None) -> None:
+        """Raise ``AssertionError`` with the decoded backtrace (when an ELF is
+        configured) if a crash was detected after ``since_sequence``."""
+        crashes, _ = self.list_events(source_id=source_id, kind="crash", since_sequence=since_sequence)
+        if not crashes:
+            return
+        first = crashes[0]
+        detail = first.message
+        try:
+            detail += "\n" + "\n".join(self.decode_crash(first.source_id, first.sequence).backtrace)
+        except Exception:  # noqa: BLE001 - no ELF configured or not decodable
+            pass
+        raise AssertionError(f"{len(crashes)} crash(es) on {first.source_id}: {detail}")
+
+    def decode_crash(self, source_id: str, sequence: int) -> CrashReport:
+        """Symbolize a detected crash with the firmware ELF configured as
+        ``sources.<ID>.elf`` (copied into the session when it started)."""
+        self.get_source(source_id)
+        resp = self._send_and_wait(
+            f"decode-{time.time_ns()}", "crash.decode", "crash.result",
+            extra={"source_id": source_id, "sequence": sequence},
+        )
+        return CrashReport.from_dict(resp.get("report") or {})
 
     # ── Entry streaming ──
 

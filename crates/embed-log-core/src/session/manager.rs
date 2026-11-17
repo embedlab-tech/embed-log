@@ -40,6 +40,8 @@ pub struct SessionManager {
     source_levels: serde_json::Value,
     /// Boots and crashes detected per source in this session.
     event_counts: std::collections::BTreeMap<String, crate::events::EventCounts>,
+    /// `{source: "symbols/<SOURCE>.elf"}`: firmware ELF snapshots (`crate::symbols`).
+    symbols: serde_json::Value,
 }
 
 impl SessionManager {
@@ -91,7 +93,14 @@ impl SessionManager {
             merges,
             source_levels: serde_json::Value::Null,
             event_counts: std::collections::BTreeMap::new(),
+            symbols: json!({}),
         }
+    }
+
+    /// ELF snapshots of this session (`crate::symbols::snapshot_elfs`).
+    pub fn with_symbols(mut self, symbols: serde_json::Value) -> Self {
+        self.symbols = symbols;
+        self
     }
 
     /// Count a detected `crate::events` event of `source`.
@@ -342,6 +351,7 @@ impl SessionManager {
             "source_files": self.source_files,
             "combined_file": self.combined_file,
             "merges": self.merges,
+            "symbols": self.symbols,
         })
     }
 
@@ -367,6 +377,7 @@ impl SessionManager {
             "source_files": self.source_files,
             "combined_file": self.combined_file,
             "merges": self.merges,
+            "symbols": self.symbols,
             "source_levels": self.source_levels,
             "session_html": html_path.display().to_string(),
             "last_export_reason": serde_json::Value::Null,

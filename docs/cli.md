@@ -272,6 +272,26 @@ embed-log sessions info latest --dir logs
 embed-log sessions summary latest
 ```
 
+Restarts, crashes and crash decoding:
+
+```bash
+embed-log sessions events latest                         # all restarts/crashes, oldest first, with per-source totals
+embed-log sessions events latest --kind crash --source DUT --json
+embed-log sessions decode latest                         # symbolize every crash with the session's ELF snapshot
+embed-log sessions decode latest --sequence 1234         # one crash (sequence from `sessions events`)
+embed-log sessions decode 2026-11-17_17-46-27 --elf build/zephyr/zephyr.elf
+```
+
+`sessions decode` uses the `sources.<ID>.elf` snapshot stored in the session; `--elf` overrides it (for sessions recorded before an ELF was configured). Output:
+
+```text
+Crash #61 on DUT  (ELF: symbols/DUT.elf)
+  [00:00:02.600,000] <err> os: ***** MPU FAULT *****
+  lr       0x0000104b  sensor_task  src/sensor.c:20
+  pc       0x0000102a  scale_sample  src/sensor.c:7  (inlined)
+                       process_sample  src/sensor.c:12
+```
+
 List sessions:
 
 ```bash

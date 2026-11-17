@@ -119,6 +119,43 @@ pub(crate) enum SessionsCommand {
         #[arg(long = "with-markers")]
         with_markers: bool,
     },
+    /// List device restarts and crashes detected in a session.
+    #[command(
+        long_about = "List device restarts and crashes detected in a session (oldest first), with per-source totals.\n\nExamples:\n  embed-log sessions events latest\n  embed-log sessions events latest --kind crash --source DUT --json"
+    )]
+    Events {
+        session_id: String,
+        #[command(flatten)]
+        log_dir: LogDirArgs,
+        /// Only `restart` or `crash` events.
+        #[arg(long, value_parser = ["restart", "boot", "crash"])]
+        kind: Option<String>,
+        /// Restrict to source ids. Repeatable.
+        #[arg(long = "source")]
+        sources: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Symbolize crash dumps with the firmware ELF (function, file:line, inlined frames).
+    #[command(
+        long_about = "Decode detected crashes of a session with the firmware ELF: program counter, link register and call-trace addresses are resolved to function and source line.\n\nThe ELF configured as sources.<ID>.elf is copied into the session when it starts; pass --elf to use another file (for example for sessions recorded before the ELF was configured).\n\nExamples:\n  embed-log sessions decode latest\n  embed-log sessions decode latest --sequence 1234\n  embed-log sessions decode 2026-11-17_17-46-27 --source DUT --elf build/zephyr/zephyr.elf --json"
+    )]
+    Decode {
+        session_id: String,
+        #[command(flatten)]
+        log_dir: LogDirArgs,
+        /// Sequence of the crash record (from `sessions events`); all crashes when omitted.
+        #[arg(long)]
+        sequence: Option<u64>,
+        /// Restrict to source ids. Repeatable.
+        #[arg(long = "source")]
+        sources: Vec<String>,
+        /// Firmware ELF to use instead of the session's snapshot.
+        #[arg(long)]
+        elf: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Show one session manifest.
     Info {
         session_id: String,
@@ -290,6 +327,8 @@ impl SessionsCommand {
             | Self::Import { json, .. }
             | Self::List { json, .. }
             | Self::Info { json, .. }
+            | Self::Events { json, .. }
+            | Self::Decode { json, .. }
             | Self::Summary { json, .. } => *json,
             Self::Read { json, .. } | Self::Around { json, .. } | Self::Search { json, .. } => {
                 *json
@@ -370,6 +409,47 @@ pub(crate) fn cmd_sessions(command: SessionsCommand) -> Result<()> {
         } => {
             let dir = resolve_sessions_dir(&log_dir)?;
             list_sessions(&dir, json, limit, with_markers)
+        }
+        SessionsCommand::Events {
+            session_id,
+            log_dir,
+            kind,
+            sources,
+            json,
+        } => {
+            let dir = resolve_sessions_dir(&log_dir)?;
+            let kind = kind.map(|k| {
+                if k == "boot" {
+                    "restart".to_string()
+                } else {
+                    k
+                }
+            });
+            crate::commands::session_events::show_events(
+                &dir,
+                &session_id,
+                kind.as_deref(),
+                &sources,
+                json,
+            )
+        }
+        SessionsCommand::Decode {
+            session_id,
+            log_dir,
+            sequence,
+            sources,
+            elf,
+            json,
+        } => {
+            let dir = resolve_sessions_dir(&log_dir)?;
+            crate::commands::session_events::decode_crashes(
+                &dir,
+                &session_id,
+                sequence,
+                &sources,
+                elf.as_deref(),
+                json,
+            )
         }
         SessionsCommand::Info {
             session_id,

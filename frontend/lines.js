@@ -606,14 +606,55 @@ export function invalidateFilterProjections() {
     _projectionEpoch++;
 }
 
+// ── Boot filter: show one restart-to-restart range of a pane ──────
+// { fromSequence, toSequence (exclusive, null = still running), sourceId, label }
+const _bootFilters = new Map();
+
+function _entrySequence(entry) {
+    const meta = _isRawTuple(entry) ? entry[3] : entry;
+    return meta && typeof meta === "object" && Number.isFinite(meta.sequence) ? meta.sequence : null;
+}
+
+function _inBootRange(entry, range) {
+    const sequence = _entrySequence(entry);
+    return sequence !== null && sequence >= range.fromSequence
+        && (range.toSequence === null || sequence < range.toSequence);
+}
+
+/** Active boot filter of a pane, or null. */
+export function bootFilter(paneId) {
+    return _bootFilters.get(paneId) || null;
+}
+
+/**
+ * Show only the lines from a restart until the next restart of the same
+ * source (`null` shows everything again).
+ */
+export function setBootFilter(paneId, filter) {
+    _eventReveals.delete(paneId);
+    if (filter) _bootFilters.set(paneId, { ...filter });
+    else _bootFilters.delete(paneId);
+    const logEl = document.getElementById("log-" + paneId);
+    if (logEl) logEl.scrollTop = 0;
+    state.atBottom[paneId] = !filter;
+    rerenderPane(paneId);
+    window.__embedLogOnBootFilterChange?.(paneId);
+}
+
+function _bootFilterKey(paneId) {
+    const filter = _bootFilters.get(paneId);
+    return filter ? `${filter.fromSequence}:${filter.toSequence}` : "";
+}
+
 function _getVisibleIndices(paneId, vp) {
     const lines = state.rawLines[paneId] || [];
     const rx = state.filters[paneId] || null;
     const levelVersion = levelFilterVersion(paneId);
     const revealedIndex = _eventRevealIndex(paneId);
+    const bootKey = _bootFilterKey(paneId);
     const sameProjection = vp.projectionRows === lines && vp.projectionFilter === rx
         && vp.projectionLevel === levelVersion && vp.projectionEpoch === _projectionEpoch
-        && vp.projectionReveal === revealedIndex && Array.isArray(vp.visibleIndices);
+        && vp.projectionBoot === bootKey && vp.projectionReveal === revealedIndex && Array.isArray(vp.visibleIndices);
     // Preserve raw rows/indices for export, selection and debugging, but don't
     // allocate visual rows for terminal text erased before the next record or
     // for levels hidden in this pane. Extend the projection on append instead
@@ -629,11 +670,13 @@ function _getVisibleIndices(paneId, vp) {
     // filtering does not turn every row into a full line object (HTML, plugin
     // data), which doubled memory and dominated the first keystroke.
     const plainFilter = !!rx && !paneHasPlugins(paneId);
+    const bootRange = _bootFilters.get(paneId) || null;
     for (let rawIndex = extend ? vp.projectionSourceLen : 0; rawIndex < lines.length; rawIndex++) {
         if (rawIndex === revealedIndex) {
             indices.push(rawIndex);
             continue;
         }
+        if (bootRange && !_inBootRange(lines[rawIndex], bootRange)) continue;
         if (!rx) {
             const entry = lines[rawIndex];
             const rawText = _isRawTuple(entry) ? entry[1] : entry.rawText;
@@ -662,6 +705,7 @@ function _getVisibleIndices(paneId, vp) {
     vp.projectionLevel = levelVersion;
     vp.projectionEpoch = _projectionEpoch;
     vp.projectionReveal = revealedIndex;
+    vp.projectionBoot = bootKey;
     vp.projectionSourceLen = lines.length;
     return indices;
 }
@@ -1496,6 +1540,7 @@ window.__embedLogRefreshPluginIndicators = refreshPluginIndicators;
 
 export function clearPane(paneId) {
     _eventReveals.delete(paneId);
+    if (_bootFilters.delete(paneId)) window.__embedLogOnBootFilterChange?.(paneId);
     state.rawLines[paneId] = [];
     state.selected[paneId] = new Set();
     if (state.searches[paneId]) state.searches[paneId] = new PhraseSearch(state.searches[paneId].phrase);
@@ -1651,6 +1696,8 @@ export function paneEvents(paneId) {
         out.push({
             rawIndex,
             event,
+            sequence: Number.isFinite(line?.sequence) ? line.sequence : null,
+            sourceId: line?.sourceId || paneId,
             ts: line?.ts || "",
             text: String(line?.rawText || "").replace(/\x1b(?:\[[0-9;]*[A-Za-z]|\][^\x07]*\x07|[^[\]])/g, ""),
         });

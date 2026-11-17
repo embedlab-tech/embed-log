@@ -15,48 +15,134 @@ use std::sync::OnceLock;
 use chrono::{DateTime, Duration, Local};
 use regex::{Regex, RegexSet};
 
+use crate::config::SourceEvents;
+
 pub const BOOT: &str = "boot";
 pub const CRASH: &str = "crash";
 
 /// Matches of the same kind closer together than this are one event.
 const GROUP_WINDOW_MS: i64 = 5_000;
 
-fn boot_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
+const BUILTIN_BOOT: &[&str] = &[
     // `*** Booting Zephyr OS build v3.7.0 ***`, `*** Booting nRF Connect SDK v2.7.0 ***`,
     // `*** Booting MCUboot v2.1.0 ***`.
-    RE.get_or_init(|| Regex::new(r"\*\*\* Booting \S").expect("valid boot regex"))
-}
+    r"\*\*\* Booting \S",
+];
 
-fn crash_set() -> &'static RegexSet {
-    static SET: OnceLock<RegexSet> = OnceLock::new();
-    SET.get_or_init(|| {
-        RegexSet::new([
-            // z_fatal_error(): `>>> ZEPHYR FATAL ERROR 3: Kernel oops on CPU 0`
-            r">>> ZEPHYR FATAL ERROR",
-            // __ASSERT(): `ASSERTION FAIL [x == 1] @ WEST_TOPDIR/...`
-            r"ASSERTION FAIL",
-            // Cortex-M fault banners: `***** HARD FAULT *****`, `***** MPU FAULT *****`,
-            // `***** BUS FAULT *****`, `***** USAGE FAULT *****`, `***** SECURE FAULT *****`.
-            r"\*{5} [A-Z ]*FAULT \*{5}",
-            // Other architectures and older kernels.
-            r"Fatal fault in (?:ISR|thread)",
-            r"\bKernel (?:panic|oops)\b",
-        ])
-        .expect("valid crash regexes")
+const BUILTIN_CRASH: &[&str] = &[
+    // z_fatal_error(): `>>> ZEPHYR FATAL ERROR 3: Kernel oops on CPU 0`
+    r">>> ZEPHYR FATAL ERROR",
+    // __ASSERT(): `ASSERTION FAIL [x == 1] @ WEST_TOPDIR/...`
+    r"ASSERTION FAIL",
+    // Cortex-M fault banners: `***** HARD FAULT *****`, `***** MPU FAULT *****`,
+    // `***** BUS FAULT *****`, `***** USAGE FAULT *****`, `***** SECURE FAULT *****`.
+    r"\*{5} [A-Z ]*FAULT \*{5}",
+    // Other architectures and older kernels.
+    r"Fatal fault in (?:ISR|thread)",
+    r"\bKernel (?:panic|oops)\b",
+];
+
+/// Longest custom rule accepted (characters).
+const MAX_RULE_LEN: usize = 1024;
+
+fn builtin_sets() -> &'static (RegexSet, RegexSet) {
+    static SETS: OnceLock<(RegexSet, RegexSet)> = OnceLock::new();
+    SETS.get_or_init(|| {
+        (
+            RegexSet::new(BUILTIN_BOOT).expect("valid boot regexes"),
+            RegexSet::new(BUILTIN_CRASH).expect("valid crash regexes"),
+        )
     })
 }
 
+fn compile_rules(rules: &[String], ctx: &str) -> Result<Option<RegexSet>, String> {
+    if rules.is_empty() {
+        return Ok(None);
+    }
+    for (i, rule) in rules.iter().enumerate() {
+        if rule.is_empty() {
+            return Err(format!("{ctx}[{i}] must not be empty"));
+        }
+        if rule.chars().count() > MAX_RULE_LEN {
+            return Err(format!("{ctx}[{i}] exceeds {MAX_RULE_LEN} characters"));
+        }
+        Regex::new(rule).map_err(|e| format!("{ctx}[{i}] is not a valid regex: {e}"))?;
+    }
+    RegexSet::new(rules)
+        .map(Some)
+        .map_err(|e| format!("{ctx}: {e}"))
+}
+
 /// Stateful per-source detector (grouping looks at earlier lines).
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct EventDetector {
+    builtin: bool,
+    boot: Option<RegexSet>,
+    crash: Option<RegexSet>,
+    window: Duration,
     last_boot: Option<DateTime<Local>>,
     last_crash: Option<DateTime<Local>>,
 }
 
+impl Default for EventDetector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EventDetector {
+    /// The built-in Zephyr rules.
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            builtin: true,
+            boot: None,
+            crash: None,
+            window: Duration::milliseconds(GROUP_WINDOW_MS),
+            last_boot: None,
+            last_crash: None,
+        }
+    }
+
+    /// Detector for `sources.<ID>.events`; `Ok(None)` when detection is off.
+    /// `ctx` is the YAML location used in error messages.
+    pub fn for_source(events: Option<&SourceEvents>, ctx: &str) -> Result<Option<Self>, String> {
+        match events {
+            None => Ok(Some(Self::new())),
+            Some(SourceEvents::Named(name)) if name == "zephyr" => Ok(Some(Self::new())),
+            Some(SourceEvents::Named(name)) if name == "off" => Ok(None),
+            Some(SourceEvents::Named(name)) => Err(format!(
+                "{ctx}: unknown value '{name}' (use zephyr, off or rules with boot/crash regexes)"
+            )),
+            Some(SourceEvents::Rules(rules)) => {
+                let window = rules.group_window_ms.unwrap_or(GROUP_WINDOW_MS as u64);
+                if window > 600_000 {
+                    return Err(format!("{ctx}.group_window_ms must be at most 600000"));
+                }
+                if !rules.builtin && rules.boot.is_empty() && rules.crash.is_empty() {
+                    return Err(format!(
+                        "{ctx}: builtin is false and no boot or crash rules are given (use `events: off` to disable detection)"
+                    ));
+                }
+                Ok(Some(Self {
+                    builtin: rules.builtin,
+                    boot: compile_rules(&rules.boot, &format!("{ctx}.boot"))?,
+                    crash: compile_rules(&rules.crash, &format!("{ctx}.crash"))?,
+                    window: Duration::milliseconds(window as i64),
+                    last_boot: None,
+                    last_crash: None,
+                }))
+            }
+        }
+    }
+
+    fn is_boot(&self, text: &str) -> bool {
+        (self.builtin && builtin_sets().0.is_match(text))
+            || self.boot.as_ref().is_some_and(|set| set.is_match(text))
+    }
+
+    fn is_crash(&self, text: &str) -> bool {
+        (self.builtin && builtin_sets().1.is_match(text))
+            || self.crash.as_ref().is_some_and(|set| set.is_match(text))
     }
 
     /// Classify one received line (not TX echoes) logged at `at`.
@@ -68,15 +154,15 @@ impl EventDetector {
         } else {
             message
         };
-        let window = Duration::milliseconds(GROUP_WINDOW_MS);
+        let window = self.window;
         let recent = |last: Option<DateTime<Local>>| last.is_some_and(|last| at - last < window);
-        if boot_re().is_match(text) {
+        if self.is_boot(text) {
             let new_boot = !recent(self.last_boot);
             self.last_boot = Some(at);
             self.last_crash = None;
             return new_boot.then_some(BOOT);
         }
-        if crash_set().is_match(text) {
+        if self.is_crash(text) {
             let new_crash = !recent(self.last_crash);
             self.last_crash = Some(at);
             self.last_boot = None;
@@ -169,6 +255,86 @@ mod tests {
             assert_eq!(d.detect("ASSERTION FAIL [x]", at(ms + 200)), Some(CRASH));
             assert_eq!(d.detect(">>> ZEPHYR FATAL ERROR 4", at(ms + 300)), None);
         }
+    }
+
+    #[test]
+    fn custom_rules_extend_or_replace_the_builtin_ones() {
+        let rules = |builtin: bool| {
+            SourceEvents::Rules(crate::config::EventRules {
+                builtin,
+                boot: vec![r"^APP START v\d+".into()],
+                crash: vec![r"Guru Meditation Error".into(), r"PANIC:".into()],
+                group_window_ms: Some(100),
+            })
+        };
+        let mut d = EventDetector::for_source(Some(&rules(true)), "ctx")
+            .unwrap()
+            .unwrap();
+        assert_eq!(d.detect("APP START v2", at(0)), Some(BOOT));
+        assert_eq!(
+            d.detect("Guru Meditation Error: Core 0 panic'ed", at(10)),
+            Some(CRASH)
+        );
+        assert_eq!(
+            d.detect("PANIC: watchdog", at(50)),
+            None,
+            "same crash group"
+        );
+        assert_eq!(
+            d.detect("PANIC: watchdog", at(500)),
+            Some(CRASH),
+            "100 ms window"
+        );
+        assert_eq!(
+            d.detect("*** Booting Zephyr OS ***", at(900)),
+            Some(BOOT),
+            "builtin kept"
+        );
+
+        let mut d = EventDetector::for_source(Some(&rules(false)), "ctx")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            d.detect("*** Booting Zephyr OS ***", at(0)),
+            None,
+            "builtin off"
+        );
+        assert_eq!(d.detect("APP START v3", at(0)), Some(BOOT));
+
+        let off = SourceEvents::Named("off".into());
+        assert!(EventDetector::for_source(Some(&off), "ctx")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn invalid_rules_report_their_yaml_location() {
+        let bad = SourceEvents::Rules(crate::config::EventRules {
+            builtin: true,
+            boot: vec![],
+            crash: vec!["ok".into(), "(unclosed".into()],
+            group_window_ms: None,
+        });
+        let err = EventDetector::for_source(Some(&bad), "sources.APP.events").unwrap_err();
+        assert!(
+            err.starts_with("sources.APP.events.crash[1] is not a valid regex"),
+            "{err}"
+        );
+        let unknown = SourceEvents::Named("zephir".into());
+        assert!(
+            EventDetector::for_source(Some(&unknown), "sources.APP.events")
+                .unwrap_err()
+                .contains("unknown value 'zephir'")
+        );
+        let empty = SourceEvents::Rules(crate::config::EventRules {
+            builtin: false,
+            boot: vec![],
+            crash: vec![],
+            group_window_ms: None,
+        });
+        assert!(EventDetector::for_source(Some(&empty), "x")
+            .unwrap_err()
+            .contains("events: off"));
     }
 
     #[test]

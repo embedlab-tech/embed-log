@@ -1,4 +1,5 @@
 pub mod control_ws;
+pub mod crash;
 pub mod history;
 pub mod watch;
 pub mod ws_server;
