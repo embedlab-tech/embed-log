@@ -142,8 +142,7 @@ test.describe('layout and time synchronization', () => {
     await waitForLineContaining(page, 'SENSOR_A', 'kind=warning');
     await expect(page.locator('#log-SENSOR_A .log-line').first()).toBeVisible();
 
-    // Disable the default wrapping to capture the unwrapped height first.
-    await page.locator('#pane-SENSOR_A .pane-wrap-btn').click();
+    // Wrapping is off by default.
     await expect(page.locator('#log-SENSOR_A')).not.toHaveClass(/wrap/);
 
     // Capture log area scroll height before wrapping (full-width, no wrap)
@@ -175,8 +174,8 @@ test.describe('layout and time synchronization', () => {
 
 // Scenario: Per-pane wrap does not affect sibling pane wrapping state
 //   Given two panes SENSOR_A and SENSOR_B
-//   When  default wrapping is disabled on SENSOR_A only
-//   Then  SENSOR_B remains wrapped, while SENSOR_A does not
+//   When  wrapping is enabled on SENSOR_A only
+//   Then  SENSOR_B remains unwrapped, while SENSOR_A wraps
 
   test('per-pane wrap does not affect sibling pane', async ({ page }) => {
     await page.goto('/');
@@ -184,13 +183,13 @@ test.describe('layout and time synchronization', () => {
 
     await waitForLineContaining(page, 'SENSOR_A', 'kind=warning');
 
-    // Disable the default wrapping on SENSOR_A only.
+    // Enable wrapping on SENSOR_A only.
     await page.locator('#pane-SENSOR_A .pane-wrap-btn').click();
 
-    await expect(page.locator('#log-SENSOR_B')).toHaveClass(/wrap/);
-    await expect(page.locator('#pane-SENSOR_B .pane-wrap-btn')).toHaveClass(/active/);
-    await expect(page.locator('#log-SENSOR_A')).not.toHaveClass(/wrap/);
-    await expect(page.locator('#pane-SENSOR_A .pane-wrap-btn')).not.toHaveClass(/active/);
+    await expect(page.locator('#log-SENSOR_B')).not.toHaveClass(/wrap/);
+    await expect(page.locator('#pane-SENSOR_B .pane-wrap-btn')).not.toHaveClass(/active/);
+    await expect(page.locator('#log-SENSOR_A')).toHaveClass(/wrap/);
+    await expect(page.locator('#pane-SENSOR_A .pane-wrap-btn')).toHaveClass(/active/);
 });
 
 });

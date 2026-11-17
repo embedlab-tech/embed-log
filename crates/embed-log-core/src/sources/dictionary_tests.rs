@@ -368,12 +368,15 @@ async fn runtime_switch_is_acknowledged_per_uart_and_discards_partial_record() {
     *manager.lock().unwrap() = session(rotated.clone());
     tokio::task::block_in_place(|| master_a.write_all(&record()).unwrap());
     timeout(Duration::from_secs(3), async {
-        while control_a
-            .status()
-            .raw_file
-            .as_ref()
-            .map_or(true, |p| !p.contains("rotated"))
-        {
+        // Opening the rotated file publishes its path before the bytes are written.
+        while {
+            let status = control_a.status();
+            status
+                .raw_file
+                .as_ref()
+                .map_or(true, |p| !p.contains("rotated"))
+                || status.raw_offset < record().len() as u64
+        } {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })

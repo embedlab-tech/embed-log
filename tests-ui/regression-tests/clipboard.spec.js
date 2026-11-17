@@ -79,11 +79,27 @@ test.describe('clipboard UX', () => {
   // Given the user selects only a fragment of one rendered log line
   // When they press Cmd/Ctrl+C
   // Then the browser copies exactly that fragment, without pane/timestamp formatting.
-  test('platform shortcut preserves native single-line text selection', async ({ page }) => {
+  for (const mode of ['plain', 'wrapped', 'highlight']) {
+  test(`platform shortcut preserves native single-line text selection while logs arrive (${mode})`, async ({ page }) => {
+    await page.routeWebSocket('**/ws', ws => ws.send(JSON.stringify({
+      type: 'config', tabs: [{ label: 'Main', panes: ['SENSOR_A'] }],
+      pane_kinds: { SENSOR_A: 'udp' },
+    })));
     await page.goto('/');
     await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await page.evaluate(async () => {
+      const { appendLineBatch } = await import('/lines.js');
+      appendLineBatch([{ paneId: 'SENSOR_A', ts: '12:00:00', rawText: 'TEST kind=warning message', isTx: false }]);
+    });
     await waitForLineContaining(page, 'SENSOR_A', 'kind=warning');
+    if (mode === 'wrapped') await page.locator('#pane-SENSOR_A .pane-wrap-btn').click();
+    if (mode === 'highlight') {
+      await page.locator('#pane-SENSOR_A .search-mode').click();
+      await page.locator('.filter-input[data-pane="SENSOR_A"]').fill('message');
+      await expect(page.locator('#log-SENSOR_A mark.search-hit')).toHaveText('message');
+    }
 
+    await page.evaluate(() => navigator.clipboard.writeText('clipboard before copy'));
     const selected = await page.locator('#log-SENSOR_A .log-line', { hasText: 'kind=warning' }).first().evaluate(line => {
       const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
       let node;
@@ -103,9 +119,16 @@ test.describe('clipboard UX', () => {
       throw new Error('test log line did not contain selectable kind text');
     });
 
+    expect(selected).toBe('kind=warning');
+    await page.evaluate(async () => {
+      const { appendLineBatch } = await import('/lines.js');
+      appendLineBatch([{ paneId: 'SENSOR_A', ts: '12:00:01', rawText: 'next live record', isTx: false }]);
+    });
+    expect(await page.evaluate(() => window.getSelection().toString())).toBe(selected);
     await page.keyboard.press(COPY_SHORTCUT);
-    expect(await readClipboard(page)).toBe(selected);
+    await expect.poll(() => readClipboard(page)).toBe(selected);
   });
+  }
 
   // Clipboard buffer UI was removed in frontend refactoring.
 // Scenario: Clipboard buffer add, peek, copy all, and clear across panes
