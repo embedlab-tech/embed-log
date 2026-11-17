@@ -1,8 +1,77 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
 use crate::models::TimestampMode;
+
+/// One log level of a level profile, e.g. `err` / "Error".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LevelDefinition {
+    /// Stable identifier stored in records (`level` field) and used by the UI filter.
+    pub id: String,
+    /// Display name; defaults to `id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Regex matched against the ANSI-stripped line. Required unless the
+    /// profile uses a single `pattern` with a named `level` group.
+    #[serde(rename = "match", default, skip_serializing_if = "Option::is_none")]
+    pub match_regex: Option<String>,
+    /// CSS color (`#rgb`, `#rrggbb`, a color name or `var(--theme-variable)`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// Whether the level is shown before the viewer changes the filter.
+    #[serde(default = "LevelDefinition::default_visible")]
+    pub default_visible: bool,
+}
+
+impl LevelDefinition {
+    fn default_visible() -> bool {
+        true
+    }
+}
+
+/// What happens to a line that matches no level.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UnmatchedLevel {
+    /// The line has no level ("No level" in the UI).
+    #[default]
+    None,
+    /// The line takes the level of the previous leveled line of the same source.
+    Inherit,
+}
+
+/// How to detect log levels in a source's lines.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LevelProfile {
+    /// Ordered by importance; with per-level `match` the first match wins.
+    pub levels: Vec<LevelDefinition>,
+    #[serde(default)]
+    pub case_insensitive: bool,
+    /// Alternative to per-level `match`: one regex with a named group `level`
+    /// whose text (or its alias) is a level `id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub aliases: BTreeMap<String, String>,
+    #[serde(default)]
+    pub unmatched: UnmatchedLevel,
+    /// Lines matching this regex always take the previous line's level
+    /// (multi-line messages, hexdumps).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continuation: Option<String>,
+}
+
+/// `levels:` of a source: a profile name (`zephyr`, `off` or a key of
+/// `level_profiles`) or an inline profile.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SourceLevels {
+    Named(String),
+    Inline(LevelProfile),
+}
 
 /// One dictionary path (legacy format) or an ordered list; the first is preferred.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,6 +150,9 @@ pub struct SourceConfig {
     pub baudrate: Option<u32>,
     // label
     pub label: Option<String>,
+    /// Log level detection; `None` means the built-in `zephyr` profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub levels: Option<SourceLevels>,
 }
 
 /// Frontend plugin definition.
@@ -249,6 +321,9 @@ pub struct AppConfig {
     pub baudrate: u32,
     #[serde(default)]
     pub frontend_plugins: HashMap<String, FrontendPluginDefinition>,
+    /// Named level profiles referenced by `sources.<name>.levels`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub level_profiles: BTreeMap<String, LevelProfile>,
 }
 
 impl AppConfig {
@@ -268,6 +343,7 @@ impl Default for AppConfig {
             logs: LogsConfig::default(),
             baudrate: Self::default_baudrate(),
             frontend_plugins: HashMap::new(),
+            level_profiles: BTreeMap::new(),
         }
     }
 }

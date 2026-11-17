@@ -32,6 +32,8 @@ struct V2Config {
     ui: Option<V2UiConfig>,
     #[serde(default)]
     merges: Vec<MergeConfig>,
+    #[serde(default)]
+    level_profiles: std::collections::BTreeMap<String, LevelProfile>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -72,6 +74,8 @@ struct V2SourceConfig {
     label: Option<String>,
     #[serde(default)]
     parser: ParserConfig,
+    #[serde(default)]
+    levels: Option<SourceLevels>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -194,6 +198,7 @@ fn parse_v2_config(raw: serde_yaml::Value) -> Result<AppConfig, ConfigError> {
             parser: source.parser,
             baudrate: source.baud,
             label: source.label,
+            levels: source.levels,
         });
     }
 
@@ -224,6 +229,7 @@ fn parse_v2_config(raw: serde_yaml::Value) -> Result<AppConfig, ConfigError> {
         logs: v2.logs,
         baudrate: 115_200,
         frontend_plugins: Default::default(),
+        level_profiles: v2.level_profiles,
     })
 }
 
@@ -255,6 +261,9 @@ pub fn config_to_v2_yaml(config: &AppConfig) -> anyhow::Result<String> {
         }
         if source.parser != ParserConfig::default() {
             value.insert("parser".to_string(), serde_json::to_value(&source.parser)?);
+        }
+        if let Some(levels) = &source.levels {
+            value.insert("levels".to_string(), serde_json::to_value(levels)?);
         }
         source_map.insert(source.name.clone(), serde_json::Value::Object(value));
     }
@@ -316,6 +325,9 @@ pub fn config_to_v2_yaml(config: &AppConfig) -> anyhow::Result<String> {
     });
     if !config.merges.is_empty() {
         root["merges"] = serde_json::to_value(&config.merges)?;
+    }
+    if !config.level_profiles.is_empty() {
+        root["level_profiles"] = serde_json::to_value(&config.level_profiles)?;
     }
     Ok(serde_yaml::to_string(&root)?)
 }
@@ -421,6 +433,8 @@ fn validate_config(config: &mut AppConfig, config_path: &Path) -> Result<(), Con
             )));
         }
     }
+
+    crate::levels::validate_level_config(config).map_err(ConfigError::validation)?;
 
     let mut source_names = HashSet::new();
 
@@ -762,6 +776,111 @@ sources: {}
         std::fs::remove_file(path).ok();
     }
 
+    fn load_yaml(name: &str, yaml: &str) -> Result<AppConfig, ConfigError> {
+        let path = std::env::temp_dir().join(format!("{name}-{}.yml", std::process::id()));
+        std::fs::write(&path, yaml).unwrap();
+        let result = load_config(&path);
+        std::fs::remove_file(&path).ok();
+        result
+    }
+
+    #[test]
+    fn level_profiles_resolve_per_source_and_round_trip() {
+        let yaml = r#"
+version: 2
+level_profiles:
+  my-fw:
+    case_insensitive: true
+    unmatched: inherit
+    continuation: '^\s{2,}'
+    levels:
+      - id: fatal
+        label: Fatal
+        match: '\[FATAL\]'
+        color: red
+      - id: err
+        match: '<err>'
+      - id: trace
+        label: Trace
+        match: '\[TRACE\]'
+        default_visible: false
+sources:
+  DUT:
+    type: udp
+    port: 5001
+    levels: my-fw
+  HOST:
+    type: udp
+    port: 5002
+    levels: off
+  AUX:
+    type: udp
+    port: 5003
+  GW:
+    type: udp
+    port: 5004
+    levels:
+      pattern: '^(?P<level>[EWID])/'
+      aliases: { E: err, W: wrn }
+      levels:
+        - { id: err, color: '#f00' }
+        - { id: wrn }
+        - { id: i }
+        - { id: d, default_visible: false }
+"#;
+        let config = load_yaml("levels-ok", yaml).unwrap();
+        let levels = crate::levels::source_levels_json(&config);
+        assert_eq!(levels["DUT"]["levels"][0]["id"], "fatal");
+        assert_eq!(levels["DUT"]["levels"][0]["color"], "red");
+        assert_eq!(levels["DUT"]["levels"][2]["default_visible"], false);
+        assert_eq!(
+            levels["DUT"]["levels"][1]["label"], "err",
+            "label defaults to id"
+        );
+        assert!(levels["HOST"].is_null(), "levels: off");
+        assert_eq!(
+            levels["AUX"]["levels"][3]["id"], "dbg",
+            "built-in zephyr profile"
+        );
+        assert_eq!(levels["GW"]["levels"].as_array().unwrap().len(), 4);
+
+        // The canonical YAML writer keeps profiles and per-source settings.
+        let yaml = config_to_v2_yaml(&config).unwrap();
+        let reloaded = load_yaml("levels-roundtrip", &yaml).unwrap();
+        assert_eq!(reloaded.level_profiles, config.level_profiles);
+        for source in &config.sources {
+            let reloaded_source = reloaded
+                .sources
+                .iter()
+                .find(|s| s.name == source.name)
+                .unwrap();
+            assert_eq!(reloaded_source.levels, source.levels, "{}", source.name);
+        }
+    }
+
+    #[test]
+    fn invalid_level_configuration_is_rejected_with_its_location() {
+        let base = "version: 2\nsources:\n  DUT:\n    type: udp\n    port: 5001\n";
+        for (extra, expected) in [
+            ("    levels: nope\n", "sources.DUT.levels: unknown level profile 'nope'"),
+            (
+                "    levels: fw\nlevel_profiles:\n  fw:\n    levels:\n      - { id: err, match: '(' }\n",
+                "level_profiles.fw.levels[0].match is not a valid regex",
+            ),
+            (
+                "level_profiles:\n  zephyr:\n    levels:\n      - { id: err, match: x }\n",
+                "'zephyr' is a reserved profile name",
+            ),
+            (
+                "    levels:\n      levels:\n        - { id: err, match: x, color: 'red;x' }\n",
+                "sources.DUT.levels.levels[0].color",
+            ),
+        ] {
+            let error = load_yaml("levels-bad", &format!("{base}{extra}")).unwrap_err();
+            assert!(error.to_string().contains(expected), "{error}");
+        }
+    }
+
     #[test]
     fn version_two_round_trip_serializer_uses_canonical_keys() {
         let mut cfg = AppConfig::default();
@@ -772,6 +891,7 @@ sources: {}
             parser: ParserConfig::default(),
             baudrate: Some(115_200),
             label: None,
+            levels: None,
         });
         cfg.tabs.push(TabConfig {
             label: "DUT".to_string(),

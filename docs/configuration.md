@@ -54,6 +54,7 @@ The server port hosts browser HTTP, browser WebSocket, the status API, and the c
 | `sources` | mapping | `{}` | Source ID to source definition. |
 | `ui` | object | generated | Optional tabs; one tab per source when omitted. |
 | `merges` | array | `[]` | Optional presentation-only virtual merged streams; never persisted as duplicate records. |
+| `level_profiles` | mapping | `{}` | Named log level detection profiles referenced by `sources.<ID>.levels`. See [Log levels](#log-levels). |
 
 Unknown version 2 fields are rejected rather than silently ignored. Runtime choices such as browser, TUI, and daemon mode belong to CLI flags.
 
@@ -281,6 +282,101 @@ ui:
 ```
 
 A merge must reference at least two distinct existing sources and must not collide with a source ID. Merges are presentation-only virtual sources: Embed-log persists and sequences each member record exactly once, stores the merge definition in `manifest.json`, and constructs the merged pane dynamically in the browser, TUI, and HTML export. No merge `.log` file or duplicate `combined.jsonl` record is created.
+
+## Log levels
+
+Each pane has a **Levels** button next to Highlight. It lists the levels its sources can produce, with a line count for each, plus **No level** for lines that matched no level. Unchecked levels are hidden from the pane, from Highlight counts and from navigation; the regex filter still applies on top. The choice is remembered per pane in the browser. TX lines are never hidden by the level filter. A merged pane offers the union of its members' levels.
+
+The server classifies every received line once, with the profile of its source, and stores the result as `level` in `combined.jsonl`. The UI receives only level ids, labels, colors and default visibility; regexes stay on the server.
+
+### Built-in Zephyr profile
+
+Sources without a `levels` key use the built-in `zephyr` profile:
+
+| Id | Label | Matches (case-insensitive) | Visible by default |
+| --- | --- | --- | --- |
+| `err` | Error | `<err>`, `[err]`, `[error]` | yes |
+| `wrn` | Warning | `<wrn>`, `[wrn]`, `[warn]`, `[warning]` | yes |
+| `inf` | Info | `<inf>`, `[inf]`, `[info]` | yes |
+| `dbg` | Debug | `<dbg>`, `[dbg]`, `[debug]` | **no** |
+
+Tags must appear at the start of the line, optionally after a Zephyr timestamp in any `log_output` format (uptime ticks, `[00:00:01.234,567]`, Linux `[    1.234567]`, date `[1970-01-01 00:00:01.234,567]`, ISO 8601, or the dictionary decoder's `[2024-01-01T00:00:00Z]:`). A shell prompt that Zephyr erased before printing the log line (`uart:~$ `) and stray control bytes are skipped. Tags quoted inside a message do not change its level.
+
+Hexdump rows printed by Zephyr after a log message (`    01 02 03 … |....`) inherit the level of the message. Lines without a tag (shell prompts, `printk` output) are **No level** and stay visible. ANSI color codes are ignored when matching.
+
+### Per-source configuration
+
+```yaml
+sources:
+  DUT:
+    type: uart
+    path: /dev/ttyUSB0
+    levels: zephyr        # default; same as omitting the key
+  HOST:
+    type: udp
+    port: 16000
+    levels: off           # no detection, no Levels button
+  APP:
+    type: udp
+    port: 16001
+    levels: app           # named profile from level_profiles
+```
+
+`levels` accepts `zephyr`, `off`, the name of a profile from `level_profiles`, or an inline profile with the same fields.
+
+### Custom profiles
+
+A profile either gives each level its own `match` regex, or one `pattern` with a named group `level`.
+
+```yaml
+level_profiles:
+  app:
+    case_insensitive: true      # default false
+    unmatched: inherit          # none (default) | inherit
+    continuation: '^\s+at '     # optional: lines that keep the previous level
+    levels:
+      - id: fatal
+        label: Fatal
+        match: '\bFATAL\b'
+        color: '#ff4d4f'
+      - id: err
+        match: '\bERROR\b'      # built-in ids err/wrn/dbg keep the theme colors
+      - id: wrn
+        match: '\bWARN(ING)?\b'
+      - id: inf
+        match: '\bINFO\b'
+      - id: trace
+        label: Trace
+        match: '\bTRACE\b'
+        default_visible: false
+
+  syslog:
+    pattern: '^\S+ \S+ (?P<level>[A-Z]+):'
+    aliases: { E: err, W: wrn, WARNING: wrn, I: inf, D: dbg }
+    levels:
+      - { id: err, label: Error }
+      - { id: wrn, label: Warning }
+      - { id: inf, label: Info }
+      - { id: dbg, label: Debug, default_visible: false }
+```
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| `levels` | required | Ordered list; the order is the order in the Levels menu. With per-level `match`, the first level whose regex matches wins. |
+| `levels[].id` | required | 1–32 letters, digits, `_` or `-`; unique (case-insensitive). Ids `err`/`error`/`fatal`/`crit`, `wrn`/`warn`/`warning` and `dbg`/`debug` reuse the theme's line colors. |
+| `levels[].label` | id | Name shown in the menu. |
+| `levels[].match` | — | Regex; required for every level unless the profile has `pattern`. |
+| `levels[].color` | theme | `#rgb`, `#rrggbb` (with optional alpha), a CSS color name or `var(--name)`. |
+| `levels[].default_visible` | `true` | Initial checkbox state until the viewer changes it. |
+| `pattern` | — | One regex with a `(?P<level>...)` group; the captured text is matched against level ids and `aliases` case-insensitively. |
+| `aliases` | `{}` | Captured text → level id. Requires `pattern`. |
+| `case_insensitive` | `false` | Applies to `match`, `pattern` and `continuation`. |
+| `unmatched` | `none` | `none`: a line without a match is **No level**. `inherit`: it keeps the level of the previous line of the same source (multi-line messages, stack traces). |
+| `continuation` | — | Lines matching this regex always keep the previous level, even with `unmatched: none`. |
+
+Regexes use Rust [`regex`](https://docs.rs/regex/latest/regex/#syntax) syntax: no look-around or backreferences, matching time is linear in the line length. Each regex is limited to 1024 characters. Matching runs on the decoded line text without ANSI codes and without the timestamp added by Embed-log. Invalid profiles are rejected at startup with the YAML location, for example `level_profiles.app.levels[1].match is not a valid regex`. The names `zephyr` and `off` are reserved.
+
+Records injected through the control API keep an explicit `level` from their metadata. HTML exports embed the level definitions, so the Levels button works offline; sessions recorded by older versions fall back to Zephyr tag detection in the browser.
 
 ## Version 1 migration
 

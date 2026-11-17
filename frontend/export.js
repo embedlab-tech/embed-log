@@ -36,7 +36,7 @@ export async function exportHtmlSnapshot(options = {}) {
         const ASSETS = [
             "profile.js", "keyboard.js", "renderPane.js", "renderToolbar.js", "viewer.css",
             "pluginRuntime.js", "state.js", "themes.js", "settings.js", "fontsize.js",
-            "ansi.js", "search.js", "timeSync.js", "lines.js", "tabs.js", "tabcreate.js",
+            "ansi.js", "levels.js", "search.js", "timeSync.js", "lines.js", "tabs.js", "tabcreate.js",
             "ui.js", "export.js", "postprocess.js", "selection.js", "tsparse.js", "import.js",
         ];
 
@@ -67,7 +67,7 @@ export async function exportHtmlSnapshot(options = {}) {
             return a.endsWith(".js") ? _escJs(_stripModuleSyntax(src)) : src;
         }));
         const [profileJs, keyboardJs, renderPaneJs, renderToolbarJs, css, pluginRuntimeJs, stateJs, themesJs, settingsJs, fontsizeJs,
-               ansiJs, searchJs, timeSyncJs, linesJs, tabsJs, tabcreateJs, uiJs, exportJs, postprocessJs, selectionJs, tsparseJs, importJs] = texts;
+               ansiJs, levelsJs, searchJs, timeSyncJs, linesJs, tabsJs, tabcreateJs, uiJs, exportJs, postprocessJs, selectionJs, tsparseJs, importJs] = texts;
 
 
         // ------------------------------------------------------------------
@@ -112,6 +112,8 @@ export async function exportHtmlSnapshot(options = {}) {
             `window.__embedLogFrontendPlugins = ${_safeJson(Object.fromEntries(activePluginNames.map(name => [name, frontendPlugins[name]])))};\n` +
             `window.__embedLogPanePlugins = ${_safeJson(panePlugins)};\n` +
             `window.__embedLogPluginScripts = ${_safeJson(pluginScripts)};\n` +
+            `window.__embedLogMerges = ${_safeJson(window.__embedLogMerges || [])};\n` +
+            (window.__embedLogSourceLevels ? `window.__embedLogSourceLevels = ${_safeJson(window.__embedLogSourceLevels)};\n` : "") +
             `window.__embedLogInitialPanePluginUiState = ${_safeJson(panePluginUiState)};\n` +
             `window.__embedLogInitialThemeState = ${_safeJson(themeState)};\n` +
             `window.__embedLogInitialTimestampMode = ${_safeJson(state.timestampMode === "hidden" ? state.sessionTimestampMode : state.timestampMode)};\n` +
@@ -143,6 +145,8 @@ export async function exportHtmlSnapshot(options = {}) {
             if (Number.isFinite(line.absNum)) meta.absNum = line.absNum;
             if (line.relTs != null) meta.relTs = line.relTs;
             if (Number.isFinite(line.relNum)) meta.relNum = line.relNum;
+            if (line.sourceId) meta.sourceId = line.sourceId;
+            if (line.level) meta.level = line.level;
             return [line.ts, _rawOf(line), line.isTx, Object.keys(meta).length ? meta : null];
         }
 
@@ -164,6 +168,8 @@ export async function exportHtmlSnapshot(options = {}) {
                     if (Number.isFinite(e.absNum)) meta.absNum = e.absNum;
                     if (e.relTs != null) meta.relTs = e.relTs;
                     if (Number.isFinite(e.relNum)) meta.relNum = e.relNum;
+                    if (e.sourceId) meta.sourceId = e.sourceId;
+                    if (e.level) meta.level = e.level;
                     return [e.ts, e.text, e.isTx, Object.keys(meta).length ? meta : null];
                 }))}</script>\n`;
             });
@@ -284,6 +290,7 @@ ${pluginScriptTags}
 <script>${settingsJs}</script>
 <script>${fontsizeJs}</script>
 <script>${ansiJs}</script>
+<script>${levelsJs}</script>
 <script>${searchJs}</script>
 <script>${timeSyncJs}</script>
 <script>${linesJs}</script>

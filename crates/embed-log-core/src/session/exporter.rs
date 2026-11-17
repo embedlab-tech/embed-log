@@ -35,6 +35,9 @@ pub struct SessionExporter {
     markers: Vec<serde_json::Value>,
     merges: Vec<crate::config::MergeConfig>,
     combined_file: Option<PathBuf>,
+    /// `{source: level profile summary | null}`; omitted for older callers,
+    /// in which case the offline viewer falls back to the built-in Zephyr levels.
+    source_levels: Option<serde_json::Value>,
 }
 
 impl SessionExporter {
@@ -62,6 +65,7 @@ impl SessionExporter {
             markers: vec![],
             merges: vec![],
             combined_file: None,
+            source_levels: None,
         }
     }
 
@@ -69,6 +73,12 @@ impl SessionExporter {
     /// original source ids and global sequence values.
     pub fn with_combined_file(mut self, path: PathBuf) -> Self {
         self.combined_file = Some(path);
+        self
+    }
+
+    /// Level profile summaries per source (see `levels::source_levels_json`).
+    pub fn with_source_levels(mut self, source_levels: serde_json::Value) -> Self {
+        self.source_levels = Some(source_levels);
         self
     }
 
@@ -213,6 +223,10 @@ impl SessionExporter {
                             .get("timestamp_domain")
                             .and_then(|value| value.as_str())
                             .map(str::to_string),
+                        level: record
+                            .get("level")
+                            .and_then(|value| value.as_str())
+                            .map(str::to_string),
                     });
             }
             log_data = combined_data;
@@ -297,6 +311,13 @@ impl SessionExporter {
         let plugin_scripts_json = serde_json::to_string(&self.plugin_scripts)?;
         let markers_json = serde_json::to_string(&self.markers)?;
         let merges_json = serde_json::to_string(&self.merges)?;
+        let source_levels_js = match &self.source_levels {
+            Some(levels) => format!(
+                "window.__embedLogSourceLevels = {};\n",
+                serde_json::to_string(levels)?
+            ),
+            None => String::new(),
+        };
 
         // Build static profile.
         let static_profile = json!({
@@ -328,6 +349,7 @@ impl SessionExporter {
              window.__embedLogPanePlugins = {pane_plugins_json};\n\
              window.__embedLogPluginScripts = {plugin_scripts_json};\n\
              window.__embedLogMerges = {merges_json};\n\
+             {source_levels_js}\
              window.__embedLogInitialPanePluginUiState = {{}};\n\
              window.__embedLogInitialThemeState = {{\"mode\":\"light\",\"lightKey\":\"whitesand\",\"darkKey\":\"one-dark\"}};\n\
              window.__embedLogInitialTimestampMode = {tm};\n\
@@ -366,6 +388,9 @@ impl SessionExporter {
                 }
                 if let Some(sequence) = e.sequence {
                     meta["sequence"] = json!(sequence);
+                }
+                if let Some(level) = &e.level {
+                    meta["level"] = json!(level);
                 }
                 let meta_val = if meta.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
                     meta
@@ -420,6 +445,7 @@ impl SessionExporter {
             "settings.js",
             "fontsize.js",
             "ansi.js",
+            "levels.js",
             "search.js",
             "timeSync.js",
             "lines.js",
@@ -785,6 +811,53 @@ mod tests {
         let html = std::fs::read_to_string(html_path).unwrap();
         assert!(html.contains("COMMITTED_LINE_7a1"));
         assert!(!html.contains("UNCOMMITTED_TAIL_9f2"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn export_keeps_record_levels_and_embeds_level_definitions() {
+        let dir = std::env::temp_dir().join(format!(
+            "embed-log-export-levels-{}-{}",
+            std::process::id(),
+            EXPORT_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let combined = dir.join("combined.jsonl");
+        std::fs::write(
+            &combined,
+            format!(
+                "{}\n{}\n",
+                json!({"sequence":1,"source_id":"DUT","message":"<dbg> a","level":"dbg"}),
+                json!({"sequence":2,"source_id":"DUT","message":"shell"})
+            ),
+        )
+        .unwrap();
+        let html_path = dir.join("session.html");
+        let levels = json!({"DUT": crate::levels::profile_summary(&crate::levels::builtin_zephyr_profile())});
+        SessionExporter::new(
+            html_path.clone(),
+            HashMap::new(),
+            vec![json!({"label":"Main","panes":["DUT","ALL"]})],
+            HashMap::new(),
+            PathBuf::from("frontend"),
+            "absolute".to_string(),
+            None,
+        )
+        .with_combined_file(combined)
+        .with_merges(json!([{"name":"ALL","of":["DUT"]}]))
+        .with_source_levels(levels.clone())
+        .export()
+        .unwrap();
+        let html = std::fs::read_to_string(html_path).unwrap();
+        assert!(html.contains(&format!("window.__embedLogSourceLevels = {levels};")));
+        let data =
+            Regex::new(r#"<script type="application/json" data-pane="(DUT|ALL)">(.*?)</script>"#)
+                .unwrap();
+        for capture in data.captures_iter(&html) {
+            let rows: serde_json::Value = serde_json::from_str(&capture[2]).unwrap();
+            assert_eq!(rows[0][3]["level"], "dbg", "{}", &capture[1]);
+            assert!(rows[1][3].get("level").is_none());
+        }
         std::fs::remove_dir_all(dir).unwrap();
     }
 

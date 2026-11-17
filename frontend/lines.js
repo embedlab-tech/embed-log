@@ -4,6 +4,10 @@ import {
 } from './state.js';
 import { parseAnsi, isErasedConsoleLine } from './ansi.js';
 import { PhraseSearch, markPhraseMatches } from './search.js';
+import {
+    entryLevel, hasLevelProfile, isEntryVisible, levelClass, levelColor, levelFilterVersion,
+    levelPredicate,
+} from './levels.js';
 import { analyzeLinePlugins, getLinePluginTooltip, getConfiguredPanePlugins, getPanePluginSettings, setPanePluginSetting } from './pluginRuntime.js';
 import { isEditableTarget, isComposingEvent } from './keyboard.js';
 import { findNearestCandidate, resolveSyncAnchor } from './timeSync.js';
@@ -60,6 +64,8 @@ export function buildStoredLine(paneId, ts, rawText, isTx, meta = null) {
         serverLineIdx: Number.isFinite(lineMeta.lineIdx) ? lineMeta.lineIdx : null,
         sequence: Number.isFinite(lineMeta.sequence) ? lineMeta.sequence : null,
         sessionId: lineMeta.sessionId || null,
+        sourceId: lineMeta.sourceId || null,
+        level: typeof lineMeta.level === "string" && lineMeta.level ? lineMeta.level : null,
         html,
         rawText,
         isTx,
@@ -89,13 +95,22 @@ export function _lineClass(line, idx, paneId) {
         : "";
     return "log-line"
         + (line.isTx ? " tx-line" : "")
-        + _lineTagClass(line.html)
+        + _lineLevelClass(line, paneId)
         + pluginClasses
         + (state.selected[paneId].has(idx) ? " selected" : "");
 }
 
-export function matchesFilter(line, rx) {
+// Lines with a detected level use its class; sources without a level profile
+// (`levels: off`) keep the legacy tag-based coloring.
+function _lineLevelClass(line, paneId) {
+    const level = entryLevel(line);
+    if (level) return levelClass(level);
+    return hasLevelProfile(line, paneId) ? "" : _lineTagClass(line.html);
+}
+
+export function matchesFilter(line, rx, paneId = null) {
     if (!line.isTx && (line.transientConsoleRedraw ?? isErasedConsoleLine(line.rawText))) return false;
+    if (paneId && !isEntryVisible(paneId, line)) return false;
     if (!rx) return true;
     const rendered = line.pluginInlineText || line.html.replace(/<[^>]+>/g, "");
     const rawText = typeof line.rawText === "string" ? line.rawText : "";
@@ -303,6 +318,7 @@ export function hidePluginOverlays() {
 window.__embedLogHidePluginOverlays = hidePluginOverlays;
 export function applyLineDom(div, line, paneId, idx, filterRx) {
     div.className = _lineClass(line, idx, paneId);
+    div.style.color = levelColor(line, paneId);
     const tooltip = getLinePluginTooltip(line);
     if (tooltip) {
         div.dataset.pluginTooltip = tooltip;
@@ -323,7 +339,7 @@ export function applyLineDom(div, line, paneId, idx, filterRx) {
     } else {
         delete div.dataset.markerTooltip;
     }
-    if (!matchesFilter(line, filterRx)) {
+    if (!matchesFilter(line, filterRx, paneId)) {
         div.style.display = "none";
         div.innerHTML = "";
         _renderedLineContent.delete(div);
@@ -540,30 +556,36 @@ function _getNumTs(entry, paneId = null, idx = -1) {
 function _getVisibleIndices(paneId, vp) {
     const lines = state.rawLines[paneId] || [];
     const rx = state.filters[paneId] || null;
+    const levelVersion = levelFilterVersion(paneId);
+    const sameProjection = vp.projectionRows === lines && vp.projectionFilter === rx
+        && vp.projectionLevel === levelVersion && Array.isArray(vp.visibleIndices);
     // Preserve raw rows/indices for export, selection and debugging, but don't
-    // allocate visual rows for terminal text erased before the next record.
-    // Extend the projection on append instead of rescanning the entire session.
-    if (rx && vp.projectionRows === lines && vp.projectionFilter === rx
-        && vp.projectionSourceLen === lines.length && Array.isArray(vp.visibleIndices)) {
+    // allocate visual rows for terminal text erased before the next record or
+    // for levels hidden in this pane. Extend the projection on append instead
+    // of rescanning the entire session (the level filter is on by default).
+    if (rx && sameProjection && vp.projectionSourceLen === lines.length) {
         return vp.visibleIndices;
     }
-    const extend = !rx && vp.projectionRows === lines && vp.projectionFilter === rx
-        && vp.projectionSourceLen <= lines.length && Array.isArray(vp.visibleIndices);
+    const extend = !rx && sameProjection && vp.projectionSourceLen <= lines.length;
     const indices = extend ? vp.visibleIndices : [];
+    const levelVisible = levelPredicate(paneId);
     for (let rawIndex = extend ? vp.projectionSourceLen : 0; rawIndex < lines.length; rawIndex++) {
         if (!rx) {
             const entry = lines[rawIndex];
             const rawText = _isRawTuple(entry) ? entry[1] : entry.rawText;
             const isTx = _isRawTuple(entry) ? entry[2] : entry.isTx;
-            if (isTx || !isErasedConsoleLine(rawText)) indices.push(rawIndex);
+            if ((isTx || !isErasedConsoleLine(rawText)) && (!levelVisible || levelVisible(entry))) {
+                indices.push(rawIndex);
+            }
         } else {
             const line = getLine(paneId, rawIndex);
-            if (line && matchesFilter(line, rx)) indices.push(rawIndex);
+            if (line && matchesFilter(line, rx, paneId)) indices.push(rawIndex);
         }
     }
     vp.visibleIndices = indices;
     vp.projectionRows = lines;
     vp.projectionFilter = rx;
+    vp.projectionLevel = levelVersion;
     vp.projectionSourceLen = lines.length;
     return indices;
 }
@@ -979,7 +1001,8 @@ export function appendLineBatch(entries) {
 export function updatePaneSearch(paneId) {
     const search = state.searches[paneId];
     if (!search) return;
-    search.update(state.rawLines[paneId] || []);
+    // Count and navigate only rows the level filter shows.
+    search.update(state.rawLines[paneId] || [], levelPredicate(paneId), levelFilterVersion(paneId));
     const bar = document.querySelector(`#pane-${paneId} .filter-bar`);
     const counter = bar?.querySelector('.search-count');
     if (counter) counter.textContent = search.loading ? 'Loading history…'
@@ -993,7 +1016,7 @@ export function updatePaneSearch(paneId) {
 export function navigatePaneSearch(paneId, direction) {
     const search = state.searches[paneId];
     if (!search || search.loading || search.error) return;
-    search.update(state.rawLines[paneId] || []);
+    search.update(state.rawLines[paneId] || [], levelPredicate(paneId), levelFilterVersion(paneId));
     const match = search.move(direction);
     if (!match) return;
     state.atBottom[paneId] = false;

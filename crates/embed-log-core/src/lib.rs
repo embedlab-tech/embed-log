@@ -1,6 +1,7 @@
 pub mod clock;
 pub mod config;
 pub mod frontend_assets;
+pub mod levels;
 pub mod models;
 pub mod naming;
 pub mod net;

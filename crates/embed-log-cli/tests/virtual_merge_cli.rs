@@ -190,6 +190,10 @@ fn merge_is_virtual_and_cli_expands_it_to_original_records() {
     assert!(html.contains("MCU_TX: sent") || html.contains("MCU TX: sent"));
     assert!(html.contains("sourceId"));
     assert!(html.contains("sequence"));
+    assert!(
+        html.contains("window.__embedLogSourceLevels"),
+        "post-factum export keeps level definitions from the manifest"
+    );
 
     let stopped = invoke(&runtime, &["stop", "--instance", "merge", "--json"]);
     assert!(stopped.status.success());

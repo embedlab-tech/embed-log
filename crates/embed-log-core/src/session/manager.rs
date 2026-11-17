@@ -37,6 +37,7 @@ pub struct SessionManager {
     html_error: Option<String>,
     next_sequence: u64,
     merges: serde_json::Value,
+    source_levels: serde_json::Value,
 }
 
 impl SessionManager {
@@ -86,7 +87,15 @@ impl SessionManager {
             html_error: None,
             next_sequence: 1,
             merges,
+            source_levels: serde_json::Value::Null,
         }
+    }
+
+    /// Level profile summaries per source (`levels::source_levels_json`), kept
+    /// in the manifest so post-factum exports render the same Levels menu.
+    pub fn with_source_levels(mut self, source_levels: serde_json::Value) -> Self {
+        self.source_levels = source_levels;
+        self
     }
 
     /// Attach the human experiment title persisted in the manifest and APIs.
@@ -331,6 +340,7 @@ impl SessionManager {
             "source_files": self.source_files,
             "combined_file": self.combined_file,
             "merges": self.merges,
+            "source_levels": self.source_levels,
             "session_html": html_path.display().to_string(),
             "last_export_reason": serde_json::Value::Null,
             "html_status": self.html_status,
@@ -501,6 +511,7 @@ mod tests {
             "source_files",
             "combined_file",
             "merges",
+            "source_levels",
             "session_html",
             "last_export_reason",
             "html_status",

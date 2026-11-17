@@ -1,6 +1,9 @@
 import { state, TABS, PANES, paneLabel } from './state.js';
 import { rerenderPane, reanalyzePanePlugins, setTimestampMode, canDisplayTimestampMode, hidePluginOverlays, updatePaneSearch, navigatePaneSearch } from './lines.js';
 import { PhraseSearch } from './search.js';
+import {
+    countLevels, hiddenLevelCount, hiddenLevels, paneLevelDefs, setLevelVisible, showAllLevels,
+} from './levels.js';
 import { rebuildLayout } from './tabcreate.js';
 import { getPanePluginSettings, setPanePluginSetting } from './pluginRuntime.js';
 
@@ -357,6 +360,118 @@ function _buildSwapTargetOptions(select, fromPaneId) {
 // ---------------------------------------------------------------------------
 // Filter inputs
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Per-pane log level filter ("Levels" button next to Highlight)
+// ---------------------------------------------------------------------------
+const _levelControlRefreshers = new Map(); // paneId -> refresh button label/visibility
+
+function _closeLevelMenus(except = null) {
+    document.querySelectorAll('.level-filter').forEach(wrap => {
+        if (wrap === except) return;
+        const menu = wrap.querySelector('.level-menu');
+        if (menu && !menu.hidden) {
+            menu.hidden = true;
+            wrap.querySelector('.level-mode')?.setAttribute('aria-expanded', 'false');
+        }
+    });
+}
+document.addEventListener('click', event => {
+    _closeLevelMenus(event.target.closest?.('.level-filter') || null);
+});
+
+function _setupLevelControl(id, after) {
+    const wrap = document.createElement('span');
+    wrap.className = 'level-filter';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'level-mode';
+    button.setAttribute('aria-haspopup', 'true');
+    button.setAttribute('aria-expanded', 'false');
+    const menu = document.createElement('div');
+    menu.className = 'level-menu';
+    menu.hidden = true;
+    menu.setAttribute('role', 'group');
+    menu.setAttribute('aria-label', 'Visible log levels');
+    wrap.append(button, menu);
+    after.after(wrap);
+
+    const refreshButton = () => {
+        const defs = paneLevelDefs(id);
+        wrap.hidden = defs.length === 0;
+        const hidden = hiddenLevelCount(id);
+        button.textContent = hidden ? `Levels ${defs.length - hidden}/${defs.length}` : 'Levels';
+        button.classList.toggle('filtered', hidden > 0);
+        button.title = hidden
+            ? `${hidden} log level${hidden === 1 ? '' : 's'} hidden in this pane`
+            : 'Choose which log levels this pane shows';
+    };
+    const applyChange = () => {
+        refreshButton();
+        rerenderPane(id);
+        updatePaneSearch(id);
+    };
+    const renderMenu = () => {
+        const defs = paneLevelDefs(id);
+        const counts = countLevels(id, state.rawLines[id] || []);
+        const hidden = hiddenLevels(id);
+        menu.replaceChildren();
+        for (const def of defs) {
+            const label = document.createElement('label');
+            const box = document.createElement('input');
+            box.type = 'checkbox';
+            box.checked = !hidden.has(def.id);
+            box.dataset.level = def.id;
+            box.addEventListener('change', () => {
+                setLevelVisible(id, def.id, box.checked);
+                applyChange();
+            });
+            const name = document.createElement('span');
+            name.className = 'level-name';
+            name.textContent = def.label;
+            const count = document.createElement('span');
+            count.className = 'level-count';
+            count.textContent = (counts.get(def.id) || 0).toLocaleString();
+            label.append(box, name, count);
+            menu.append(label);
+        }
+        const all = document.createElement('button');
+        all.type = 'button';
+        all.className = 'level-show-all';
+        all.textContent = 'Show all';
+        all.addEventListener('click', () => {
+            showAllLevels(id);
+            applyChange();
+            renderMenu();
+        });
+        menu.append(all);
+    };
+    button.addEventListener('click', () => {
+        if (menu.hidden) {
+            renderMenu();
+            menu.hidden = false;
+            button.setAttribute('aria-expanded', 'true');
+            menu.querySelector('input')?.focus();
+        } else {
+            menu.hidden = true;
+            button.setAttribute('aria-expanded', 'false');
+        }
+    });
+    menu.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') return;
+        event.stopPropagation();
+        menu.hidden = true;
+        button.setAttribute('aria-expanded', 'false');
+        button.focus();
+    });
+    _levelControlRefreshers.set(id, refreshButton);
+    refreshButton();
+}
+
+// Level definitions arrive with the server config, possibly after panes exist.
+window.__embedLogRefreshLevelControls = () => {
+    for (const refresh of _levelControlRefreshers.values()) refresh();
+};
+
 export function _uiSetupPane(id) {
     const input = document.querySelector(`.filter-input[data-pane="${id}"]`);
     if (input && !input.dataset.searchInitialized) {
@@ -424,6 +539,7 @@ export function _uiSetupPane(id) {
             controls.hidden = !enabled;
             apply();
         });
+        _setupLevelControl(id, controls);
         updatePaneSearch(id);
     }
 
