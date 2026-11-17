@@ -297,16 +297,22 @@ async fn handle_ws_client(mut socket: WebSocket, state: ServerState) {
         return;
     }
 
-    // 2. Send replay buffer so the client catches up.
+    // 2. Subscribe before reading the replay buffer: a record published
+    //    between the two steps would otherwise be in neither and never reach
+    //    this client. Records that end up in both are skipped below.
+    let mut rx = state.broadcast_tx.subscribe();
+
+    // 3. Send replay buffer so the client catches up.
     let replay_msgs = drain_replay(&state.replay);
+    let mut replayed_until = replay_msgs
+        .iter()
+        .rev()
+        .find_map(|msg| record_position(msg));
     for msg in replay_msgs {
         if socket.send(Message::Text(msg.into())).await.is_err() {
             return;
         }
     }
-
-    // 3. Subscribe to the broadcast channel.
-    let mut rx = state.broadcast_tx.subscribe();
 
     // 4. Forward broadcast messages to the client; drain incoming messages.
     loop {
@@ -314,6 +320,15 @@ async fn handle_ws_client(mut socket: WebSocket, state: ServerState) {
             result = rx.recv() => {
                 match result {
                     Ok(data) => {
+                        // Only the first broadcasts after subscribing can
+                        // repeat replayed records; stop checking after them.
+                        if let Some(until) = &replayed_until {
+                            match record_position(&data) {
+                                Some(position) if position.0 == until.0 && position.1 <= until.1 => continue,
+                                Some(_) => replayed_until = None,
+                                None => {}
+                            }
+                        }
                         if socket.send(Message::Text(data.into())).await.is_err() {
                             break;
                         }
@@ -650,18 +665,33 @@ async fn api_export_handler(
             .pointer("/session/id")
             .and_then(|value| value.as_str())
             .unwrap_or("session");
-        match path.and_then(|path| std::fs::read(path).ok()) {
-            Some(bytes) => {
-                return Response::builder()
-                    .status(StatusCode::OK)
-                    .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
-                    .header(
-                        header::CONTENT_DISPOSITION,
-                        format!("attachment; filename=\"embed-log-{session_id}.html\""),
-                    )
-                    .header("x-embed-log-session", session_id)
-                    .body(axum::body::Body::from(bytes))
-                    .unwrap();
+        // Stream the published file instead of reading it into memory: a
+        // large session's report can be hundreds of megabytes.
+        let served = match path {
+            Some(path) if path.is_file() => tower_http::services::ServeFile::new(path)
+                .try_call(axum::http::Request::new(axum::body::Body::empty()))
+                .await
+                .ok()
+                .filter(|response| response.status() == StatusCode::OK),
+            _ => None,
+        };
+        match served {
+            Some(response) => {
+                let mut response = response.into_response();
+                let headers = response.headers_mut();
+                headers.insert(
+                    header::CONTENT_TYPE,
+                    header::HeaderValue::from_static("text/html; charset=utf-8"),
+                );
+                if let Ok(value) = header::HeaderValue::from_str(&format!(
+                    "attachment; filename=\"embed-log-{session_id}.html\""
+                )) {
+                    headers.insert(header::CONTENT_DISPOSITION, value);
+                }
+                if let Ok(value) = header::HeaderValue::from_str(session_id) {
+                    headers.insert("x-embed-log-session", value);
+                }
+                return response;
             }
             None => {
                 return (
@@ -966,6 +996,17 @@ async fn session_file_handler(
     }
 }
 
+/// `(session_id, sequence)` of a log record message, `None` for other messages.
+fn record_position(message: &str) -> Option<(String, u64)> {
+    #[derive(serde::Deserialize)]
+    struct Position {
+        session_id: Option<String>,
+        sequence: Option<u64>,
+    }
+    let position: Position = serde_json::from_str(message).ok()?;
+    Some((position.session_id.unwrap_or_default(), position.sequence?))
+}
+
 /// Collect all messages from a replay buffer, leaving it intact.
 pub fn drain_replay(replay: &Arc<Mutex<VecDeque<String>>>) -> Vec<String> {
     let buf = replay.lock().unwrap();
@@ -980,6 +1021,23 @@ mod tests {
     use axum::response::IntoResponse;
     use chrono::Local;
     use serde_json::json;
+
+    #[test]
+    fn record_position_reads_log_records_only() {
+        assert_eq!(
+            record_position(r#"{"type":"rx","session_id":"s1","sequence":7,"data":"x"}"#),
+            Some(("s1".to_string(), 7))
+        );
+        assert_eq!(
+            record_position(r#"{"type":"session_info","session":{}}"#),
+            None
+        );
+        assert_eq!(
+            record_position(r#"{"type":"stream_gap","skipped":3}"#),
+            None
+        );
+        assert_eq!(record_position("not json"), None);
+    }
 
     #[tokio::test]
     async fn embedded_fallback_serves_font_with_font_mime_type_not_html() {
@@ -1071,6 +1129,42 @@ mod tests {
             control_api: true,
         };
         (state, rx)
+    }
+
+    #[tokio::test]
+    async fn export_download_streams_the_published_html() {
+        let dir = temp_session_dir("export-download");
+        let html = dir.join("published.html");
+        let page = format!("<!doctype html>{}", "x".repeat(300_000));
+        std::fs::write(&html, &page).unwrap();
+        let (mut state, _) = test_state(dir.clone());
+        let published = html.display().to_string();
+        state.on_export = Some(Arc::new(move || Ok(published.clone())));
+        let response =
+            api_export_handler(State(state.clone()), Query(ExportQuery { download: true }))
+                .await
+                .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers()["content-type"],
+            "text/html; charset=utf-8"
+        );
+        assert_eq!(
+            response.headers()["content-disposition"],
+            "attachment; filename=\"embed-log-session-1.html\""
+        );
+        let body = axum::body::to_bytes(response.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        assert_eq!(body.len(), page.len());
+        assert_eq!(&body[..], page.as_bytes());
+
+        // A missing published file is an error, not an empty download.
+        std::fs::remove_file(&html).unwrap();
+        let response = api_export_handler(State(state), Query(ExportQuery { download: true }))
+            .await
+            .into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     #[tokio::test]

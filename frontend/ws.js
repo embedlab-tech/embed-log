@@ -21,6 +21,9 @@ const searchHistoryLoaded = new Set();
 let searchHistoryGeneration = 0;
 
 // Replay is bounded; explicitly requested full-session search must also read older records.
+// V8's maximum string length (0x1fffffe8 UTF-16 units).
+const MAX_HISTORY_CHARS = 0x1fffffe8;
+
 window.__embedLogLoadSearchHistory = function (paneId) {
     if (searchHistoryLoaded.has(paneId)) return Promise.resolve();
     if (searchHistoryRequests.has(paneId)) return searchHistoryRequests.get(paneId);
@@ -31,7 +34,15 @@ window.__embedLogLoadSearchHistory = function (paneId) {
         const response = await fetch(`/sessions/${encodeURIComponent(sessionId)}/combined.jsonl`, { cache: 'no-store' });
         if (!response.ok) throw new Error(`Cannot load full session history (HTTP ${response.status})`);
         // shortcut: history is loaded in memory; use paged reads if sessions outgrow browser memory.
+        // Browsers cap a string at about 512 MiB; Chromium then resolves text()
+        // to "" instead of failing, which would look like a session without history.
+        const length = Number(response.headers.get('content-length'));
+        if (length > MAX_HISTORY_CHARS) {
+            response.body?.cancel().catch(() => {});
+            throw new Error(`Session history is too large to load in the browser (${Math.round(length / 1048576)} MB)`);
+        }
         const text = await response.text();
+        if (!text && length > 0) throw new Error('Session history could not be read in the browser');
         if (generation !== searchHistoryGeneration || sessionId !== currentSessionId || !state.searches[paneId]) return;
         const current = state.rawLines[paneId] || [];
         const first = current[0];
@@ -95,6 +106,30 @@ function resetLayoutForNewSession() {
     state.selected = {};
     Object.keys(PANE_LABELS).forEach(key => delete PANE_LABELS[key]);
     resetPanePlugins();
+}
+
+// The server drops records for a client that falls behind the broadcast
+// buffer and says so with `stream_gap`. Make the gap visible: the panes are
+// missing lines until the page reloads the replay buffer.
+let skippedLines = 0;
+function showStreamGap(skipped) {
+    skippedLines += Number.isFinite(skipped) && skipped > 0 ? skipped : 0;
+    let notice = document.getElementById("stream-gap");
+    if (!notice) {
+        notice = document.createElement("button");
+        notice.id = "stream-gap";
+        notice.type = "button";
+        notice.title = "The browser fell behind the live stream and missed log lines. Click to reload and resync.";
+        notice.addEventListener("click", () => window.location.reload());
+        wsStatus?.before(notice);
+    }
+    notice.hidden = false;
+    notice.textContent = `\u26a0 ${skippedLines.toLocaleString("en-US")} lines skipped`;
+}
+function hideStreamGap() {
+    skippedLines = 0;
+    const notice = document.getElementById("stream-gap");
+    if (notice) notice.hidden = true;
 }
 
 function wsSetStatus(cls, text) {
@@ -265,6 +300,7 @@ function wsConnect() {
     ws.addEventListener("open", () => {
         // UX policy: never show stale in-memory lines after reconnect/open.
         clearAllPaneContents();
+        hideStreamGap();
         wsSetStatus("connected", "connected");
         wsRetryDelay = 1000;
     });
@@ -330,6 +366,11 @@ function wsConnect() {
             }
             refreshStatsUi();
             window.__embedLogSchedulePersist?.();
+            return;
+        }
+
+        if (msg.type === "stream_gap") {
+            showStreamGap(msg.skipped);
             return;
         }
 
