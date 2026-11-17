@@ -159,6 +159,7 @@ The Axum server serves API routes first, then static frontend assets from `front
 | `/api/session/marker` | `POST` | Record an external timeline marker. |
 | `/api/session/rotate` | `POST` | Close current session, start a new one, export old session in background. |
 | `/api/sessions` | `GET` | List sessions under logs root. |
+| `/api/sessions/{id}/history?sources=A,B&before=N` | `GET` | Stream the session journal's records of the given sources with `sequence < N` as compact NDJSON (fields the viewer uses only). Used by Highlight to load history older than the replay buffer. |
 | `/api/stats` | `GET` | Runtime counters and WebSocket/replay state. |
 | `/sessions/{session_id}/{filename}` | `GET` | Serve session artifacts such as logs, `manifest.json`, `session.html`. |
 

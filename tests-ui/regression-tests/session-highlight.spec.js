@@ -25,7 +25,7 @@ for (const legacyCache of [false, true]) {
   test(`highlight loads history after reload with ${legacyCache ? 'legacy' : 'current'} cache`, async ({ page }) => {
     const session = 'cached-history';
     const rows = [record(1, 'needle'), record(2, 'needle needle')];
-    await page.route('**/sessions/cached-history/combined.jsonl', route => route.fulfill({
+    await page.route('**/api/sessions/cached-history/history*', route => route.fulfill({
       contentType: 'application/x-ndjson', body: rows.map(JSON.stringify).join('\n') + '\n',
     }));
     await page.routeWebSocket('**/ws', ws => {
@@ -64,7 +64,7 @@ for (const legacyCache of [false, true]) {
 
 test('repeated pane setup keeps one highlight toggle with counter and navigation', async ({ page }) => {
   const rows = [record(1, 'needle needle'), record(2, 'context'), record(3, 'needle')];
-  await page.route('**/sessions/repeated-setup/combined.jsonl', route => route.fulfill({
+  await page.route('**/api/sessions/repeated-setup/history*', route => route.fulfill({
     contentType: 'application/x-ndjson', body: rows.map(JSON.stringify).join('\n') + '\n',
   }));
   await page.routeWebSocket('**/ws', ws => ws.send(JSON.stringify(config('repeated-setup'))));
@@ -92,7 +92,7 @@ test('session highlight loads history beyond replay, counts occurrences and navi
     i === 5 ? '\x1b[31mNee\x1b[0mdle NEEDLE' : i === 5500 ? 'needle' : `context ${i}`));
   const journal = [...rows, record(6001, 'needle', 'B')].map(JSON.stringify).join('\n') + '\n';
   let requests = 0;
-  await page.route('**/sessions/session-one/combined.jsonl', route => {
+  await page.route('**/api/sessions/session-one/history*', route => {
     requests++;
     return route.fulfill({ contentType: 'application/x-ndjson', body: journal + '{"unfinished":' });
   });
@@ -145,7 +145,7 @@ test('session highlight loads history beyond replay, counts occurrences and navi
   await highlight(page, 'ALL', 'needle');
   await expect(page.locator('#pane-ALL .search-count')).toHaveText('0 / 6');
   // A config-only session switch must invalidate the old pane's full-history cache too.
-  await page.route('**/sessions/session-two/combined.jsonl', route => route.fulfill({
+  await page.route('**/api/sessions/session-two/history*', route => route.fulfill({
     body: JSON.stringify(record(1, 'fresh session')) + '\n',
   }));
   socket.send(JSON.stringify(config('session-two')));
@@ -159,7 +159,7 @@ test('highlight reads the real running session journal', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.goto('/');
   await waitForSourceTestLine(page, 'SENSOR_A');
-  const response = page.waitForResponse(response => response.url().endsWith('/combined.jsonl'));
+  const response = page.waitForResponse(response => response.url().includes('/history?'));
   await highlight(page, 'SENSOR_A', 'TEST src=SENSOR_A');
   expect((await response).status()).toBe(200);
   await expect(page.locator('#pane-SENSOR_A .search-count')).toHaveText(/^0 \/ [1-9]\d*$/);
@@ -171,11 +171,11 @@ test('highlight reads the real running session journal', async ({ page }) => {
 test('history failures are explicit and stale fetches cannot leak records into a rotated session', async ({ page }) => {
   let socket;
   let finish, finishNew;
-  await page.route('**/sessions/session-one/combined.jsonl', async route => {
+  await page.route('**/api/sessions/session-one/history*', async route => {
     await new Promise(resolve => { finish = resolve; });
     await route.fulfill({ body: JSON.stringify(record(1, 'old needle')) + '\n' });
   });
-  await page.route('**/sessions/session-two/combined.jsonl', async route => {
+  await page.route('**/api/sessions/session-two/history*', async route => {
     await new Promise(resolve => { finishNew = resolve; });
     await route.fulfill({ status: 503, body: 'unavailable' });
   });
