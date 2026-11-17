@@ -250,7 +250,7 @@ fn known_normal_record(bytes: &[u8], db: &Database) -> bool {
 
 fn flush_binary_console(text: &mut Vec<u8>, lines: &mut Vec<String>) {
     if !text.is_empty() {
-        let line = String::from_utf8_lossy(text);
+        let line = crate::parsers::console_text(text);
         let line = line.trim_end_matches('\r');
         if !line.is_empty() {
             lines.push(line.to_owned());
