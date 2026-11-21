@@ -357,9 +357,26 @@ function _buildSwapTargetOptions(select, fromPaneId) {
     menu.addEventListener("mouseleave", scheduleHide);
 })();
 
-// ---------------------------------------------------------------------------
-// Filter inputs
-// ---------------------------------------------------------------------------
+// Pickers are fixed so the pane's overflow does not clip them.
+function _positionPicker(button, picker) {
+    const edge = 8;
+    const anchor = button.getBoundingClientRect();
+    const { clientWidth, clientHeight } = document.documentElement;
+    const below = clientHeight - anchor.bottom - 4 - edge;
+    const above = anchor.top - 4 - edge;
+    const drop = below >= Math.min(320, picker.scrollHeight + 2) || below >= above;
+    picker.style.setProperty('--picker-room', `${Math.max(0, drop ? below : above)}px`);
+    const { width, height } = picker.getBoundingClientRect();
+    picker.style.left = `${Math.max(edge, Math.min(anchor.right - width, clientWidth - width - edge))}px`;
+    picker.style.top = `${drop ? anchor.bottom + 4 : anchor.top - 4 - height}px`;
+}
+
+window.addEventListener('resize', () => {
+    for (const picker of document.querySelectorAll('.level-menu:not([hidden]), .events-menu:not([hidden])')) {
+        if (picker.getClientRects().length) _positionPicker(picker.previousElementSibling, picker);
+    }
+});
+
 // ---------------------------------------------------------------------------
 // Per-pane log level filter ("Levels" button next to Highlight)
 // ---------------------------------------------------------------------------
@@ -385,10 +402,11 @@ function _setupLevelControl(id, after) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'level-mode';
-    button.setAttribute('aria-haspopup', 'true');
     button.setAttribute('aria-expanded', 'false');
+    button.setAttribute('aria-controls', `level-menu-${id}`);
     const menu = document.createElement('div');
     menu.className = 'level-menu';
+    menu.id = `level-menu-${id}`;
     menu.hidden = true;
     menu.setAttribute('role', 'group');
     menu.setAttribute('aria-label', 'Visible log levels');
@@ -442,6 +460,8 @@ function _setupLevelControl(id, after) {
             showAllLevels(id);
             applyChange();
             renderMenu();
+            _positionPicker(button, menu);
+            menu.querySelector('.level-show-all').focus();
         });
         menu.append(all);
     };
@@ -450,6 +470,7 @@ function _setupLevelControl(id, after) {
             renderMenu();
             menu.hidden = false;
             button.setAttribute('aria-expanded', 'true');
+            _positionPicker(button, menu);
             menu.querySelector('input')?.focus();
         } else {
             menu.hidden = true;
@@ -478,7 +499,7 @@ window.__embedLogRefreshLevelControls = () => {
 const EVENT_LABELS = { boot: "Restart", crash: "Crash" };
 const EVENT_ICONS = { boot: "\u27f3", crash: "\u2716" };
 const MAX_LISTED_EVENTS = 300;
-const _eventBadges = new Map(); // paneId -> { refresh, menu }
+const _eventBadges = new Map(); // paneId -> { refresh }
 
 function _paneEventSources(paneId) {
     const merge = (window.__embedLogMerges || []).find(m => m && m.name === paneId);
@@ -527,16 +548,23 @@ function _setupEventBadge(id) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "pane-events-btn";
-    button.setAttribute("aria-haspopup", "true");
     button.setAttribute("aria-expanded", "false");
+    button.setAttribute("aria-controls", `events-menu-${id}`);
     const menu = document.createElement("div");
     menu.className = "events-menu";
+    menu.id = `events-menu-${id}`;
     menu.hidden = true;
-    menu.setAttribute("role", "menu");
+    menu.tabIndex = -1;
+    menu.setAttribute("role", "group");
     menu.setAttribute("aria-label", "Device restarts and crashes");
     wrap.append(button, menu);
     (header.querySelector(".pane-stats") || header.firstElementChild)?.after(wrap);
 
+    const close = () => {
+        menu.hidden = true;
+        button.setAttribute("aria-expanded", "false");
+        button.focus();
+    };
     const renderMenu = () => {
         const counts = _paneEventCounts(id);
         const events = paneEvents(id).reverse();
@@ -545,9 +573,9 @@ function _setupEventBadge(id) {
             const row = document.createElement("button");
             row.type = "button";
             row.className = `events-item events-${item.event}`;
-            row.setAttribute("role", "menuitem");
             const icon = document.createElement("span");
             icon.className = "events-icon";
+            icon.setAttribute("aria-hidden", "true");
             icon.textContent = EVENT_ICONS[item.event];
             const label = document.createElement("span");
             label.className = "events-kind";
@@ -560,12 +588,12 @@ function _setupEventBadge(id) {
             text.textContent = item.text;
             row.append(icon, label, time, text);
             row.addEventListener("click", () => {
-                menu.hidden = true;
-                button.setAttribute("aria-expanded", "false");
+                close();
                 revealRawLine(id, item.rawIndex);
             });
             const entry = document.createElement("div");
             entry.className = "events-entry";
+            entry.dataset.eventKey = `${item.sourceId}:${item.sequence ?? item.rawIndex}`;
             entry.append(row);
             if (item.event === "boot" && Number.isFinite(item.sequence)) {
                 const only = document.createElement("button");
@@ -574,8 +602,7 @@ function _setupEventBadge(id) {
                 only.textContent = "Only this boot";
                 only.title = "Show only the lines from this restart until the next restart of the same device";
                 only.addEventListener("click", () => {
-                    menu.hidden = true;
-                    button.setAttribute("aria-expanded", "false");
+                    close();
                     _applyBootFilter(id, item.sourceId, item.sequence);
                 });
                 entry.append(only);
@@ -587,8 +614,7 @@ function _setupEventBadge(id) {
                 decode.textContent = "Decode";
                 decode.title = "Symbolize this crash dump with the firmware ELF";
                 decode.addEventListener("click", () => {
-                    menu.hidden = true;
-                    button.setAttribute("aria-expanded", "false");
+                    close();
                     revealRawLine(id, item.rawIndex);
                     _showCrashDecode(item);
                 });
@@ -619,27 +645,37 @@ function _setupEventBadge(id) {
             button.append(part);
         }
         const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
-        button.title = `${plural(counts.boot, "restart", "restarts")}, ${plural(counts.crash, "crash", "crashes")}`
-            + " detected in this session. Click to list them.";
-        if (!menu.hidden) renderMenu();
-    };
-    button.addEventListener("click", () => {
-        if (menu.hidden) {
-            renderMenu();
-            menu.hidden = false;
-            button.setAttribute("aria-expanded", "true");
-            menu.querySelector("button")?.focus();
-        } else {
+        const summary = `${plural(counts.boot, "restart", "restarts")}, ${plural(counts.crash, "crash", "crashes")}`;
+        button.title = `${summary} detected in this session. Click to list them.`;
+        button.setAttribute("aria-label", summary);
+        if (menu.hidden) return;
+        if (wrap.hidden) {
             menu.hidden = true;
             button.setAttribute("aria-expanded", "false");
+            return;
         }
+        const focused = document.activeElement;
+        const key = focused.closest(".events-entry")?.dataset.eventKey;
+        renderMenu();
+        if (!menu.getClientRects().length) return;
+        _positionPicker(button, menu);
+        if (key) {
+            const entry = [...menu.children].find(row => row.dataset.eventKey === key);
+            (entry?.getElementsByClassName(focused.classList[0])[0] || menu).focus();
+        }
+    };
+    button.addEventListener("click", () => {
+        if (!menu.hidden) return close();
+        renderMenu();
+        menu.hidden = false;
+        button.setAttribute("aria-expanded", "true");
+        _positionPicker(button, menu);
+        (menu.querySelector("button") || menu).focus();
     });
-    menu.addEventListener("keydown", event => {
-        if (event.key !== "Escape") return;
+    wrap.addEventListener("keydown", event => {
+        if (event.key !== "Escape" || menu.hidden) return;
         event.stopPropagation();
-        menu.hidden = true;
-        button.setAttribute("aria-expanded", "false");
-        button.focus();
+        close();
     });
     _eventBadges.set(id, { refresh });
     refresh();
@@ -673,7 +709,7 @@ function _setupBootChip(id) {
     chip.className = "boot-chip";
     chip.hidden = true;
     chip.innerHTML = '<button type="button" class="boot-prev" aria-label="Previous boot" title="Previous boot">\u2039</button>'
-        + '<span class="boot-label"></span>'
+        + '<span class="boot-label" role="status"></span>'
         + '<button type="button" class="boot-next" aria-label="Next boot" title="Next boot">\u203a</button>'
         + '<button type="button" class="boot-clear" aria-label="Show all boots" title="Show all boots">\u2715</button>';
     bar.append(chip);
@@ -685,9 +721,20 @@ function _setupBootChip(id) {
         const next = boots[at + direction];
         if (next) _applyBootFilter(id, filter.sourceId, next.sequence);
     };
-    chip.querySelector(".boot-prev").addEventListener("click", () => step(-1));
-    chip.querySelector(".boot-next").addEventListener("click", () => step(1));
-    chip.querySelector(".boot-clear").addEventListener("click", () => setBootFilter(id, null));
+    const prev = chip.querySelector(".boot-prev");
+    const next = chip.querySelector(".boot-next");
+    prev.addEventListener("click", () => {
+        step(-1);
+        if (prev.disabled) next.focus();
+    });
+    next.addEventListener("click", () => {
+        step(1);
+        if (next.disabled) prev.focus();
+    });
+    chip.querySelector(".boot-clear").addEventListener("click", () => {
+        setBootFilter(id, null);
+        bar.closest(".pane").querySelector(".pane-events-btn")?.focus();
+    });
     _bootChips.set(id, () => {
         const filter = bootFilter(id);
         chip.hidden = !filter;
@@ -695,10 +742,11 @@ function _setupBootChip(id) {
         const boots = _paneBoots(id, filter.sourceId);
         const at = boots.findIndex(b => b.sequence === filter.fromSequence);
         const merged = _paneEventSources(id).length > 1 ? `${paneLabel(filter.sourceId)} ` : "";
-        chip.querySelector(".boot-label").textContent =
-            `\u27f3 ${merged}boot ${at + 1}/${boots.length} \u00b7 ${filter.ts}${filter.toSequence === null ? " \u2192 now" : ""}`;
-        chip.querySelector(".boot-prev").disabled = at <= 0;
-        chip.querySelector(".boot-next").disabled = at < 0 || at >= boots.length - 1;
+        const label = chip.querySelector(".boot-label");
+        const text = `\u27f3 ${merged}boot ${at + 1}/${boots.length} \u00b7 ${filter.ts}${filter.toSequence === null ? " \u2192 now" : ""}`;
+        if (label.textContent !== text) label.textContent = text;
+        prev.disabled = at <= 0;
+        next.disabled = at < 0 || at >= boots.length - 1;
     });
     _bootChips.get(id)();
 }
@@ -717,9 +765,10 @@ function _crashDialog() {
     if (dialog) return dialog;
     dialog = document.createElement("dialog");
     dialog.id = "crash-dialog";
-    dialog.innerHTML = '<div class="crash-head"><span class="crash-title"></span>'
+    dialog.setAttribute("aria-labelledby", "crash-title");
+    dialog.innerHTML = '<div class="crash-head"><span id="crash-title" class="crash-title"></span>'
         + '<button type="button" class="crash-close" aria-label="Close">\u2715</button></div>'
-        + '<div class="crash-meta"></div><div class="crash-body"></div>';
+        + '<div class="crash-meta" role="status"></div><div class="crash-body"></div>';
     dialog.querySelector(".crash-close").addEventListener("click", () => dialog.close());
     dialog.addEventListener("click", event => { if (event.target === dialog) dialog.close(); });
     document.body.append(dialog);

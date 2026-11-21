@@ -15,6 +15,7 @@ async function serve(page, tabs) {
     ws.send(JSON.stringify(record(1, 'A', 'alpha one')));
     ws.send(JSON.stringify(record(2, 'A', 'alpha two')));
     ws.send(JSON.stringify(record(3, 'B', 'beta')));
+    ws.send(JSON.stringify({ type: 'markers_update', markers: [{ paneId: 'A', lineIdx: 0 }] }));
   });
   await page.goto('/');
 }
@@ -85,6 +86,33 @@ test('overlapping merges count loaded copies and keep original bytes in a snapsh
   await expect(total).toHaveText('· 4 lines · 21 B');
   send({ type: 'clear_logs', pane: 'BC' });
   await expect(total).toHaveText('· 1 lines · 5 B');
+});
+
+test('the toolbar wraps without clipping navigation controls or covering logs', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 600 });
+  await serve(page, [{ label: 'Sources', panes: ['A', 'B'] }]);
+  const toolbar = page.locator('#toolbar');
+  const navigation = toolbar.getByRole('group', { name: 'Log navigation' });
+  const live = navigation.getByRole('button', { name: 'Live', exact: true });
+  const marker = navigation.getByRole('button', { name: 'Next marker' });
+  await expect(marker).toBeVisible();
+  const buttons = await toolbar.getByRole('button').all();
+  for (const button of buttons) await expect(button).toBeInViewport({ ratio: 1 });
+  const rows = await toolbar.getByRole('button').evaluateAll(controls =>
+    new Set(controls.map(button => Math.round(button.getBoundingClientRect().top))).size);
+  expect(rows).toBeGreaterThan(1);
+  expect((await live.boundingBox()).y).toBe((await marker.boundingBox()).y);
+  const toolbarBox = await toolbar.boundingBox();
+  const log = page.locator('#log-A');
+  await expect(log.getByText('alpha one')).toBeVisible();
+  const logBox = await log.boundingBox();
+  expect(logBox.y).toBeGreaterThanOrEqual(toolbarBox.y + toolbarBox.height);
+  expect(logBox.height).toBeGreaterThan(100);
+  await marker.press('Enter');
+  await expect(page.locator('#marker-nav-idx')).toHaveText('1');
+  await expect.poll(() => page.evaluate(async () => (await import('/state.js')).state.atBottom.A)).toBe(false);
+  await live.press('Enter');
+  await expect.poll(() => page.evaluate(async () => (await import('/state.js')).state.atBottom.A)).toBe(true);
 });
 
 test('split-tabs and per-pane wrap buttons show their state', async ({ page }) => {

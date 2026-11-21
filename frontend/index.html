@@ -2,13 +2,13 @@
 <html lang="en" data-theme="whitesand">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>embed-log</title>
     <link rel="stylesheet" href="viewer.css">
 </head>
 <body>
 
 <!-- ── TOOLBAR ────────────────────────────────────────────── -->
-<!-- Canonical toolbar: frontend/toolbar.html -->
 <div id="toolbar">
     <div class="toolbar-group toolbar-left">
         <span class="app-name">embed-log</span>
@@ -20,14 +20,16 @@
         <div class="sep"></div>
         <button id="btn-theme" title="Toggle light / dark theme">🌙</button>
     </div>
-    <button id="btn-jump-all" title="Jump every pane to its latest line and keep tab switches live (Shift+L)" class="btn-live">Live</button>
     <div class="toolbar-group toolbar-right">
         <div id="toolbar-stats" class="toolbar-stats"></div>
         <div id="ws-status" class="disconnected">WS: disconnected</div>
-        <div id="marker-nav" class="marker-nav" style="display:none">
-            <button id="marker-nav-prev" title="Previous marker">◀</button>
-            <span id="marker-nav-idx">1</span>/<span id="marker-nav-total">0</span>
-            <button id="marker-nav-next" title="Next marker">▶</button>
+        <div class="toolbar-nav" role="group" aria-label="Log navigation">
+            <button id="btn-jump-all" title="Jump every pane to its latest line and keep tab switches live (Shift+L)" class="btn-live">Live</button>
+            <div id="marker-nav" class="marker-nav" style="display:none">
+                <button id="marker-nav-prev" title="Previous marker" aria-label="Previous marker">◀</button>
+                <span id="marker-nav-idx">1</span>/<span id="marker-nav-total">0</span>
+                <button id="marker-nav-next" title="Next marker" aria-label="Next marker">▶</button>
+            </div>
         </div>
     </div>
 </div>

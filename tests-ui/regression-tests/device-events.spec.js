@@ -54,16 +54,78 @@ test('panes count restarts and crashes and jump to them', async ({ page }) => {
   await expect(crash).toContainText('MPU FAULT');
   await expect(page.locator('#log-A .log-line.event-boot').first()).toContainText('Booting');
 
-  // Counts are session-wide: the server may know events older than the loaded lines.
+  // Session-wide counts can change while the picker is open.
+  await badgeA.click();
+  await page.keyboard.press('Tab');
+  const action = page.locator('#pane-A .events-boot-filter').first();
+  await expect(action).toBeFocused();
   socket().send(JSON.stringify({ type: 'source_events', session_id: 'events', counts: { A: { boot: 5, crash: 2 }, B: { boot: 1, crash: 0 } } }));
   await expect(badgeA).toHaveText('⟳ 5✖ 2');
-  await badgeA.click();
   await expect(page.locator('#pane-A .events-note')).toHaveText('4 earlier events are older than the loaded lines');
+  await expect(action).toBeFocused();
   await page.keyboard.press('Escape');
 
   // A merged pane adds up its sources.
   await page.getByRole('button', { name: 'Merged' }).click();
   await expect(page.locator('#pane-ALL .pane-events-btn')).toHaveText('⟳ 6✖ 2');
+});
+
+test('right pane pickers stay on screen when the two-pane view narrows', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 700 });
+  await serve(page, {
+    counts: { A: { boot: 2, crash: 1 }, B: { boot: 1, crash: 0 } },
+    levels: { A: null, B: { levels: [{ id: 'inf', label: 'Info' }] } },
+  });
+  const pane = page.locator('#pane-B');
+  const badge = pane.locator('.pane-events-btn');
+  const events = pane.getByRole('group', { name: 'Device restarts and crashes' });
+  const assertOnScreen = async locator => {
+    await expect(locator).toBeInViewport({ ratio: 1 });
+    const { x, y, width, height } = await locator.boundingBox();
+    expect(x).toBeGreaterThanOrEqual(0);
+    expect(y).toBeGreaterThanOrEqual(0);
+    expect(x + width).toBeLessThanOrEqual(page.viewportSize().width);
+    expect(y + height).toBeLessThanOrEqual(page.viewportSize().height);
+  };
+
+  await expect(page.locator('#pane-A')).toBeVisible();
+  expect((await pane.boundingBox()).x).toBeGreaterThan(0);
+  await badge.focus();
+  await page.keyboard.press('Enter');
+  await expect(badge).toHaveAttribute('aria-expanded', 'true');
+  await assertOnScreen(events);
+  await expect(events.getByRole('button', { name: /Restart/ })).toBeFocused();
+
+  await page.setViewportSize({ width: 375, height: 400 });
+  await assertOnScreen(events);
+  await page.keyboard.press('Escape');
+  await expect(badge).toHaveAttribute('aria-expanded', 'false');
+  await expect(badge).toBeFocused();
+
+  const levels = pane.getByRole('button', { name: 'Levels' });
+  await levels.click();
+  await assertOnScreen(pane.getByRole('group', { name: 'Visible log levels' }));
+  await page.keyboard.press('Escape');
+  await expect(levels).toBeFocused();
+
+  await badge.click();
+  await page.keyboard.press('Tab');
+  const only = events.getByRole('button', { name: 'Only this boot' });
+  await expect(only).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(events).toBeHidden();
+  await expect(badge).toBeFocused();
+  await expect(pane.locator('.boot-label')).toContainText('boot 1/1');
+  await expect(page.locator('#pane-A .boot-chip')).toBeHidden();
+  for (const name of ['Previous boot', 'Next boot', 'Show all boots']) {
+    const control = pane.getByRole('button', { name, exact: true });
+    await assertOnScreen(control);
+    const { width, height } = await control.boundingBox();
+    expect(Math.min(width, height)).toBeGreaterThanOrEqual(30);
+  }
+  await pane.getByRole('button', { name: 'Show all boots' }).click();
+  await expect(pane.locator('.boot-chip')).toBeHidden();
+  await expect(badge).toBeFocused();
 });
 
 test('without server counts (exported report) events are counted from the lines', async ({ page }) => {
@@ -147,8 +209,9 @@ test('a crash is decoded with the firmware ELF in a dialog', async ({ page }) =>
   await expect(page.locator('#pane-A .events-decode')).toHaveCount(1);
   await expect(page.locator('#pane-B .events-decode')).toHaveCount(0);
   await page.locator('#pane-A .events-decode').click();
-  const dialog = page.locator('#crash-dialog');
+  const dialog = page.getByRole('dialog', { name: 'Crash on Main MCU' });
   await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Close' })).toBeFocused();
   expect(requested.pathname).toBe('/api/sessions/events/crashes/60');
   expect(requested.searchParams.get('source')).toBe('A');
   await expect(dialog.locator('.crash-title')).toHaveText('Crash on Main MCU');
@@ -166,6 +229,7 @@ test('a crash is decoded with the firmware ELF in a dialog', async ({ page }) =>
   await expect(page.locator('#log-A .log-line.event-crash')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
+  await expect(page.locator('#pane-A .pane-events-btn')).toBeFocused();
 });
 
 test('a pane can show one boot at a time', async ({ page }) => {
