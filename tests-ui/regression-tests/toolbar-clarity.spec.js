@@ -45,9 +45,12 @@ test('overlapping merges count loaded copies and keep original bytes in a snapsh
     send(record(4, 'C', '雪cat'));
     send(record(5, 'B', 'βeta'));
   });
-  await page.route('**/sessions/toolbar/combined.jsonl', route => route.fulfill({
-    body: `${JSON.stringify(record(1, 'B', 'old'))}\n`,
-  }));
+  await page.route('**/api/sessions/toolbar/history?*', route => {
+    const params = new URL(route.request().url()).searchParams;
+    expect(params.get('sources')).toBe('A,B');
+    expect(params.get('before')).toBe('2');
+    return route.fulfill({ body: `${JSON.stringify(record(1, 'B', 'old'))}\n` });
+  });
   await page.goto('/');
   const total = page.locator('#toolbar-stats');
   await expect(total).toHaveText('· 4 lines · 21 B');
