@@ -553,6 +553,12 @@ function _getNumTs(entry, paneId = null, idx = -1) {
     return entry.numTs;
 }
 
+// Existing rows may change without replacing the backing array.
+export function invalidatePaneFilterProjection(paneId) {
+    const vp = _virtualPanes.get(paneId);
+    if (vp?.projectionFilter) vp.projectionRows = null;
+}
+
 function _getVisibleIndices(paneId, vp) {
     const lines = state.rawLines[paneId] || [];
     const rx = state.filters[paneId] || null;
@@ -562,11 +568,12 @@ function _getVisibleIndices(paneId, vp) {
     // Preserve raw rows/indices for export, selection and debugging, but don't
     // allocate visual rows for terminal text erased before the next record or
     // for levels hidden in this pane. Extend the projection on append instead
-    // of rescanning the entire session (the level filter is on by default).
-    if (rx && sameProjection && vp.projectionSourceLen === lines.length) {
+    // of rescanning the entire session, with or without a regex filter: a row's
+    // visibility depends only on the row itself.
+    if (sameProjection && vp.projectionSourceLen === lines.length) {
         return vp.visibleIndices;
     }
-    const extend = !rx && sameProjection && vp.projectionSourceLen <= lines.length;
+    const extend = sameProjection && vp.projectionSourceLen <= lines.length;
     const indices = extend ? vp.visibleIndices : [];
     const levelVisible = levelPredicate(paneId);
     for (let rawIndex = extend ? vp.projectionSourceLen : 0; rawIndex < lines.length; rawIndex++) {
@@ -1087,6 +1094,7 @@ export function reanalyzePanePlugins(paneId) {
     lines.forEach(entry => {
         if (!_isRawTuple(entry)) analyzeLinePlugins(paneId, entry);
     });
+    invalidatePaneFilterProjection(paneId);
     rerenderPane(paneId);
 }
 export function setTimestampMode(mode) {
@@ -1099,6 +1107,7 @@ export function setTimestampMode(mode) {
     state.syncTabSwitch = false;
 
     PANES.forEach(paneId => {
+        invalidatePaneFilterProjection(paneId);
         const lines = state.rawLines[paneId] || [];
         lines.forEach(entry => {
             if (!_isRawTuple(entry)) applyTimestampModeToLine(entry);

@@ -3,6 +3,7 @@ import { appendLineBatch, clearPane, rerenderPane, setTimestampMode, refreshStat
 import { createTabWithPanes } from './tabcreate.js';
 import { refreshLevelDefinitions } from './levels.js';
 import { configurePanePlugins, resetPanePlugins } from './pluginRuntime.js';
+import { invalidatePaneFilterProjection } from './lines.js';
 
 import { switchTab } from './tabs.js';
 
@@ -174,7 +175,7 @@ async function _handleConfigMessage(msg) {
 
     // Create tabs and set pane metadata BEFORE loading plugins so log
     // lines render immediately.  Plugins load asynchronously and catch up.
-    setTimestampContext({
+    const enriched = setTimestampContext({
         mode: msg.session?.timestamp_mode || "absolute",
         firstLogAt: msg.session?.first_log_at,
         resetMode: isSessionChange || (TABS.length === 0 && PANES.length === 0),
@@ -182,6 +183,7 @@ async function _handleConfigMessage(msg) {
     if (isSessionChange || (TABS.length === 0 && PANES.length === 0)) {
         setTimestampMode(state.timestampMode);
     }
+    if (enriched) PANES.forEach(invalidatePaneFilterProjection);
     window.__embedLogUpdateTimestampModeUi?.();
 
     window.__embedLogSession = msg.session || null;
@@ -286,7 +288,10 @@ function wsConnect() {
                 firstLogAt: msg.session?.first_log_at,
                 resetMode: false,
             });
-            if (enriched) PANES.forEach(rerenderPane);
+            if (enriched) {
+                PANES.forEach(invalidatePaneFilterProjection);
+                PANES.forEach(rerenderPane);
+            }
             window.__embedLogUpdateTimestampModeUi?.();
             return;
         }
