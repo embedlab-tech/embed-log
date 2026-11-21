@@ -30,8 +30,22 @@ test.describe('drag selection UX', () => {
 
     const lines = page.locator('#log-SENSOR_A .log-line');
     await expect.poll(async () => lines.count()).toBeGreaterThanOrEqual(6);
-    const start = lines.nth(1);
-    const end = lines.nth(5);
+    // The demo keeps logging. Leave the live tail and address rows by raw
+    // index: following the tail re-renders the window for every batch, which
+    // could detach a row between locating it and measuring it.
+    await page.evaluate(() => {
+      const log = document.getElementById('log-SENSOR_A');
+      log.scrollTop = 0;
+      log.dispatchEvent(new Event('scroll'));
+    });
+    await expect.poll(() => page.evaluate(() => document.getElementById('log-SENSOR_A').scrollTop)).toBe(0);
+    const [startIdx, endIdx] = await page.evaluate(() => {
+      const nodes = Array.from(document.querySelectorAll('#log-SENSOR_A .log-line'))
+        .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+      return [nodes[1].dataset.idx, nodes[5].dataset.idx];
+    });
+    const start = page.locator(`#log-SENSOR_A .log-line[data-idx="${startIdx}"]`);
+    const end = page.locator(`#log-SENSOR_A .log-line[data-idx="${endIdx}"]`);
     await expect(start).toBeVisible();
     await expect(end).toBeVisible();
 
