@@ -208,16 +208,21 @@ async function _handleConfigMessage(msg) {
 
     const sessionId = msg.session?.id || null;
     const isSessionChange = currentSessionId && sessionId && currentSessionId !== sessionId;
-    if (isSessionChange) {
+    // /ws sends config then replay on connect, or to rebase after a missed rotation.
+    // Same-session config updates on an initialized socket don't start replay.
+    const startsReplay = !configReady || isSessionChange;
+    if (startsReplay) {
+        // Reconnects replace in-memory logs; a reload after a gap must also skip cached logs.
+        let skipCachedLines = !!currentSessionId || state.streamGap;
+        try {
+            skipCachedLines ||= !!sessionId && sessionStorage.getItem(STREAM_GAP_SESSION_KEY) === sessionId;
+        } catch {}
         hideStreamGap();
-        resetLayoutForNewSession();
+        if (isSessionChange) resetLayoutForNewSession();
+        else clearAllPaneContents();
+        window.__embedLogSetSession?.(msg.session || null, { skipCachedLines });
     }
     currentSessionId = sessionId || currentSessionId;
-    try {
-        if (!state.streamGap && currentSessionId && sessionStorage.getItem(STREAM_GAP_SESSION_KEY) === currentSessionId) {
-            showStreamGap();
-        }
-    } catch {}
 
     // Create tabs and set pane metadata BEFORE loading plugins so log
     // lines render immediately.  Plugins load asynchronously and catch up.
@@ -232,7 +237,6 @@ async function _handleConfigMessage(msg) {
     window.__embedLogUpdateTimestampModeUi?.();
 
     window.__embedLogSession = msg.session || null;
-    window.__embedLogSetSession?.(msg.session || null);
     const paneLabels = msg.pane_labels && typeof msg.pane_labels === "object" ? msg.pane_labels : {};
     window.__embedLogPaneKinds = msg.pane_kinds && typeof msg.pane_kinds === "object" ? msg.pane_kinds : {};
     window.__embedLogPaneCommands = msg.pane_commands && typeof msg.pane_commands === "object" ? msg.pane_commands : {};
@@ -301,7 +305,7 @@ async function _handleConfigMessage(msg) {
     PANES.forEach(id => {
         try { rerenderPane(id); } catch (_) {}
     });
-    window.__embedLogAfterConfig?.(msg.tabs || []);
+    window.__embedLogAfterConfig?.();
 }
 
 function wsConnect() {
@@ -310,8 +314,6 @@ function wsConnect() {
     ws = new WebSocket(wsScheme + window.location.host + "/ws");
 
     ws.addEventListener("open", () => {
-        // UX policy: never show stale in-memory lines after reconnect/open.
-        clearAllPaneContents();
         wsSetStatus("connected", "connected");
         wsRetryDelay = 1000;
     });

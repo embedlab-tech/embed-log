@@ -9,74 +9,105 @@ const record = (session, sequence, message) => ({
   timestamp: '12:00:00', sequence, session_id: session, line_idx: sequence,
 });
 
-test('a stream gap survives reconnect and reload but clears when the session changes', async ({ page }) => {
+test('a stream gap clears on rotation or a replay rebase, but a new gap can still warn', async ({ page }) => {
   let socket;
-  let session = 'gap';
-  let connections = 0;
   await page.routeWebSocket('**/ws', ws => {
     socket = ws;
-    ws.send(JSON.stringify(config(session)));
-    if (++connections === 2) ws.send(JSON.stringify(record(session, 1, 'older recent replay')));
-    ws.send(JSON.stringify(record(session, 2, 'recent replay')));
+    ws.send(JSON.stringify(config('gap')));
+    ws.send(JSON.stringify(record('gap', 1, 'before rotation')));
   });
   await page.goto('/');
-  await expect(page.locator('#log-A')).toContainText('recent replay');
+  const log = page.locator('#log-A');
   const notice = page.locator('#stream-gap');
+  await expect(log).toContainText('before rotation');
   await expect(notice).toHaveCount(0);
   socket.send(JSON.stringify({ type: 'stream_gap', skipped: 1200, session_id: 'gap' }));
   await expect(notice).toHaveText('⚠ Log panes may be incomplete · Reload recent logs');
   await expect(notice).toHaveAttribute('title', /older missing lines may not be recovered/);
-  await socket.close({ code: 1000, reason: 'test reconnect' });
-  await expect(page.locator('#log-A')).toContainText('older recent replay');
-  await expect(notice).toBeVisible();
 
-  session = 'next';
-  socket.send(JSON.stringify({ type: 'session_rotated', session: { id: session } }));
+  socket.send(JSON.stringify({ type: 'session_rotated', session: { id: 'next' } }));
   socket.send(JSON.stringify({ type: 'stream_gap', skipped: 1, session_id: 'gap' }));
-  socket.send(JSON.stringify(record(session, 1, 'after rotation')));
-  await expect(page.locator('#log-A')).toContainText('after rotation');
+  socket.send(JSON.stringify(record('next', 1, 'after rotation')));
+  await expect(log).toContainText('after rotation');
   await expect(notice).toBeHidden();
-  socket.send(JSON.stringify({ type: 'stream_gap', skipped: 1, session_id: session }));
-  await notice.click();
-  await expect(page.locator('#log-A')).toContainText('recent replay');
+  socket.send(JSON.stringify({ type: 'stream_gap', skipped: 1, session_id: 'next' }));
   await expect(notice).toBeVisible();
 
   // A lagged client can receive fresh config instead of the dropped rotation frame.
   socket.send(JSON.stringify(config('rebased')));
   socket.send(JSON.stringify(record('rebased', 1, 'after rebase')));
-  await expect(page.locator('#log-A')).toContainText('after rebase');
-  await expect(page.locator('#log-A')).not.toContainText('recent replay');
+  await expect(log).toContainText('after rebase');
+  await expect(log).not.toContainText('after rotation');
   await expect(notice).toBeHidden();
+  socket.send(JSON.stringify({ type: 'stream_gap', skipped: 1, session_id: 'rebased' }));
+  await expect(notice).toBeVisible();
 });
 
-test('highlight marks results incomplete when a journal record is inside a live gap', async ({ page }) => {
-  const session = 'interior-gap';
-  const rows = [1, 2, 3].map(i => record(session, i, `needle ${i}`));
-  let socket;
-  await page.route(`**/sessions/${session}/combined.jsonl`, route => route.fulfill({
-    body: rows.map(row => JSON.stringify(row) + '\n').join(''),
-  }));
-  await page.routeWebSocket('**/ws', ws => {
-    socket = ws;
-    ws.send(JSON.stringify(config(session)));
-    ws.send(JSON.stringify(rows[0]));
-    ws.send(JSON.stringify(rows[2]));
+for (const recovery of ['reconnect', 'reload']) {
+  test(`fresh replay after ${recovery} clears a stream gap and rebuilds Highlight`, async ({ page }) => {
+    const session = 'interior-gap';
+    const rows = [1, 2, 3].map(i => record(session, i, `needle ${i}`));
+    let socket;
+    let connections = 0;
+    let releaseHistory;
+    const historyReady = new Promise(resolve => { releaseHistory = resolve; });
+    await page.route(`**/sessions/${session}/combined.jsonl`, async route => {
+      if (connections > 1) await historyReady;
+      await route.fulfill({ body: rows.map(JSON.stringify).join('\n') + '\n' });
+    });
+    await page.routeWebSocket('**/ws', ws => {
+      socket = ws;
+      if (++connections !== 1) return;
+      ws.send(JSON.stringify(config(session)));
+      ws.send(JSON.stringify(rows[0]));
+      ws.send(JSON.stringify(rows[2]));
+    });
+    await page.goto('/');
+    const lines = page.locator('#log-A .log-line');
+    const notice = page.locator('#stream-gap');
+    const mode = page.locator('#pane-A .search-mode');
+    const input = page.locator('.filter-input[data-pane="A"]');
+    const counter = page.locator('#pane-A .search-count');
+    const next = page.locator('#pane-A .search-next');
+    await expect(lines).toHaveCount(2);
+    await mode.click();
+    await input.fill('needle');
+    await expect(counter).toHaveText('0 / 2');
+    socket.send(JSON.stringify({ type: 'stream_gap', skipped: 1, session_id: session }));
+    socket.send(JSON.stringify({ ...config(session), app_name: 'Runtime update' }));
+    await expect(page.locator('#toolbar .app-name')).toHaveText('Runtime update');
+    await expect(notice).toBeVisible();
+    await expect(counter).toHaveText('Results incomplete');
+    await expect(next).toBeDisabled();
+    await expect(lines).toHaveCount(2);
+
+    if (recovery === 'reload') await notice.click();
+    else await socket.close({ code: 1000, reason: 'test reconnect' });
+    await expect.poll(() => connections).toBe(2);
+    if (recovery === 'reconnect') {
+      await expect(notice).toBeVisible();
+      await expect(counter).toHaveText('Results incomplete');
+    }
+    socket.send(JSON.stringify(config(session)));
+    if (recovery === 'reload') {
+      await expect(mode).toBeVisible();
+      await expect(lines).toHaveCount(0); // don't restore the gapped cache
+    }
+    for (const row of rows.slice(1)) socket.send(JSON.stringify(row));
+    await expect(lines).toHaveText([/needle 2/, /needle 3/]);
+    await expect(notice).toBeHidden();
+    if (recovery === 'reload') {
+      await mode.click();
+      await input.fill('needle');
+    }
+    releaseHistory();
+    await expect(lines).toHaveText([/needle 1/, /needle 2/, /needle 3/]);
+    await expect(counter).toHaveText('0 / 3');
+    await expect(next).toBeEnabled();
+    await next.click();
+    await expect(counter).toHaveText('1 / 3');
   });
-  await page.goto('/');
-  await expect(page.locator('#log-A .log-line')).toHaveCount(2);
-  await page.locator('#pane-A .search-mode').click();
-  const input = page.locator('.filter-input[data-pane="A"]');
-  await input.fill('needle');
-  await input.press('Enter');
-  const counter = page.locator('#pane-A .search-count');
-  await expect(counter).toHaveText(/\/ 2$/);
-  socket.send(JSON.stringify({ type: 'stream_gap', skipped: 1, session_id: session }));
-  await expect(counter).toHaveText('Results incomplete');
-  await expect(page.locator('#pane-A .search-next')).toBeDisabled();
-  await input.fill('needle 2');
-  await input.press('Enter');
-  await expect(counter).toHaveText('Results incomplete');
-});
+}
 
 test('pane byte statistics count UTF-8 bytes without encoding', async ({ page }) => {
   await page.routeWebSocket('**/ws', ws => ws.send(JSON.stringify(config('bytes'))));
