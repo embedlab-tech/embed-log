@@ -255,7 +255,7 @@ impl SessionExporter {
 
         // Assign local identities before cloning records from legacy logs.
         let mut sources = log_data.iter_mut().collect::<Vec<_>>();
-        sources.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+        sources.sort_unstable_by_key(|(name, _)| *name);
         for (ordinal, entry) in sources
             .into_iter()
             .flat_map(|(_, entries)| entries)
