@@ -1738,6 +1738,7 @@ export function paneEvents(paneId) {
             rawIndex,
             event,
             sequence: Number.isFinite(line?.sequence) ? line.sequence : null,
+            sessionId: line?.sessionId || null,
             sourceId: line?.sourceId || paneId,
             ts: line?.ts || "",
             text: String(line?.rawText || "").replace(/\x1b(?:\[[0-9;]*[A-Za-z]|\][^\x07]*\x07|[^[\]])/g, ""),
