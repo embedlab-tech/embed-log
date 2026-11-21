@@ -114,9 +114,16 @@ test.describe('HTML export replay', () => {
     expect(html).toContain('hydratePanesFromJson');
     expect(html).toContain('kind=filter-alpha');
 
-    const exported = await openHtmlFile(browser, htmlPath);
+    const exported = await browser.newPage({ offline: true });
     try {
+      await exported.goto(pathToFileURL(htmlPath).href);
       await expect(exported.locator('#toolbar')).toBeVisible();
+      await exported.getByRole('button', { name: 'Settings' }).click();
+      await exported.getByRole('button', { name: 'Configuration' }).click();
+      const config = exported.getByRole('dialog', { name: 'Runtime configuration (read-only)' });
+      await expect(config).toContainText('SENSOR_A');
+      await expect(config).not.toContainText('logs_dir');
+      await config.getByRole('button', { name: 'Close' }).click();
       await expect(exported.locator('#pane-SENSOR_A')).toBeVisible();
       await expect(exported.locator('#pane-SENSOR_B')).toBeVisible();
       await expect(exported.locator('#log-SENSOR_A')).toContainText('kind=filter-alpha');

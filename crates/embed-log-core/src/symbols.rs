@@ -52,6 +52,9 @@ pub struct DecodedAddress {
     pub address: DumpAddress,
     /// Empty when the ELF has no code at this address (wrong ELF, or not a code address).
     pub frames: Vec<Frame>,
+    /// Journal row carrying the address, for selection-scoped exports.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub record_sequence: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -213,6 +216,7 @@ impl Symbolizer {
             .into_iter()
             .map(|address| DecodedAddress {
                 frames: self.frames(address.address, address.is_return),
+                record_sequence: None,
                 address,
             })
             .collect()
@@ -226,6 +230,10 @@ struct JournalRecord {
     message: String,
     #[serde(default, rename = "type")]
     kind: Option<String>,
+    #[serde(default)]
+    is_tx: bool,
+    #[serde(default)]
+    source_kind: Option<String>,
     #[serde(default)]
     event: Option<String>,
     #[serde(default, rename = "absNum")]
@@ -241,25 +249,41 @@ pub fn crash_dump_lines(
     source: &str,
     sequence: u64,
 ) -> Result<Vec<String>, String> {
+    Ok(journal_dump(journal, source, sequence)?
+        .into_iter()
+        .map(|(_, line)| line)
+        .collect())
+}
+
+fn journal_dump(journal: &Path, source: &str, sequence: u64) -> Result<Vec<(u64, String)>, String> {
     let file = std::fs::File::open(journal)
         .map_err(|e| format!("cannot open {}: {e}", journal.display()))?;
-    let needle = format!(
-        "\"source_id\":{}",
-        serde_json::to_string(source).unwrap_or_default()
-    );
+    let len = file.metadata().map_err(|e| e.to_string())?.len();
+    let mut reader = BufReader::new(std::io::Read::take(file, len));
+    let mut buffer = Vec::new();
+    let records = std::iter::from_fn(|| {
+        buffer.clear();
+        reader.read_until(b'\n', &mut buffer).ok()?;
+        buffer
+            .ends_with(b"\n")
+            .then(|| serde_json::from_slice::<JournalRecord>(&buffer).ok())
+    })
+    .flatten()
+    .filter(|record| record.source_id == source && record.source_kind.as_deref() != Some("merge"));
+    crash_dump(records, source, sequence)
+}
+
+fn crash_dump(
+    records: impl IntoIterator<Item = JournalRecord>,
+    source: &str,
+    sequence: u64,
+) -> Result<Vec<(u64, String)>, String> {
     let mut preceding: VecDeque<JournalRecord> = VecDeque::new();
     let mut lines = Vec::new();
     let mut started_at: Option<f64> = None;
     let mut found = false;
-    for line in BufReader::new(file).lines() {
-        let Ok(line) = line else { continue };
-        if !line.contains(&needle) {
-            continue;
-        }
-        let Ok(record) = serde_json::from_str::<JournalRecord>(&line) else {
-            continue;
-        };
-        if record.source_id != source || record.kind.as_deref() == Some("tx") {
+    for record in records {
+        if record.is_tx || record.kind.as_deref() == Some("tx") {
             continue;
         }
         if record.sequence < sequence {
@@ -301,7 +325,7 @@ pub fn crash_dump_lines(
                     preceding
                         .iter()
                         .skip(first)
-                        .map(|prior| dump_text(&prior.message)),
+                        .map(|prior| (prior.sequence, dump_text(&prior.message))),
                 );
             }
         } else {
@@ -310,7 +334,7 @@ pub fn crash_dump_lines(
                 break;
             }
         }
-        lines.push(dump_text(&record.message));
+        lines.push((record.sequence, dump_text(&record.message)));
     }
     if !found {
         return Err(format!(
@@ -327,16 +351,63 @@ pub fn decode_crash(
     sequence: u64,
     elf: &Path,
 ) -> Result<CrashReport, String> {
-    let lines = crash_dump_lines(journal, source, sequence)?;
+    let dump = journal_dump(journal, source, sequence)?;
     let symbolizer = Symbolizer::open(elf)?;
-    let addresses = symbolizer.decode(dump_addresses(&lines));
+    let addresses = decode_dump(&symbolizer, &dump);
     Ok(CrashReport {
         source: source.to_string(),
         sequence,
-        lines,
+        lines: dump.into_iter().map(|(_, line)| line).collect(),
         addresses,
         elf: elf.display().to_string(),
     })
+}
+
+fn decode_dump(symbolizer: &Symbolizer, dump: &[(u64, String)]) -> Vec<DecodedAddress> {
+    let mut seen = std::collections::HashSet::new();
+    dump.iter()
+        .flat_map(|(sequence, text)| {
+            dump_addresses(std::slice::from_ref(text))
+                .into_iter()
+                .map(move |address| (*sequence, address))
+        })
+        .filter(|(_, address)| seen.insert((address.label.clone(), address.address)))
+        .map(|(sequence, address)| DecodedAddress {
+            record_sequence: Some(sequence),
+            frames: symbolizer.frames(address.address, address.is_return),
+            address,
+        })
+        .collect()
+}
+
+/// Decode using the same physical-source snapshot as the HTML logs.
+pub(crate) fn replay_addresses(
+    symbolizer: &Symbolizer,
+    entries: &[&crate::session::log_parse::LogEntry],
+    index: usize,
+) -> Vec<DecodedAddress> {
+    let anchor = &entries[index];
+    let (Some(source), Some(sequence)) = (&anchor.source_id, anchor.sequence) else {
+        return vec![];
+    };
+    let records = entries
+        [index.saturating_sub(MAX_DUMP_LINES - 1)..entries.len().min(index + MAX_DUMP_LINES)]
+        .iter()
+        .filter_map(|entry| {
+            Some(JournalRecord {
+                source_id: source.clone(),
+                sequence: entry.sequence?,
+                message: entry.text.clone(),
+                kind: None,
+                is_tx: entry.is_tx,
+                source_kind: None,
+                event: entry.event.clone(),
+                abs_num: entry.abs_num.map(|n| n as f64),
+            })
+        });
+    crash_dump(records, source, sequence)
+        .map(|dump| decode_dump(symbolizer, &dump))
+        .unwrap_or_default()
 }
 
 /// Snapshot path of a source's ELF inside a session directory.

@@ -623,6 +623,9 @@ function _buildRangeLogData(entries) {
             absNum: Number.isFinite(e.line.absNum) ? e.line.absNum : null,
             relTs: e.line.relTs ?? null,
             relNum: Number.isFinite(e.line.relNum) ? e.line.relNum : null,
+            timeDomain: e.line.timeDomain,
+            level: e.line.level,
+            event: e.line.event,
         });
     });
     return logData;

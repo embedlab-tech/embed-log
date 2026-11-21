@@ -1,4 +1,6 @@
 import { expect, test } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
 
 // Restart / crash detection: the server marks records with `event` and sends
 // session-wide counts as `source_events`; panes show a counter and a list.
@@ -10,7 +12,7 @@ const record = (sequence, source_id, message, event = null) => ({
   ...(message.includes('<err>') ? { level: 'err' } : message.includes('<inf>') ? { level: 'inf' } : {}),
 });
 
-async function serve(page, { counts, levels = { A: null, B: null } }) {
+async function serve(page, { counts, levels = { A: null, B: null }, runtime_config }) {
   let socket;
   await page.routeWebSocket('**/ws', ws => {
     socket = ws;
@@ -18,7 +20,7 @@ async function serve(page, { counts, levels = { A: null, B: null } }) {
       type: 'config', session: { id: 'events', symbols: { A: 'symbols/A.elf' } },
       tabs: [{ label: 'Devices', panes: ['A', 'B'] }, { label: 'Merged', panes: ['ALL'] }],
       pane_labels: { A: 'Main MCU', B: 'Network core' }, pane_kinds: { A: 'uart', B: 'uart' },
-      merges: [{ name: 'ALL', of: ['A', 'B'] }], source_levels: levels,
+      merges: [{ name: 'ALL', of: ['A', 'B'] }], source_levels: levels, runtime_config,
     }));
     if (counts) ws.send(JSON.stringify({ type: 'source_events', session_id: 'events', counts }));
     const rows = [record(1, 'A', '*** Booting Zephyr OS build v3.7.0 ***', 'boot')];
@@ -231,6 +233,68 @@ test('a crash is decoded with the firmware ELF in a dialog', async ({ page }) =>
   await expect(dialog).toBeHidden();
   await expect(page.locator('#pane-A .pane-events-btn')).toBeFocused();
 });
+
+for (const decoderAvailable of [true, false]) {
+  test(`a scoped HTML download replays device events offline (decoder ${decoderAvailable ? 'available' : 'unavailable'})`, async ({ page, context }, testInfo) => {
+    const requests = [];
+    await page.route('**/api/sessions/events/crashes/**', route => {
+      requests.push(new URL(route.request().url()).searchParams.get('source'));
+      return route.fulfill({ status: decoderAvailable ? 200 : 404, json: { report: {
+        source: 'A', sequence: 60, elf: 'PRIVATE_FIRMWARE.elf', lines: ['UNSELECTED_RAW_DUMP'],
+        addresses: [
+          { label: 'pc', address: 0x102a, record_sequence: 60,
+            frames: [{ function: 'in_scope_function', file: '/PRIVATE_DIRECTORY/sensor.c', line: 7, inlined: true }] },
+          { label: 'lr', address: 0x104b, record_sequence: 61,
+            frames: [{ function: 'unselected_function', file: '/private/task.c', line: 20 }] },
+        ],
+      } } });
+    });
+    await serve(page, { counts: { A: { boot: 2, crash: 1 }, B: { boot: 1, crash: 0 } }, runtime_config: {
+      server: { timestamp_mode: 'absolute', logs_root: 'PRIVATE_LOGS_ROOT' },
+      sources: [{ name: 'A', type: 'uart', baudrate: 115200, device: 'PRIVATE_DEVICE', parser: { type: 'raw' } },
+        { name: 'B', type: 'uart', baudrate: 9600 }],
+    } });
+    const download = page.waitForEvent('download');
+    await page.evaluate(async () => {
+      const { state } = await import('/state.js');
+      state.selectionScope = 'exact';
+      state.selected.A = new Set([0, 59]);
+      document.getElementById('export-html-A').click();
+    });
+    const path = testInfo.outputPath('offline.html');
+    await (await download).saveAs(path);
+    expect(requests).toEqual(['A']);
+    const html = await readFile(path, 'utf8');
+    expect(html).not.toMatch(/PRIVATE_|UNSELECTED_RAW_DUMP|unselected_function|Network core/);
+
+    await context.setOffline(true);
+    const offline = await context.newPage();
+    const errors = [];
+    offline.on('pageerror', error => errors.push(error.message));
+    await offline.goto(pathToFileURL(path).href);
+    await expect(offline.locator('#pane-B')).toHaveCount(0);
+    await offline.locator('#btn-settings').click();
+    await offline.locator('#btn-runtime-config').click();
+    const config = offline.locator('.runtime-config-dialog');
+    await expect(config.locator('pre')).toContainText('115200');
+    await expect(config.locator('pre')).not.toContainText('9600');
+    await config.getByRole('button', { name: 'Close' }).click();
+    await offline.locator('#btn-settings').click();
+    await expect(offline.locator('#pane-A .pane-events-btn')).toHaveText('⟳ 1✖ 1');
+    await offline.locator('#pane-A .pane-events-btn').click();
+    await expect(offline.locator('#pane-A .events-kind')).toHaveText(['Crash', 'Restart']);
+    await offline.locator('#pane-A .events-decode').click();
+    const crash = offline.locator('#crash-dialog');
+    if (decoderAvailable) {
+      await expect(crash.locator('.crash-frames tbody')).toContainText('in_scope_function');
+      await expect(crash.locator('.crash-frames tbody')).toContainText('sensor.c:7');
+      await expect(crash.locator('.crash-note')).toContainText('outside the exported logs');
+    } else {
+      await expect(crash.locator('.crash-meta')).toContainText('No decoded frames were saved');
+    }
+    expect(errors).toEqual([]);
+  });
+}
 
 test('a pane can show one boot at a time', async ({ page }) => {
   await serve(page, { counts: { A: { boot: 2, crash: 1 } } });

@@ -6,6 +6,7 @@ import {
 } from './levels.js';
 import { rebuildLayout } from './tabcreate.js';
 import { getPanePluginSettings, setPanePluginSetting } from './pluginRuntime.js';
+import { fetchCrashReport } from './export.js';
 
 
 
@@ -72,20 +73,22 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
 // Settings panel — read-only effective configuration (never raw YAML).
 // ---------------------------------------------------------------------------
 (function () {
+    const offline = window.__embedLogProfile?.kind === "static";
     const panel = document.getElementById("settings-panel");
     if (!panel) return;
     const btn = document.createElement("button");
     btn.id = "btn-runtime-config";
     btn.textContent = "Configuration";
-    btn.title = "View runtime configuration summary (requires a live server)";
+    btn.title = offline ? "View saved configuration snapshot" : "View runtime configuration summary";
     const dialog = document.createElement("dialog");
     dialog.className = "runtime-config-dialog";
     dialog.setAttribute("aria-labelledby", "runtime-config-title");
     dialog.innerHTML = '<h2 id="runtime-config-title">Runtime configuration (read-only)</h2><pre></pre><button type="button">Close</button>';
     const update = () => {
         const config = window.__embedLogRuntimeConfig;
-        btn.disabled = !config;
-        dialog.querySelector("pre").textContent = config ? JSON.stringify(config, null, 2) : "Configuration unavailable from this server.";
+        btn.disabled = !offline && !config;
+        dialog.querySelector("pre").textContent = config ? JSON.stringify(config, null, 2)
+            : offline ? "No configuration snapshot was saved." : "Configuration unavailable from this server.";
     };
     window.__embedLogUpdateRuntimeConfig = update;
     btn.addEventListener("click", () => { update(); dialog.showModal(); });
@@ -612,7 +615,8 @@ function _setupEventBadge(id) {
                 decode.type = "button";
                 decode.className = "events-decode";
                 decode.textContent = "Decode";
-                decode.title = "Symbolize this crash dump with the firmware ELF";
+                decode.title = window.__embedLogProfile?.kind === "static"
+                    ? "View saved crash report" : "Symbolize this crash dump with the firmware ELF";
                 decode.addEventListener("click", () => {
                     close();
                     revealRawLine(id, item.rawIndex);
@@ -754,10 +758,12 @@ function _setupBootChip(id) {
 const _bootChips = new Map();
 window.__embedLogOnBootFilterChange = paneId => _bootChips.get(paneId)?.();
 
-// ── Crash decoding with the firmware ELF (live server only) ──
+// ── Live crash decoding and offline replay ──
 function _canDecode(item) {
+    if (!Number.isFinite(item.sequence)) return false;
+    if (window.__embedLogProfile?.kind === "static") return true;
     const session = window.__embedLogSession;
-    return !!(session?.id && Number.isFinite(item.sequence) && session.symbols?.[item.sourceId]);
+    return !!(session?.id && (!item.sessionId || item.sessionId === session.id) && session.symbols?.[item.sourceId]);
 }
 
 function _crashDialog() {
@@ -789,18 +795,25 @@ async function _showCrashDecode(item) {
     const body = dialog.querySelector(".crash-body");
     body.replaceChildren();
     if (!dialog.open) dialog.showModal();
-    const session = window.__embedLogSession;
+    const offline = window.__embedLogProfile?.kind === "static";
     let report;
     try {
-        const response = await fetch(`/api/sessions/${encodeURIComponent(session.id)}/crashes/${item.sequence}?source=${encodeURIComponent(item.sourceId)}`, { cache: "no-store" });
-        const result = await response.json().catch(() => ({}));
-        if (!response.ok || !result.report) throw new Error(result.error || `HTTP ${response.status}`);
-        report = result.report;
+        report = offline
+            ? window.__embedLogCrashReports?.find(saved => saved.source === item.sourceId && saved.sequence === item.sequence)
+            : await fetchCrashReport(window.__embedLogSession.id, item);
+        if (!report || report.unavailable) throw new Error("No decoded frames were saved for this crash.");
     } catch (error) {
         dialog.querySelector(".crash-meta").textContent = `${item.ts} \u00b7 cannot decode: ${error.message}`;
         return;
     }
-    dialog.querySelector(".crash-meta").textContent = `${item.ts} \u00b7 record #${report.sequence} \u00b7 ELF ${report.elf}`;
+    dialog.querySelector(".crash-meta").textContent = `${item.ts} \u00b7 record #${report.sequence}`
+        + (offline ? " · saved report" : ` · ELF ${report.elf}`);
+    if (report.partial) {
+        const note = document.createElement("p");
+        note.className = "crash-note";
+        note.textContent = "Some frames were outside the exported logs.";
+        body.append(note);
+    }
     const table = document.createElement("table");
     table.className = "crash-frames";
     table.innerHTML = "<thead><tr><th>Register</th><th>Address</th><th>Function</th><th>Location</th></tr></thead>";
@@ -835,11 +848,13 @@ async function _showCrashDecode(item) {
     if (!report.addresses.length) {
         const note = document.createElement("p");
         note.className = "crash-note";
-        note.textContent = "No code addresses (pc, lr, call trace) were found in this fault dump.";
+        note.textContent = offline ? "No code addresses were saved for this crash."
+            : "No code addresses (pc, lr, call trace) were found in this fault dump.";
         body.append(note);
     } else {
         body.append(table);
     }
+    if (offline) return;
     const dump = document.createElement("details");
     dump.className = "crash-dump";
     const summary = document.createElement("summary");

@@ -12,6 +12,57 @@ import { renderPaneWindow, updateJumpBtn, getLine, hydratePaneRows, refreshStats
 import { state, TABS, PANES, PANE_LABELS } from './state.js';
 import { isEditableTarget, isComposingEvent } from './keyboard.js';
 
+export async function fetchCrashReport(sessionId, item) {
+    const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/crashes/${item.sequence}?source=${encodeURIComponent(item.sourceId)}`, {
+        cache: "no-store", signal: AbortSignal.timeout(5000),
+    });
+    const result = await response.json().catch(() => null);
+    const report = result?.report;
+    if (!response.ok) throw new Error(result?.error || `HTTP ${response.status}`);
+    if (report?.source !== item.sourceId || report?.sequence !== item.sequence || !Array.isArray(report.addresses)) {
+        throw new Error("Invalid crash report");
+    }
+    return report;
+}
+
+async function _snapshotCrashReports(items, sources, session) {
+    const offline = window.__embedLogProfile?.kind === "static";
+    const key = (source, sequence) => JSON.stringify([source, sequence]);
+    const saved = new Map((window.__embedLogCrashReports || []).map(report => [key(report.source, report.sequence), report]));
+    const crashes = new Map(items.map(item => [key(item.sourceId, item.sequence), item]));
+    const reports = [];
+    for (const [id, item] of crashes) {
+        const { sourceId: source, sequence } = item;
+        let report = saved.get(id);
+        if (!offline && session?.id && item.sessionId === session.id && Object.hasOwn(session.symbols || {}, source)) {
+            try { report = await fetchCrashReport(session.id, item); }
+            catch { /* Decoder failure must not prevent exporting the logs. */ }
+        }
+        const decoded = report?.addresses || [];
+        const addresses = decoded.filter(address => Number.isFinite(address?.address)
+            && Array.isArray(address.frames) && sources.get(source)?.has(address.record_sequence))
+            .map(({ label, address, record_sequence, frames }) => ({ label, address, record_sequence,
+                frames: frames.map(({ function: name, file, line, inlined }) => ({
+                    function: name, file: file?.split(/[\\/\\\\]/).pop(), line, inlined,
+                })),
+            }));
+        reports.push({ source, sequence, addresses, unavailable: !report || !!report.unavailable,
+            partial: !!report?.partial || addresses.length < decoded.length });
+    }
+    return reports;
+}
+
+function _configurationSnapshot(summary, sourceIds) {
+    if (!Array.isArray(summary?.sources)) return null;
+    return {
+        server: { timestamp_mode: summary.server?.timestamp_mode ?? null },
+        sources: summary.sources.filter(source => sourceIds.has(source.name))
+            .map(({ name, type, baudrate, parser }) => ({
+                name, type, baudrate: baudrate ?? null, parser: { type: parser?.type ?? null },
+            })),
+    };
+}
+
 export async function exportHtmlSnapshot(options = {}) {
     const btn = options.button === undefined ? document.getElementById("btn-export") : options.button;
     const prev = btn?.textContent;
@@ -20,13 +71,62 @@ export async function exportHtmlSnapshot(options = {}) {
         btn.disabled = true;
     }
 
-    // Escape <\/script> sequences in embedded JSON so they can't break the
-    // surrounding <\/script> tag — same issue affects any log message.
-    function _safeJson(obj) {
-        return JSON.stringify(obj).replace(/<\//g, "<\\/");
-    }
-
+    const _safeJson = obj => JSON.stringify(obj).replace(/</g, "\\u003c");
+    const _attr = text => text.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
     try {
+        const session = window.__embedLogSession;
+        const paneData = options.logData || Object.fromEntries(PANES.map(id => [id, state.rawLines[id] || []]));
+        const allMerges = window.__embedLogMerges || [];
+        const sources = new Map();
+        if (!options.logData) {
+            for (const paneId of PANES) {
+                for (const source of allMerges.find(merge => merge.name === paneId)?.of || [paneId]) {
+                    sources.set(source, new Set());
+                }
+            }
+        }
+        const textTemplate = document.createElement("template");
+        const rawText = entry => {
+            if (entry.text != null || entry.rawText != null) return entry.text ?? entry.rawText;
+            textTemplate.innerHTML = entry.html || "";
+            return textTemplate.content.textContent;
+        };
+        const crashes = [];
+        let paneDataTags = "";
+        for (const [paneId, entries] of Object.entries(paneData)) {
+            if (!entries.length) continue;
+            const tuples = entries.map(entry => {
+                const [ts, text, isTx, meta] = Array.isArray(entry)
+                    ? entry : [entry.ts, rawText(entry), entry.isTx, entry];
+                const { absTs, absNum, relTs, relNum, timeDomain, sequence, recordOrdinal, originalBytes, level, event, sessionId } = meta || {};
+                const sourceId = meta?.sourceId || paneId;
+                if (!sources.has(sourceId)) sources.set(sourceId, new Set());
+                if (!isTx && Number.isFinite(sequence) && (!session || sessionId === session.id)) {
+                    sources.get(sourceId).add(sequence);
+                    if (event === "crash") crashes.push({ sourceId, sequence, sessionId });
+                }
+                return [ts, text, isTx, { absTs, absNum, relTs, relNum, timeDomain, sourceId, sequence,
+                    sessionId, recordOrdinal, originalBytes, level, event }];
+            });
+            paneDataTags += `<script type="application/json" data-pane="${_attr(paneId)}">${_safeJson(tuples)}</script>\n`;
+        }
+        const layout = TABS.map((tab, index) => ({ label: tab.label, index,
+            panes: tab.panes.filter(id => !options.logData || paneData[id]?.length),
+        })).filter(tab => tab.panes.length);
+        if (!layout.length) return;
+        const tabs = layout.map(({ label, panes }) => ({ label, panes }));
+        const panes = [...new Set(tabs.flatMap(tab => tab.panes))];
+        const visible = id => panes.includes(id) || sources.has(id);
+        const labels = Object.fromEntries(Object.entries(PANE_LABELS).filter(([id]) => visible(id)));
+        const merges = allMerges.filter(merge => panes.includes(merge.name))
+            .map(({ name, of }) => ({ name, of: of.filter(id => sources.has(id)) }));
+        const levels = Object.fromEntries(Object.entries(window.__embedLogSourceLevels || {}).filter(([id]) => visible(id)));
+        const config = _configurationSnapshot(window.__embedLogRuntimeConfig, sources);
+        const markers = options.logData ? [] : Object.values(state.markers).flat();
+        const activeTabIdx = Math.max(0, layout.findIndex(tab => tab.index === (options.activeTab ?? state.activeTab)));
+        const timestampMode = state.timestampMode === "hidden" ? state.sessionTimestampMode : state.timestampMode;
+        const firstLogAt = state.firstLogAt;
+        const fontSize = state.fontSize;
         // ------------------------------------------------------------------
         // Fetch all frontend assets in parallel (same order as index.html).
         // ws.js is intentionally omitted — no WebSocket in a static file.
@@ -60,14 +160,29 @@ export async function exportHtmlSnapshot(options = {}) {
                 .replace(/^export\s*\{[^}]*\}\s*(?:from\s*['"][^'"]*['"])?\s*;?\r?\n?/gm, '');
         }
 
-        const texts = await Promise.all(ASSETS.map(async a => {
+        const assets = await Promise.all(ASSETS.map(async a => {
+            const bundled = document.querySelector(`[data-asset="${a}"]`);
+            if (bundled) return bundled.outerHTML;
             const r = await fetch(a, {cache: "no-store"});
             if (!r.ok) throw new Error(`Failed to fetch ${a}: ${r.status}`);
             const src = await r.text();
-            return a.endsWith(".js") ? _escJs(_stripModuleSyntax(src)) : src;
+            return a.endsWith(".js")
+                ? `<script data-asset="${a}">${_escJs(_stripModuleSyntax(src))}</script>`
+                : `<style data-asset="${a}">${src.replace(/@font-face\s*\{[^}]*\}/g, "")}</style>`;
         }));
-        const [profileJs, keyboardJs, renderPaneJs, renderToolbarJs, css, pluginRuntimeJs, stateJs, themesJs, settingsJs, fontsizeJs,
-               ansiJs, levelsJs, searchJs, timeSyncJs, linesJs, tabsJs, tabcreateJs, uiJs, exportJs, postprocessJs, selectionJs, tsparseJs, importJs] = texts;
+        const css = assets[ASSETS.indexOf("viewer.css")];
+        const scopePlugins = value => Object.fromEntries(Object.entries(value).filter(([id]) => panes.includes(id)));
+        const panePlugins = scopePlugins(getConfiguredPanePlugins());
+        const panePluginUiState = scopePlugins(getPanePluginUiState());
+        const frontendPlugins = getConfiguredFrontendPlugins();
+        const existingPluginScripts = getConfiguredPluginScripts();
+        const activePluginNames = [...new Set(Object.values(panePlugins).flatMap(refs => refs.map(ref => ref.name)))];
+        const pluginScripts = Object.fromEntries(activePluginNames.map(name => [name, existingPluginScripts[name]])
+            .filter(([, source]) => typeof source === "string" && source));
+        assets[ASSETS.indexOf("pluginRuntime.js")] += Object.values(pluginScripts)
+            .map(src => `<script>${_escJs(src)}</script>`).join("\n");
+        const scripts = assets.filter((_, i) => ASSETS[i] !== "viewer.css").join("\n");
+        const reports = await _snapshotCrashReports(crashes, sources, session);
 
 
         // ------------------------------------------------------------------
@@ -81,104 +196,39 @@ export async function exportHtmlSnapshot(options = {}) {
             lightKey: "whitesand",
             darkKey: "one-dark",
         };
-        const panePluginUiState = getPanePluginUiState();
-        const frontendPlugins = getConfiguredFrontendPlugins();
-        const panePlugins = getConfiguredPanePlugins();
-        const existingPluginScripts = getConfiguredPluginScripts();
-        const activePluginNames = [...new Set(Object.values(panePlugins)
-            .flatMap(refs => Array.isArray(refs) ? refs : [])
-            .map(ref => ref?.name)
-            .filter(name => typeof name === "string" && name && frontendPlugins[name]))];
-        const pluginScripts = {};
-        for (const name of activePluginNames) {
-            if (typeof existingPluginScripts[name] === "string" && existingPluginScripts[name]) {
-                pluginScripts[name] = existingPluginScripts[name];
-            }
-        }
-        const pluginScriptTags = activePluginNames
-            .map(name => pluginScripts[name])
-            .filter(Boolean)
-            .map(src => `<script>${_escJs(src)}</script>`)
-            .join("\n");
-
         // ------------------------------------------------------------------
         // Config: inject TABS + PANES + initial theme state before scripts run
         // ------------------------------------------------------------------
         const configJs =
             `window.__embedLogProfile = ${_safeJson(STATIC_EXPORT_PROFILE)};\n` +
-            `window.TABS = ${_safeJson(TABS)};\n` +
-            `window.PANES = ${_safeJson(PANES)};\n` +
-            `window.PANE_LABELS = ${_safeJson(PANE_LABELS)};\n` +
+            `window.TABS = ${_safeJson(tabs)};\n` +
+            `window.PANES = ${_safeJson(panes)};\n` +
+            `window.PANE_LABELS = ${_safeJson(labels)};\n` +
             `window.__embedLogFrontendPlugins = ${_safeJson(Object.fromEntries(activePluginNames.map(name => [name, frontendPlugins[name]])))};\n` +
             `window.__embedLogPanePlugins = ${_safeJson(panePlugins)};\n` +
             `window.__embedLogPluginScripts = ${_safeJson(pluginScripts)};\n` +
-            `window.__embedLogMerges = ${_safeJson(window.__embedLogMerges || [])};\n` +
-            (window.__embedLogSourceLevels ? `window.__embedLogSourceLevels = ${_safeJson(window.__embedLogSourceLevels)};\n` : "") +
             `window.__embedLogInitialPanePluginUiState = ${_safeJson(panePluginUiState)};\n` +
+            `window.__embedLogRuntimeConfig = ${_safeJson(config)};\n` +
+            `window.__embedLogCrashReports = ${_safeJson(reports)};\n` +
+            `window.__embedLogMerges = ${_safeJson(merges)};\n` +
+            `window.__embedLogSourceLevels = ${_safeJson(levels)};\n` +
             `window.__embedLogInitialThemeState = ${_safeJson(themeState)};\n` +
-            `window.__embedLogInitialTimestampMode = ${_safeJson(state.timestampMode === "hidden" ? state.sessionTimestampMode : state.timestampMode)};\n` +
-            `window.__embedLogFirstLogAt = ${_safeJson(state.firstLogAt)};\n` +
-            `window.__embedLogInitialFontSize = ${state.fontSize};`;
+            `window.__embedLogInitialTimestampMode = ${_safeJson(timestampMode)};\n` +
+            `window.__embedLogFirstLogAt = ${_safeJson(firstLogAt)};\n` +
+            `window.__embedLogInitialFontSize = ${_safeJson(fontSize)};`;
 
 
 
-        // ------------------------------------------------------------------
-        // Serialize selection-export pane data as compact JSON tuples for
-        // fast hydration with windowed rendering.
-        // rawText may be absent on lines loaded before this session; fall back
-        // to decoding the stored HTML via a temporary element.
-        // ------------------------------------------------------------------
-        const _tmpEl = document.createElement("div");
-        function _rawOf(line) {
-            if (Array.isArray(line)) return line[1];
-
-            if (line.rawText !== undefined) return line.rawText;
-            _tmpEl.innerHTML = line.html;
-            return _tmpEl.textContent;
-        }
-
-        // Compact tuple: [ts, text, isTx, meta|null]
-        function _compactEntry(line, text) {
-            if (Array.isArray(line)) return line;
-            const meta = {};
-            if (line.absTs != null) meta.absTs = line.absTs;
-            if (Number.isFinite(line.absNum)) meta.absNum = line.absNum;
-            if (line.relTs != null) meta.relTs = line.relTs;
-            if (Number.isFinite(line.relNum)) meta.relNum = line.relNum;
-            if (line.sourceId) meta.sourceId = line.sourceId;
-            if (line.level) meta.level = line.level;
-            if (line.sessionId) meta.sessionId = line.sessionId;
-            if (Number.isFinite(line.sequence)) meta.sequence = line.sequence;
-            if (Number.isFinite(line.recordOrdinal)) meta.recordOrdinal = line.recordOrdinal;
-            if (Number.isFinite(line.originalBytes)) meta.originalBytes = line.originalBytes;
-            return [line.ts, text ?? _rawOf(line), line.isTx, Object.keys(meta).length ? meta : null];
-        }
-
-        const logData = options.logData || {};
-        let paneDataTags = "";
-        if (!options.logData) {
-            PANES.forEach(id => {
-                const lines = state.rawLines[id] || [];
-                if (!lines.length) return;
-                paneDataTags += `<script type="application/json" data-pane="${id}">${_safeJson(lines.map(line => _compactEntry(line)))}</script>\n`;
-            });
-        } else {
-            // Custom logData passed in (e.g. from selection export)
-            Object.entries(options.logData).forEach(([paneId, entries]) => {
-                if (!entries || !entries.length) return;
-                paneDataTags += `<script type="application/json" data-pane="${paneId}">${_safeJson(entries.map(e => _compactEntry(e, e.text)))}</script>\n`;
-            });
-        }
         // ------------------------------------------------------------------
         // Build pane + tab HTML for selection-only snapshots, with the TX
         // input row hidden in static mode.
         // ------------------------------------------------------------------
         function _paneHtml(paneId) {
-            const raw = document.querySelector(`#pane-${paneId} .pane-name`)?.textContent.trim() || paneId;
+            const raw = document.getElementById(`pane-${paneId}`)?.querySelector(".pane-name")?.textContent.trim() || paneId;
             return renderPaneShell(paneId, raw, { showTx: false });
         }
 
-        const tabContentsHtml = TABS.map((tab, i) => {
+        const tabContentsHtml = tabs.map((tab, i) => {
             const inner = tab.panes.map((paneId, j) =>
                 (j > 0 ? '        <div class="splitter"></div>\n' : "") + _paneHtml(paneId)
             ).join("\n");
@@ -188,7 +238,6 @@ export async function exportHtmlSnapshot(options = {}) {
         // ------------------------------------------------------------------
         // Bootstrap: lazy hydration via compact JSON + windowed rendering
         // ------------------------------------------------------------------
-        const activeTabIdx = Number.isInteger(options.activeTab) ? options.activeTab : state.activeTab;
         const bootstrapJs = `(function () {
     "use strict";
     window.wsSend = function () {};
@@ -198,7 +247,7 @@ export async function exportHtmlSnapshot(options = {}) {
     if (typeof window.__embedLogUpdateTimestampModeUi === "function") {
         window.__embedLogUpdateTimestampModeUi();
     }
-    var _markers = ${_safeJson(Object.values(state.markers).flat() || [])};
+    var _markers = ${_safeJson(markers)};
     if (_markers.length) {
         state.markers = {};
         _markers.forEach(function (m) {
@@ -243,7 +292,7 @@ export async function exportHtmlSnapshot(options = {}) {
         // Assemble final HTML
         // ------------------------------------------------------------------
         const ts    = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -1);
-        const rawTitle = options.title || TABS.map(t => t.label).join(" + ");
+        const rawTitle = options.title || tabs.map(t => t.label).join(" + ");
         const title = rawTitle.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
         const themeAttr = currentTheme ? ` data-theme="${currentTheme}"` : "";
 
@@ -251,8 +300,9 @@ export async function exportHtmlSnapshot(options = {}) {
 <html lang="en"${themeAttr}>
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>embed-log \u2014 ${title}</title>
-<style>${css}</style>
+${css}
 </head>
 <body>
 
@@ -274,29 +324,7 @@ ${tabContentsHtml}
 
 <script>${configJs}</script>
 ${paneDataTags}
-<script>${profileJs}</script>
-<script>${keyboardJs}</script>
-<script>${renderPaneJs}</script>
-<script>${renderToolbarJs}</script>
-<script>${pluginRuntimeJs}</script>
-${pluginScriptTags}
-<script>${stateJs}</script>
-<script>${themesJs}</script>
-<script>${settingsJs}</script>
-<script>${fontsizeJs}</script>
-<script>${ansiJs}</script>
-<script>${levelsJs}</script>
-<script>${searchJs}</script>
-<script>${timeSyncJs}</script>
-<script>${linesJs}</script>
-<script>${tabsJs}</script>
-<script>${tabcreateJs}</script>
-<script>${uiJs}</script>
-<script>${exportJs}</script>
-<script>${postprocessJs}</script>
-<script>${selectionJs}</script>
-<script>${tsparseJs}</script>
-<script>${importJs}</script>
+${scripts}
 <script>${bootstrapJs}</script>
 </body>
 </html>`;
@@ -567,11 +595,6 @@ function _closeRawMenu() {
     document.getElementById("download-raw-menu")?.classList.remove("open");
 }
 
-document.getElementById("btn-download-raw")?.addEventListener("click", e => {
-    e.stopPropagation();
-    _toggleRawMenu();
-});
-
 document.getElementById("btn-download-merged")?.addEventListener("click", e => {
     e.stopPropagation();
     downloadRawMerged();
@@ -587,9 +610,11 @@ document.getElementById("btn-download-split")?.addEventListener("click", e => {
 document.addEventListener("click", e => {
     const menu = document.getElementById("download-raw-menu");
     const btn = document.getElementById("btn-download-raw");
-    if (!menu?.classList.contains("open")) return;
-    if (menu.contains(e.target) || btn?.contains(e.target)) return;
-    _closeRawMenu();
+    if (btn?.contains(e.target)) {
+        _toggleRawMenu();
+    } else if (menu?.classList.contains("open") && !menu.contains(e.target)) {
+        _closeRawMenu();
+    }
 }, true);
 
 document.addEventListener("keydown", e => {

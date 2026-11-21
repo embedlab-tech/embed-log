@@ -11,6 +11,7 @@
     const gearBtn = document.createElement("button");
     gearBtn.id        = "btn-settings";
     gearBtn.title     = "Settings";
+    gearBtn.setAttribute("aria-label", "Settings");
     gearBtn.textContent = "⚙";
     if (wsStatus) {
         wsStatus.before(gearBtn);

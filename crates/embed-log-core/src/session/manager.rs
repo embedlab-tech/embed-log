@@ -38,6 +38,7 @@ pub struct SessionManager {
     next_sequence: u64,
     merges: serde_json::Value,
     source_levels: serde_json::Value,
+    runtime_config: serde_json::Value,
     /// Boots and crashes detected per source in this session.
     event_counts: std::collections::BTreeMap<String, crate::events::EventCounts>,
     /// `{source: "symbols/<SOURCE>.elf"}`: firmware ELF snapshots (`crate::symbols`).
@@ -92,6 +93,7 @@ impl SessionManager {
             next_sequence: 1,
             merges,
             source_levels: serde_json::Value::Null,
+            runtime_config: serde_json::Value::Null,
             event_counts: std::collections::BTreeMap::new(),
             symbols: json!({}),
         }
@@ -131,6 +133,11 @@ impl SessionManager {
     /// in the manifest so post-factum exports render the same Levels menu.
     pub fn with_source_levels(mut self, source_levels: serde_json::Value) -> Self {
         self.source_levels = source_levels;
+        self
+    }
+
+    pub(crate) fn with_runtime_config(mut self, summary: &serde_json::Value) -> Self {
+        self.runtime_config = super::exporter::configuration_snapshot(summary, None);
         self
     }
 
@@ -379,6 +386,7 @@ impl SessionManager {
             "merges": self.merges,
             "symbols": self.symbols,
             "source_levels": self.source_levels,
+            "runtime_config": self.runtime_config,
             "session_html": html_path.display().to_string(),
             "last_export_reason": serde_json::Value::Null,
             "html_status": self.html_status,
