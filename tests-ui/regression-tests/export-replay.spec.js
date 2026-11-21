@@ -333,8 +333,13 @@ for (const canonical of [true, false]) {
     });
     const exported = await openHtmlFile(browser, htmlPath);
     try {
-      await expect(exported.locator('#toolbar-stats')).toHaveText('· 4 lines · 21 B');
+      const total = exported.locator('#toolbar-stats');
+      await expect(total).toHaveText('· 4 lines · 21 B');
       await expect(exported.locator('.pane-stats[data-pane-stats="AB"]')).toHaveText('3 lines · 38 B');
+      await exported.evaluate(() => clearPane('AB'));
+      await expect(total).toHaveText('· 4 lines · 21 B');
+      await exported.evaluate(() => clearPane('BC'));
+      await expect(total).toHaveText('· 1 lines · 5 B');
     } finally {
       await exported.close();
     }

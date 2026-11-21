@@ -902,7 +902,7 @@ function _updatePaneStats(paneId) {
         : "";
 }
 
-// One numeric identity per record, with a reference for each loaded copy.
+// Per scope, map each numeric record identity to its loaded-copy count.
 const _recordsBySession = new Map();
 const _ordinalScope = Symbol('export-local record ordinals');
 const _unidentified = new Map(); // paneId -> totals for rows without identity
@@ -926,24 +926,26 @@ export function originalRecordBytes(paneId, text, meta, bytes, isMerge) {
     return bytes;
 }
 
-function _adjustRecord(meta, delta, bytes) {
+function _adjustRecord(paneId, text, meta, delta, isMerge, bytes) {
     const hasSequence = Number.isFinite(meta?.sequence);
     const key = hasSequence ? meta.sequence : meta?.recordOrdinal;
     if (!Number.isFinite(key)) return false;
     const scope = hasSequence ? (meta.sessionId || '') : _ordinalScope;
     let records = _recordsBySession.get(scope);
-    const record = records?.get(key);
-    if (!record) {
+    const refs = records?.get(key) || 0;
+    if (refs === 0) {
         if (delta < 0) return true;
         if (!records) _recordsBySession.set(scope, records = new Map());
-        records.set(key, { refs: 1, bytes });
+        records.set(key, 1);
         _totalLines++;
-        _totalBytes += bytes;
-    } else if ((record.refs += delta) === 0) {
+        _totalBytes += originalRecordBytes(paneId, text, meta, bytes, isMerge);
+    } else if (refs + delta === 0) {
         records.delete(key);
         if (!records.size) _recordsBySession.delete(scope);
         _totalLines--;
-        _totalBytes -= record.bytes;
+        _totalBytes -= originalRecordBytes(paneId, text, meta, bytes, isMerge);
+    } else {
+        records.set(key, refs + delta);
     }
     return true;
 }
@@ -957,8 +959,8 @@ function _recordPaneBytes(paneId, newLines) {
         const meta = Array.isArray(line) ? line[3] : line;
         const bytes = _byteSize(text);
         delta += bytes;
-        const originalBytes = originalRecordBytes(paneId, text, meta, bytes, isMerge);
-        if (!_adjustRecord(meta, 1, originalBytes)) {
+        if (!_adjustRecord(paneId, text, meta, 1, isMerge, bytes)) {
+            const originalBytes = originalRecordBytes(paneId, text, meta, bytes, isMerge);
             // shortcut: no identity means each copy counts, rather than guessing from text.
             unidentified.lines++;
             unidentified.bytes += originalBytes;
@@ -972,8 +974,11 @@ function _recordPaneBytes(paneId, newLines) {
 
 function _removePaneStats(paneId) {
     if (!_paneBytes.has(paneId)) return;
+    const isMerge = window.__embedLogMerges?.some(merge => merge?.name === paneId) ?? false;
     for (const line of state.rawLines[paneId] || []) {
-        _adjustRecord(Array.isArray(line) ? line[3] : line, -1);
+        const text = (Array.isArray(line) ? line[1] : line?.rawText) || '';
+        const meta = Array.isArray(line) ? line[3] : line;
+        _adjustRecord(paneId, text, meta, -1, isMerge);
     }
     const unidentified = _unidentified.get(paneId);
     if (unidentified) {
