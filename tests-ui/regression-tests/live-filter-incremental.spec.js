@@ -3,15 +3,20 @@ import { expect, test } from '@playwright/test';
 // A regex filter must not rescan the whole pane for every live batch, and
 // the incrementally extended result must equal a full rescan.
 
-async function setup(page) {
+async function setup(page, panes = ['A']) {
+  let socket;
   await page.setViewportSize({ width: 1200, height: 800 });
-  await page.routeWebSocket('**/ws', ws => ws.send(JSON.stringify({
-    type: 'config', session: { id: 'live-filter' },
-    tabs: [{ label: 'Logs', panes: ['A'] }], pane_kinds: { A: 'uart' },
-    source_levels: { A: null },
-  })));
+  await page.routeWebSocket('**/ws', ws => {
+    socket = ws;
+    ws.send(JSON.stringify({
+      type: 'config', session: { id: 'live-filter' },
+      tabs: [{ label: 'Logs', panes }], pane_kinds: { A: 'uart', B: 'uart' },
+      source_levels: { A: null, B: null },
+    }));
+  });
   await page.goto('/');
-  await expect(page.locator('#ws-status')).toContainText(/connected/i);
+  await expect(page.locator('.filter-input[data-pane="A"]')).toBeVisible();
+  return socket;
 }
 
 test('live batches with an active filter extend the projection and match a full rescan', async ({ page }) => {
@@ -80,4 +85,40 @@ test('changing the timestamp mode re-evaluates a filter that matches timestamps'
   await page.evaluate(async () => (await import('/lines.js')).setTimestampMode('relative'));
   await expect(page.locator('#log-A .log-line')).toHaveCount(1);
   await expect(page.locator('#log-A .log-line')).toContainText('row 1');
+});
+
+test('late session metadata re-evaluates existing timestamp matches', async ({ page }) => {
+  const socket = await setup(page);
+  await page.evaluate(async () => {
+    const { appendLineBatch } = await import('/lines.js');
+    appendLineBatch([{ paneId: 'A', ts: 'T+00:00:00.000', rawText: 'early row', isTx: false,
+      meta: { sequence: 1, relNum: 0 } }]);
+  });
+  const input = page.locator('.filter-input[data-pane="A"]');
+  await input.fill('^early row early row \\d{2}-\\d{2} ');
+  await input.press('Enter');
+  await expect(page.locator('#log-A .log-line')).toHaveCount(0);
+  socket.send(JSON.stringify({ type: 'session_info', session: { first_log_at: '2026-11-16T12:00:00Z' } }));
+  await expect(page.locator('#log-A .log-line')).toHaveText(/early row/);
+});
+
+test('reanalyzing one pane does not rescan another pane on live append', async ({ page }) => {
+  await setup(page, ['A', 'B']);
+  const checks = await page.evaluate(async () => {
+    const { state } = await import('/state.js');
+    const { appendLineBatch, reanalyzePanePlugins, rerenderPane } = await import('/lines.js');
+    const row = i => ({ paneId: 'B', ts: '', rawText: `row ${i}`, isTx: false });
+    appendLineBatch(Array.from({ length: 1000 }, (_, i) => row(i)));
+    let checks = 0;
+    const filter = /row 0\b/;
+    filter.test = text => { checks++; return RegExp.prototype.test.call(filter, text); };
+    state.filters.B = filter;
+    rerenderPane('B');
+    checks = 0;
+    reanalyzePanePlugins('A');
+    appendLineBatch([row(1000)]);
+    return checks;
+  });
+  expect(checks).toBeLessThan(100);
+  await expect(page.locator('#log-B .log-line')).toContainText('row 0');
 });

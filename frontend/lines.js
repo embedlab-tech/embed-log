@@ -553,18 +553,18 @@ function _getNumTs(entry, paneId = null, idx = -1) {
     return entry.numTs;
 }
 
-// Bumped when something a regex filter matches against changes for existing
-// rows (displayed timestamp, plugin filter text), so filtered projections are
-// rebuilt instead of only extended.
-let _projectionEpoch = 0;
+// Existing rows may change without replacing the backing array.
+export function invalidatePaneFilterProjection(paneId) {
+    const vp = _virtualPanes.get(paneId);
+    if (vp?.projectionFilter) vp.projectionRows = null;
+}
 
 function _getVisibleIndices(paneId, vp) {
     const lines = state.rawLines[paneId] || [];
     const rx = state.filters[paneId] || null;
     const levelVersion = levelFilterVersion(paneId);
     const sameProjection = vp.projectionRows === lines && vp.projectionFilter === rx
-        && vp.projectionLevel === levelVersion && vp.projectionEpoch === _projectionEpoch
-        && Array.isArray(vp.visibleIndices);
+        && vp.projectionLevel === levelVersion && Array.isArray(vp.visibleIndices);
     // Preserve raw rows/indices for export, selection and debugging, but don't
     // allocate visual rows for terminal text erased before the next record or
     // for levels hidden in this pane. Extend the projection on append instead
@@ -593,7 +593,6 @@ function _getVisibleIndices(paneId, vp) {
     vp.projectionRows = lines;
     vp.projectionFilter = rx;
     vp.projectionLevel = levelVersion;
-    vp.projectionEpoch = _projectionEpoch;
     vp.projectionSourceLen = lines.length;
     return indices;
 }
@@ -1095,7 +1094,7 @@ export function reanalyzePanePlugins(paneId) {
     lines.forEach(entry => {
         if (!_isRawTuple(entry)) analyzeLinePlugins(paneId, entry);
     });
-    _projectionEpoch++;
+    invalidatePaneFilterProjection(paneId);
     rerenderPane(paneId);
 }
 export function setTimestampMode(mode) {
@@ -1106,9 +1105,9 @@ export function setTimestampMode(mode) {
     state.showTs = nextMode !== "hidden";
     state.syncTs = null;
     state.syncTabSwitch = false;
-    _projectionEpoch++;
 
     PANES.forEach(paneId => {
+        invalidatePaneFilterProjection(paneId);
         const lines = state.rawLines[paneId] || [];
         lines.forEach(entry => {
             if (!_isRawTuple(entry)) applyTimestampModeToLine(entry);
