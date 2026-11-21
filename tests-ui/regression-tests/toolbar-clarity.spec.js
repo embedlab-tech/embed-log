@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { openHtmlFile, saveDownload } from './helpers.js';
 
 const record = (sequence, source_id, message) => ({
   type: 'rx', data: message, message, source_id, source_kind: 'uart',
@@ -21,13 +22,66 @@ async function serve(page, tabs) {
 test('toolbar total counts each line once when a merged pane repeats its sources', async ({ page }) => {
   await serve(page, [{ label: 'Sources', panes: ['A', 'B'] }, { label: 'Merged', panes: ['ALL'] }]);
   await expect(page.locator('.pane-stats[data-pane-stats="ALL"]')).toContainText('3 lines');
-  await expect(page.locator('#toolbar-stats')).toContainText('3 lines');
-  await expect(page.locator('#toolbar-stats')).not.toContainText('6 lines');
+  await expect(page.locator('#toolbar-stats')).toHaveText('· 3 lines · 22 B');
 });
 
 test('toolbar total counts merged lines whose sources have no pane of their own', async ({ page }) => {
   await serve(page, [{ label: 'Merged', panes: ['ALL'] }]);
-  await expect(page.locator('#toolbar-stats')).toContainText('3 lines');
+  await expect(page.locator('#toolbar-stats')).toHaveText('· 3 lines · 22 B');
+});
+
+test('overlapping merges count loaded copies and keep original bytes in a snapshot', async ({ page, browser }, testInfo) => {
+  let send;
+  await page.routeWebSocket('**/ws', ws => {
+    send = msg => ws.send(JSON.stringify(msg));
+    send({
+      type: 'config', session: { id: 'toolbar' },
+      tabs: [{ label: 'Sources', panes: ['A', 'B'] }, { label: 'AB merge', panes: ['AB'] }, { label: 'BC merge', panes: ['BC'] }],
+      pane_labels: { B: 'Βήτα', C: '雪' },
+      merges: [{ name: 'AB', of: ['A', 'B'] }, { name: 'BC', of: ['B', 'C'] }],
+    });
+    send(record(2, 'A', 'alpha'));
+    send(record(3, 'B', 'βeta'));
+    send(record(4, 'C', '雪cat'));
+    send(record(5, 'B', 'βeta'));
+  });
+  await page.route('**/sessions/toolbar/combined.jsonl', route => route.fulfill({
+    body: `${JSON.stringify(record(1, 'B', 'old'))}\n`,
+  }));
+  await page.goto('/');
+  const total = page.locator('#toolbar-stats');
+  await expect(total).toHaveText('· 4 lines · 21 B');
+
+  send({ type: 'clear_logs', pane: 'B' });
+  await expect(page.locator('.pane-stats[data-pane-stats="B"]')).toBeEmpty();
+  await expect(total).toHaveText('· 4 lines · 21 B');
+  await page.getByRole('button', { name: 'AB merge', exact: true }).click();
+  await page.locator('#pane-AB .filter-input').fill('old');
+  await page.locator('#pane-AB .search-mode').click();
+  await expect(total).toHaveText('· 5 lines · 24 B');
+
+  const download = page.waitForEvent('download');
+  await page.evaluate(() => window.__embedLogExportSnapshot());
+  const exported = await openHtmlFile(browser, await saveDownload(await download, testInfo));
+  try {
+    const split = exported.locator('#btn-unwrap');
+    await expect(split).toHaveAttribute('aria-pressed', 'false');
+    const exportedTotal = exported.locator('#toolbar-stats');
+    await expect(exportedTotal).toHaveText('· 5 lines · 24 B');
+    await exported.getByRole('button', { name: 'BC merge', exact: true }).click();
+    await expect(exportedTotal).toHaveText('· 5 lines · 24 B');
+    await split.click();
+    await expect(exportedTotal).toHaveText('· 5 lines · 24 B');
+    await split.click();
+    await expect(exportedTotal).toHaveText('· 5 lines · 24 B');
+  } finally {
+    await exported.close();
+  }
+
+  send({ type: 'clear_logs', pane: 'AB' });
+  await expect(total).toHaveText('· 4 lines · 21 B');
+  send({ type: 'clear_logs', pane: 'BC' });
+  await expect(total).toHaveText('· 1 lines · 5 B');
 });
 
 test('split-tabs and per-pane wrap buttons show their state', async ({ page }) => {
