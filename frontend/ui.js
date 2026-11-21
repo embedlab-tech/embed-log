@@ -490,16 +490,15 @@ export function _uiSetupPane(id) {
         controls.innerHTML = '<button type="button" class="search-prev" aria-label="Previous match" title="Previous match (Shift+Enter)">▲</button><span class="search-count" role="status" aria-live="polite"></span><button type="button" class="search-next" aria-label="Next match" title="Next match (Enter)">▼</button>';
         input.after(mode, controls);
         input.setAttribute('aria-label', 'Filter or highlight phrase');
-        controls.querySelector('.search-prev').addEventListener('click', () => navigatePaneSearch(id, -1));
-        controls.querySelector('.search-next').addEventListener('click', () => navigatePaneSearch(id, 1));
-        input.addEventListener('keydown', async event => {
-            // Enter applies what was typed right away instead of after the debounce.
-            const applying = !event.isComposing && event.key === 'Enter' ? flushPendingApply() : null;
-            if (!event.isComposing && state.searches[id] && (event.key === 'Enter' || event.key === 'F3')) {
+        controls.querySelector('.search-prev').addEventListener('click', () => navigate(-1));
+        controls.querySelector('.search-next').addEventListener('click', () => navigate(1));
+        input.addEventListener('keydown', event => {
+            if (event.isComposing) return;
+            if (state.searches[id] && (event.key === 'Enter' || event.key === 'F3')) {
                 event.preventDefault();
-                // A new phrase may still be loading history; navigate once it is counted.
-                if (applying) await applying;
-                navigatePaneSearch(id, event.shiftKey ? -1 : 1);
+                navigate(event.shiftKey ? -1 : 1);
+            } else if (event.key === 'Enter') {
+                flushPendingApply();
             }
         });
         const apply = async () => {
@@ -541,18 +540,31 @@ export function _uiSetupPane(id) {
         // Filtering or highlighting scans every line of the pane, so apply it
         // once typing pauses rather than on every keystroke.
         let pendingApply = null;
+        let applying = null;
+        const sessionId = () => window.__embedLogSession?.id;
+        let pendingSession;
         function flushPendingApply() {
-            if (pendingApply === null) return null;
-            clearTimeout(pendingApply);
-            pendingApply = null;
-            return apply();
+            if (pendingApply !== null) {
+                clearTimeout(pendingApply);
+                pendingApply = null;
+                if (input.isConnected && pendingSession === sessionId()) applying = apply();
+            }
+        }
+        async function navigate(direction) {
+            if (!input.isConnected) return;
+            flushPendingApply();
+            const search = state.searches[id];
+            const value = input.value;
+            const session = sessionId();
+            if (search?.loading) await applying;
+            if (input.isConnected && session === sessionId() && input.value === value && state.searches[id] === search) {
+                navigatePaneSearch(id, direction);
+            }
         }
         input.addEventListener('input', () => {
             clearTimeout(pendingApply);
-            pendingApply = setTimeout(() => {
-                pendingApply = null;
-                apply();
-            }, FILTER_INPUT_DEBOUNCE_MS);
+            pendingSession = sessionId();
+            pendingApply = setTimeout(flushPendingApply, FILTER_INPUT_DEBOUNCE_MS);
         });
         mode.addEventListener('click', () => {
             clearTimeout(pendingApply);
@@ -560,7 +572,7 @@ export function _uiSetupPane(id) {
             const enabled = mode.getAttribute('aria-pressed') !== 'true';
             mode.setAttribute('aria-pressed', String(enabled));
             controls.hidden = !enabled;
-            apply();
+            applying = apply();
         });
         _setupLevelControl(id, controls);
         updatePaneSearch(id);
