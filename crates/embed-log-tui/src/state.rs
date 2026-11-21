@@ -22,7 +22,10 @@ use crate::protocol::{ConfigMessage, LogPayload, Marker, SessionInfo};
 /// Per-pane cap on retained log lines. The browser virtualizes over the full array,
 /// but a terminal viewer rarely needs more than this in memory; older lines are
 /// dropped (the on-disk session log retains everything).
-const MAX_LINES_PER_PANE: usize = 100_000;
+pub(crate) const MAX_LINES_PER_PANE: usize = 100_000;
+/// A full pane may grow this far past the cap before old lines are dropped,
+/// so the front of the `Vec` is shifted once per batch, not once per line.
+pub(crate) const TRIM_SLACK: usize = MAX_LINES_PER_PANE / 10;
 
 /// A stored log line (the post-parse, pre-render form).
 ///
@@ -151,7 +154,7 @@ pub struct State {
     pub raw_lines: HashMap<String, Vec<StoredLine>>,
     /// `pane_id → current filter regex` (None = no filter).
     pub filters: HashMap<String, Option<Regex>>,
-    /// `pane_id → scroll offset (raw index of the top visible line)`.
+    /// `pane_id → scroll offset among the filter matches` (ignored when following).
     pub scroll: HashMap<String, usize>,
     /// Markers keyed by pane → list.
     pub markers: HashMap<String, Vec<Marker>>,
@@ -161,8 +164,10 @@ pub struct State {
     pub first_log_at: Option<String>,
     /// Sync timestamp (epoch millis) set by clicking/Enter on a line.
     pub sync_ts: Option<f64>,
-    /// The exact raw line index most recently focused/clicked in the active pane.
-    pub focused_raw_idx: Option<u64>,
+    /// Pane and raw buffer offset of the most recently focused line.
+    pub focused_line: Option<(String, usize)>,
+    /// Last marker jump, so repeated jumps advance even when the row is centered.
+    pub(crate) marker_jump: Option<(String, usize)>,
     /// Whether switching tabs should scroll to `sync_ts`.
     pub sync_tab_switch: bool,
     /// Connection state for the status bar.
@@ -174,11 +179,11 @@ pub struct State {
     /// Unwrap mode (each pane is its own tab).
     pub unwrap: bool,
     /// Selection: `pane_id → set of selected raw line indices`.
-    pub selected: HashMap<String, std::collections::BTreeSet<u64>>,
+    pub selected: HashMap<String, std::collections::BTreeSet<usize>>,
     /// Selection scope: Exact (active pane) or Context (synced lines across tab panes).
     pub selection_scope: SelectionScope,
-    /// Visual range select mode anchor (raw index of the start line).
-    pub visual_anchor: Option<u64>,
+    /// Visual range start (pane and raw buffer offset).
+    pub visual_anchor: Option<(String, usize)>,
     /// Splitter ratio for 2-pane tabs (0.0–1.0, fraction for the left pane).
     pub splitter: f32,
     /// Jump-to-bottom toggle per pane (true = follow new lines).
@@ -249,12 +254,45 @@ impl State {
     }
 
     /// Append a log line to its pane, enforcing the per-pane cap.
+    ///
+    /// Old lines are dropped in batches of `TRIM_SLACK` (amortised O(1) per
+    /// line); dropping one line per append moved the whole buffer every time.
+    /// Rebase view and row offsets so they keep pointing at the same lines.
     pub fn append_line(&mut self, pane_id: &str, line: StoredLine) {
         let v = self.raw_lines.entry(pane_id.to_string()).or_default();
         v.push(line);
-        if v.len() > MAX_LINES_PER_PANE {
-            let drop = v.len() - MAX_LINES_PER_PANE;
-            v.drain(..drop);
+        if v.len() <= MAX_LINES_PER_PANE + TRIM_SLACK {
+            return;
+        }
+        let drop = v.len() - MAX_LINES_PER_PANE;
+        if let Some(scroll) = self.scroll.get_mut(pane_id) {
+            let matched = match self.filters.get(pane_id).and_then(Option::as_ref) {
+                Some(rx) => v[..drop].iter().filter(|l| rx.is_match(&l.message)).count(),
+                None => drop,
+            };
+            *scroll = scroll.saturating_sub(matched);
+        }
+        v.drain(..drop);
+        if let Some(selected) = self.selected.get_mut(pane_id) {
+            *selected = selected
+                .iter()
+                .filter_map(|idx| idx.checked_sub(drop))
+                .collect();
+        }
+        for position in [
+            &mut self.visual_anchor,
+            &mut self.focused_line,
+            &mut self.marker_jump,
+        ] {
+            if let Some((pane, idx)) = position {
+                if pane == pane_id {
+                    if let Some(shifted) = idx.checked_sub(drop) {
+                        *idx = shifted;
+                    } else {
+                        *position = None;
+                    }
+                }
+            }
         }
     }
 
@@ -286,11 +324,27 @@ impl State {
                 if let Some(v) = self.raw_lines.get_mut(id) {
                     v.clear();
                 }
+                self.scroll.remove(id);
+                self.selected.remove(id);
             }
             None => {
                 for v in self.raw_lines.values_mut() {
                     v.clear();
                 }
+                self.scroll.clear();
+                self.selected.clear();
+            }
+        }
+        for position in [
+            &mut self.visual_anchor,
+            &mut self.focused_line,
+            &mut self.marker_jump,
+        ] {
+            if position
+                .as_ref()
+                .is_some_and(|(id, _)| pane.is_none() || pane == Some(id.as_str()))
+            {
+                *position = None;
             }
         }
     }
@@ -336,9 +390,10 @@ impl State {
             .collect();
 
         // Reset per-pane stores for the new layout.
+        self.clear(None);
         self.raw_lines.clear();
         self.filters.clear();
-        self.scroll.clear();
+        self.at_bottom.clear();
         for p in &self.panes {
             self.raw_lines.entry(p.clone()).or_default();
             self.filters.insert(p.clone(), None);
@@ -402,17 +457,15 @@ impl State {
         self.pane_kinds.clear();
         self.pane_commands.clear();
         self.pane_plugins.clear();
+        self.clear(None);
         self.raw_lines.clear();
         self.filters.clear();
-        self.scroll.clear();
-        self.selected.clear();
         self.at_bottom.clear();
         self.markers.clear();
         self.active_tab = 0;
         self.active_pane = 0;
         self.sync_ts = None;
         self.sync_tab_switch = false;
-        self.visual_anchor = None;
         self.splitter = 0.5;
     }
 
@@ -423,40 +476,92 @@ impl State {
         self.scroll.get(pane_id).copied().unwrap_or(0)
     }
 
-    /// Set the scroll offset for a pane, clamping to valid range.
-    /// `visible` is the number of rows that fit in the pane.
-    pub fn set_scroll(&mut self, pane_id: &str, scroll: usize, visible: usize) {
-        let len = self.raw_lines.get(pane_id).map(|v| v.len()).unwrap_or(0);
-        let max = len.saturating_sub(visible);
-        let clamped = scroll.min(max);
-        self.scroll.insert(pane_id.to_string(), clamped);
-        // Scrolling away from the bottom disables follow mode.
-        if clamped < max {
-            self.at_bottom.insert(pane_id.to_string(), false);
+    pub fn filter_for(&self, pane_id: &str) -> Option<&Regex> {
+        self.filters.get(pane_id).and_then(Option::as_ref)
+    }
+
+    fn effective_scroll(&self, pane_id: &str, max: usize) -> usize {
+        if self.at_bottom.get(pane_id) == Some(&true) {
+            max
         } else {
-            self.at_bottom.insert(pane_id.to_string(), true);
+            self.scroll_of(pane_id).min(max)
         }
     }
 
-    /// Scroll the active pane by `delta` rows (positive = down).
+    /// Effective scroll, match count, and raw offsets of the on-screen rows.
+    pub fn viewport(&self, pane_id: &str, visible: usize) -> (usize, usize, Vec<usize>) {
+        let Some(lines) = self.raw_lines.get(pane_id) else {
+            return (0, 0, Vec::new());
+        };
+        let matches = self
+            .filter_for(pane_id)
+            .map(|rx| crate::lines::filtered_indices(lines, Some(rx)));
+        let len = matches.as_ref().map_or(lines.len(), Vec::len);
+        let start = self.effective_scroll(pane_id, len.saturating_sub(visible));
+        let range = start..(start + visible).min(len);
+        let rows = match matches {
+            Some(matches) => matches[range].to_vec(),
+            None => range.collect(),
+        };
+        (start, len, rows)
+    }
+
+    pub fn active_top(&self, visible: usize) -> Option<(String, usize)> {
+        let pane = self.active_pane_id()?;
+        let raw_idx = *self.viewport(&pane, visible).2.first()?;
+        Some((pane, raw_idx))
+    }
+
+    /// Scroll the active pane by `delta` matching rows (positive = down).
     pub fn scroll_active(&mut self, delta: i32, visible: usize) {
         if let Some(pane) = self.active_pane_id() {
-            let cur = self.scroll_of(&pane) as i32;
-            let next = (cur + delta).max(0) as usize;
-            self.set_scroll(&pane, next, visible);
+            let (cur, len, _) = self.viewport(&pane, visible);
+            let max = len.saturating_sub(visible);
+            let next = cur.saturating_add_signed(delta as isize).min(max);
+            self.scroll.insert(pane.clone(), next);
+            self.at_bottom.insert(pane, next == max);
+            self.marker_jump = None;
         }
     }
 
     /// Scroll a pane to its bottom (follow new lines).
-    pub fn scroll_to_bottom(&mut self, pane_id: &str, visible: usize) {
-        let len = self.raw_lines.get(pane_id).map(|v| v.len()).unwrap_or(0);
-        self.set_scroll(pane_id, len, visible);
+    pub fn scroll_to_bottom(&mut self, pane_id: &str) {
         self.at_bottom.insert(pane_id.to_string(), true);
+        self.marker_jump = None;
     }
 
     /// Scroll a pane to its top.
     pub fn scroll_to_top(&mut self, pane_id: &str) {
         self.scroll.insert(pane_id.to_string(), 0);
+        self.at_bottom.insert(pane_id.to_string(), false);
+        self.marker_jump = None;
+    }
+
+    pub fn set_filter(&mut self, pane_id: String, filter: Option<Regex>, visible: usize) {
+        self.filters.insert(pane_id.clone(), filter);
+        let (scroll, _, _) = self.viewport(&pane_id, visible);
+        self.scroll.insert(pane_id, scroll);
+        self.marker_jump = None;
+    }
+
+    pub fn focus_line(&mut self, pane: String, raw_idx: usize, visible: usize) {
+        if let Some(line) = self
+            .raw_lines
+            .get(&pane)
+            .and_then(|lines| lines.get(raw_idx))
+        {
+            let ts = line.abs_num;
+            self.focused_line = Some((pane, raw_idx));
+            self.marker_jump = None;
+            self.sync_panes_to_ts(ts, visible);
+        }
+    }
+
+    fn center_row(&mut self, pane_id: &str, row: usize, len: usize, visible: usize) {
+        let start = row
+            .saturating_sub(visible / 2)
+            .min(len.saturating_sub(visible));
+        self.scroll.insert(pane_id.to_string(), start);
         self.at_bottom.insert(pane_id.to_string(), false);
     }
 
@@ -480,10 +585,21 @@ impl State {
             if lines.is_empty() {
                 continue;
             }
-            let idx = nearest_line_by_ts(lines, num_ts);
-            // Center the line in the viewport.
-            let target = idx.saturating_sub(visible / 2);
-            self.set_scroll(pane_id, target, visible);
+            let raw_idx = self
+                .focused_line
+                .as_ref()
+                .filter(|(id, idx)| {
+                    id == pane_id && lines.get(*idx).is_some_and(|line| line.abs_num == num_ts)
+                })
+                .map_or_else(|| nearest_line_by_ts(lines, num_ts), |(_, idx)| *idx);
+            let (row, len) = match self.filter_for(pane_id) {
+                Some(rx) => {
+                    let matches = crate::lines::filtered_indices(lines, Some(rx));
+                    (matches.partition_point(|&idx| idx < raw_idx), matches.len())
+                }
+                None => (raw_idx, lines.len()),
+            };
+            self.center_row(pane_id, row, len, visible);
         }
         self.sync_ts = Some(num_ts);
         self.sync_tab_switch = true;
@@ -492,7 +608,7 @@ impl State {
     // ── Selection ──────────────────────────────────────────────────────
 
     /// Toggle selection of a line in the active pane.
-    pub fn toggle_select_active(&mut self, line_idx: u64) {
+    pub fn toggle_select_active(&mut self, line_idx: usize) {
         if let Some(pane) = self.active_pane_id() {
             let set = self.selected.entry(pane.clone()).or_default();
             if set.contains(&line_idx) {
@@ -510,19 +626,25 @@ impl State {
     pub fn clear_selection(&mut self) {
         if let Some(pane) = self.active_pane_id() {
             self.selected.remove(&pane);
+            if self
+                .visual_anchor
+                .as_ref()
+                .is_some_and(|(id, _)| id == &pane)
+            {
+                self.visual_anchor = None;
+            }
         }
-        self.visual_anchor = None;
     }
 
     /// Whether a line is selected in a pane.
-    pub fn is_selected(&self, pane_id: &str, line_idx: u64) -> bool {
+    pub fn is_selected(&self, pane_id: &str, line_idx: usize) -> bool {
         self.selected
             .get(pane_id)
             .is_some_and(|s| s.contains(&line_idx))
     }
 
     /// Selected line indices in a pane, sorted.
-    pub fn selected_for(&self, pane_id: &str) -> Vec<u64> {
+    pub fn selected_for(&self, pane_id: &str) -> Vec<usize> {
         self.selected
             .get(pane_id)
             .map(|s| s.iter().copied().collect())
@@ -532,7 +654,7 @@ impl State {
     /// Collect context-scope entries: lines from all panes in the active tab
     /// whose `abs_num` falls within the selection's [min, max] time range.
     /// Mirrors `frontend/selection.js::_collectRangeEntries`.
-    pub fn collect_context_entries(&self) -> Vec<(String, u64, f64)> {
+    pub fn collect_context_entries(&self) -> Vec<(String, usize, f64)> {
         let panes = self.active_tab_panes();
         // Compute the time range from the active pane's selection.
         let Some(active) = self.active_pane_id() else {
@@ -550,18 +672,18 @@ impl State {
         };
         let (min_ts, max_ts) = sel
             .iter()
-            .filter_map(|&idx| lines.get(idx as usize).map(|l| l.abs_num))
+            .filter_map(|&idx| lines.get(idx).map(|l| l.abs_num))
             .fold((f64::MAX, f64::MIN), |(mn, mx), n| (mn.min(n), mx.max(n)));
         if min_ts > max_ts {
             return Vec::new();
         }
 
-        let mut entries: Vec<(String, u64, f64)> = Vec::new();
+        let mut entries = Vec::new();
         for pane_id in &panes {
             if let Some(pl) = self.raw_lines.get(pane_id) {
                 for (i, line) in pl.iter().enumerate() {
                     if line.abs_num >= min_ts && line.abs_num <= max_ts {
-                        entries.push((pane_id.clone(), i as u64, line.abs_num));
+                        entries.push((pane_id.clone(), i, line.abs_num));
                     }
                 }
             }
@@ -578,22 +700,17 @@ impl State {
 
     // ── Markers ────────────────────────────────────────────────────────
 
-    /// Toggle a user marker on a line in the active pane. Returns the full
-    /// marker set for that pane (for the `save_markers` WS command).
-    pub fn toggle_marker_active(
-        &mut self,
-        line_idx: u64,
-        num_ts: f64,
-        description: &str,
-    ) -> Vec<Marker> {
-        let Some(pane) = self.active_pane_id() else {
-            return Vec::new();
-        };
+    /// Toggle a persisted marker on the given row in the active pane.
+    pub fn toggle_marker_active(&mut self, pane: String, raw_idx: usize) {
+        let line = &self.raw_lines[&pane][raw_idx];
+        let line_idx = line.line_idx;
+        let num_ts = line.abs_num;
+        let merged = !line.source_id.is_empty() && line.source_id != pane;
         let markers = self.markers.entry(pane.clone()).or_default();
         // Toggle: remove if one exists at this line, else add.
         let exists = markers
             .iter()
-            .position(|m| m.pane_id == pane && m.line_idx == line_idx);
+            .position(|m| m.line_idx == line_idx && (!merged || m.num_ts == num_ts));
         if let Some(pos) = exists {
             markers.remove(pos);
         } else {
@@ -602,12 +719,10 @@ impl State {
                 line_idx,
                 end_idx: line_idx,
                 num_ts,
-                description: description.to_string(),
+                description: String::new(),
                 created_at: chrono::Local::now().to_rfc3339(),
             });
         }
-        // Return the full set for this pane (save_markers sends per-pane or all).
-        self.markers_for(&pane)
     }
 
     /// All markers across all panes (for the `save_markers` WS command).
@@ -617,29 +732,46 @@ impl State {
         all
     }
 
-    /// Navigate to the previous or next marker in the active pane.
-    pub fn nav_marker(&self, forward: bool) -> Option<u64> {
-        let pane = self.active_pane_id()?;
-        let scroll = self.scroll_of(&pane);
-        let markers = self.markers_for(&pane);
-        let current_ts = self
-            .raw_lines
-            .get(&pane)
-            .and_then(|l| l.get(scroll))
-            .map(|l| l.abs_num);
-        let target = if forward {
-            markers
-                .iter()
-                .find(|m| m.num_ts > current_ts.unwrap_or(f64::MIN))
-                .map(|m| m.line_idx)
-        } else {
-            markers
-                .iter()
-                .rev()
-                .find(|m| m.num_ts < current_ts.unwrap_or(f64::MAX))
-                .map(|m| m.line_idx)
+    /// Jump to the previous/next marker whose start row is retained and visible to the filter.
+    pub fn jump_marker(&mut self, pane: String, forward: bool, visible: usize) {
+        let Some(markers) = self.markers.get(&pane).filter(|m| !m.is_empty()) else {
+            return;
         };
-        target
+        let (_, len, rows) = self.viewport(&pane, visible);
+        let Some(&top) = rows.first() else { return };
+        let current = match &self.marker_jump {
+            Some((id, idx)) if id == &pane => *idx,
+            _ => top,
+        };
+        let lines = &self.raw_lines[&pane];
+        let filter = self.filter_for(&pane);
+        let merged = lines
+            .iter()
+            .any(|l| !l.source_id.is_empty() && l.source_id != pane);
+        // shortcut: legacy merge markers can collide on index and timestamp; use source IDs if the format gains them.
+        let key = |idx, ts: f64| (idx, merged.then(|| ts.to_bits()));
+        let targets: HashSet<_> = markers.iter().map(|m| key(m.line_idx, m.num_ts)).collect();
+        let mut matches = lines
+            .iter()
+            .enumerate()
+            .filter(|(_, line)| filter.map_or(true, |rx| rx.is_match(&line.message)))
+            .enumerate()
+            .filter(|(_, (raw, line))| {
+                (if forward {
+                    *raw > current
+                } else {
+                    *raw < current
+                }) && targets.contains(&key(line.line_idx, line.abs_num))
+            });
+        let target = if forward {
+            matches.next()
+        } else {
+            matches.last()
+        };
+        if let Some((row, (raw, _))) = target {
+            self.center_row(&pane, row, len, visible);
+            self.marker_jump = Some((pane, raw));
+        }
     }
 
     // ── TX input ───────────────────────────────────────────────────────
@@ -831,7 +963,8 @@ mod tests {
     fn append_line_caps_per_pane() {
         let mut s = State::default();
         s.apply_config(&cfg_with(vec![("T", vec!["DUT"])]));
-        for i in 0..(MAX_LINES_PER_PANE + 50) {
+        let total = MAX_LINES_PER_PANE + TRIM_SLACK + 1;
+        for i in 0..total {
             s.append_line(
                 "DUT",
                 StoredLine {
@@ -840,12 +973,65 @@ mod tests {
                     ..Default::default()
                 },
             );
+            assert!(s.raw_lines["DUT"].len() <= MAX_LINES_PER_PANE + TRIM_SLACK);
         }
         let v = s.raw_lines.get("DUT").unwrap();
         assert_eq!(v.len(), MAX_LINES_PER_PANE);
         // Oldest dropped; newest retained.
-        assert_eq!(v.first().unwrap().line_idx, 50);
-        assert_eq!(v.last().unwrap().line_idx, (MAX_LINES_PER_PANE + 49) as u64);
+        assert_eq!(v.first().unwrap().line_idx, (TRIM_SLACK + 1) as u64);
+        assert_eq!(v.last().unwrap().line_idx, (total - 1) as u64);
+    }
+
+    #[test]
+    fn trimming_a_filtered_pane_keeps_the_same_top_match() {
+        let mut s = State::default();
+        s.apply_config(&cfg_with(vec![("T", vec!["DUT"])]));
+        s.set_filter("DUT".into(), Some(Regex::new("keep").unwrap()), 3);
+        let line = |i: usize| StoredLine {
+            line_idx: i as u64,
+            message: if i % 2 == 0 {
+                "keep".into()
+            } else {
+                String::new()
+            },
+            ..Default::default()
+        };
+        for i in 0..MAX_LINES_PER_PANE + TRIM_SLACK {
+            s.append_line("DUT", line(i));
+        }
+        s.scroll_active(25_000, 3);
+        let top_id = |s: &State| s.raw_lines["DUT"][s.viewport("DUT", 3).2[0]].line_idx;
+        assert_eq!(top_id(&s), 50_000);
+        s.append_line("DUT", line(MAX_LINES_PER_PANE + TRIM_SLACK));
+        assert_eq!(top_id(&s), 50_000);
+    }
+
+    #[test]
+    fn appending_to_a_full_pane_is_cheap() {
+        let mut s = State::default();
+        s.apply_config(&cfg_with(vec![("T", vec!["DUT"])]));
+        for i in 0..MAX_LINES_PER_PANE {
+            s.append_line(
+                "DUT",
+                StoredLine {
+                    line_idx: i as u64,
+                    ..Default::default()
+                },
+            );
+        }
+        let started = std::time::Instant::now();
+        for i in MAX_LINES_PER_PANE..2 * MAX_LINES_PER_PANE {
+            s.append_line(
+                "DUT",
+                StoredLine {
+                    line_idx: i as u64,
+                    ..Default::default()
+                },
+            );
+        }
+        let elapsed = started.elapsed();
+        eprintln!("100,000 appends to a full pane: {elapsed:?}");
+        assert!(elapsed < std::time::Duration::from_secs(1), "{elapsed:?}");
     }
 
     #[test]

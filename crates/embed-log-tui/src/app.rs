@@ -168,28 +168,22 @@ fn handle_mouse(state: &mut State, mouse: &crossterm::event::MouseEvent, width: 
     let Some(hit) = draw::hit_test_pane(state, area, mouse.column, mouse.row) else {
         return;
     };
-    let visible = height.saturating_sub(6).max(1) as usize;
-
     match mouse.kind {
-        MouseEventKind::ScrollDown => {
+        MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
             state.active_pane = hit.pane_index;
-            state.scroll_active(3, visible);
-        }
-        MouseEventKind::ScrollUp => {
-            state.active_pane = hit.pane_index;
-            state.scroll_active(-3, visible);
+            let visible = draw::active_visible_rows(state, height);
+            let delta = if mouse.kind == MouseEventKind::ScrollDown {
+                3
+            } else {
+                -3
+            };
+            state.scroll_active(delta, visible);
         }
         MouseEventKind::Down(MouseButton::Left) => {
             state.active_pane = hit.pane_index;
             if let Some(raw_idx) = hit.raw_idx {
-                if let Some(line) = state
-                    .raw_lines
-                    .get(&hit.pane_id)
-                    .and_then(|l| l.get(raw_idx))
-                {
-                    state.focused_raw_idx = Some(line.line_idx);
-                    state.sync_panes_to_ts(line.abs_num, visible);
-                }
+                let visible = draw::active_visible_rows(state, height);
+                state.focus_line(hit.pane_id, raw_idx, visible);
             }
         }
         _ => {}
@@ -207,4 +201,48 @@ fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Re
     .context("leave alternate screen")?;
     terminal.show_cursor().context("show cursor")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::{ConfigMessage, TabDef};
+    use crate::state::StoredLine;
+    use crossterm::event::MouseEvent;
+
+    #[test]
+    fn click_focuses_the_displayed_filtered_row_in_its_pane() {
+        let mut state = State::default();
+        state.apply_config(&ConfigMessage {
+            tabs: vec![TabDef {
+                panes: vec!["left".into(), "right".into()],
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        for i in 0..10 {
+            state.append_line(
+                "right",
+                StoredLine {
+                    line_idx: 50 + i,
+                    message: if i == 9 { "match" } else { "hidden" }.into(),
+                    ..Default::default()
+                },
+            );
+        }
+        state.set_filter("right".into(), Some(regex::Regex::new("match").unwrap()), 4);
+        handle_mouse(
+            &mut state,
+            &MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 60,
+                row: 4,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+            80,
+            10,
+        );
+        assert_eq!(state.active_pane, 1);
+        assert_eq!(state.focused_line, Some(("right".into(), 9)));
+    }
 }
