@@ -1,5 +1,5 @@
 import { state, TABS, PANES, paneLabel, unwrapPaneLabel } from './state.js';
-import { onLineClick, hidePluginOverlays, ensureLineVisible, getLine } from './lines.js';
+import { onLineClick, hidePluginOverlays, ensureLineVisible, getLine, originalRecordBytes } from './lines.js';
 import { exportHtmlSnapshot } from './export.js';
 import { switchTab } from './tabs.js';
 import { _escHtml } from './renderPane.js';
@@ -614,6 +614,11 @@ function _buildRangeLogData(entries) {
             ts: e.line.ts,
             text: `[${e.paneId}] ${_selectionMessageText(e)}`,
             isTx: e.line.isTx,
+            sourceId: e.line.sourceId,
+            sessionId: e.line.sessionId,
+            sequence: e.line.sequence,
+            recordOrdinal: e.line.recordOrdinal,
+            originalBytes: originalRecordBytes(e.paneId, e.line.rawText || '', e.line),
             absTs: e.line.absTs ?? null,
             absNum: Number.isFinite(e.line.absNum) ? e.line.absNum : null,
             relTs: e.line.relTs ?? null,

@@ -1,5 +1,5 @@
 import {
-    state, TABS, PANES, buildTimestampInfo, applyTimestampModeToLine,
+    state, TABS, PANES, PANE_LABELS, buildTimestampInfo, applyTimestampModeToLine,
     lineHasTimestampMode, noteRelativeTimestampCandidate,
 } from './state.js';
 import { parseAnsi, isErasedConsoleLine } from './ansi.js';
@@ -65,6 +65,8 @@ export function buildStoredLine(paneId, ts, rawText, isTx, meta = null) {
         sequence: Number.isFinite(lineMeta.sequence) ? lineMeta.sequence : null,
         sessionId: lineMeta.sessionId || null,
         sourceId: lineMeta.sourceId || null,
+        originalBytes: lineMeta.originalBytes,
+        recordOrdinal: lineMeta.recordOrdinal,
         level: typeof lineMeta.level === "string" && lineMeta.level ? lineMeta.level : null,
         html,
         rawText,
@@ -553,6 +555,12 @@ function _getNumTs(entry, paneId = null, idx = -1) {
     return entry.numTs;
 }
 
+// Existing rows may change without replacing the backing array.
+export function invalidatePaneFilterProjection(paneId) {
+    const vp = _virtualPanes.get(paneId);
+    if (vp?.projectionFilter) vp.projectionRows = null;
+}
+
 function _getVisibleIndices(paneId, vp) {
     const lines = state.rawLines[paneId] || [];
     const rx = state.filters[paneId] || null;
@@ -562,11 +570,12 @@ function _getVisibleIndices(paneId, vp) {
     // Preserve raw rows/indices for export, selection and debugging, but don't
     // allocate visual rows for terminal text erased before the next record or
     // for levels hidden in this pane. Extend the projection on append instead
-    // of rescanning the entire session (the level filter is on by default).
-    if (rx && sameProjection && vp.projectionSourceLen === lines.length) {
+    // of rescanning the entire session, with or without a regex filter: a row's
+    // visibility depends only on the row itself.
+    if (sameProjection && vp.projectionSourceLen === lines.length) {
         return vp.visibleIndices;
     }
-    const extend = !rx && sameProjection && vp.projectionSourceLen <= lines.length;
+    const extend = sameProjection && vp.projectionSourceLen <= lines.length;
     const indices = extend ? vp.visibleIndices : [];
     const levelVisible = levelPredicate(paneId);
     for (let rawIndex = extend ? vp.projectionSourceLen : 0; rawIndex < lines.length; rawIndex++) {
@@ -870,12 +879,27 @@ function _renderVirtualWindow(paneId, { targetIdx, forceAtBottom } = {}) {
 // Stats (line count + UTF-8 byte count per pane; toolbar total)
 // ---------------------------------------------------------------------------
 
-const _textEncoder = new TextEncoder();
-
-function _byteSize(text) {
+/**
+ * UTF-8 length of a string without encoding it. Pane statistics count every
+ * received line, and TextEncoder allocated a buffer per line.
+ */
+export function utf8ByteLength(text) {
     if (!text) return 0;
-    return _textEncoder.encode(text).length;
+    let bytes = text.length;
+    for (let i = 0; i < text.length; i++) {
+        const code = text.charCodeAt(i);
+        if (code < 0x80) continue;
+        if (code < 0x800) bytes += 1;
+        else if (code >= 0xd800 && code <= 0xdbff && i + 1 < text.length
+            && (text.charCodeAt(i + 1) & 0xfc00) === 0xdc00) {
+            bytes += 2; // surrogate pair: 2 UTF-16 units, 4 UTF-8 bytes
+            i++;
+        } else bytes += 2; // other BMP characters (lone surrogates encode as U+FFFD)
+    }
+    return bytes;
 }
+
+const _byteSize = utf8ByteLength;
 
 function _formatInt(n) {
     return n.toLocaleString("en-US");
@@ -900,35 +924,100 @@ function _updatePaneStats(paneId) {
         : "";
 }
 
+// One numeric identity per record, with a reference for each loaded copy.
+const _recordsBySession = new Map();
+const _ordinalScope = Symbol('export-local record ordinals');
+const _unidentified = new Map(); // paneId -> totals for rows without identity
+let _totalLines = 0;
+let _totalBytes = 0;
+
 function _updateToolbarStats() {
     const el = document.getElementById("toolbar-stats");
-    if (!el) return;
-    let totalLines = 0;
-    let totalBytes = 0;
-    for (const paneId of PANES) {
-        const lines = state.rawLines[paneId];
-        if (!lines) continue;
-        totalLines += lines.length;
-        totalBytes += _paneBytes.get(paneId) || 0;
+    if (el) el.textContent = _totalLines ? `· ${_formatStatsText(_totalLines, _totalBytes)}` : "";
+}
+
+export function originalRecordBytes(paneId, text, meta, bytes, isMerge) {
+    if (Number.isFinite(meta?.originalBytes)) return meta.originalBytes;
+    bytes ??= _byteSize(text);
+    isMerge ??= window.__embedLogMerges?.some(merge => merge?.name === paneId);
+    // Older exports may have a display prefix but no original byte length.
+    if (isMerge && meta?.sourceId) {
+        const prefix = `${PANE_LABELS[meta.sourceId] || meta.sourceId}: `;
+        if (text.startsWith(prefix)) return bytes - _byteSize(prefix);
     }
-    el.textContent = totalLines
-        ? `· ${_formatStatsText(totalLines, totalBytes)}`
-        : "";
+    return bytes;
+}
+
+function _adjustRecord(meta, delta, bytes) {
+    const hasSequence = Number.isFinite(meta?.sequence);
+    const key = hasSequence ? meta.sequence : meta?.recordOrdinal;
+    if (!Number.isFinite(key)) return false;
+    const scope = hasSequence ? (meta.sessionId || '') : _ordinalScope;
+    let records = _recordsBySession.get(scope);
+    const record = records?.get(key);
+    if (!record) {
+        if (delta < 0) return true;
+        if (!records) _recordsBySession.set(scope, records = new Map());
+        records.set(key, { refs: 1, bytes });
+        _totalLines++;
+        _totalBytes += bytes;
+    } else if ((record.refs += delta) === 0) {
+        records.delete(key);
+        if (!records.size) _recordsBySession.delete(scope);
+        _totalLines--;
+        _totalBytes -= record.bytes;
+    }
+    return true;
 }
 
 function _recordPaneBytes(paneId, newLines) {
-    if (!newLines || newLines.length === 0) return;
+    const isMerge = window.__embedLogMerges?.some(merge => merge?.name === paneId) ?? false;
+    const unidentified = _unidentified.get(paneId) || { lines: 0, bytes: 0 };
     let delta = 0;
     for (const line of newLines) {
-        // state.rawLines entries are [ts, rawText, isTx, meta]
-        delta += _byteSize(line && line[1]);
+        const text = (Array.isArray(line) ? line[1] : line?.rawText) || '';
+        const meta = Array.isArray(line) ? line[3] : line;
+        const bytes = _byteSize(text);
+        delta += bytes;
+        const originalBytes = originalRecordBytes(paneId, text, meta, bytes, isMerge);
+        if (!_adjustRecord(meta, 1, originalBytes)) {
+            // shortcut: no identity means each copy counts, rather than guessing from text.
+            unidentified.lines++;
+            unidentified.bytes += originalBytes;
+            _totalLines++;
+            _totalBytes += originalBytes;
+        }
     }
     _paneBytes.set(paneId, (_paneBytes.get(paneId) || 0) + delta);
+    if (unidentified.lines) _unidentified.set(paneId, unidentified);
 }
 
-function _resetPaneStats(paneId) {
-    _paneBytes.set(paneId, 0);
-    _updatePaneStats(paneId);
+function _removePaneStats(paneId) {
+    if (!_paneBytes.has(paneId)) return;
+    for (const line of state.rawLines[paneId] || []) {
+        _adjustRecord(Array.isArray(line) ? line[3] : line, -1);
+    }
+    const unidentified = _unidentified.get(paneId);
+    if (unidentified) {
+        _totalLines -= unidentified.lines;
+        _totalBytes -= unidentified.bytes;
+        _unidentified.delete(paneId);
+    }
+    _paneBytes.delete(paneId);
+}
+
+export function resetAllLineStats() {
+    _recordsBySession.clear();
+    _unidentified.clear();
+    _paneBytes.clear();
+    _totalLines = _totalBytes = 0;
+    _updateToolbarStats();
+}
+
+export function hydratePaneRows(paneId, rows) {
+    _removePaneStats(paneId);
+    state.rawLines[paneId] = rows;
+    _recordPaneBytes(paneId, rows);
 }
 
 export function refreshStatsUi() {
@@ -958,9 +1047,10 @@ export function appendLineBatch(entries) {
             && meta.sequence <= previousMeta.sequence
             && (!meta.sessionId || !previousMeta.sessionId || meta.sessionId === previousMeta.sessionId)) return;
         noteRelativeTimestampCandidate(meta);
-        state.rawLines[paneId].push([ts, rawText, isTx, meta]);
+        const row = [ts, rawText, isTx, meta];
+        state.rawLines[paneId].push(row);
         if (!newByPane.has(paneId)) newByPane.set(paneId, []);
-        newByPane.get(paneId).push([ts, rawText, isTx, meta]);
+        newByPane.get(paneId).push(row);
         touched.add(paneId);
     });
 
@@ -1005,17 +1095,20 @@ export function updatePaneSearch(paneId) {
     search.update(state.rawLines[paneId] || [], levelPredicate(paneId), levelFilterVersion(paneId));
     const bar = document.querySelector(`#pane-${paneId} .filter-bar`);
     const counter = bar?.querySelector('.search-count');
-    if (counter) counter.textContent = search.loading ? 'Loading history…'
-        : (search.error ? 'History unavailable' : `${search.cursor + 1} / ${search.matches.length}`);
-    if (counter) counter.title = search.error || 'Phrase occurrences in the session (case-insensitive)';
+    if (counter) {
+        counter.textContent = state.streamGap ? 'Results incomplete' : search.loading ? 'Loading history…'
+            : (search.error ? 'History unavailable' : `${search.cursor + 1} / ${search.matches.length}`);
+        counter.title = state.streamGap ? 'Live updates were missed; Highlight cannot verify the full session.'
+            : search.error || 'Phrase occurrences in the session (case-insensitive)';
+    }
     bar?.querySelectorAll('.search-controls button').forEach(button => {
-        button.disabled = search.loading || !!search.error || !search.matches.length;
+        button.disabled = state.streamGap || search.loading || !!search.error || !search.matches.length;
     });
 }
 
 export function navigatePaneSearch(paneId, direction) {
     const search = state.searches[paneId];
-    if (!search || search.loading || search.error) return;
+    if (!search || state.streamGap || search.loading || search.error) return;
     search.update(state.rawLines[paneId] || [], levelPredicate(paneId), levelFilterVersion(paneId));
     const match = search.move(direction);
     if (!match) return;
@@ -1087,6 +1180,7 @@ export function reanalyzePanePlugins(paneId) {
     lines.forEach(entry => {
         if (!_isRawTuple(entry)) analyzeLinePlugins(paneId, entry);
     });
+    invalidatePaneFilterProjection(paneId);
     rerenderPane(paneId);
 }
 export function setTimestampMode(mode) {
@@ -1099,6 +1193,7 @@ export function setTimestampMode(mode) {
     state.syncTabSwitch = false;
 
     PANES.forEach(paneId => {
+        invalidatePaneFilterProjection(paneId);
         const lines = state.rawLines[paneId] || [];
         lines.forEach(entry => {
             if (!_isRawTuple(entry)) applyTimestampModeToLine(entry);
@@ -1365,6 +1460,7 @@ window.__embedLogRefreshPluginIndicators = refreshPluginIndicators;
 // ---------------------------------------------------------------------------
 
 export function clearPane(paneId) {
+    _removePaneStats(paneId);
     state.rawLines[paneId] = [];
     state.selected[paneId] = new Set();
     if (state.searches[paneId]) state.searches[paneId] = new PhraseSearch(state.searches[paneId].phrase);
@@ -1381,7 +1477,8 @@ export function clearPane(paneId) {
     }
     _virtualPanes.delete(paneId);
     highlightLine(paneId, null);
-    _resetPaneStats(paneId);
+    _updatePaneStats(paneId);
+    _updateToolbarStats();
     hidePluginOverlays();
     state.atBottom[paneId] = true;
     updateJumpBtn(paneId);

@@ -27,20 +27,14 @@ test.describe('filter and keyboard UX', () => {
     const input = page.locator('.filter-input[data-pane="SENSOR_A"]');
     await input.fill('filter-alpha');
 
-    await expect(page.locator('#log-SENSOR_A .log-line:visible').first()).toContainText('kind=filter-alpha');
-    // Only lines matching the filter should be visible. Do not assert an upper
-    // bound here: CI can have a long-running shared demo stream, and the
-    // virtualized DOM may legitimately contain more matching rows.
-    const visibleTexts = await page.locator('#log-SENSOR_A .log-line:visible').evaluateAll(nodes =>
-      nodes.map(n => n.textContent || '')
-    );
-    expect(visibleTexts.length).toBeGreaterThanOrEqual(1);
-    expect(visibleTexts.every(text => text.includes('kind=filter-alpha'))).toBe(true);
+    const visible = page.locator('#log-SENSOR_A .log-line:visible');
+    const nonmatches = visible.filter({ hasNotText: 'kind=filter-alpha' });
+    await expect(visible.first()).toContainText('kind=filter-alpha');
+    await expect(nonmatches).toHaveCount(0);
 
-    // Clear filter — all lines reappear
+    // Clear filter — nonmatching lines reappear.
     await input.fill('');
-    await expect.poll(async () => page.locator('#log-SENSOR_A .log-line:visible').count())
-      .toBeGreaterThan(3);
+    await expect(nonmatches.first()).toBeVisible();
   });
 
 // Scenario: Invalid regex does not break UI and shows an error state on the input
@@ -142,10 +136,11 @@ test.describe('filter and keyboard UX', () => {
 
     const input = page.locator('.filter-input[data-pane="SENSOR_A"]');
 
-    // First enter a valid filter
+    // Wait for the valid filter to apply before typing the invalid one.
     await input.fill('filter-alpha');
-    await expect(input).not.toHaveClass(/invalid/);
-    await expect(page.locator('#log-SENSOR_A .log-line:visible').first()).toContainText('kind=filter-alpha');
+    const visible = page.locator('#log-SENSOR_A .log-line:visible');
+    await expect(visible.first()).toContainText('kind=filter-alpha');
+    await expect(visible.filter({ hasNotText: 'kind=filter-alpha' })).toHaveCount(0);
 
     // Now type a broken character — the previous valid filter should still be active
     await input.fill('filter-alpha(');

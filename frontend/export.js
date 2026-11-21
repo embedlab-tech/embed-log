@@ -7,7 +7,7 @@ import {
 const STATIC_EXPORT_PROFILE =
     typeof STATIC_PROFILE !== 'undefined' ? STATIC_PROFILE : window.__embedLogProfile;
 
-import { renderPaneWindow, updateJumpBtn, getLine } from './lines.js';
+import { renderPaneWindow, updateJumpBtn, getLine, hydratePaneRows, refreshStatsUi } from './lines.js';
 
 import { state, TABS, PANES, PANE_LABELS } from './state.js';
 import { isEditableTarget, isComposingEvent } from './keyboard.js';
@@ -138,7 +138,7 @@ export async function exportHtmlSnapshot(options = {}) {
         }
 
         // Compact tuple: [ts, text, isTx, meta|null]
-        function _compactEntry(line) {
+        function _compactEntry(line, text) {
             if (Array.isArray(line)) return line;
             const meta = {};
             if (line.absTs != null) meta.absTs = line.absTs;
@@ -147,7 +147,11 @@ export async function exportHtmlSnapshot(options = {}) {
             if (Number.isFinite(line.relNum)) meta.relNum = line.relNum;
             if (line.sourceId) meta.sourceId = line.sourceId;
             if (line.level) meta.level = line.level;
-            return [line.ts, _rawOf(line), line.isTx, Object.keys(meta).length ? meta : null];
+            if (line.sessionId) meta.sessionId = line.sessionId;
+            if (Number.isFinite(line.sequence)) meta.sequence = line.sequence;
+            if (Number.isFinite(line.recordOrdinal)) meta.recordOrdinal = line.recordOrdinal;
+            if (Number.isFinite(line.originalBytes)) meta.originalBytes = line.originalBytes;
+            return [line.ts, text ?? _rawOf(line), line.isTx, Object.keys(meta).length ? meta : null];
         }
 
         const logData = options.logData || {};
@@ -156,22 +160,13 @@ export async function exportHtmlSnapshot(options = {}) {
             PANES.forEach(id => {
                 const lines = state.rawLines[id] || [];
                 if (!lines.length) return;
-                paneDataTags += `<script type="application/json" data-pane="${id}">${_safeJson(lines.map(_compactEntry))}</script>\n`;
+                paneDataTags += `<script type="application/json" data-pane="${id}">${_safeJson(lines.map(line => _compactEntry(line)))}</script>\n`;
             });
         } else {
             // Custom logData passed in (e.g. from selection export)
             Object.entries(options.logData).forEach(([paneId, entries]) => {
                 if (!entries || !entries.length) return;
-                paneDataTags += `<script type="application/json" data-pane="${paneId}">${_safeJson(entries.map(e => {
-                    const meta = {};
-                    if (e.absTs != null) meta.absTs = e.absTs;
-                    if (Number.isFinite(e.absNum)) meta.absNum = e.absNum;
-                    if (e.relTs != null) meta.relTs = e.relTs;
-                    if (Number.isFinite(e.relNum)) meta.relNum = e.relNum;
-                    if (e.sourceId) meta.sourceId = e.sourceId;
-                    if (e.level) meta.level = e.level;
-                    return [e.ts, e.text, e.isTx, Object.keys(meta).length ? meta : null];
-                }))}</script>\n`;
+                paneDataTags += `<script type="application/json" data-pane="${paneId}">${_safeJson(entries.map(e => _compactEntry(e, e.text)))}</script>\n`;
             });
         }
         // ------------------------------------------------------------------
@@ -620,7 +615,8 @@ export function hydratePanesFromJson() {
 
             // Keep compact tuples in state; lines are parsed/analyzed lazily
             // when the virtual renderer needs to display a raw index.
-            state.rawLines[paneId] = tuples;
+            if (!PANES.includes(paneId)) return;
+            hydratePaneRows(paneId, tuples);
             // The compact arrays own the data now; release the duplicate JSON payload.
             script.remove();
 
@@ -630,6 +626,8 @@ export function hydratePanesFromJson() {
             console.error("Failed to parse JSON data for pane", paneId, e);
         }
     });
+
+    refreshStatsUi();
 
     // Render the visible window for each hydrated pane
     PANES.forEach(id => {

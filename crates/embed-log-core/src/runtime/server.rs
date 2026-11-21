@@ -352,6 +352,7 @@ impl LogServer {
             first_log_at: first_log_at.clone(),
             replay: replay.clone(),
             commit_lock: commit_lock.clone(),
+            broadcast_tx: broadcast_tx.clone(),
             line_counters: line_counters.clone(),
             frontend: self.frontend_dir.clone(),
             tabs: tabs_json.clone(),
@@ -376,6 +377,7 @@ impl LogServer {
         // ── 12. Start HTTP + WS server ──
         let state = ServerState {
             config_msg: shared_config_msg,
+            commit_lock,
             broadcast_tx: broadcast_tx.clone(),
             replay: replay.clone(),
             on_export: Some(on_export.clone()),
@@ -852,6 +854,7 @@ struct RotationContext {
     first_log_at: Arc<Mutex<Option<DateTime<Local>>>>,
     replay: Arc<Mutex<VecDeque<String>>>,
     commit_lock: Arc<Mutex<()>>,
+    broadcast_tx: broadcast::Sender<String>,
     line_counters: HashMap<String, Arc<AtomicU64>>,
     frontend: PathBuf,
     tabs: Vec<serde_json::Value>,
@@ -977,6 +980,14 @@ fn rotate_session(
     *ctx.config_msg
         .lock()
         .map_err(|_| "config message lock failed".to_string())? = new_config_msg.to_string();
+    let _ = ctx.broadcast_tx.send(
+        json!({
+            "type": "session_rotated",
+            "old_session": old_session,
+            "session": new_session,
+        })
+        .to_string(),
+    );
     drop(commit_guard);
 
     // Export the old foreground session's HTML off the hot path. Daemons keep
@@ -1902,6 +1913,7 @@ mod tests {
 
         let replay = Arc::new(Mutex::new(VecDeque::from(["stale".to_string()])));
         let config_msg = Arc::new(Mutex::new("old-config".to_string()));
+        let (broadcast_tx, mut rotation_events) = broadcast::channel(4);
         let line_counter = Arc::new(AtomicU64::new(42));
 
         let mut pane_labels = HashMap::new();
@@ -1920,6 +1932,7 @@ mod tests {
             first_log_at: Arc::new(Mutex::new(Some(Local::now()))),
             replay: replay.clone(),
             commit_lock: Arc::new(Mutex::new(())),
+            broadcast_tx,
             line_counters: HashMap::from([("dut".to_string(), line_counter.clone())]),
             frontend: root.join("frontend"),
             tabs: vec![json!({ "label": "Main", "panes": ["dut"] })],
@@ -1943,6 +1956,11 @@ mod tests {
         let (old_session, new_session) = rotate_session(&ctx, Some(title.clone())).unwrap();
         assert_ne!(old_session, new_session, "session info should change");
         assert_eq!(new_session["title"], title);
+        let rotation: serde_json::Value =
+            serde_json::from_str(&rotation_events.try_recv().unwrap()).unwrap();
+        assert_eq!(rotation["type"], "session_rotated");
+        assert_eq!(rotation["old_session"], old_session);
+        assert_eq!(rotation["session"], new_session);
         assert!(new_session["id"]
             .as_str()
             .unwrap()

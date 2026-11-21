@@ -228,13 +228,16 @@ test.describe('HTML export replay', () => {
 
       await exported.setViewportSize({ width: 700, height: 600 });
       const narrowToolbarBox = await exported.locator('#toolbar').boundingBox();
-      const narrowTops = await exported.locator('#toolbar > button, #toolbar .toolbar-left > button, #toolbar .toolbar-right > button').evaluateAll(buttons => {
+      const narrowCenters = await exported.locator('#toolbar > button, #toolbar .toolbar-left > button, #toolbar .toolbar-right > button').evaluateAll(buttons => {
         return buttons.filter(button => getComputedStyle(button).display !== 'none')
-          .map(button => Math.round(button.getBoundingClientRect().top));
+          .map(button => {
+            const { top, height } = button.getBoundingClientRect();
+            return top + height / 2;
+          });
       });
       expect(narrowToolbarBox).toBeTruthy();
-      expect(narrowTops.length).toBeGreaterThan(0);
-      expect(Math.max(...narrowTops) - Math.min(...narrowTops)).toBeLessThanOrEqual(1);
+      expect(narrowCenters.length).toBeGreaterThan(0);
+      expect(Math.max(...narrowCenters) - Math.min(...narrowCenters)).toBeLessThanOrEqual(1);
 
       await exported.locator('#btn-unwrap').click();
       await expect(exported.locator('#btn-unwrap')).toHaveClass(/active/);
@@ -306,6 +309,37 @@ test('repeated Export captures newer log content that arrived after first export
   expect(html2).toContain('TEST src=SENSOR_A');
   expect(count2).toBeGreaterThan(count1);
 });
+
+for (const canonical of [true, false]) {
+  test(`overlapping merges hydrate original toolbar totals (${canonical ? 'canonical' : 'legacy'} logs)`, async ({ browser }, testInfo) => {
+    const htmlPath = testInfo.outputPath('overlapping-merges.html');
+    const sessionDir = path.join(path.dirname(htmlPath), 'recorded-sessions', 'large-export');
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const sourceFiles = {};
+    const records = [['A', 'alpha'], ['B', 'βeta'], ['B', 'βeta'], ['C', '雪cat']];
+    for (const [source, message] of records) {
+      sourceFiles[source] = path.join(sessionDir, `${source}.log`);
+      fs.appendFileSync(sourceFiles[source], `[2026-04-22T10:11:00.000+00:00] ${message}\n`);
+    }
+    if (canonical) {
+      fs.writeFileSync(path.join(sessionDir, 'combined.jsonl'), records.map(([source_id, message], i) =>
+        JSON.stringify({ sequence: i + 1, source_id, message, session_id: 'large-export' }) + '\n').join(''));
+    }
+    generateMergedHtml(htmlPath, sourceFiles.A, {
+      tabs: [{ label: 'First', panes: ['AB'] }, { label: 'Second', panes: ['A', 'BC'] }],
+      source_files: sourceFiles,
+      pane_labels: { B: 'Βήτα', C: '雪' },
+      merges: [{ name: 'AB', of: ['A', 'B'] }, { name: 'BC', of: ['B', 'C'] }],
+    });
+    const exported = await openHtmlFile(browser, htmlPath);
+    try {
+      await expect(exported.locator('#toolbar-stats')).toHaveText('· 4 lines · 21 B');
+      await expect(exported.locator('.pane-stats[data-pane-stats="AB"]')).toHaveText('3 lines · 38 B');
+    } finally {
+      await exported.close();
+    }
+  });
+}
 
 test('50 MB merged export keeps complete compact data and bounded DOM', async ({ browser }, testInfo) => {
   test.setTimeout(120_000);

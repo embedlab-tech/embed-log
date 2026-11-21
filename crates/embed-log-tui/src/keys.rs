@@ -20,12 +20,6 @@ pub enum KeyAction {
     Quit,
 }
 
-/// Visible rows in the active pane, derived from terminal height.
-/// Chrome: tab bar (3) + status bar (1) + pane borders (2) = 6 rows.
-fn pane_visible_rows(terminal_height: u16) -> usize {
-    terminal_height.saturating_sub(6).max(1) as usize
-}
-
 /// Handle one key event. Returns whether to quit.
 pub fn handle_key(
     state: &mut State,
@@ -38,7 +32,7 @@ pub fn handle_key(
         return KeyAction::Continue;
     }
     if state.filter_mode {
-        handle_filter_key(state, key);
+        handle_filter_key(state, key, terminal_height);
         return KeyAction::Continue;
     }
     if key.is_quit() {
@@ -73,7 +67,7 @@ pub fn handle_key(
         return KeyAction::Continue;
     }
 
-    let visible = pane_visible_rows(terminal_height);
+    let visible = crate::draw::active_visible_rows(state, terminal_height);
 
     match key.code {
         // ── Help / TX open ──
@@ -133,7 +127,7 @@ pub fn handle_key(
         }
         KeyCode::Char('G') => {
             if let Some(pane) = state.active_pane_id() {
-                state.scroll_to_bottom(&pane, visible);
+                state.scroll_to_bottom(&pane);
             }
         }
         // Ctrl-d / Ctrl-u: half-page scroll.
@@ -146,59 +140,28 @@ pub fn handle_key(
 
         // ── Sync: Enter syncs panes to the active line's timestamp ──
         KeyCode::Enter => {
-            if let Some(pane) = state.active_pane_id() {
-                let scroll = state.scroll_of(&pane);
-                if let Some(line) = state.raw_lines.get(&pane).and_then(|l| l.get(scroll)) {
-                    state.focused_raw_idx = Some(line.line_idx);
-                    state.sync_panes_to_ts(line.abs_num, visible);
-                }
+            if let Some((pane, idx)) = state.active_top(visible) {
+                state.focus_line(pane, idx, visible);
             }
         }
 
         // ── Selection: Space toggles the current line ──
         KeyCode::Char(' ') => {
-            if let Some(pane) = state.active_pane_id() {
-                let scroll = state.scroll_of(&pane);
-                if let Some(line_idx) = state
-                    .raw_lines
-                    .get(&pane)
-                    .and_then(|l| l.get(scroll))
-                    .map(|l| l.line_idx)
-                {
-                    state.toggle_select_active(line_idx);
-                }
+            if let Some((_, idx)) = state.active_top(visible) {
+                state.toggle_select_active(idx);
             }
         }
         // Visual range select: 'v' enters/extends from anchor.
         KeyCode::Char('v') => {
-            if let Some(pane) = state.active_pane_id() {
-                let scroll = state.scroll_of(&pane);
-                let line_idx = state
-                    .raw_lines
-                    .get(&pane)
-                    .and_then(|l| l.get(scroll))
-                    .map(|l| l.line_idx);
-                if let Some(idx) = line_idx {
-                    match state.visual_anchor {
-                        None => {
-                            state.visual_anchor = Some(idx);
-                            state.toggle_select_active(idx);
-                        }
-                        Some(anchor) => {
-                            // Select range from anchor to current.
-                            let set = state.selected.entry(pane.clone()).or_default();
-                            let (lo, hi) = if anchor <= idx {
-                                (anchor, idx)
-                            } else {
-                                (idx, anchor)
-                            };
-                            // Re-select the range.
-                            set.clear();
-                            for i in lo..=hi {
-                                set.insert(i);
-                            }
-                            state.visual_anchor = Some(anchor);
-                        }
+            if let Some((pane, idx)) = state.active_top(visible) {
+                match &state.visual_anchor {
+                    Some((id, anchor)) if id == &pane => {
+                        let range = idx.min(*anchor)..=idx.max(*anchor);
+                        state.selected.insert(pane, range.collect());
+                    }
+                    _ => {
+                        state.selected.entry(pane.clone()).or_default().insert(idx);
+                        state.visual_anchor = Some((pane, idx));
                     }
                 }
             }
@@ -225,34 +188,17 @@ pub fn handle_key(
         // ── Markers ──
         // Toggle marker on current line.
         KeyCode::Char('m') => {
-            if let Some(pane) = state.active_pane_id() {
-                let scroll = state.scroll_of(&pane);
-                if let Some(line) = state.raw_lines.get(&pane).and_then(|l| l.get(scroll)) {
-                    let markers = state.toggle_marker_active(line.line_idx, line.abs_num, "");
-                    let _ = client.commands.try_send(ClientCommand::SaveMarkers {
-                        markers: state.all_markers(),
-                    });
-                    let _ = markers; // markers already in state
-                }
+            if let Some((pane, idx)) = state.active_top(visible) {
+                state.toggle_marker_active(pane, idx);
+                let _ = client.commands.try_send(ClientCommand::SaveMarkers {
+                    markers: state.all_markers(),
+                });
             }
         }
         // Marker navigation: [ prev, ] next.
-        KeyCode::Char('[') => {
-            if let Some(target) = state.nav_marker(false) {
-                if let Some(pane) = state.active_pane_id() {
-                    let target = target as usize;
-                    let center = target.saturating_sub(visible / 2);
-                    state.set_scroll(&pane, center, visible);
-                }
-            }
-        }
-        KeyCode::Char(']') => {
-            if let Some(target) = state.nav_marker(true) {
-                if let Some(pane) = state.active_pane_id() {
-                    let target = target as usize;
-                    let center = target.saturating_sub(visible / 2);
-                    state.set_scroll(&pane, center, visible);
-                }
+        KeyCode::Char('[' | ']') => {
+            if let Some(pane) = state.active_pane_id() {
+                state.jump_marker(pane, key.code == KeyCode::Char(']'), visible);
             }
         }
         // ── Toggles ──
@@ -286,7 +232,7 @@ pub fn handle_key(
     KeyAction::Continue
 }
 
-fn handle_filter_key(state: &mut State, key: &InputKey) {
+fn handle_filter_key(state: &mut State, key: &InputKey, terminal_height: u16) {
     match key.code {
         KeyCode::Esc => {
             state.filter_mode = false;
@@ -296,16 +242,16 @@ fn handle_filter_key(state: &mut State, key: &InputKey) {
             let pattern = state.filter_buffer.trim();
             match regex::Regex::new(pattern) {
                 Ok(regex) => {
-                    if let Some(pane) = state.active_pane_id() {
-                        state
-                            .filters
-                            .insert(pane, (!pattern.is_empty()).then_some(regex));
-                    }
-                    state.tx_status = Some(if pattern.is_empty() {
+                    let filter = (!pattern.is_empty()).then_some(regex);
+                    state.tx_status = Some(if filter.is_none() {
                         "filter cleared".to_string()
                     } else {
                         format!("filter: {pattern}")
                     });
+                    if let Some(pane) = state.active_pane_id() {
+                        let visible = crate::draw::active_visible_rows(state, terminal_height);
+                        state.set_filter(pane, filter, visible);
+                    }
                     state.filter_mode = false;
                     state.filter_buffer.clear();
                 }
@@ -403,6 +349,87 @@ mod tests {
             24,
         );
         assert!(!state.show_config);
+        client.stop();
+    }
+
+    #[tokio::test]
+    async fn keys_keep_row_identity_after_eviction_in_a_merged_pane() {
+        use crate::protocol::Marker;
+        use crate::state::{StoredLine, MAX_LINES_PER_PANE, TRIM_SLACK};
+
+        let mut s = State::default();
+        s.apply_config(&ConfigMessage {
+            tabs: vec![TabDef {
+                panes: vec!["merged".into()],
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        let mut client = crate::client::spawn_client("ws://127.0.0.1:0".into());
+        let mut press = |s: &mut State, code| {
+            handle_key(
+                s,
+                &mut client,
+                &InputKey {
+                    code,
+                    modifiers: KeyModifiers::NONE,
+                },
+                10,
+            );
+        };
+        let append = |s: &mut State, i: usize| {
+            s.append_line(
+                "merged",
+                StoredLine {
+                    source_id: if i % 2 == 0 { "A" } else { "B" }.into(),
+                    line_idx: (i / 2) as u64,
+                    abs_num: i as f64,
+                    message: format!("row-{i}"),
+                    ..Default::default()
+                },
+            );
+        };
+        let limit = MAX_LINES_PER_PANE + TRIM_SLACK;
+        for i in 0..limit {
+            append(&mut s, i);
+        }
+        s.scroll.insert("merged".into(), 1);
+        press(&mut s, KeyCode::Char(' ')); // evicted selection
+        s.scroll.insert("merged".into(), 50_000);
+        press(&mut s, KeyCode::Char('v'));
+        press(&mut s, KeyCode::Enter);
+        append(&mut s, limit);
+
+        let first = 50_000 - (TRIM_SLACK + 1);
+        assert_eq!(s.selected_for("merged"), vec![first]);
+        assert_eq!(s.focused_line, Some(("merged".into(), first)));
+        press(&mut s, KeyCode::Down);
+        press(&mut s, KeyCode::Char(' '));
+        assert_eq!(s.selected_for("merged"), vec![first, first + 1]);
+        press(&mut s, KeyCode::Down);
+        press(&mut s, KeyCode::Char('v'));
+        let copied = crate::selection::selection_text(&s);
+        assert_eq!(
+            copied,
+            "  [merged]  row-50000\n  [merged]  row-50001\n  [merged]  row-50002"
+        );
+        press(&mut s, KeyCode::Enter);
+        assert_eq!(s.focused_line, Some(("merged".into(), first + 2)));
+
+        s.apply_markers(&[1, 70_001, 80_000].map(|i| Marker {
+            pane_id: "merged".into(),
+            line_idx: i / 2,
+            num_ts: i as f64,
+            ..Default::default()
+        }));
+        press(&mut s, KeyCode::Char('[')); // the only earlier marker was evicted
+        assert_eq!(s.scroll_of("merged"), first + 2);
+        for (key, id) in [(']', 70_001), (']', 80_000), ('[', 70_001)] {
+            press(&mut s, KeyCode::Char(key));
+            let center = s.viewport("merged", 4).2[2];
+            assert_eq!(s.raw_lines["merged"][center].abs_num, id as f64);
+        }
+        assert_eq!(s.all_markers().len(), 3);
         client.stop();
     }
 
