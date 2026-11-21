@@ -95,8 +95,8 @@ function _restoreIfPossible() {
     }
     replacePanePluginUiState(snap.panePluginUiState);
 
-    // Refill panes that are currently empty.
-    const byPane = snap.lines && typeof snap.lines === 'object' ? snap.lines : {};
+    // After a gap, cached later sequences could suppress missing lines in recent replay.
+    const byPane = !state.streamGap && snap.lines && typeof snap.lines === 'object' ? snap.lines : {};
     Object.entries(byPane).forEach(([paneId, entries]) => {
         if (!PANES.includes(paneId)) return;
         if (!Array.isArray(entries) || entries.length === 0) return;

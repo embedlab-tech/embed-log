@@ -1020,17 +1020,20 @@ export function updatePaneSearch(paneId) {
     search.update(state.rawLines[paneId] || [], levelPredicate(paneId), levelFilterVersion(paneId));
     const bar = document.querySelector(`#pane-${paneId} .filter-bar`);
     const counter = bar?.querySelector('.search-count');
-    if (counter) counter.textContent = search.loading ? 'Loading history…'
-        : (search.error ? 'History unavailable' : `${search.cursor + 1} / ${search.matches.length}`);
-    if (counter) counter.title = search.error || 'Phrase occurrences in the session (case-insensitive)';
+    if (counter) {
+        counter.textContent = state.streamGap ? 'Results incomplete' : search.loading ? 'Loading history…'
+            : (search.error ? 'History unavailable' : `${search.cursor + 1} / ${search.matches.length}`);
+        counter.title = state.streamGap ? 'Live updates were missed; Highlight cannot verify the full session.'
+            : search.error || 'Phrase occurrences in the session (case-insensitive)';
+    }
     bar?.querySelectorAll('.search-controls button').forEach(button => {
-        button.disabled = search.loading || !!search.error || !search.matches.length;
+        button.disabled = state.streamGap || search.loading || !!search.error || !search.matches.length;
     });
 }
 
 export function navigatePaneSearch(paneId, direction) {
     const search = state.searches[paneId];
-    if (!search || search.loading || search.error) return;
+    if (!search || state.streamGap || search.loading || search.error) return;
     search.update(state.rawLines[paneId] || [], levelPredicate(paneId), levelFilterVersion(paneId));
     const match = search.move(direction);
     if (!match) return;

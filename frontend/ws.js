@@ -5,6 +5,7 @@ import { refreshLevelDefinitions } from './levels.js';
 import { configurePanePlugins, resetPanePlugins } from './pluginRuntime.js';
 
 import { switchTab } from './tabs.js';
+import { updatePaneSearch } from './lines.js';
 
 let ws = null;
 let wsRetryDelay = 1000;
@@ -36,13 +37,14 @@ window.__embedLogLoadSearchHistory = function (paneId) {
         // shortcut: history is loaded in memory; use paged reads if sessions outgrow browser memory.
         // Browsers cap a string at about 512 MiB; Chromium then resolves text()
         // to "" instead of failing, which would look like a session without history.
-        const length = Number(response.headers.get('content-length'));
+        const contentLength = response.headers.get('content-length');
+        const length = Number(contentLength);
         if (length > MAX_HISTORY_CHARS) {
             response.body?.cancel().catch(() => {});
             throw new Error(`Session history is too large to load in the browser (${Math.round(length / 1048576)} MB)`);
         }
         const text = await response.text();
-        if (!text && length > 0) throw new Error('Session history could not be read in the browser');
+        if (!text && contentLength !== '0') throw new Error('Session history could not be read in the browser');
         if (generation !== searchHistoryGeneration || sessionId !== currentSessionId || !state.searches[paneId]) return;
         const current = state.rawLines[paneId] || [];
         const first = current[0];
@@ -86,7 +88,7 @@ function invalidateSearchHistory() {
 }
 
 function resetLayoutForNewSession() {
-    invalidateSearchHistory();
+    clearAllPaneContents();
     const container = document.getElementById("container");
     if (container) container.innerHTML = "";
 
@@ -108,26 +110,30 @@ function resetLayoutForNewSession() {
     resetPanePlugins();
 }
 
-// The server drops records for a client that falls behind the broadcast
-// buffer and says so with `stream_gap`. Make the gap visible: the panes are
-// missing lines until the page reloads the replay buffer.
-let skippedLines = 0;
-function showStreamGap(skipped) {
-    skippedLines += Number.isFinite(skipped) && skipped > 0 ? skipped : 0;
+const STREAM_GAP_SESSION_KEY = 'embed-log:stream-gap-session';
+
+// A lagged broadcast can contain records for any pane, or only status messages.
+function showStreamGap() {
+    state.streamGap = true;
+    if (currentSessionId) {
+        try { sessionStorage.setItem(STREAM_GAP_SESSION_KEY, currentSessionId); } catch {}
+    }
     let notice = document.getElementById("stream-gap");
     if (!notice) {
         notice = document.createElement("button");
         notice.id = "stream-gap";
         notice.type = "button";
-        notice.title = "The browser fell behind the live stream and missed log lines. Click to reload and resync.";
+        notice.title = "The browser missed live updates. Reload to fetch recent replay; older missing lines may not be recovered.";
+        notice.textContent = "\u26a0 Log panes may be incomplete · Reload recent logs";
         notice.addEventListener("click", () => window.location.reload());
         wsStatus?.before(notice);
     }
     notice.hidden = false;
-    notice.textContent = `\u26a0 ${skippedLines.toLocaleString("en-US")} lines skipped`;
+    PANES.forEach(updatePaneSearch);
 }
 function hideStreamGap() {
-    skippedLines = 0;
+    state.streamGap = false;
+    try { sessionStorage.removeItem(STREAM_GAP_SESSION_KEY); } catch {}
     const notice = document.getElementById("stream-gap");
     if (notice) notice.hidden = true;
 }
@@ -203,9 +209,15 @@ async function _handleConfigMessage(msg) {
     const sessionId = msg.session?.id || null;
     const isSessionChange = currentSessionId && sessionId && currentSessionId !== sessionId;
     if (isSessionChange) {
+        hideStreamGap();
         resetLayoutForNewSession();
     }
     currentSessionId = sessionId || currentSessionId;
+    try {
+        if (!state.streamGap && currentSessionId && sessionStorage.getItem(STREAM_GAP_SESSION_KEY) === currentSessionId) {
+            showStreamGap();
+        }
+    } catch {}
 
     // Create tabs and set pane metadata BEFORE loading plugins so log
     // lines render immediately.  Plugins load asynchronously and catch up.
@@ -300,7 +312,6 @@ function wsConnect() {
     ws.addEventListener("open", () => {
         // UX policy: never show stale in-memory lines after reconnect/open.
         clearAllPaneContents();
-        hideStreamGap();
         wsSetStatus("connected", "connected");
         wsRetryDelay = 1000;
     });
@@ -327,7 +338,9 @@ function wsConnect() {
             return;
         }
         if (msg.type === "session_rotated") {
-            currentSessionId = msg.session?.id || currentSessionId;
+            const sessionId = msg.session?.id;
+            if (sessionId && sessionId !== currentSessionId) hideStreamGap();
+            currentSessionId = sessionId || currentSessionId;
             state.syncTs = null;
             state.syncTabSwitch = false;
             clearAllPaneContents();
@@ -370,7 +383,7 @@ function wsConnect() {
         }
 
         if (msg.type === "stream_gap") {
-            showStreamGap(msg.skipped);
+            if (!msg.session_id || msg.session_id === currentSessionId) showStreamGap();
             return;
         }
 
