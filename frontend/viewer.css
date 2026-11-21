@@ -441,7 +441,9 @@ button.active { background: var(--selection); border-color: var(--accent); color
 }
 .pane-header .pane-name { flex: 1; }
 .pane-header button { padding: 2px 6px; font-size: 11px; }
-.pane-header button.active { border-color: var(--accent); }
+.pane-header button.active { border-color: var(--accent); color: var(--accent); }
+/* The timestamp button shows the current mode; say what it is about. */
+#btn-timestamp-mode::before { content: "Time: "; opacity: .65; }
 .pane-header .pane-stats {
     color: var(--muted);
     font-size: 11px;
