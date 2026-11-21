@@ -34,7 +34,7 @@ fn selection_exact(state: &State) -> String {
     }
     let mut out = Vec::new();
     for idx in &indices {
-        if let Some(line) = lines.get(*idx as usize) {
+        if let Some(line) = lines.get(*idx) {
             let ts = match state.timestamp_mode {
                 crate::state::TimestampMode::Absolute => &line.abs_ts,
                 crate::state::TimestampMode::Relative => &line.rel_ts,
@@ -60,11 +60,7 @@ fn selection_context(state: &State) -> String {
             }
             current_pane = Some(pane_id.clone());
         }
-        if let Some(line) = state
-            .raw_lines
-            .get(pane_id)
-            .and_then(|l| l.get(*idx as usize))
-        {
+        if let Some(line) = state.raw_lines.get(pane_id).and_then(|l| l.get(*idx)) {
             let ts = match state.timestamp_mode {
                 crate::state::TimestampMode::Absolute => &line.abs_ts,
                 crate::state::TimestampMode::Relative => &line.rel_ts,

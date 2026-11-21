@@ -12,21 +12,24 @@ use regex::Regex;
 
 /// A parsed log entry with timestamp variants.
 #[derive(Clone)]
-pub(super) struct LogEntry {
-    pub(super) source_id: Option<String>,
-    pub(super) sequence: Option<u64>,
+pub(crate) struct LogEntry {
+    pub(crate) source_id: Option<String>,
+    pub(crate) sequence: Option<u64>,
+    pub(super) session_id: Option<String>,
+    pub(super) record_ordinal: Option<usize>,
+    pub(super) original_bytes: Option<usize>,
     pub(super) ts: String,
-    pub(super) text: String,
-    pub(super) is_tx: bool,
+    pub(crate) text: String,
+    pub(crate) is_tx: bool,
     pub(super) abs_ts: Option<String>,
-    pub(super) abs_num: Option<i64>,
+    pub(crate) abs_num: Option<i64>,
     pub(super) rel_ts: Option<String>,
     pub(super) rel_num: Option<i64>,
     pub(super) time_domain: Option<String>,
     /// Level id from the canonical record (`level` field); none for legacy logs.
     pub(super) level: Option<String>,
     /// Detected device event (`boot` / `crash`, see `crate::events`).
-    pub(super) event: Option<String>,
+    pub(crate) event: Option<String>,
 }
 
 pub(super) fn parse_log_file(
@@ -57,6 +60,9 @@ pub(super) fn parse_log_file(
             pending = Some(LogEntry {
                 source_id: pane_id.map(str::to_string),
                 sequence: None,
+                session_id: None,
+                record_ordinal: None,
+                original_bytes: None,
                 ts,
                 text: clean_text,
                 is_tx,

@@ -36,6 +36,7 @@ function _snapshot() {
                 sessionId: line?.sessionId ?? null,
                 lineIdx: line?.serverLineIdx ?? null,
                 sourceId: line?.sourceId ?? null,
+                originalBytes: line?.originalBytes,
                 level: line?.level ?? null,
                 event: line?.event ?? null,
                 absTs: line?.absTs ?? null,
@@ -96,8 +97,8 @@ function _restoreIfPossible() {
     }
     replacePanePluginUiState(snap.panePluginUiState);
 
-    // Refill panes that are currently empty.
-    const byPane = snap.lines && typeof snap.lines === 'object' ? snap.lines : {};
+    // After a gap, cached later sequences could suppress missing lines in recent replay.
+    const byPane = !state.streamGap && snap.lines && typeof snap.lines === 'object' ? snap.lines : {};
     Object.entries(byPane).forEach(([paneId, entries]) => {
         if (!PANES.includes(paneId)) return;
         if (!Array.isArray(entries) || entries.length === 0) return;
@@ -111,6 +112,7 @@ function _restoreIfPossible() {
                 sequence: e.sequence,
                 sessionId: e.sessionId,
                 lineIdx: e.lineIdx ?? null,
+                originalBytes: e.originalBytes,
                 ...(e.sourceId ? { sourceId: e.sourceId } : {}),
                 ...(e.level ? { level: e.level } : {}),
                 ...(e.event ? { event: e.event } : {}),

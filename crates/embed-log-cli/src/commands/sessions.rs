@@ -2043,21 +2043,6 @@ pub(crate) fn export_session_html(session: &SessionRecord, output: PathBuf) -> R
         .map(str::to_owned);
     let frontend_dir = std::env::current_dir()?.join("frontend");
     let markers = load_markers_file(&session.dir)?;
-    let frontend_plugins = session
-        .manifest
-        .get("frontend_plugins")
-        .cloned()
-        .unwrap_or_else(|| serde_json::json!({}));
-    let pane_plugins = session
-        .manifest
-        .get("pane_plugins")
-        .cloned()
-        .unwrap_or_else(|| serde_json::json!({}));
-    let plugin_scripts = session
-        .manifest
-        .get("plugin_scripts")
-        .cloned()
-        .unwrap_or_else(|| serde_json::json!({}));
     let merges = session
         .manifest
         .get("merges")
@@ -2080,8 +2065,8 @@ pub(crate) fn export_session_html(session: &SessionRecord, output: PathBuf) -> R
         first_log_at,
     )
     .with_combined_file(manifest_combined_file(session)?)
+    .with_session_dir(session.dir.clone())
     .with_merges(merges)
-    .with_plugins(frontend_plugins, pane_plugins, plugin_scripts)
     .with_markers(markers);
     if let Some(source_levels) = source_levels {
         exporter = exporter.with_source_levels(source_levels);

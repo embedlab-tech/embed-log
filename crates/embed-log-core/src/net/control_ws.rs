@@ -1240,6 +1240,7 @@ mod tests {
         source_txs.insert("DUT_UART".to_string(), entry_tx);
 
         ServerState {
+            commit_lock: Arc::new(Mutex::new(())),
             config_msg: Arc::new(Mutex::new("{}".to_string())),
             broadcast_tx,
             replay: Arc::new(Mutex::new(std::collections::VecDeque::new())),
@@ -1814,6 +1815,7 @@ mod tests {
         source_txs.insert("DUT_UART".to_string(), entry_tx);
 
         let state = ServerState {
+            commit_lock: Arc::new(Mutex::new(())),
             config_msg: Arc::new(Mutex::new("{}".to_string())),
             broadcast_tx,
             replay,
@@ -2131,6 +2133,7 @@ mod tests {
         source_txs.insert("DUT_UART".to_string(), entry_tx);
 
         let state = ServerState {
+            commit_lock: Arc::new(Mutex::new(())),
             config_msg: Arc::new(Mutex::new("{}".to_string())),
             broadcast_tx,
             replay,

@@ -220,6 +220,7 @@ impl LogServer {
             serde_json::to_value(&self.config.merges).unwrap_or_else(|_| json!([])),
         )
         .with_source_levels(crate::levels::source_levels_json(&self.config))
+        .with_runtime_config(&runtime_config_summary(&self.config, &self.logs_root))
         .with_symbols(crate::symbols::snapshot_elfs(
             &session_dir,
             &symbol_elfs(&self.config),
@@ -337,7 +338,7 @@ impl LogServer {
             ts_mode: self.config.server.timestamp_mode.to_string(),
             source_files: shared_source_files.clone(),
             html_path: shared_html_path.clone(),
-            plugins: plugins.clone(),
+            commit_lock: commit_lock.clone(),
             session_mgr: session_mgr.clone(),
             first_log_at: first_log_at.clone(),
             merges: serde_json::to_value(&self.config.merges).unwrap_or_else(|_| json!([])),
@@ -357,6 +358,7 @@ impl LogServer {
             first_log_at: first_log_at.clone(),
             replay: replay.clone(),
             commit_lock: commit_lock.clone(),
+            broadcast_tx: broadcast_tx.clone(),
             line_counters: line_counters.clone(),
             frontend: self.frontend_dir.clone(),
             tabs: tabs_json.clone(),
@@ -382,6 +384,7 @@ impl LogServer {
         // ── 12. Start HTTP + WS server ──
         let state = ServerState {
             config_msg: shared_config_msg,
+            commit_lock,
             broadcast_tx: broadcast_tx.clone(),
             replay: replay.clone(),
             on_export: Some(on_export.clone()),
@@ -807,7 +810,7 @@ struct ExportContext {
     ts_mode: String,
     source_files: Arc<Mutex<HashMap<String, String>>>,
     html_path: Arc<Mutex<PathBuf>>,
-    plugins: LoadedPlugins,
+    commit_lock: Arc<Mutex<()>>,
     session_mgr: Arc<Mutex<SessionManager>>,
     first_log_at: Arc<Mutex<Option<DateTime<Local>>>>,
     merges: serde_json::Value,
@@ -817,14 +820,26 @@ struct ExportContext {
 /// Export the current session to HTML from the latest complete canonical
 /// combined stream. SessionExporter serializes producers and publishes atomically.
 fn export_session(ctx: &ExportContext) -> Result<String, String> {
+    let commit_guard = ctx
+        .commit_lock
+        .lock()
+        .map_err(|_| "combined commit lock failed")?;
     let fla = ctx.first_log_at.lock().unwrap().map(|dt| dt.to_rfc3339());
     let export_html = ctx.html_path.lock().unwrap().clone();
     let export_sources = ctx.source_files.lock().unwrap().clone();
-    let (export_markers, combined_file) = ctx
+    let (session_id, session_dir, export_markers, combined_file) = ctx
         .session_mgr
         .lock()
-        .map(|mgr| (mgr.load_markers(), mgr.combined_file()))
-        .unwrap_or_default();
+        .map(|mgr| {
+            (
+                mgr.session_id().to_owned(),
+                mgr.session_dir().to_owned(),
+                mgr.load_markers(),
+                mgr.combined_file(),
+            )
+        })
+        .map_err(|_| "session manager lock failed")?;
+    drop(commit_guard);
 
     let exporter = SessionExporter::new(
         export_html.clone(),
@@ -838,24 +853,24 @@ fn export_session(ctx: &ExportContext) -> Result<String, String> {
     .with_combined_file(combined_file)
     .with_merges(ctx.merges.clone())
     .with_source_levels(ctx.source_levels.clone())
-    .with_plugins(
-        ctx.plugins.definitions.clone(),
-        ctx.plugins.pane_plugins.clone(),
-        ctx.plugins.scripts.clone(),
-    )
+    .with_session_dir(session_dir)
     .with_markers(export_markers);
 
     match exporter.export() {
         Ok(path) => {
             if let Ok(mut mgr) = ctx.session_mgr.lock() {
-                let _ = mgr.mark_html_exported(&path);
+                if mgr.session_id() == session_id {
+                    let _ = mgr.mark_html_exported(&path);
+                }
             }
             Ok(path.display().to_string())
         }
         Err(e) => {
             let err_msg = e.to_string();
             if let Ok(mut mgr) = ctx.session_mgr.lock() {
-                let _ = mgr.mark_html_error(&err_msg);
+                if mgr.session_id() == session_id {
+                    let _ = mgr.mark_html_error(&err_msg);
+                }
             }
             Err(err_msg)
         }
@@ -884,6 +899,7 @@ struct RotationContext {
     first_log_at: Arc<Mutex<Option<DateTime<Local>>>>,
     replay: Arc<Mutex<VecDeque<String>>>,
     commit_lock: Arc<Mutex<()>>,
+    broadcast_tx: broadcast::Sender<String>,
     line_counters: HashMap<String, Arc<AtomicU64>>,
     frontend: PathBuf,
     tabs: Vec<serde_json::Value>,
@@ -969,6 +985,7 @@ fn rotate_session(
     )
     .with_title(title)
     .with_source_levels(ctx.source_levels.clone())
+    .with_runtime_config(&ctx.runtime_config)
     .with_symbols(crate::symbols::snapshot_elfs(
         &new_session_dir,
         &ctx.symbol_elfs,
@@ -1013,6 +1030,14 @@ fn rotate_session(
     *ctx.config_msg
         .lock()
         .map_err(|_| "config message lock failed".to_string())? = new_config_msg.to_string();
+    let _ = ctx.broadcast_tx.send(
+        json!({
+            "type": "session_rotated",
+            "old_session": old_session,
+            "session": new_session,
+        })
+        .to_string(),
+    );
     drop(commit_guard);
 
     // Export the old foreground session's HTML off the hot path. Daemons keep
@@ -1032,7 +1057,6 @@ fn rotate_session(
             let old_export_labels = ctx.pane_labels.clone();
             let old_export_frontend = ctx.frontend.clone();
             let old_export_ts_mode = ctx.timestamp_mode.clone();
-            let old_export_plugins = ctx.plugins.clone();
             let old_export_merges = ctx.merges.clone();
             let old_export_source_levels = ctx.source_levels.clone();
             std::thread::spawn(move || {
@@ -1048,11 +1072,6 @@ fn rotate_session(
                 .with_combined_file(old_html_path.parent().unwrap().join("combined.jsonl"))
                 .with_merges(old_export_merges)
                 .with_source_levels(old_export_source_levels)
-                .with_plugins(
-                    old_export_plugins.definitions,
-                    old_export_plugins.pane_plugins,
-                    old_export_plugins.scripts,
-                )
                 .with_markers(old_markers);
 
                 match exporter.export() {
@@ -2049,6 +2068,7 @@ mod tests {
 
         let replay = Arc::new(Mutex::new(VecDeque::from(["stale".to_string()])));
         let config_msg = Arc::new(Mutex::new("old-config".to_string()));
+        let (broadcast_tx, mut rotation_events) = broadcast::channel(4);
         let line_counter = Arc::new(AtomicU64::new(42));
 
         let mut pane_labels = HashMap::new();
@@ -2068,6 +2088,7 @@ mod tests {
             first_log_at: Arc::new(Mutex::new(Some(Local::now()))),
             replay: replay.clone(),
             commit_lock: Arc::new(Mutex::new(())),
+            broadcast_tx,
             line_counters: HashMap::from([("dut".to_string(), line_counter.clone())]),
             frontend: root.join("frontend"),
             tabs: vec![json!({ "label": "Main", "panes": ["dut"] })],
@@ -2091,6 +2112,11 @@ mod tests {
         let (old_session, new_session) = rotate_session(&ctx, Some(title.clone())).unwrap();
         assert_ne!(old_session, new_session, "session info should change");
         assert_eq!(new_session["title"], title);
+        let rotation: serde_json::Value =
+            serde_json::from_str(&rotation_events.try_recv().unwrap()).unwrap();
+        assert_eq!(rotation["type"], "session_rotated");
+        assert_eq!(rotation["old_session"], old_session);
+        assert_eq!(rotation["session"], new_session);
         assert!(new_session["id"]
             .as_str()
             .unwrap()
@@ -2144,7 +2170,7 @@ mod tests {
                 log.display().to_string(),
             )]))),
             html_path: Arc::new(Mutex::new(html.clone())),
-            plugins: empty_plugins(),
+            commit_lock: Arc::new(Mutex::new(())),
             session_mgr: Arc::new(Mutex::new(mgr)),
             first_log_at: Arc::new(Mutex::new(None)),
             merges: json!([]),

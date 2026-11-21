@@ -94,6 +94,25 @@ pub struct PaneHit {
     pub raw_idx: Option<usize>,
 }
 
+fn log_height(state: &State, pane_id: &str, focused: bool, inner_height: u16) -> u16 {
+    if focused && state.is_writable(pane_id) && inner_height >= 2 {
+        inner_height - 1
+    } else {
+        inner_height
+    }
+}
+
+pub(crate) fn active_visible_rows(state: &State, terminal_height: u16) -> usize {
+    // Tab bar (3) + status bar (1) + pane borders (2).
+    let inner_height = terminal_height.saturating_sub(6);
+    state
+        .active_pane_id()
+        .map_or(inner_height, |pane| {
+            log_height(state, &pane, true, inner_height)
+        })
+        .max(1) as usize
+}
+
 /// Hit-test the pane content for mouse interactions.
 /// Returns the pane under `(column,row)` and, when the click lands on a visible
 /// log line, the raw line index of that row.
@@ -134,29 +153,16 @@ pub fn hit_test_pane(state: &State, area: Rect, column: u16, row: u16) -> Option
         {
             continue;
         }
-        let inner = Block::default().borders(Borders::ALL).inner(outer);
+        let mut inner = Block::default().borders(Borders::ALL).inner(outer);
+        inner.height = log_height(state, pane_id, i == state.active_pane, inner.height);
         let mut raw_idx = None;
         if column >= inner.x
             && column < inner.x + inner.width
             && row >= inner.y
             && row < inner.y + inner.height
         {
-            if let Some(lines) = state.raw_lines.get(pane_id) {
-                let markers = state.markers_for(pane_id);
-                let filter = state.filters.get(pane_id).and_then(|f| f.as_ref());
-                let scroll = state.scroll.get(pane_id).copied().unwrap_or(0);
-                let visible = inner.height.max(1) as usize;
-                let (_, rows) = crate::lines::pane_rows(
-                    lines,
-                    &markers,
-                    state.timestamp_mode,
-                    filter,
-                    scroll,
-                    visible,
-                );
-                let rel_y = (row - inner.y) as usize;
-                raw_idx = rows.get(rel_y).map(|(idx, _)| *idx);
-            }
+            let (_, _, rows) = state.viewport(pane_id, usize::from(inner.height));
+            raw_idx = rows.get(usize::from(row - inner.y)).copied();
         }
         return Some(PaneHit {
             pane_id: pane_id.clone(),
@@ -254,13 +260,10 @@ fn draw_pane_content(f: &mut Frame, state: &State, area: Rect) {
         let stored = state.raw_lines.get(pane_id);
         let line_count = stored.map(|v| v.len()).unwrap_or(0);
         let mut content_area = inner;
-        if focused && state.is_writable(pane_id) && inner.height >= 2 {
-            let split = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Min(1), Constraint::Length(1)])
-                .split(inner);
-            content_area = split[0];
-            draw_tx_bar(f, state, pane_id, split[1]);
+        content_area.height = log_height(state, pane_id, focused, inner.height);
+        if content_area.height < inner.height {
+            let tx_bar = Rect::new(inner.x, inner.y + content_area.height, inner.width, 1);
+            draw_tx_bar(f, state, pane_id, tx_bar);
         }
 
         if line_count == 0 {
@@ -273,25 +276,21 @@ fn draw_pane_content(f: &mut Frame, state: &State, area: Rect) {
 
         let stored = stored.unwrap();
         let markers = state.markers_for(pane_id);
-        let filter = state.filters.get(pane_id).and_then(|f| f.as_ref());
-        let scroll = state.scroll.get(pane_id).copied().unwrap_or(0);
-        let visible = content_area.height.max(1) as usize;
-        let (_, rows) = crate::lines::pane_rows(
-            stored,
-            &markers,
-            state.timestamp_mode,
-            filter,
-            scroll,
-            visible,
-        );
+        let visible = usize::from(content_area.height);
+        let (scroll, match_count, rows) = state.viewport(pane_id, visible);
         let mut lines = Vec::with_capacity(rows.len());
-        for (raw_idx, mut line) in rows {
-            let line_abs = stored.get(raw_idx).map(|l| l.abs_num);
-            let is_focused = state.focused_raw_idx == Some(raw_idx as u64);
+        for raw_idx in rows {
+            let stored_line = &stored[raw_idx];
+            let mut line =
+                crate::lines::format_line(stored_line, &markers, state.timestamp_mode, None)
+                    .expect("unfiltered formatting always yields a line");
+            let is_focused = state
+                .focused_line
+                .as_ref()
+                .is_some_and(|(pane, idx)| pane == pane_id && *idx == raw_idx);
             let is_synced = state
                 .sync_ts
-                .zip(line_abs)
-                .is_some_and(|(ts, n)| (ts - n).abs() < 0.5);
+                .is_some_and(|ts| (ts - stored_line.abs_num).abs() < 0.5);
             if is_focused || is_synced {
                 let style = if is_focused {
                     Style::default().bg(Color::DarkGray)
@@ -303,7 +302,7 @@ fn draw_pane_content(f: &mut Frame, state: &State, area: Rect) {
             lines.push(line);
         }
         f.render_widget(Paragraph::new(lines), content_area);
-        draw_scrollbar(f, pane_areas[i], line_count, scroll, visible, focused);
+        draw_scrollbar(f, pane_areas[i], match_count, scroll, visible, focused);
     }
 }
 
@@ -530,6 +529,52 @@ mod tests {
             rows.push(row.trim_end().to_string());
         }
         rows.join("\n")
+    }
+
+    #[test]
+    fn drawing_and_hit_testing_follow_tail_before_and_across_trim() {
+        use crate::state::{MAX_LINES_PER_PANE, TRIM_SLACK};
+
+        let mut s = populated_state();
+        s.active_tab = 1;
+        let pane = "UART_DUT";
+        let area = Rect::new(0, 0, 80, 10);
+        let limit = MAX_LINES_PER_PANE + TRIM_SLACK;
+        let append = |s: &mut State, i| {
+            s.append_line(
+                pane,
+                StoredLine {
+                    line_idx: i as u64,
+                    message: format!("row-{i}"),
+                    ..Default::default()
+                },
+            );
+        };
+        for i in 0..limit - 1 {
+            append(&mut s, i);
+        }
+        s.scroll_to_bottom(pane);
+        for i in [limit - 1, limit, limit + 1] {
+            append(&mut s, i);
+            let output = render(&s, area.width, area.height);
+            assert!(
+                output.lines().nth(6).unwrap().contains(&format!("row-{i}")),
+                "{output}"
+            );
+            let hit = hit_test_pane(&s, area, 2, 6).unwrap();
+            assert_eq!(s.raw_lines[pane][hit.raw_idx.unwrap()].line_idx, i as u64);
+            assert_eq!(hit_test_pane(&s, area, 2, 7).unwrap().raw_idx, None);
+        }
+        s.scroll_active(-1, active_visible_rows(&s, area.height));
+        let output = render(&s, area.width, area.height);
+        assert!(
+            output
+                .lines()
+                .nth(6)
+                .unwrap()
+                .contains(&format!("row-{limit}")),
+            "{output}"
+        );
     }
 
     #[test]

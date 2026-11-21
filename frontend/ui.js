@@ -6,6 +6,7 @@ import {
 } from './levels.js';
 import { rebuildLayout } from './tabcreate.js';
 import { getPanePluginSettings, setPanePluginSetting } from './pluginRuntime.js';
+import { fetchCrashReport } from './export.js';
 
 
 
@@ -72,20 +73,22 @@ document.getElementById("btn-unwrap")?.addEventListener("click", () => {
 // Settings panel — read-only effective configuration (never raw YAML).
 // ---------------------------------------------------------------------------
 (function () {
+    const offline = window.__embedLogProfile?.kind === "static";
     const panel = document.getElementById("settings-panel");
     if (!panel) return;
     const btn = document.createElement("button");
     btn.id = "btn-runtime-config";
     btn.textContent = "Configuration";
-    btn.title = "View runtime configuration summary (requires a live server)";
+    btn.title = offline ? "View saved configuration snapshot" : "View runtime configuration summary";
     const dialog = document.createElement("dialog");
     dialog.className = "runtime-config-dialog";
     dialog.setAttribute("aria-labelledby", "runtime-config-title");
     dialog.innerHTML = '<h2 id="runtime-config-title">Runtime configuration (read-only)</h2><pre></pre><button type="button">Close</button>';
     const update = () => {
         const config = window.__embedLogRuntimeConfig;
-        btn.disabled = !config;
-        dialog.querySelector("pre").textContent = config ? JSON.stringify(config, null, 2) : "Configuration unavailable from this server.";
+        btn.disabled = !offline && !config;
+        dialog.querySelector("pre").textContent = config ? JSON.stringify(config, null, 2)
+            : offline ? "No configuration snapshot was saved." : "Configuration unavailable from this server.";
     };
     window.__embedLogUpdateRuntimeConfig = update;
     btn.addEventListener("click", () => { update(); dialog.showModal(); });
@@ -357,9 +360,26 @@ function _buildSwapTargetOptions(select, fromPaneId) {
     menu.addEventListener("mouseleave", scheduleHide);
 })();
 
-// ---------------------------------------------------------------------------
-// Filter inputs
-// ---------------------------------------------------------------------------
+// Pickers are fixed so the pane's overflow does not clip them.
+function _positionPicker(button, picker) {
+    const edge = 8;
+    const anchor = button.getBoundingClientRect();
+    const { clientWidth, clientHeight } = document.documentElement;
+    const below = clientHeight - anchor.bottom - 4 - edge;
+    const above = anchor.top - 4 - edge;
+    const drop = below >= Math.min(320, picker.scrollHeight + 2) || below >= above;
+    picker.style.setProperty('--picker-room', `${Math.max(0, drop ? below : above)}px`);
+    const { width, height } = picker.getBoundingClientRect();
+    picker.style.left = `${Math.max(edge, Math.min(anchor.right - width, clientWidth - width - edge))}px`;
+    picker.style.top = `${drop ? anchor.bottom + 4 : anchor.top - 4 - height}px`;
+}
+
+window.addEventListener('resize', () => {
+    for (const picker of document.querySelectorAll('.level-menu:not([hidden]), .events-menu:not([hidden])')) {
+        if (picker.getClientRects().length) _positionPicker(picker.previousElementSibling, picker);
+    }
+});
+
 // ---------------------------------------------------------------------------
 // Per-pane log level filter ("Levels" button next to Highlight)
 // ---------------------------------------------------------------------------
@@ -385,10 +405,11 @@ function _setupLevelControl(id, after) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'level-mode';
-    button.setAttribute('aria-haspopup', 'true');
     button.setAttribute('aria-expanded', 'false');
+    button.setAttribute('aria-controls', `level-menu-${id}`);
     const menu = document.createElement('div');
     menu.className = 'level-menu';
+    menu.id = `level-menu-${id}`;
     menu.hidden = true;
     menu.setAttribute('role', 'group');
     menu.setAttribute('aria-label', 'Visible log levels');
@@ -442,6 +463,8 @@ function _setupLevelControl(id, after) {
             showAllLevels(id);
             applyChange();
             renderMenu();
+            _positionPicker(button, menu);
+            menu.querySelector('.level-show-all').focus();
         });
         menu.append(all);
     };
@@ -450,6 +473,7 @@ function _setupLevelControl(id, after) {
             renderMenu();
             menu.hidden = false;
             button.setAttribute('aria-expanded', 'true');
+            _positionPicker(button, menu);
             menu.querySelector('input')?.focus();
         } else {
             menu.hidden = true;
@@ -478,7 +502,7 @@ window.__embedLogRefreshLevelControls = () => {
 const EVENT_LABELS = { boot: "Restart", crash: "Crash" };
 const EVENT_ICONS = { boot: "\u27f3", crash: "\u2716" };
 const MAX_LISTED_EVENTS = 300;
-const _eventBadges = new Map(); // paneId -> { refresh, menu }
+const _eventBadges = new Map(); // paneId -> { refresh }
 
 function _paneEventSources(paneId) {
     const merge = (window.__embedLogMerges || []).find(m => m && m.name === paneId);
@@ -527,16 +551,23 @@ function _setupEventBadge(id) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "pane-events-btn";
-    button.setAttribute("aria-haspopup", "true");
     button.setAttribute("aria-expanded", "false");
+    button.setAttribute("aria-controls", `events-menu-${id}`);
     const menu = document.createElement("div");
     menu.className = "events-menu";
+    menu.id = `events-menu-${id}`;
     menu.hidden = true;
-    menu.setAttribute("role", "menu");
+    menu.tabIndex = -1;
+    menu.setAttribute("role", "group");
     menu.setAttribute("aria-label", "Device restarts and crashes");
     wrap.append(button, menu);
     (header.querySelector(".pane-stats") || header.firstElementChild)?.after(wrap);
 
+    const close = () => {
+        menu.hidden = true;
+        button.setAttribute("aria-expanded", "false");
+        button.focus();
+    };
     const renderMenu = () => {
         const counts = _paneEventCounts(id);
         const events = paneEvents(id).reverse();
@@ -545,9 +576,9 @@ function _setupEventBadge(id) {
             const row = document.createElement("button");
             row.type = "button";
             row.className = `events-item events-${item.event}`;
-            row.setAttribute("role", "menuitem");
             const icon = document.createElement("span");
             icon.className = "events-icon";
+            icon.setAttribute("aria-hidden", "true");
             icon.textContent = EVENT_ICONS[item.event];
             const label = document.createElement("span");
             label.className = "events-kind";
@@ -560,12 +591,12 @@ function _setupEventBadge(id) {
             text.textContent = item.text;
             row.append(icon, label, time, text);
             row.addEventListener("click", () => {
-                menu.hidden = true;
-                button.setAttribute("aria-expanded", "false");
+                close();
                 revealRawLine(id, item.rawIndex);
             });
             const entry = document.createElement("div");
             entry.className = "events-entry";
+            entry.dataset.eventKey = `${item.sourceId}:${item.sequence ?? item.rawIndex}`;
             entry.append(row);
             if (item.event === "boot" && Number.isFinite(item.sequence)) {
                 const only = document.createElement("button");
@@ -574,8 +605,7 @@ function _setupEventBadge(id) {
                 only.textContent = "Only this boot";
                 only.title = "Show only the lines from this restart until the next restart of the same device";
                 only.addEventListener("click", () => {
-                    menu.hidden = true;
-                    button.setAttribute("aria-expanded", "false");
+                    close();
                     _applyBootFilter(id, item.sourceId, item.sequence);
                 });
                 entry.append(only);
@@ -585,10 +615,10 @@ function _setupEventBadge(id) {
                 decode.type = "button";
                 decode.className = "events-decode";
                 decode.textContent = "Decode";
-                decode.title = "Symbolize this crash dump with the firmware ELF";
+                decode.title = window.__embedLogProfile?.kind === "static"
+                    ? "View saved crash report" : "Symbolize this crash dump with the firmware ELF";
                 decode.addEventListener("click", () => {
-                    menu.hidden = true;
-                    button.setAttribute("aria-expanded", "false");
+                    close();
                     revealRawLine(id, item.rawIndex);
                     _showCrashDecode(item);
                 });
@@ -619,27 +649,37 @@ function _setupEventBadge(id) {
             button.append(part);
         }
         const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
-        button.title = `${plural(counts.boot, "restart", "restarts")}, ${plural(counts.crash, "crash", "crashes")}`
-            + " detected in this session. Click to list them.";
-        if (!menu.hidden) renderMenu();
-    };
-    button.addEventListener("click", () => {
-        if (menu.hidden) {
-            renderMenu();
-            menu.hidden = false;
-            button.setAttribute("aria-expanded", "true");
-            menu.querySelector("button")?.focus();
-        } else {
+        const summary = `${plural(counts.boot, "restart", "restarts")}, ${plural(counts.crash, "crash", "crashes")}`;
+        button.title = `${summary} detected in this session. Click to list them.`;
+        button.setAttribute("aria-label", summary);
+        if (menu.hidden) return;
+        if (wrap.hidden) {
             menu.hidden = true;
             button.setAttribute("aria-expanded", "false");
+            return;
         }
+        const focused = document.activeElement;
+        const key = focused.closest(".events-entry")?.dataset.eventKey;
+        renderMenu();
+        if (!menu.getClientRects().length) return;
+        _positionPicker(button, menu);
+        if (key) {
+            const entry = [...menu.children].find(row => row.dataset.eventKey === key);
+            (entry?.getElementsByClassName(focused.classList[0])[0] || menu).focus();
+        }
+    };
+    button.addEventListener("click", () => {
+        if (!menu.hidden) return close();
+        renderMenu();
+        menu.hidden = false;
+        button.setAttribute("aria-expanded", "true");
+        _positionPicker(button, menu);
+        (menu.querySelector("button") || menu).focus();
     });
-    menu.addEventListener("keydown", event => {
-        if (event.key !== "Escape") return;
+    wrap.addEventListener("keydown", event => {
+        if (event.key !== "Escape" || menu.hidden) return;
         event.stopPropagation();
-        menu.hidden = true;
-        button.setAttribute("aria-expanded", "false");
-        button.focus();
+        close();
     });
     _eventBadges.set(id, { refresh });
     refresh();
@@ -673,7 +713,7 @@ function _setupBootChip(id) {
     chip.className = "boot-chip";
     chip.hidden = true;
     chip.innerHTML = '<button type="button" class="boot-prev" aria-label="Previous boot" title="Previous boot">\u2039</button>'
-        + '<span class="boot-label"></span>'
+        + '<span class="boot-label" role="status"></span>'
         + '<button type="button" class="boot-next" aria-label="Next boot" title="Next boot">\u203a</button>'
         + '<button type="button" class="boot-clear" aria-label="Show all boots" title="Show all boots">\u2715</button>';
     bar.append(chip);
@@ -685,9 +725,20 @@ function _setupBootChip(id) {
         const next = boots[at + direction];
         if (next) _applyBootFilter(id, filter.sourceId, next.sequence);
     };
-    chip.querySelector(".boot-prev").addEventListener("click", () => step(-1));
-    chip.querySelector(".boot-next").addEventListener("click", () => step(1));
-    chip.querySelector(".boot-clear").addEventListener("click", () => setBootFilter(id, null));
+    const prev = chip.querySelector(".boot-prev");
+    const next = chip.querySelector(".boot-next");
+    prev.addEventListener("click", () => {
+        step(-1);
+        if (prev.disabled) next.focus();
+    });
+    next.addEventListener("click", () => {
+        step(1);
+        if (next.disabled) prev.focus();
+    });
+    chip.querySelector(".boot-clear").addEventListener("click", () => {
+        setBootFilter(id, null);
+        bar.closest(".pane").querySelector(".pane-events-btn")?.focus();
+    });
     _bootChips.set(id, () => {
         const filter = bootFilter(id);
         chip.hidden = !filter;
@@ -695,10 +746,11 @@ function _setupBootChip(id) {
         const boots = _paneBoots(id, filter.sourceId);
         const at = boots.findIndex(b => b.sequence === filter.fromSequence);
         const merged = _paneEventSources(id).length > 1 ? `${paneLabel(filter.sourceId)} ` : "";
-        chip.querySelector(".boot-label").textContent =
-            `\u27f3 ${merged}boot ${at + 1}/${boots.length} \u00b7 ${filter.ts}${filter.toSequence === null ? " \u2192 now" : ""}`;
-        chip.querySelector(".boot-prev").disabled = at <= 0;
-        chip.querySelector(".boot-next").disabled = at < 0 || at >= boots.length - 1;
+        const label = chip.querySelector(".boot-label");
+        const text = `\u27f3 ${merged}boot ${at + 1}/${boots.length} \u00b7 ${filter.ts}${filter.toSequence === null ? " \u2192 now" : ""}`;
+        if (label.textContent !== text) label.textContent = text;
+        prev.disabled = at <= 0;
+        next.disabled = at < 0 || at >= boots.length - 1;
     });
     _bootChips.get(id)();
 }
@@ -706,10 +758,12 @@ function _setupBootChip(id) {
 const _bootChips = new Map();
 window.__embedLogOnBootFilterChange = paneId => _bootChips.get(paneId)?.();
 
-// ── Crash decoding with the firmware ELF (live server only) ──
+// ── Live crash decoding and offline replay ──
 function _canDecode(item) {
+    if (!Number.isFinite(item.sequence)) return false;
+    if (window.__embedLogProfile?.kind === "static") return true;
     const session = window.__embedLogSession;
-    return !!(session?.id && Number.isFinite(item.sequence) && session.symbols?.[item.sourceId]);
+    return !!(session?.id && (!item.sessionId || item.sessionId === session.id) && session.symbols?.[item.sourceId]);
 }
 
 function _crashDialog() {
@@ -717,9 +771,10 @@ function _crashDialog() {
     if (dialog) return dialog;
     dialog = document.createElement("dialog");
     dialog.id = "crash-dialog";
-    dialog.innerHTML = '<div class="crash-head"><span class="crash-title"></span>'
+    dialog.setAttribute("aria-labelledby", "crash-title");
+    dialog.innerHTML = '<div class="crash-head"><span id="crash-title" class="crash-title"></span>'
         + '<button type="button" class="crash-close" aria-label="Close">\u2715</button></div>'
-        + '<div class="crash-meta"></div><div class="crash-body"></div>';
+        + '<div class="crash-meta" role="status"></div><div class="crash-body"></div>';
     dialog.querySelector(".crash-close").addEventListener("click", () => dialog.close());
     dialog.addEventListener("click", event => { if (event.target === dialog) dialog.close(); });
     document.body.append(dialog);
@@ -740,18 +795,25 @@ async function _showCrashDecode(item) {
     const body = dialog.querySelector(".crash-body");
     body.replaceChildren();
     if (!dialog.open) dialog.showModal();
-    const session = window.__embedLogSession;
+    const offline = window.__embedLogProfile?.kind === "static";
     let report;
     try {
-        const response = await fetch(`/api/sessions/${encodeURIComponent(session.id)}/crashes/${item.sequence}?source=${encodeURIComponent(item.sourceId)}`, { cache: "no-store" });
-        const result = await response.json().catch(() => ({}));
-        if (!response.ok || !result.report) throw new Error(result.error || `HTTP ${response.status}`);
-        report = result.report;
+        report = offline
+            ? window.__embedLogCrashReports?.find(saved => saved.source === item.sourceId && saved.sequence === item.sequence)
+            : await fetchCrashReport(window.__embedLogSession.id, item);
+        if (!report || report.unavailable) throw new Error("No decoded frames were saved for this crash.");
     } catch (error) {
         dialog.querySelector(".crash-meta").textContent = `${item.ts} \u00b7 cannot decode: ${error.message}`;
         return;
     }
-    dialog.querySelector(".crash-meta").textContent = `${item.ts} \u00b7 record #${report.sequence} \u00b7 ELF ${report.elf}`;
+    dialog.querySelector(".crash-meta").textContent = `${item.ts} \u00b7 record #${report.sequence}`
+        + (offline ? " · saved report" : ` · ELF ${report.elf}`);
+    if (report.partial) {
+        const note = document.createElement("p");
+        note.className = "crash-note";
+        note.textContent = "Some frames were outside the exported logs.";
+        body.append(note);
+    }
     const table = document.createElement("table");
     table.className = "crash-frames";
     table.innerHTML = "<thead><tr><th>Register</th><th>Address</th><th>Function</th><th>Location</th></tr></thead>";
@@ -786,11 +848,13 @@ async function _showCrashDecode(item) {
     if (!report.addresses.length) {
         const note = document.createElement("p");
         note.className = "crash-note";
-        note.textContent = "No code addresses (pc, lr, call trace) were found in this fault dump.";
+        note.textContent = offline ? "No code addresses were saved for this crash."
+            : "No code addresses (pc, lr, call trace) were found in this fault dump.";
         body.append(note);
     } else {
         body.append(table);
     }
+    if (offline) return;
     const dump = document.createElement("details");
     dump.className = "crash-dump";
     const summary = document.createElement("summary");
@@ -847,16 +911,15 @@ export function _uiSetupPane(id) {
         controls.innerHTML = '<button type="button" class="search-prev" aria-label="Previous match" title="Previous match (Shift+Enter)">▲</button><span class="search-count" role="status" aria-live="polite"></span><button type="button" class="search-next" aria-label="Next match" title="Next match (Enter)">▼</button>';
         input.after(mode, controls);
         input.setAttribute('aria-label', 'Filter or highlight phrase');
-        controls.querySelector('.search-prev').addEventListener('click', () => navigatePaneSearch(id, -1));
-        controls.querySelector('.search-next').addEventListener('click', () => navigatePaneSearch(id, 1));
-        input.addEventListener('keydown', async event => {
-            // Enter applies what was typed right away instead of after the debounce.
-            const applying = !event.isComposing && event.key === 'Enter' ? flushPendingApply() : null;
-            if (!event.isComposing && state.searches[id] && (event.key === 'Enter' || event.key === 'F3')) {
+        controls.querySelector('.search-prev').addEventListener('click', () => navigate(-1));
+        controls.querySelector('.search-next').addEventListener('click', () => navigate(1));
+        input.addEventListener('keydown', event => {
+            if (event.isComposing) return;
+            if (state.searches[id] && (event.key === 'Enter' || event.key === 'F3')) {
                 event.preventDefault();
-                // A new phrase may still be loading history; navigate once it is counted.
-                if (applying) await applying;
-                navigatePaneSearch(id, event.shiftKey ? -1 : 1);
+                navigate(event.shiftKey ? -1 : 1);
+            } else if (event.key === 'Enter') {
+                flushPendingApply();
             }
         });
         const apply = async () => {
@@ -898,18 +961,31 @@ export function _uiSetupPane(id) {
         // Filtering or highlighting scans every line of the pane, so apply it
         // once typing pauses rather than on every keystroke.
         let pendingApply = null;
+        let applying = null;
+        const sessionId = () => window.__embedLogSession?.id;
+        let pendingSession;
         function flushPendingApply() {
-            if (pendingApply === null) return null;
-            clearTimeout(pendingApply);
-            pendingApply = null;
-            return apply();
+            if (pendingApply !== null) {
+                clearTimeout(pendingApply);
+                pendingApply = null;
+                if (input.isConnected && pendingSession === sessionId()) applying = apply();
+            }
+        }
+        async function navigate(direction) {
+            if (!input.isConnected) return;
+            flushPendingApply();
+            const search = state.searches[id];
+            const value = input.value;
+            const session = sessionId();
+            if (search?.loading) await applying;
+            if (input.isConnected && session === sessionId() && input.value === value && state.searches[id] === search) {
+                navigatePaneSearch(id, direction);
+            }
         }
         input.addEventListener('input', () => {
             clearTimeout(pendingApply);
-            pendingApply = setTimeout(() => {
-                pendingApply = null;
-                apply();
-            }, FILTER_INPUT_DEBOUNCE_MS);
+            pendingSession = sessionId();
+            pendingApply = setTimeout(flushPendingApply, FILTER_INPUT_DEBOUNCE_MS);
         });
         mode.addEventListener('click', () => {
             clearTimeout(pendingApply);
@@ -917,7 +993,7 @@ export function _uiSetupPane(id) {
             const enabled = mode.getAttribute('aria-pressed') !== 'true';
             mode.setAttribute('aria-pressed', String(enabled));
             controls.hidden = !enabled;
-            apply();
+            applying = apply();
         });
         _setupLevelControl(id, controls);
         updatePaneSearch(id);

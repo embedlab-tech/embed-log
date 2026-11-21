@@ -1,10 +1,12 @@
 import { state, TABS, PANES, PANE_LABELS, setTimestampContext, resetRelativeTimestampBase } from './state.js';
-import { appendLineBatch, clearPane, rerenderPane, setTimestampMode, refreshStatsUi, prependPaneHistory, invalidateFilterProjections } from './lines.js';
+import { appendLineBatch, clearPane, rerenderPane, setTimestampMode, refreshStatsUi, prependPaneHistory, resetAllLineStats } from './lines.js';
 import { createTabWithPanes } from './tabcreate.js';
 import { refreshLevelDefinitions } from './levels.js';
 import { configurePanePlugins, resetPanePlugins } from './pluginRuntime.js';
+import { invalidatePaneFilterProjection } from './lines.js';
 
 import { switchTab } from './tabs.js';
+import { updatePaneSearch } from './lines.js';
 
 let ws = null;
 let wsRetryDelay = 1000;
@@ -19,6 +21,8 @@ const LOG_FLUSH_MAX_LINES = 1000;
 const searchHistoryRequests = new Map();
 const searchHistoryLoaded = new Set();
 let searchHistoryGeneration = 0;
+let nextRecordOrdinal = 0;
+const messageEncoder = new TextEncoder();
 
 // Replay is bounded; explicitly requested full-session search must also read older records.
 // The server streams only this pane's sources from the session journal
@@ -84,6 +88,7 @@ window.__embedLogLoadSearchHistory = function (paneId) {
                 (merge ? `${label}: ` : '') + record.message,
                 record.type === 'tx' || record.is_tx === true,
                 { sourceId: record.source_id, sequence: record.sequence, sessionId,
+                    ...(merge ? { originalBytes: messageEncoder.encode(record.message).length } : {}),
                     lineIdx: record.line_idx, absTs: record.absTs, absNum: record.absNum,
                     relTs: record.relTs, relNum: record.relNum,
                     timestampIso: record.timestamp_iso, numTs: record.timestamp_num,
@@ -107,7 +112,7 @@ function invalidateSearchHistory() {
 }
 
 function resetLayoutForNewSession() {
-    invalidateSearchHistory();
+    clearAllPaneContents();
     const container = document.getElementById("container");
     if (container) container.innerHTML = "";
 
@@ -121,6 +126,7 @@ function resetLayoutForNewSession() {
     state.filters = {};
     state.searches = {};
     state.rawLines = {};
+    resetAllLineStats();
     state.atBottom = {};
     state.highlighted = {};
     state.highlightedIdx = {};
@@ -129,26 +135,30 @@ function resetLayoutForNewSession() {
     resetPanePlugins();
 }
 
-// The server drops records for a client that falls behind the broadcast
-// buffer and says so with `stream_gap`. Make the gap visible: the panes are
-// missing lines until the page reloads the replay buffer.
-let skippedLines = 0;
-function showStreamGap(skipped) {
-    skippedLines += Number.isFinite(skipped) && skipped > 0 ? skipped : 0;
+const STREAM_GAP_SESSION_KEY = 'embed-log:stream-gap-session';
+
+// A lagged broadcast can contain records for any pane, or only status messages.
+function showStreamGap() {
+    state.streamGap = true;
+    if (currentSessionId) {
+        try { sessionStorage.setItem(STREAM_GAP_SESSION_KEY, currentSessionId); } catch {}
+    }
     let notice = document.getElementById("stream-gap");
     if (!notice) {
         notice = document.createElement("button");
         notice.id = "stream-gap";
         notice.type = "button";
-        notice.title = "The browser fell behind the live stream and missed log lines. Click to reload and resync.";
+        notice.title = "The browser missed live updates. Reload to fetch recent replay; older missing lines may not be recovered.";
+        notice.textContent = "\u26a0 Log panes may be incomplete · Reload recent logs";
         notice.addEventListener("click", () => window.location.reload());
         wsStatus?.before(notice);
     }
     notice.hidden = false;
-    notice.textContent = `\u26a0 ${skippedLines.toLocaleString("en-US")} lines skipped`;
+    PANES.forEach(updatePaneSearch);
 }
 function hideStreamGap() {
-    skippedLines = 0;
+    state.streamGap = false;
+    try { sessionStorage.removeItem(STREAM_GAP_SESSION_KEY); } catch {}
     const notice = document.getElementById("stream-gap");
     if (notice) notice.hidden = true;
 }
@@ -224,13 +234,20 @@ async function _handleConfigMessage(msg) {
     const sessionId = msg.session?.id || null;
     const isSessionChange = currentSessionId && sessionId && currentSessionId !== sessionId;
     if (isSessionChange) {
+        hideStreamGap();
+        window.__embedLogSourceEvents = {};
         resetLayoutForNewSession();
     }
     currentSessionId = sessionId || currentSessionId;
+    try {
+        if (!state.streamGap && currentSessionId && sessionStorage.getItem(STREAM_GAP_SESSION_KEY) === currentSessionId) {
+            showStreamGap();
+        }
+    } catch {}
 
     // Create tabs and set pane metadata BEFORE loading plugins so log
     // lines render immediately.  Plugins load asynchronously and catch up.
-    setTimestampContext({
+    const enriched = setTimestampContext({
         mode: msg.session?.timestamp_mode || "absolute",
         firstLogAt: msg.session?.first_log_at,
         resetMode: isSessionChange || (TABS.length === 0 && PANES.length === 0),
@@ -238,6 +255,7 @@ async function _handleConfigMessage(msg) {
     if (isSessionChange || (TABS.length === 0 && PANES.length === 0)) {
         setTimestampMode(state.timestampMode);
     }
+    if (enriched) PANES.forEach(invalidatePaneFilterProjection);
     window.__embedLogUpdateTimestampModeUi?.();
 
     window.__embedLogSession = msg.session || null;
@@ -308,8 +326,8 @@ async function _handleConfigMessage(msg) {
 
     // Re-render all panes so plugin data attaches to already-visible lines,
     // and re-filter: plugin text is part of what a filter matches.
-    invalidateFilterProjections();
     PANES.forEach(id => {
+        invalidatePaneFilterProjection(id);
         try { rerenderPane(id); } catch (_) {}
     });
     window.__embedLogAfterConfig?.(msg.tabs || []);
@@ -323,8 +341,7 @@ function wsConnect() {
     ws.addEventListener("open", () => {
         // UX policy: never show stale in-memory lines after reconnect/open.
         clearAllPaneContents();
-        hideStreamGap();
-        // Live mode: counts come from the server (none yet in a new session).
+        // Live mode: counts come from the server.
         window.__embedLogSourceEvents = {};
         window.__embedLogRefreshEventBadges?.();
         wsSetStatus("connected", "connected");
@@ -348,12 +365,17 @@ function wsConnect() {
                 firstLogAt: msg.session?.first_log_at,
                 resetMode: false,
             });
-            if (enriched) PANES.forEach(rerenderPane);
+            if (enriched) {
+                PANES.forEach(invalidatePaneFilterProjection);
+                PANES.forEach(rerenderPane);
+            }
             window.__embedLogUpdateTimestampModeUi?.();
             return;
         }
         if (msg.type === "session_rotated") {
-            currentSessionId = msg.session?.id || currentSessionId;
+            const sessionId = msg.session?.id;
+            if (sessionId && sessionId !== currentSessionId) hideStreamGap();
+            currentSessionId = sessionId || currentSessionId;
             window.__embedLogSourceEvents = {};
             window.__embedLogRefreshEventBadges?.();
             state.syncTs = null;
@@ -398,7 +420,7 @@ function wsConnect() {
         }
 
         if (msg.type === "stream_gap") {
-            showStreamGap(msg.skipped);
+            if (!msg.session_id || msg.session_id === currentSessionId) showStreamGap();
             return;
         }
 
@@ -429,25 +451,27 @@ function wsConnect() {
             return;
         }
         const sourceLabel = PANE_LABELS[source_id] || source_id;
+        const text = data || "";
+        const hasMerge = destinations.some(({ virtual }) => virtual);
+        const mergedText = hasMerge ? `${sourceLabel}: ${text}` : text;
+        const meta = {
+            sourceId: source_id,
+            timestampIso: timestamp_iso,
+            numTs: timestamp_num,
+            absTs, absNum, relTs, relNum,
+            lineIdx: line_idx,
+            sessionId: session_id || currentSessionId,
+            ...(hasMerge ? { originalBytes: messageEncoder.encode(text).length } : {}),
+            ...(typeof event === "string" && event ? { event } : {}),
+            ...(Number.isFinite(sequence) ? { sequence } : { recordOrdinal: nextRecordOrdinal++ }),
+            ...(typeof level === "string" && level ? { level } : {}),
+        };
         destinations.forEach(({ paneId, virtual }) => enqueueLogMessage({
             paneId,
             ts: timestamp || "",
-            rawText: virtual ? `${sourceLabel}: ${data || ""}` : (data || ""),
+            rawText: virtual ? mergedText : text,
             isTx: type === "tx",
-            meta: {
-                sourceId: source_id,
-                timestampIso: timestamp_iso,
-                numTs: timestamp_num,
-                absTs: absTs,
-                absNum: absNum,
-                relTs: relTs,
-                relNum: relNum,
-                lineIdx: line_idx,
-                ...(typeof event === "string" && event ? { event } : {}),
-                ...(Number.isFinite(sequence) ? { sequence } : {}),
-                ...(session_id ? { sessionId: session_id } : {}),
-                ...(typeof level === "string" && level ? { level } : {}),
-            },
+            meta,
         }));
     });
 

@@ -34,3 +34,4 @@ addr2line = { version = "0.24", default-features = false, features = ["std", "lo
 
 [dev-dependencies]
 serde_yaml.workspace = true
+tokio-tungstenite = "0.29"

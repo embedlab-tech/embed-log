@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -29,9 +29,7 @@ pub struct SessionExporter {
     frontend_dir: PathBuf,
     timestamp_mode: String,
     first_log_at: Option<String>,
-    pane_plugins: serde_json::Value,
-    frontend_plugins: serde_json::Value,
-    plugin_scripts: serde_json::Value,
+    session_dir: Option<PathBuf>,
     markers: Vec<serde_json::Value>,
     merges: Vec<crate::config::MergeConfig>,
     combined_file: Option<PathBuf>,
@@ -59,9 +57,7 @@ impl SessionExporter {
             frontend_dir,
             timestamp_mode,
             first_log_at,
-            pane_plugins: json!({}),
-            frontend_plugins: json!({}),
-            plugin_scripts: json!({}),
+            session_dir: None,
             markers: vec![],
             merges: vec![],
             combined_file: None,
@@ -88,16 +84,9 @@ impl SessionExporter {
         self
     }
 
-    /// Set plugin data from the server's loaded plugins.
-    pub fn with_plugins(
-        mut self,
-        frontend_plugins: serde_json::Value,
-        pane_plugins: serde_json::Value,
-        plugin_scripts: serde_json::Value,
-    ) -> Self {
-        self.frontend_plugins = frontend_plugins;
-        self.pane_plugins = pane_plugins;
-        self.plugin_scripts = plugin_scripts;
+    /// Directory holding the recorded manifest and symbol snapshots.
+    pub fn with_session_dir(mut self, path: PathBuf) -> Self {
+        self.session_dir = Some(path);
         self
     }
 
@@ -196,6 +185,12 @@ impl SessionExporter {
                     .push(LogEntry {
                         source_id: Some(source_id),
                         sequence: record.get("sequence").and_then(|value| value.as_u64()),
+                        session_id: record
+                            .get("session_id")
+                            .and_then(|value| value.as_str())
+                            .map(str::to_string),
+                        record_ordinal: None,
+                        original_bytes: None,
                         ts: record
                             .get("timestamp")
                             .or_else(|| record.get("absTs"))
@@ -251,9 +246,41 @@ impl SessionExporter {
             }
         }
 
+        // Assign local identities before cloning records from legacy logs.
+        let mut sources = log_data.iter_mut().collect::<Vec<_>>();
+        sources.sort_unstable_by_key(|(name, _)| *name);
+        for (ordinal, entry) in sources
+            .into_iter()
+            .flat_map(|(_, entries)| entries)
+            .enumerate()
+        {
+            if entry.sequence.is_none() {
+                entry.record_ordinal = Some(ordinal);
+            }
+        }
+
+        let pane_ids: HashSet<_> = self
+            .tabs
+            .iter()
+            .filter_map(|tab| tab.get("panes").and_then(|panes| panes.as_array()))
+            .flatten()
+            .filter_map(|id| id.as_str())
+            .collect();
+        let merges: Vec<_> = self
+            .merges
+            .iter()
+            .filter(|merge| pane_ids.contains(merge.name.as_str()))
+            .collect();
+        let mut sources = pane_ids.clone();
+        for merge in &merges {
+            sources.remove(merge.name.as_str());
+            sources.extend(merge.of.iter().map(String::as_str));
+        }
+        let (runtime_config, crash_reports) = self.replay_data(&log_data, &sources);
+
         // Build presentation-only merge panes from original source entries.
         // These clones exist only in the exported HTML and retain source_id.
-        for merge in &self.merges {
+        for merge in &merges {
             let mut entries = Vec::new();
             for member in &merge.of {
                 let label = self
@@ -263,6 +290,7 @@ impl SessionExporter {
                     .unwrap_or(member);
                 if let Some(member_entries) = log_data.get(member) {
                     entries.extend(member_entries.iter().cloned().map(|mut entry| {
+                        entry.original_bytes.get_or_insert(entry.text.len());
                         entry.text = format!("{label}: {}", entry.text);
                         entry
                     }));
@@ -306,21 +334,55 @@ impl SessionExporter {
             }
         }
 
+        for source in &sources {
+            if let Some(label) = self.source_labels.get(*source) {
+                pane_labels_map
+                    .entry((*source).to_owned())
+                    .or_insert_with(|| label.clone());
+            }
+        }
+
         // Build JSON serializations.
-        let tabs_json = serde_json::to_string(&self.tabs)?;
-        let panes_json = serde_json::to_string(&all_pane_ids)?;
-        let pane_labels_json = serde_json::to_string(&pane_labels_map)?;
-        let frontend_plugins_json = serde_json::to_string(&self.frontend_plugins)?;
-        let pane_plugins_json = serde_json::to_string(&self.pane_plugins)?;
-        let plugin_scripts_json = serde_json::to_string(&self.plugin_scripts)?;
-        let markers_json = serde_json::to_string(&self.markers)?;
-        let merges_json = serde_json::to_string(&self.merges)?;
-        let source_levels_js = match &self.source_levels {
-            Some(levels) => format!(
+        let tabs: Vec<_> = self
+            .tabs
+            .iter()
+            .map(|tab| {
+                json!({
+                    "label": tab.get("label"), "panes": tab.get("panes"),
+                })
+            })
+            .collect();
+        let tabs_json = script_json(&tabs)?;
+        let panes_json = script_json(&all_pane_ids)?;
+        let pane_labels_json = script_json(&pane_labels_map)?;
+        let markers: Vec<_> = self
+            .markers
+            .iter()
+            .filter(|marker| {
+                marker["paneId"]
+                    .as_str()
+                    .is_some_and(|id| pane_ids.contains(id))
+            })
+            .collect();
+        let markers_json = script_json(&markers)?;
+        let merges_json = script_json(&merges)?;
+        let runtime_config_json = script_json(&runtime_config)?;
+        let crash_reports_json = script_json(&crash_reports)?;
+        let source_levels_js = if let Some(levels) = self
+            .source_levels
+            .as_ref()
+            .and_then(|value| value.as_object())
+        {
+            let levels: HashMap<_, _> = levels
+                .iter()
+                .filter(|(id, _)| sources.contains(id.as_str()) || pane_ids.contains(id.as_str()))
+                .collect();
+            format!(
                 "window.__embedLogSourceLevels = {};\n",
-                serde_json::to_string(levels)?
-            ),
-            None => String::new(),
+                script_json(&levels)?
+            )
+        } else {
+            String::new()
         };
 
         // Build static profile.
@@ -349,9 +411,8 @@ impl SessionExporter {
              window.TABS = {tabs_json};\n\
              window.PANES = {panes_json};\n\
              window.PANE_LABELS = {pane_labels_json};\n\
-             window.__embedLogFrontendPlugins = {frontend_plugins_json};\n\
-             window.__embedLogPanePlugins = {pane_plugins_json};\n\
-             window.__embedLogPluginScripts = {plugin_scripts_json};\n\
+             window.__embedLogRuntimeConfig = {runtime_config_json};\n\
+             window.__embedLogCrashReports = {crash_reports_json};\n\
              window.__embedLogMerges = {merges_json};\n\
              {source_levels_js}\
              window.__embedLogInitialPanePluginUiState = {{}};\n\
@@ -359,8 +420,8 @@ impl SessionExporter {
              window.__embedLogInitialTimestampMode = {tm};\n\
              window.__embedLogFirstLogAt = {fla};\n\
              window.__embedLogInitialFontSize = 14;",
-            tm = json!(self.timestamp_mode),
-            fla = json!(effective_first_log_at),
+            tm = script_json(&self.timestamp_mode)?,
+            fla = script_json(&effective_first_log_at)?,
         ));
 
         // Build pane data tags (lazy mode).
@@ -393,6 +454,15 @@ impl SessionExporter {
                 if let Some(sequence) = e.sequence {
                     meta["sequence"] = json!(sequence);
                 }
+                if let Some(session_id) = &e.session_id {
+                    meta["sessionId"] = json!(session_id);
+                }
+                if let Some(ordinal) = e.record_ordinal {
+                    meta["recordOrdinal"] = json!(ordinal);
+                }
+                if let Some(bytes) = e.original_bytes {
+                    meta["originalBytes"] = json!(bytes);
+                }
                 if let Some(level) = &e.level {
                     meta["level"] = json!(level);
                 }
@@ -410,7 +480,7 @@ impl SessionExporter {
                 if index > 0 {
                     pane_data_tags.push(',');
                 }
-                pane_data_tags.push_str(&serde_json::to_string(&entry)?.replace("</", "<\\/"));
+                pane_data_tags.push_str(&script_json(&entry)?);
             }
             pane_data_tags.push_str("]</script>\n");
         }
@@ -467,13 +537,10 @@ impl SessionExporter {
         ];
         let mut js_blocks = String::new();
         for &filename in &js_files {
-            if filename == "state.js" {
-                js_blocks.push_str(&plugin_script_tags(&self.plugin_scripts));
-            }
             if let Some(src) = self.read_frontend_asset(filename) {
                 let stripped = strip_module_syntax(&src);
                 let escaped = esc_script_text(&stripped);
-                js_blocks.push_str("<script>");
+                js_blocks.push_str(&format!("<script data-asset=\"{filename}\">"));
                 js_blocks.push_str(&escaped);
                 js_blocks.push_str("</script>\n");
             }
@@ -519,9 +586,9 @@ impl SessionExporter {
         html.push_str("<!DOCTYPE html>\n");
         html.push_str("<html lang=\"en\" data-theme=\"whitesand\">\n");
         html.push_str("<head>\n");
-        html.push_str("<meta charset=\"UTF-8\">\n");
+        html.push_str("<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n");
         html.push_str(&format!("<title>embed-log — {safe_title}</title>\n"));
-        html.push_str("<style>");
+        html.push_str("<style data-asset=\"viewer.css\">");
         html.push_str(&css);
         html.push_str("</style>\n");
         html.push_str("</head>\n");
@@ -563,6 +630,75 @@ impl SessionExporter {
             .with_context(|| format!("write session HTML {}", self.html_path.display()))?;
         info!("session HTML exported: {}", self.html_path.display());
         Ok(())
+    }
+
+    fn replay_data(
+        &self,
+        log_data: &HashMap<String, Vec<LogEntry>>,
+        sources: &HashSet<&str>,
+    ) -> (serde_json::Value, Vec<serde_json::Value>) {
+        use crate::symbols::{manifest_elf, replay_addresses, Symbolizer};
+        let dir = self
+            .session_dir
+            .as_deref()
+            .or_else(|| self.combined_file.as_deref().and_then(Path::parent))
+            .and_then(|path| path.canonicalize().ok());
+        let manifest: serde_json::Value = dir
+            .as_deref()
+            .and_then(|dir| session_file(dir, &dir.join("manifest.json")))
+            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default();
+        let config = configuration_snapshot(&manifest["runtime_config"], Some(sources));
+        let mut reports = Vec::new();
+        for (source, entries) in log_data
+            .iter()
+            .filter(|(id, _)| sources.contains(id.as_str()))
+        {
+            let entries: Vec<_> = entries
+                .iter()
+                .filter(|entry| !entry.is_tx && entry.sequence.is_some())
+                .collect();
+            let mut crashes = entries
+                .iter()
+                .enumerate()
+                .filter(|(_, entry)| entry.event.as_deref() == Some(crate::events::CRASH))
+                .peekable();
+            if crashes.peek().is_none() {
+                continue;
+            }
+            let symbolizer = dir
+                .as_deref()
+                .and_then(|dir| session_file(dir, &manifest_elf(dir, &manifest, source).ok()?))
+                .and_then(|elf| Symbolizer::open(&elf).ok());
+            for (index, entry) in crashes {
+                let addresses = symbolizer
+                    .as_ref()
+                    .map(|elf| replay_addresses(elf, &entries, index))
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|address| {
+                        let frames: Vec<_> = address
+                            .frames
+                            .into_iter()
+                            .map(|mut frame| {
+                                frame.file = frame
+                                    .file
+                                    .as_deref()
+                                    .and_then(|path| path.rsplit(['/', '\\']).next())
+                                    .map(str::to_owned);
+                                frame
+                            })
+                            .collect();
+                        json!({"address": address.address.address, "label": address.address.label,
+                            "record_sequence": address.record_sequence, "frames": frames})
+                    })
+                    .collect::<Vec<_>>();
+                reports.push(json!({"source": source, "sequence": entry.sequence,
+                    "unavailable": symbolizer.is_none(), "addresses": addresses}));
+            }
+        }
+        (config, reports)
     }
 
     /// Read a frontend asset from embedded assets or filesystem.
@@ -655,21 +791,45 @@ fn esc_script_text(src: &str) -> String {
     script_close_re().replace_all(src, "<\\/script").to_string()
 }
 
-fn plugin_script_tags(plugin_scripts: &serde_json::Value) -> String {
-    let mut tags = String::new();
-    if let Some(scripts) = plugin_scripts.as_object() {
-        for script in scripts.values() {
-            if let Some(script_str) = script.as_str() {
-                tags.push_str("<script>");
-                tags.push_str(&esc_script_text(script_str));
-                tags.push_str("</script>\n");
+fn script_json(value: &impl serde::Serialize) -> Result<String> {
+    Ok(serde_json::to_string(value)?.replace('<', "\\u003c"))
+}
+
+fn session_file(dir: &Path, path: &Path) -> Option<PathBuf> {
+    let path = path.canonicalize().ok()?;
+    (path.starts_with(dir) && path.is_file()).then_some(path)
+}
+
+/// Shareable projection of the existing runtime summary, not the raw config.
+/// Host/device locations, parser databases and credentials are not exported.
+pub(super) fn configuration_snapshot(
+    summary: &serde_json::Value,
+    sources: Option<&HashSet<&str>>,
+) -> serde_json::Value {
+    let Some(configured) = summary.get("sources").and_then(|value| value.as_array()) else {
+        return serde_json::Value::Null;
+    };
+    let configured: Vec<_> = configured
+        .iter()
+        .filter_map(|source| {
+            let name = source.get("name")?.as_str()?;
+            if sources.is_some_and(|scope| !scope.contains(name)) {
+                return None;
             }
-        }
-    }
-    tags
+            Some(json!({
+                "name": name,
+                "type": source["type"].as_str(),
+                "baudrate": source["baudrate"].as_u64(),
+                "parser": { "type": source["parser"]["type"].as_str() },
+            }))
+        })
+        .collect();
+    json!({ "server": { "timestamp_mode": summary["server"]["timestamp_mode"].as_str() },
+        "sources": configured })
 }
 
 fn pane_html(pane_id: &str, label: &str) -> String {
+    let pane_id = html_escape(pane_id);
     let safe_label = html_escape(label);
     format!(
         "        <div class=\"pane\" id=\"pane-{pane_id}\">\n\
@@ -867,6 +1027,91 @@ mod tests {
             assert!(rows[0][3].get("event").is_none());
             assert_eq!(rows[1][3]["event"], "boot", "{}", &capture[1]);
         }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn html_replays_scoped_crashes_and_configuration_without_firmware() {
+        let dir = std::env::temp_dir().join(format!(
+            "embed-log-export-replay-{}-{}",
+            std::process::id(),
+            EXPORT_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/cortex-m4-fault.elf");
+        let symbols = crate::symbols::snapshot_elfs(&dir, &[("DUT".into(), fixture)]);
+        std::fs::write(dir.join("manifest.json"), json!({
+            "symbols": symbols,
+            "runtime_config": {
+                "server": {"timestamp_mode":"absolute", "logs_root":"PRIVATE_LOG_ROOT"},
+                "sources": [
+                    {"name":"DUT", "type":"uart", "baudrate":115200, "device":"PRIVATE_DEVICE", "parser":{"type":"raw", "db":"PRIVATE_DB"}},
+                    {"name":"NO_ELF", "type":"uart"},
+                    {"name":"UNSCOPED", "type":"uart"},
+                ],
+            },
+        }).to_string()).unwrap();
+        let combined = dir.join("combined.jsonl");
+        std::fs::write(&combined, [
+            json!({"sequence":1,"source_id":"DUT","event":"boot","message":"Device started"}),
+            json!({"sequence":2,"source_id":"DUT","event":"crash","message":"***** MPU FAULT *****"}),
+            json!({"sequence":3,"source_id":"UNSCOPED","event":"crash","message":"UNSCOPED_LOG"}),
+            json!({"sequence":4,"source_id":"DUT","message":"Faulting instruction address (r15/pc): 0x0000102a"}),
+            json!({"sequence":5,"source_id":"NO_ELF","event":"crash","message":"***** MPU FAULT *****"}),
+        ].iter().map(|row| format!("{row}\n")).collect::<String>()).unwrap();
+        let html_path = dir.join("session.html");
+        SessionExporter::new(
+            html_path.clone(),
+            HashMap::new(),
+            vec![json!({"label":"Main","panes":["ALL","NO_ELF"]})],
+            HashMap::new(),
+            PathBuf::from("frontend"),
+            "absolute".to_string(),
+            None,
+        )
+        .with_combined_file(combined)
+        .with_merges(json!([{"name":"ALL","of":["DUT"]}]))
+        .export()
+        .unwrap();
+        let html = std::fs::read_to_string(html_path).unwrap();
+        let global = |name| {
+            let prefix = format!("window.__embedLog{name} = ");
+            serde_json::from_str::<serde_json::Value>(
+                html.lines()
+                    .find_map(|line| line.strip_prefix(&prefix))
+                    .unwrap()
+                    .strip_suffix(';')
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+        let reports = global("CrashReports");
+        let report = |source| {
+            reports
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|r| r["source"] == source)
+                .unwrap()
+        };
+        let address = &report("DUT")["addresses"][0];
+        assert_eq!(address["record_sequence"], 4);
+        assert_eq!(address["frames"][0]["function"], "scale_sample");
+        assert_eq!(address["frames"][0]["inlined"], true);
+        assert!(!address["frames"][0]["file"].as_str().unwrap().contains('/'));
+        assert_eq!(report("NO_ELF")["unavailable"], true);
+        assert_eq!(reports.as_array().unwrap().len(), 2);
+        assert_eq!(
+            global("RuntimeConfig")["sources"].as_array().unwrap().len(),
+            2
+        );
+        assert_eq!(global("RuntimeConfig")["sources"][0]["baudrate"], 115200);
+        assert!(html.contains("\"event\":\"boot\""));
+        assert!(!html.contains("PRIVATE_"));
+        assert!(!html.contains("UNSCOPED"));
+        assert!(!html.contains("symbols/"));
+        assert!(!html.contains("f0VMRg")); // Base64 ELF header.
         std::fs::remove_dir_all(dir).unwrap();
     }
 
