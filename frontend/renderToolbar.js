@@ -34,7 +34,7 @@ export function renderToolbar(profile) {
             parts.push('        <div class="sep"></div>');
             pendingSep = false;
         }
-        parts.push(`        <button id="${item.id}" title="${_escAttr(item.title)}">${item.label}</button>`);
+        parts.push(`        <button id="${item.id}" title="${_escAttr(item.title)}"${item.id === 'btn-unwrap' ? ' aria-pressed="false"' : ''}>${item.label}</button>`);
     });
 
     parts.push('    </div>');
