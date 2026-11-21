@@ -16,6 +16,7 @@ const categories = {
     'regression-tests/copy-format.spec.js',
     'regression-tests/drag-selection.spec.js',
     'regression-tests/filter-keyboard.spec.js',
+    'regression-tests/filter-debounce.spec.js',
     'regression-tests/session-highlight.spec.js',
     'regression-tests/level-filter.spec.js',
     'regression-tests/layout-sync.spec.js',

@@ -472,6 +472,8 @@ window.__embedLogRefreshLevelControls = () => {
     for (const refresh of _levelControlRefreshers.values()) refresh();
 };
 
+const FILTER_INPUT_DEBOUNCE_MS = 150;
+
 export function _uiSetupPane(id) {
     const input = document.querySelector(`.filter-input[data-pane="${id}"]`);
     if (input && !input.dataset.searchInitialized) {
@@ -488,12 +490,15 @@ export function _uiSetupPane(id) {
         controls.innerHTML = '<button type="button" class="search-prev" aria-label="Previous match" title="Previous match (Shift+Enter)">▲</button><span class="search-count" role="status" aria-live="polite"></span><button type="button" class="search-next" aria-label="Next match" title="Next match (Enter)">▼</button>';
         input.after(mode, controls);
         input.setAttribute('aria-label', 'Filter or highlight phrase');
-        controls.querySelector('.search-prev').addEventListener('click', () => navigatePaneSearch(id, -1));
-        controls.querySelector('.search-next').addEventListener('click', () => navigatePaneSearch(id, 1));
+        controls.querySelector('.search-prev').addEventListener('click', () => navigate(-1));
+        controls.querySelector('.search-next').addEventListener('click', () => navigate(1));
         input.addEventListener('keydown', event => {
-            if (!event.isComposing && state.searches[id] && (event.key === 'Enter' || event.key === 'F3')) {
+            if (event.isComposing) return;
+            if (state.searches[id] && (event.key === 'Enter' || event.key === 'F3')) {
                 event.preventDefault();
-                navigatePaneSearch(id, event.shiftKey ? -1 : 1);
+                navigate(event.shiftKey ? -1 : 1);
+            } else if (event.key === 'Enter') {
+                flushPendingApply();
             }
         });
         const apply = async () => {
@@ -532,12 +537,42 @@ export function _uiSetupPane(id) {
             }
             rerenderPane(id);
         };
-        input.addEventListener('input', apply);
+        // Filtering or highlighting scans every line of the pane, so apply it
+        // once typing pauses rather than on every keystroke.
+        let pendingApply = null;
+        let applying = null;
+        const sessionId = () => window.__embedLogSession?.id;
+        let pendingSession;
+        function flushPendingApply() {
+            if (pendingApply !== null) {
+                clearTimeout(pendingApply);
+                pendingApply = null;
+                if (input.isConnected && pendingSession === sessionId()) applying = apply();
+            }
+        }
+        async function navigate(direction) {
+            if (!input.isConnected) return;
+            flushPendingApply();
+            const search = state.searches[id];
+            const value = input.value;
+            const session = sessionId();
+            if (search?.loading) await applying;
+            if (input.isConnected && session === sessionId() && input.value === value && state.searches[id] === search) {
+                navigatePaneSearch(id, direction);
+            }
+        }
+        input.addEventListener('input', () => {
+            clearTimeout(pendingApply);
+            pendingSession = sessionId();
+            pendingApply = setTimeout(flushPendingApply, FILTER_INPUT_DEBOUNCE_MS);
+        });
         mode.addEventListener('click', () => {
+            clearTimeout(pendingApply);
+            pendingApply = null;
             const enabled = mode.getAttribute('aria-pressed') !== 'true';
             mode.setAttribute('aria-pressed', String(enabled));
             controls.hidden = !enabled;
-            apply();
+            applying = apply();
         });
         _setupLevelControl(id, controls);
         updatePaneSearch(id);
