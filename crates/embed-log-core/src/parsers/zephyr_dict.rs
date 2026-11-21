@@ -90,7 +90,7 @@ impl ZephyrDictParser {
     }
 
     fn emit_text_line(&mut self) -> Option<String> {
-        let line = String::from_utf8_lossy(&self.text_buf)
+        let line = crate::parsers::console_text(&self.text_buf)
             .trim_end_matches('\r')
             .to_string();
         self.text_buf.clear();
@@ -1899,6 +1899,20 @@ mod tests {
             !lines.iter().any(|l| l.starts_with("003008")),
             "raw hex leaked: {lines:?}"
         );
+    }
+
+    #[test]
+    fn nul_bytes_are_removed_from_console_text() {
+        for mut parser in [
+            Box::new(ZephyrDictParser::new("/nonexistent/database.json")) as Box<dyn StreamParser>,
+            Box::new(binary::ZephyrDictBinaryParser::new(
+                "/nonexistent/database.json",
+            )),
+        ] {
+            let mut lines = parser.feed(b"\0\0\0*** Booting\0 Zephyr OS\r\n\0\r\n");
+            lines.retain(|line| !line.contains("database not loaded"));
+            assert_eq!(lines, vec!["*** Booting Zephyr OS"]);
+        }
     }
 
     #[test]
