@@ -373,7 +373,7 @@ impl SessionExporter {
             .as_ref()
             .and_then(|value| value.as_object())
         {
-            let levels: HashMap<_, _> = levels
+            let levels: BTreeMap<_, _> = levels
                 .iter()
                 .filter(|(id, _)| sources.contains(id.as_str()) || pane_ids.contains(id.as_str()))
                 .collect();
@@ -1002,7 +1002,10 @@ mod tests {
         )
         .unwrap();
         let html_path = dir.join("session.html");
-        let levels = json!({"DUT": crate::levels::profile_summary(&crate::levels::builtin_zephyr_profile())});
+        let levels = json!({
+            "DUT": crate::levels::profile_summary(&crate::levels::builtin_zephyr_profile()),
+            "ALL": null,
+        });
         SessionExporter::new(
             html_path.clone(),
             HashMap::new(),
@@ -1014,7 +1017,7 @@ mod tests {
         )
         .with_combined_file(combined)
         .with_merges(json!([{"name":"ALL","of":["DUT"]}]))
-        .with_source_levels(levels.clone())
+        .with_source_levels(json!({"OUT_OF_SCOPE": null, "DUT": levels["DUT"], "ALL": null}))
         .export()
         .unwrap();
         let html = std::fs::read_to_string(html_path).unwrap();
