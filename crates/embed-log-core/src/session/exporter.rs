@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -312,7 +312,7 @@ impl SessionExporter {
         // Build pane list and labels.
         let mut all_pane_ids: Vec<String> = Vec::new();
         let mut seen = std::collections::HashSet::new();
-        let mut pane_labels_map: HashMap<String, String> = HashMap::new();
+        let mut pane_labels_map = BTreeMap::new();
         for tab in &self.tabs {
             if let Some(panes) = tab.get("panes").and_then(|p| p.as_array()) {
                 for pane_id_val in panes {
@@ -651,10 +651,12 @@ impl SessionExporter {
             .unwrap_or_default();
         let config = configuration_snapshot(&manifest["runtime_config"], Some(sources));
         let mut reports = Vec::new();
-        for (source, entries) in log_data
+        let mut source_logs: Vec<_> = log_data
             .iter()
             .filter(|(id, _)| sources.contains(id.as_str()))
-        {
+            .collect();
+        source_logs.sort_unstable_by_key(|(id, _)| *id);
+        for (source, entries) in source_logs {
             let entries: Vec<_> = entries
                 .iter()
                 .filter(|entry| !entry.is_tx && entry.sequence.is_some())
@@ -1065,7 +1067,10 @@ mod tests {
             html_path.clone(),
             HashMap::new(),
             vec![json!({"label":"Main","panes":["ALL","NO_ELF"]})],
-            HashMap::new(),
+            HashMap::from([
+                ("NO_ELF".into(), "Other".into()),
+                ("DUT".into(), "Board".into()),
+            ]),
             PathBuf::from("frontend"),
             "absolute".to_string(),
             None,
@@ -1086,7 +1091,10 @@ mod tests {
             )
             .unwrap()
         };
+        assert!(html.contains(r#"window.PANE_LABELS = {"DUT":"Board","NO_ELF":"Other"};"#));
         let reports = global("CrashReports");
+        assert_eq!(reports[0]["source"], "DUT");
+        assert_eq!(reports[1]["source"], "NO_ELF");
         let report = |source| {
             reports
                 .as_array()
