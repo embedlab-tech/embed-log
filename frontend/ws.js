@@ -235,6 +235,7 @@ async function _handleConfigMessage(msg) {
     const isSessionChange = currentSessionId && sessionId && currentSessionId !== sessionId;
     if (isSessionChange) {
         hideStreamGap();
+        window.__embedLogSourceEvents = {};
         resetLayoutForNewSession();
     }
     currentSessionId = sessionId || currentSessionId;
