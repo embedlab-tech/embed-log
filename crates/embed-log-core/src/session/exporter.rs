@@ -196,6 +196,12 @@ impl SessionExporter {
                     .push(LogEntry {
                         source_id: Some(source_id),
                         sequence: record.get("sequence").and_then(|value| value.as_u64()),
+                        session_id: record
+                            .get("session_id")
+                            .and_then(|value| value.as_str())
+                            .map(str::to_string),
+                        record_ordinal: None,
+                        original_bytes: None,
                         ts: record
                             .get("timestamp")
                             .or_else(|| record.get("absTs"))
@@ -247,6 +253,19 @@ impl SessionExporter {
             }
         }
 
+        // Assign local identities before cloning records from legacy logs.
+        let mut sources = log_data.iter_mut().collect::<Vec<_>>();
+        sources.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+        for (ordinal, entry) in sources
+            .into_iter()
+            .flat_map(|(_, entries)| entries)
+            .enumerate()
+        {
+            if entry.sequence.is_none() {
+                entry.record_ordinal = Some(ordinal);
+            }
+        }
+
         // Build presentation-only merge panes from original source entries.
         // These clones exist only in the exported HTML and retain source_id.
         for merge in &self.merges {
@@ -259,6 +278,7 @@ impl SessionExporter {
                     .unwrap_or(member);
                 if let Some(member_entries) = log_data.get(member) {
                     entries.extend(member_entries.iter().cloned().map(|mut entry| {
+                        entry.original_bytes.get_or_insert(entry.text.len());
                         entry.text = format!("{label}: {}", entry.text);
                         entry
                     }));
@@ -388,6 +408,15 @@ impl SessionExporter {
                 }
                 if let Some(sequence) = e.sequence {
                     meta["sequence"] = json!(sequence);
+                }
+                if let Some(session_id) = &e.session_id {
+                    meta["sessionId"] = json!(session_id);
+                }
+                if let Some(ordinal) = e.record_ordinal {
+                    meta["recordOrdinal"] = json!(ordinal);
+                }
+                if let Some(bytes) = e.original_bytes {
+                    meta["originalBytes"] = json!(bytes);
                 }
                 if let Some(level) = &e.level {
                     meta["level"] = json!(level);
@@ -692,7 +721,7 @@ fn render_toolbar() -> String {
         "<div id=\"toolbar\">",
         "    <div class=\"toolbar-group toolbar-left\">",
         "        <span class=\"app-name\">embed-log</span>",
-        "        <button id=\"btn-unwrap\" title=\"Unwrap multi-pane tabs into single-pane tabs\">Unwrap</button>",
+        "        <button id=\"btn-unwrap\" title=\"Show every pane of multi-pane tabs as a separate tab\" aria-pressed=\"false\">Split tabs</button>",
         "        <button id=\"btn-timestamp-mode\" title=\"Switch timestamps\">Absolute</button>",
         "        <div class=\"sep\"></div>",
         "        <button id=\"btn-theme\" title=\"Toggle light / dark theme\">&#x1F319;</button>",

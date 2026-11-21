@@ -1,5 +1,5 @@
 import { state, TABS, PANES, PANE_LABELS, setTimestampContext, resetRelativeTimestampBase } from './state.js';
-import { appendLineBatch, clearPane, rerenderPane, setTimestampMode, refreshStatsUi, prependPaneHistory } from './lines.js';
+import { appendLineBatch, clearPane, rerenderPane, setTimestampMode, refreshStatsUi, prependPaneHistory, resetAllLineStats } from './lines.js';
 import { createTabWithPanes } from './tabcreate.js';
 import { refreshLevelDefinitions } from './levels.js';
 import { configurePanePlugins, resetPanePlugins } from './pluginRuntime.js';
@@ -21,6 +21,8 @@ const LOG_FLUSH_MAX_LINES = 1000;
 const searchHistoryRequests = new Map();
 const searchHistoryLoaded = new Set();
 let searchHistoryGeneration = 0;
+let nextRecordOrdinal = 0;
+const messageEncoder = new TextEncoder();
 
 // Replay is bounded; explicitly requested full-session search must also read older records.
 // V8's maximum string length (0x1fffffe8 UTF-16 units).
@@ -67,6 +69,7 @@ window.__embedLogLoadSearchHistory = function (paneId) {
                 (merge ? `${label}: ` : '') + record.message,
                 record.type === 'tx' || record.is_tx === true,
                 { sourceId: record.source_id, sequence: record.sequence, sessionId,
+                    ...(merge ? { originalBytes: messageEncoder.encode(record.message).length } : {}),
                     lineIdx: record.line_idx, absTs: record.absTs, absNum: record.absNum,
                     relTs: record.relTs, relNum: record.relNum,
                     timestampIso: record.timestamp_iso, numTs: record.timestamp_num,
@@ -103,6 +106,7 @@ function resetLayoutForNewSession() {
     state.filters = {};
     state.searches = {};
     state.rawLines = {};
+    resetAllLineStats();
     state.atBottom = {};
     state.highlighted = {};
     state.highlightedIdx = {};
@@ -410,24 +414,26 @@ function wsConnect() {
             return;
         }
         const sourceLabel = PANE_LABELS[source_id] || source_id;
+        const text = data || "";
+        const hasMerge = destinations.some(({ virtual }) => virtual);
+        const mergedText = hasMerge ? `${sourceLabel}: ${text}` : text;
+        const meta = {
+            sourceId: source_id,
+            timestampIso: timestamp_iso,
+            numTs: timestamp_num,
+            absTs, absNum, relTs, relNum,
+            lineIdx: line_idx,
+            sessionId: session_id || currentSessionId,
+            ...(hasMerge ? { originalBytes: messageEncoder.encode(text).length } : {}),
+            ...(Number.isFinite(sequence) ? { sequence } : { recordOrdinal: nextRecordOrdinal++ }),
+            ...(typeof level === "string" && level ? { level } : {}),
+        };
         destinations.forEach(({ paneId, virtual }) => enqueueLogMessage({
             paneId,
             ts: timestamp || "",
-            rawText: virtual ? `${sourceLabel}: ${data || ""}` : (data || ""),
+            rawText: virtual ? mergedText : text,
             isTx: type === "tx",
-            meta: {
-                sourceId: source_id,
-                timestampIso: timestamp_iso,
-                numTs: timestamp_num,
-                absTs: absTs,
-                absNum: absNum,
-                relTs: relTs,
-                relNum: relNum,
-                lineIdx: line_idx,
-                ...(Number.isFinite(sequence) ? { sequence } : {}),
-                ...(session_id ? { sessionId: session_id } : {}),
-                ...(typeof level === "string" && level ? { level } : {}),
-            },
+            meta,
         }));
     });
 
