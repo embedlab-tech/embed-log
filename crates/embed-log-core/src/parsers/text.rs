@@ -1,4 +1,4 @@
-use super::traits::StreamParser;
+use super::{console_text, traits::StreamParser};
 
 /// Newline-delimited UTF-8 text parser.
 ///
@@ -25,7 +25,7 @@ impl StreamParser for TextParser {
         let mut lines = Vec::new();
         for &byte in data {
             if byte == b'\n' {
-                let line = String::from_utf8_lossy(&self.buf).trim_end().to_string();
+                let line = console_text(&self.buf).trim_end().to_string();
                 self.buf.clear();
                 if !line.is_empty() {
                     lines.push(line);
@@ -41,6 +41,20 @@ impl StreamParser for TextParser {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nul_bytes_are_removed_and_nul_only_lines_dropped() {
+        let mut p = TextParser::new();
+        let lines = p.feed(b"\0\r\n\0\0\0*** Booting Zephyr OS\r\nok\0line\n\0\0\n");
+        assert_eq!(lines, vec!["*** Booting Zephyr OS", "okline"]);
+    }
+
+    #[test]
+    fn other_control_characters_are_kept() {
+        let mut p = TextParser::new();
+        let lines = p.feed(b"\x1b[1;31m<err> x\x1b[0m\tcol\x08\n");
+        assert_eq!(lines, vec!["\x1b[1;31m<err> x\x1b[0m\tcol\x08"]);
+    }
 
     #[test]
     fn single_line() {

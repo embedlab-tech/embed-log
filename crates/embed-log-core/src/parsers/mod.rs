@@ -11,6 +11,22 @@ pub use traits::StreamParser;
 pub use zephyr_dict::binary::ZephyrDictBinaryParser;
 pub use zephyr_dict::{validate_dictionary, ZephyrDictParser};
 
+/// Decode one line of device console text.
+///
+/// Invalid UTF-8 becomes U+FFFD, and NUL bytes are removed: devices often
+/// emit them on reset or line breaks, and a single NUL makes text editors
+/// (gedit, Notepad) open the session `.log` as UTF-16, showing the whole file
+/// as CJK characters. Other control characters keep their terminal meaning
+/// (ESC sequences, CR, backspace) and are left as they are.
+pub(crate) fn console_text(bytes: &[u8]) -> String {
+    let text = String::from_utf8_lossy(bytes);
+    if text.contains('\0') {
+        text.replace('\0', "")
+    } else {
+        text.into_owned()
+    }
+}
+
 /// Fallible construction for runtime replacement; never replace a working parser
 /// with one that only reports a load error after receiving bytes.
 pub fn try_create_dictionary_parser(
