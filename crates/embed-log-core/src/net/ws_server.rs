@@ -122,6 +122,8 @@ pub struct ServerState {
     /// New/reconnecting clients must receive the current session, not the
     /// process-start session.
     pub config_msg: Arc<Mutex<String>>,
+    /// Serializes the initial stream snapshot with writer commits and rotations.
+    pub commit_lock: Arc<Mutex<()>>,
     /// Broadcast channel for live log messages (JSON strings).
     pub broadcast_tx: broadcast::Sender<String>,
     /// Replay buffer for late-connecting clients (log entries).
@@ -284,47 +286,96 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<ServerState>) -> i
     ws.on_upgrade(move |socket| handle_ws_client(socket, state))
 }
 
+struct StreamSnapshot {
+    session_id: String,
+    config: String,
+    replay: Vec<String>,
+    rx: broadcast::Receiver<String>,
+}
+
+fn session_message_id(message: &str, kind: &str) -> Option<String> {
+    let msg: serde_json::Value = serde_json::from_str(message).ok()?;
+    if msg["type"].as_str() != Some(kind) {
+        return None;
+    }
+    msg["session"]["id"].as_str().map(str::to_owned)
+}
+
+fn stream_snapshot(state: &ServerState, unless_session: Option<&str>) -> Option<StreamSnapshot> {
+    let _commit = state.commit_lock.lock().unwrap();
+    let config = state.config_msg.lock().unwrap().clone();
+    let session_id = session_message_id(&config, "config").unwrap_or_default();
+    if unless_session == Some(session_id.as_str()) {
+        return None;
+    }
+    // Replay and the live receiver share one commit boundary, so they never overlap.
+    Some(StreamSnapshot {
+        session_id,
+        config,
+        replay: drain_replay(&state.replay),
+        rx: state.broadcast_tx.subscribe(),
+    })
+}
+
+async fn send_stream_snapshot(
+    socket: &mut WebSocket,
+    config: String,
+    replay: Vec<String>,
+) -> Result<(), axum::Error> {
+    for message in std::iter::once(config).chain(replay) {
+        socket.send(Message::Text(message.into())).await?;
+    }
+    Ok(())
+}
+
 async fn handle_ws_client(mut socket: WebSocket, state: ServerState) {
     state.ws_client_count.fetch_add(1, Ordering::Relaxed);
     let _client_count_guard = WsClientCountGuard {
         count: state.ws_client_count.clone(),
     };
 
-    // 1. Send the config message immediately.
-    let config_msg = state.config_msg.lock().unwrap().clone();
-    if let Err(e) = socket.send(Message::Text(config_msg.into())).await {
-        warn!("WS: failed to send config: {e}");
+    let StreamSnapshot {
+        mut session_id,
+        config,
+        replay,
+        mut rx,
+    } = stream_snapshot(&state, None).unwrap();
+    if send_stream_snapshot(&mut socket, config, replay)
+        .await
+        .is_err()
+    {
         return;
     }
 
-    // 2. Send replay buffer so the client catches up.
-    let replay_msgs = drain_replay(&state.replay);
-    for msg in replay_msgs {
-        if socket.send(Message::Text(msg.into())).await.is_err() {
-            return;
-        }
-    }
-
-    // 3. Subscribe to the broadcast channel.
-    let mut rx = state.broadcast_tx.subscribe();
-
-    // 4. Forward broadcast messages to the client; drain incoming messages.
     loop {
         tokio::select! {
             result = rx.recv() => {
                 match result {
                     Ok(data) => {
+                        if data.contains(r#""type":"session_rotated""#) {
+                            if let Some(rotated_id) = session_message_id(&data, "session_rotated") {
+                                session_id = rotated_id;
+                            }
+                        }
                         if socket.send(Message::Text(data.into())).await.is_err() {
                             break;
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
-                        // A slow client fell behind the broadcast buffer. Tell it
-                        // in-band so the gap isn't silent — the frontend can flag
-                        // missing lines / resync rather than show a seamless feed.
-                        // ponytail: broadcast capacity is the tuning knob if lag is common.
-                        warn!("WS client lagged, skipped {n} messages");
-                        let notice = format!("{{\"type\":\"stream_gap\",\"skipped\":{n}}}");
+                        // If lag crossed a rotation, the rotation event itself may be gone.
+                        // Rebase before forwarding any new-session records or warnings.
+                        if let Some(snapshot) = stream_snapshot(&state, Some(&session_id)) {
+                            session_id = snapshot.session_id;
+                            rx = snapshot.rx;
+                            if send_stream_snapshot(&mut socket, snapshot.config, snapshot.replay)
+                                .await.is_err() {
+                                break;
+                            }
+                        }
+                        warn!("WS client lagged, skipped {n} broadcast messages");
+                        let notice = serde_json::json!({
+                            "type": "stream_gap", "skipped": n, "session_id": session_id,
+                        }).to_string();
                         if socket.send(Message::Text(notice.into())).await.is_err() {
                             break;
                         }
@@ -650,18 +701,33 @@ async fn api_export_handler(
             .pointer("/session/id")
             .and_then(|value| value.as_str())
             .unwrap_or("session");
-        match path.and_then(|path| std::fs::read(path).ok()) {
-            Some(bytes) => {
-                return Response::builder()
-                    .status(StatusCode::OK)
-                    .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
-                    .header(
-                        header::CONTENT_DISPOSITION,
-                        format!("attachment; filename=\"embed-log-{session_id}.html\""),
-                    )
-                    .header("x-embed-log-session", session_id)
-                    .body(axum::body::Body::from(bytes))
-                    .unwrap();
+        // Stream the published file instead of reading it into memory: a
+        // large session's report can be hundreds of megabytes.
+        let served = match path {
+            Some(path) if path.is_file() => tower_http::services::ServeFile::new(path)
+                .try_call(axum::http::Request::new(axum::body::Body::empty()))
+                .await
+                .ok()
+                .filter(|response| response.status() == StatusCode::OK),
+            _ => None,
+        };
+        match served {
+            Some(response) => {
+                let mut response = response.into_response();
+                let headers = response.headers_mut();
+                headers.insert(
+                    header::CONTENT_TYPE,
+                    header::HeaderValue::from_static("text/html; charset=utf-8"),
+                );
+                if let Ok(value) = header::HeaderValue::from_str(&format!(
+                    "attachment; filename=\"embed-log-{session_id}.html\""
+                )) {
+                    headers.insert(header::CONTENT_DISPOSITION, value);
+                }
+                if let Ok(value) = header::HeaderValue::from_str(session_id) {
+                    headers.insert("x-embed-log-session", value);
+                }
+                return response;
             }
             None => {
                 return (
@@ -808,22 +874,14 @@ async fn api_rotate_handler(
 
     let title = request.and_then(|axum::Json(request)| request.title);
     match rotate_fn(title) {
-        Ok((old_session, session)) => {
-            let payload = serde_json::json!({
-                "type": "session_rotated",
+        Ok((old_session, session)) => (
+            StatusCode::OK,
+            axum::Json(serde_json::json!({
+                "ok": true,
                 "old_session": old_session,
                 "session": session,
-            });
-            let _ = state.broadcast_tx.send(payload.to_string());
-            (
-                StatusCode::OK,
-                axum::Json(serde_json::json!({
-                    "ok": true,
-                    "old_session": old_session,
-                    "session": session,
-                })),
-            )
-        }
+            })),
+        ),
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             axum::Json(serde_json::json!({
@@ -1052,6 +1110,7 @@ mod tests {
         let manager = test_manager(dir.clone());
         let state = ServerState {
             config_msg: Arc::new(Mutex::new(json!({ "type": "config" }).to_string())),
+            commit_lock: Arc::new(Mutex::new(())),
             broadcast_tx,
             replay: Arc::new(Mutex::new(VecDeque::new())),
             on_export: Some(Arc::new(|| Ok("/tmp/session.html".to_string()))),
@@ -1071,6 +1130,128 @@ mod tests {
             control_api: true,
         };
         (state, rx)
+    }
+
+    #[tokio::test]
+    async fn websocket_handoff_orders_writes_and_rotation_during_connect() {
+        use tokio_tungstenite::connect_async;
+
+        let dir = temp_session_dir("stream-handoff");
+        let (state, _rx) = test_state(dir.clone());
+        let app = Router::new()
+            .route("/ws", axum::routing::get(ws_handler))
+            .with_state(state.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let publish = |session, sequence| {
+            let record = json!({"type": "rx", "session_id": session, "sequence": sequence});
+            state.replay.lock().unwrap().push_back(record.to_string());
+            state.broadcast_tx.send(record.to_string()).unwrap();
+            record
+        };
+        for lag in [false, true] {
+            *state.config_msg.lock().unwrap() = json!({
+                "type": "config", "session": {"id": "old"},
+                // Keep the config write pending until the client starts reading frames.
+                "padding": "x".repeat(8 * 1024 * 1024),
+            })
+            .to_string();
+            state.replay.lock().unwrap().clear();
+            let before_connect = publish("old", 1);
+            let receivers = state.broadcast_tx.receiver_count();
+            let (mut socket, _) = connect_async(format!("ws://{address}/ws")).await.unwrap();
+
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                while state.broadcast_tx.receiver_count() == receivers {
+                    tokio::task::yield_now().await;
+                }
+                let (during_connect, rotation, new_config, new_records) = {
+                    let _commit = state.commit_lock.lock().unwrap();
+                    let during_connect = publish("old", 2);
+                    let new_config = json!({"type": "config", "session": {"id": "new"}});
+                    *state.config_msg.lock().unwrap() = new_config.to_string();
+                    state.replay.lock().unwrap().clear();
+                    let rotation = json!({"type": "session_rotated", "session": {"id": "new"}});
+                    state.broadcast_tx.send(rotation.to_string()).unwrap();
+                    let new_records = (1..=if lag { 20 } else { 1 })
+                        .map(|sequence| publish("new", sequence))
+                        .collect::<Vec<_>>();
+                    (during_connect, rotation, new_config, new_records)
+                };
+
+                let mut next = async || -> serde_json::Value {
+                    let frame = socket.next().await.unwrap().unwrap();
+                    serde_json::from_str(frame.to_text().unwrap()).unwrap()
+                };
+                assert_eq!(next().await["session"]["id"], "old");
+                assert_eq!(next().await, before_connect);
+                if lag {
+                    assert_eq!(next().await, new_config);
+                } else {
+                    assert_eq!(next().await, during_connect);
+                    assert_eq!(next().await, rotation);
+                }
+                for record in new_records {
+                    assert_eq!(next().await, record);
+                }
+                if lag {
+                    let notice = next().await;
+                    assert_eq!(notice["type"], "stream_gap");
+                    assert_eq!(notice["session_id"], "new");
+                }
+                let final_record = {
+                    let _commit = state.commit_lock.lock().unwrap();
+                    publish("new", 21)
+                };
+                assert_eq!(next().await, final_record);
+                socket.close(None).await.unwrap();
+                while state.broadcast_tx.receiver_count() != receivers {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("WebSocket handoff timed out");
+        }
+        server.abort();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn export_download_streams_the_published_html() {
+        let dir = temp_session_dir("export-download");
+        let html = dir.join("published.html");
+        let page = format!("<!doctype html>{}", "x".repeat(300_000));
+        std::fs::write(&html, &page).unwrap();
+        let (mut state, _) = test_state(dir.clone());
+        let published = html.display().to_string();
+        state.on_export = Some(Arc::new(move || Ok(published.clone())));
+        let response =
+            api_export_handler(State(state.clone()), Query(ExportQuery { download: true }))
+                .await
+                .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers()["content-type"],
+            "text/html; charset=utf-8"
+        );
+        assert_eq!(
+            response.headers()["content-disposition"],
+            "attachment; filename=\"embed-log-session-1.html\""
+        );
+        let body = axum::body::to_bytes(response.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        assert_eq!(body.len(), page.len());
+        assert_eq!(&body[..], page.as_bytes());
+
+        // A missing published file is an error, not an empty download.
+        std::fs::remove_file(&html).unwrap();
+        let response = api_export_handler(State(state), Query(ExportQuery { download: true }))
+            .await
+            .into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     #[tokio::test]

@@ -99,6 +99,7 @@ export const state = {
     syncTabSwitch: false, // true after explicit line sync; next tab switches follow syncTs
     filters:     {},
     searches:    {},
+    streamGap:   false,
     wrap:        {},
     rawLines:    {},
     markers:     {},       // paneId → [{lineIdx, numTs, description, createdAt}]

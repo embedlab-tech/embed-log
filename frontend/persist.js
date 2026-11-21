@@ -14,6 +14,7 @@ let _storageKey = `${STORAGE_KEY_PREFIX}default${STORAGE_KEY_SUFFIX}`;
 let _hasSessionInfo = false;
 let _currentSessionId = null;
 let _restoreDone = false;
+let _skipCachedLines = false;
 let _restoring = false;
 let _saveTimer = null;
 
@@ -95,8 +96,8 @@ function _restoreIfPossible() {
     }
     replacePanePluginUiState(snap.panePluginUiState);
 
-    // Refill panes that are currently empty.
-    const byPane = snap.lines && typeof snap.lines === 'object' ? snap.lines : {};
+    // After a gap, cached later sequences could suppress missing lines in recent replay.
+    const byPane = !_skipCachedLines && !state.streamGap && snap.lines && typeof snap.lines === 'object' ? snap.lines : {};
     Object.entries(byPane).forEach(([paneId, entries]) => {
         if (!PANES.includes(paneId)) return;
         if (!Array.isArray(entries) || entries.length === 0) return;
@@ -143,7 +144,7 @@ window.__embedLogSchedulePersist = function __embedLogSchedulePersist() {
     _saveTimer = setTimeout(_saveNow, SAVE_DEBOUNCE_MS);
 };
 
-window.__embedLogSetSession = function __embedLogSetSession(session) {
+window.__embedLogSetSession = function __embedLogSetSession(session, { skipCachedLines = false } = {}) {
     _hasSessionInfo = true;
     const sessionId = session && session.id ? String(session.id) : 'default';
 
@@ -166,6 +167,7 @@ window.__embedLogSetSession = function __embedLogSetSession(session) {
 
     _currentSessionId = sessionId;
     _storageKey = `${STORAGE_KEY_PREFIX}${sessionId}${STORAGE_KEY_SUFFIX}`;
+    _skipCachedLines = skipCachedLines;
     _restoreDone = false;
 
     try { localStorage.setItem(LAST_SESSION_KEY, sessionId); } catch {}
