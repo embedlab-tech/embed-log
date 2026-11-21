@@ -3,12 +3,12 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
-use axum::Router;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{Path as AxumPath, Query, State, WebSocketUpgrade};
-use axum::http::{StatusCode, header};
+use axum::http::{header, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
+use axum::Router;
 use futures::StreamExt;
 use serde::Deserialize;
 use tokio::sync::{broadcast, mpsc};
@@ -16,7 +16,7 @@ use tower_http::services::ServeDir;
 use tracing::{info, warn};
 
 use crate::frontend_assets::FrontendAssets;
-use crate::net::control_ws::{SourceInfo, control_ws_handler};
+use crate::net::control_ws::{control_ws_handler, SourceInfo};
 use crate::session::SessionManager;
 use crate::sources::TxCommand;
 
