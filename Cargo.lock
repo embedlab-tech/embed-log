@@ -600,6 +600,7 @@ dependencies = [
  "sprintf",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-tungstenite 0.29.0",
  "tower-http",
  "tracing",
 ]

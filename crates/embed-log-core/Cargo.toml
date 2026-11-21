@@ -32,3 +32,4 @@ sha2.workspace = true
 
 [dev-dependencies]
 serde_yaml.workspace = true
+tokio-tungstenite = "0.29"

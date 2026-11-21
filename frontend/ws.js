@@ -6,6 +6,7 @@ import { configurePanePlugins, resetPanePlugins } from './pluginRuntime.js';
 import { invalidatePaneFilterProjection } from './lines.js';
 
 import { switchTab } from './tabs.js';
+import { updatePaneSearch } from './lines.js';
 
 let ws = null;
 let wsRetryDelay = 1000;
@@ -22,6 +23,9 @@ const searchHistoryLoaded = new Set();
 let searchHistoryGeneration = 0;
 
 // Replay is bounded; explicitly requested full-session search must also read older records.
+// V8's maximum string length (0x1fffffe8 UTF-16 units).
+const MAX_HISTORY_CHARS = 0x1fffffe8;
+
 window.__embedLogLoadSearchHistory = function (paneId) {
     if (searchHistoryLoaded.has(paneId)) return Promise.resolve();
     if (searchHistoryRequests.has(paneId)) return searchHistoryRequests.get(paneId);
@@ -32,7 +36,16 @@ window.__embedLogLoadSearchHistory = function (paneId) {
         const response = await fetch(`/sessions/${encodeURIComponent(sessionId)}/combined.jsonl`, { cache: 'no-store' });
         if (!response.ok) throw new Error(`Cannot load full session history (HTTP ${response.status})`);
         // shortcut: history is loaded in memory; use paged reads if sessions outgrow browser memory.
+        // Browsers cap a string at about 512 MiB; Chromium then resolves text()
+        // to "" instead of failing, which would look like a session without history.
+        const contentLength = response.headers.get('content-length');
+        const length = Number(contentLength);
+        if (length > MAX_HISTORY_CHARS) {
+            response.body?.cancel().catch(() => {});
+            throw new Error(`Session history is too large to load in the browser (${Math.round(length / 1048576)} MB)`);
+        }
         const text = await response.text();
+        if (!text && contentLength !== '0') throw new Error('Session history could not be read in the browser');
         if (generation !== searchHistoryGeneration || sessionId !== currentSessionId || !state.searches[paneId]) return;
         const current = state.rawLines[paneId] || [];
         const first = current[0];
@@ -76,7 +89,7 @@ function invalidateSearchHistory() {
 }
 
 function resetLayoutForNewSession() {
-    invalidateSearchHistory();
+    clearAllPaneContents();
     const container = document.getElementById("container");
     if (container) container.innerHTML = "";
 
@@ -96,6 +109,34 @@ function resetLayoutForNewSession() {
     state.selected = {};
     Object.keys(PANE_LABELS).forEach(key => delete PANE_LABELS[key]);
     resetPanePlugins();
+}
+
+const STREAM_GAP_SESSION_KEY = 'embed-log:stream-gap-session';
+
+// A lagged broadcast can contain records for any pane, or only status messages.
+function showStreamGap() {
+    state.streamGap = true;
+    if (currentSessionId) {
+        try { sessionStorage.setItem(STREAM_GAP_SESSION_KEY, currentSessionId); } catch {}
+    }
+    let notice = document.getElementById("stream-gap");
+    if (!notice) {
+        notice = document.createElement("button");
+        notice.id = "stream-gap";
+        notice.type = "button";
+        notice.title = "The browser missed live updates. Reload to fetch recent replay; older missing lines may not be recovered.";
+        notice.textContent = "\u26a0 Log panes may be incomplete · Reload recent logs";
+        notice.addEventListener("click", () => window.location.reload());
+        wsStatus?.before(notice);
+    }
+    notice.hidden = false;
+    PANES.forEach(updatePaneSearch);
+}
+function hideStreamGap() {
+    state.streamGap = false;
+    try { sessionStorage.removeItem(STREAM_GAP_SESSION_KEY); } catch {}
+    const notice = document.getElementById("stream-gap");
+    if (notice) notice.hidden = true;
 }
 
 function wsSetStatus(cls, text) {
@@ -169,9 +210,15 @@ async function _handleConfigMessage(msg) {
     const sessionId = msg.session?.id || null;
     const isSessionChange = currentSessionId && sessionId && currentSessionId !== sessionId;
     if (isSessionChange) {
+        hideStreamGap();
         resetLayoutForNewSession();
     }
     currentSessionId = sessionId || currentSessionId;
+    try {
+        if (!state.streamGap && currentSessionId && sessionStorage.getItem(STREAM_GAP_SESSION_KEY) === currentSessionId) {
+            showStreamGap();
+        }
+    } catch {}
 
     // Create tabs and set pane metadata BEFORE loading plugins so log
     // lines render immediately.  Plugins load asynchronously and catch up.
@@ -296,7 +343,9 @@ function wsConnect() {
             return;
         }
         if (msg.type === "session_rotated") {
-            currentSessionId = msg.session?.id || currentSessionId;
+            const sessionId = msg.session?.id;
+            if (sessionId && sessionId !== currentSessionId) hideStreamGap();
+            currentSessionId = sessionId || currentSessionId;
             state.syncTs = null;
             state.syncTabSwitch = false;
             clearAllPaneContents();
@@ -335,6 +384,11 @@ function wsConnect() {
             }
             refreshStatsUi();
             window.__embedLogSchedulePersist?.();
+            return;
+        }
+
+        if (msg.type === "stream_gap") {
+            if (!msg.session_id || msg.session_id === currentSessionId) showStreamGap();
             return;
         }
 
