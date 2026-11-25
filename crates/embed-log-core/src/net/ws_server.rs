@@ -290,25 +290,22 @@ async fn handle_ws_client(mut socket: WebSocket, state: ServerState) {
         count: state.ws_client_count.clone(),
     };
 
-    // 1. Send the config message immediately.
-    let config_msg = state.config_msg.lock().unwrap().clone();
+    // 1. Take the config, replay and live subscription as one snapshot, so no
+    //    record committed while the client connects is missed.
+    let (config_msg, replay_msgs, mut rx) = subscribe_with_replay(&state);
     if let Err(e) = socket.send(Message::Text(config_msg.into())).await {
         warn!("WS: failed to send config: {e}");
         return;
     }
 
     // 2. Send replay buffer so the client catches up.
-    let replay_msgs = drain_replay(&state.replay);
     for msg in replay_msgs {
         if socket.send(Message::Text(msg.into())).await.is_err() {
             return;
         }
     }
 
-    // 3. Subscribe to the broadcast channel.
-    let mut rx = state.broadcast_tx.subscribe();
-
-    // 4. Forward broadcast messages to the client; drain incoming messages.
+    // 3. Forward broadcast messages to the client; drain incoming messages.
     loop {
         tokio::select! {
             result = rx.recv() => {
@@ -972,6 +969,41 @@ pub fn drain_replay(replay: &Arc<Mutex<VecDeque<String>>>) -> Vec<String> {
     buf.iter().cloned().collect()
 }
 
+/// Append a log record to the replay buffer and broadcast it, as one step
+/// under the replay lock.
+///
+/// Together with [`subscribe_with_replay`] this guarantees that a connecting
+/// client receives every record exactly once: either in its replay snapshot or
+/// on its live subscription, never in neither and never in both.
+pub fn publish_replayable(
+    replay: &Mutex<VecDeque<String>>,
+    broadcast_tx: &broadcast::Sender<String>,
+    capacity: usize,
+    payload: String,
+) {
+    let mut buf = replay.lock().unwrap();
+    if buf.len() >= capacity {
+        buf.pop_front();
+    }
+    buf.push_back(payload.clone());
+    // Ignore the error when no receivers are connected.
+    let _ = broadcast_tx.send(payload);
+}
+
+/// Snapshot the current config message and replay buffer and subscribe to live
+/// records, all while holding the replay lock (see [`publish_replayable`]).
+/// Session rotation clears the replay and swaps the config under the same lock,
+/// so the snapshot never mixes two sessions.
+pub fn subscribe_with_replay(
+    state: &ServerState,
+) -> (String, Vec<String>, broadcast::Receiver<String>) {
+    let buf = state.replay.lock().unwrap();
+    let config_msg = state.config_msg.lock().unwrap().clone();
+    let replay = buf.iter().cloned().collect();
+    let rx = state.broadcast_tx.subscribe();
+    (config_msg, replay, rx)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1071,6 +1103,43 @@ mod tests {
             control_api: true,
         };
         (state, rx)
+    }
+
+    #[test]
+    fn connecting_clients_receive_every_record_exactly_once() {
+        const RECORDS: u64 = 5_000;
+        const REPLAY_CAPACITY: usize = 64;
+        let dir = temp_session_dir("replay-subscribe");
+        let (mut state, _rx) = test_state(dir.clone());
+        state.broadcast_tx = broadcast::channel(RECORDS as usize + 1).0;
+
+        let publisher = {
+            let replay = state.replay.clone();
+            let tx = state.broadcast_tx.clone();
+            std::thread::spawn(move || {
+                for seq in 1..=RECORDS {
+                    publish_replayable(&replay, &tx, REPLAY_CAPACITY, seq.to_string());
+                }
+            })
+        };
+        // Connect clients while records are being published.
+        let mut clients = Vec::new();
+        while !publisher.is_finished() && clients.len() < 200 {
+            let (_, replay, rx) = subscribe_with_replay(&state);
+            clients.push((replay, rx));
+        }
+        publisher.join().unwrap();
+
+        for (replay, mut rx) in clients {
+            let mut seen: Vec<u64> = replay.iter().map(|m| m.parse().unwrap()).collect();
+            while let Ok(msg) = rx.try_recv() {
+                seen.push(msg.parse().unwrap());
+            }
+            let first = seen.first().copied().unwrap_or(RECORDS + 1);
+            let expected: Vec<u64> = (first..=RECORDS).collect();
+            assert_eq!(seen, expected, "client saw a gap or a duplicate");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[tokio::test]
