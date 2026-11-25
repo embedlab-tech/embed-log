@@ -6,26 +6,25 @@ use std::sync::{
 };
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Local};
+use chrono::Local;
 use serde_json::json;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
-use crate::clock::{format_relative_millis, SessionClock};
 use crate::config::AppConfig;
-use crate::models::{Ansi, LogEntry, TimestampMode};
+use crate::models::LogEntry;
 use crate::naming::slugify;
 use crate::net::control_ws::SourceInfo;
-use crate::net::live::{LiveEvent, LiveMessage};
+use crate::net::live::LiveMessage;
 use crate::net::ws_server::{
-    start_server, ExportCallback, RotateCallback, RuntimeStats, ServerState, SourceRuntimeStats,
+    start_server, ExportCallback, RotateCallback, RuntimeStats, ServerState,
 };
 use crate::session::manager::atomic_write_file;
 use crate::session::{SessionExporter, SessionManager};
 use crate::sources::{FileSource, LogSource, TxCommand, UartSource, UdpSource};
 
-const REPLAY_BUFFER_SIZE: usize = 5000;
+use super::writer::{SourceRuntimeMeta, SourceSpec, Writer, WriterShared, REPLAY_BUFFER_SIZE};
 
 /// The main server orchestrator.
 pub struct LogServer {
@@ -146,7 +145,6 @@ impl LogServer {
         }
 
         // Build per-source line counters for stable line_idx.
-        use std::sync::atomic::AtomicU64;
         let line_counters: HashMap<String, Arc<AtomicU64>> = sources
             .iter()
             .map(|src| (src.name.clone(), Arc::new(AtomicU64::new(0))))
@@ -170,21 +168,12 @@ impl LogServer {
             source_files.insert(src.name.clone(), log_path.display().to_string());
             log_paths.insert(src.name.clone(), log_path);
         }
-        let writer_log_paths: HashMap<String, Arc<Mutex<PathBuf>>> = log_paths
-            .iter()
-            .map(|(name, path)| (name.clone(), Arc::new(Mutex::new(path.clone()))))
-            .collect();
         let combined_path = session_dir.join("combined.jsonl");
-        let shared_source_files = Arc::new(Mutex::new(source_files.clone()));
-        let shared_html_path = Arc::new(Mutex::new(session_dir.join("session.html")));
 
         // ── 5. Load frontend plugins ──
         let plugins = self.load_plugins();
 
-        // ── 6. Create shared first_log_at tracker ──
-        let first_log_at: Arc<Mutex<Option<DateTime<Local>>>> = Arc::new(Mutex::new(None));
-
-        // ── 7. Create SessionManager and write manifest ──
+        // ── 6. Create SessionManager and write manifest ──
         let started_at = Local::now().to_rfc3339();
         let tabs_json: Vec<serde_json::Value> = self
             .config
@@ -228,9 +217,6 @@ impl LogServer {
         // ── 8. Create broadcast channel ──
         let (broadcast_tx, _rx) = broadcast::channel::<LiveMessage>(4096);
         let replay = Arc::new(Mutex::new(VecDeque::with_capacity(REPLAY_BUFFER_SIZE)));
-        // One ordering point for sequence allocation, persistence, replay, and
-        // live publication across all concurrent source writers.
-        let commit_lock = Arc::new(Mutex::new(()));
         let stats = Arc::new(RuntimeStats::new(
             sources.iter().map(|src| src.name.clone()),
             self.config.server.queue_size,
@@ -243,10 +229,9 @@ impl LogServer {
 
         let source_tab_labels = build_source_tab_labels(&self.config.tabs, &self.config.merges);
 
-        // ── 9. Start sources + writers ──
+        // ── 9. Start sources and the session writer ──
+        let mut writer_sources = Vec::new();
         for mut src in sources {
-            let log_path = writer_log_paths[&src.name].clone();
-
             let (entry_tx, entry_rx) = mpsc::channel::<LogEntry>(self.config.server.queue_size);
             source_txs.insert(src.name.clone(), entry_tx.clone());
 
@@ -287,19 +272,13 @@ impl LogServer {
             });
             join_handles.push(reader_handle);
 
-            // Spawn writer task.
-            let writer_name = src.name.clone();
-            let writer_runtime = WriterRuntime {
-                broadcast_tx: broadcast_tx.clone(),
-                replay: replay.clone(),
-                first_log_at: first_log_at.clone(),
-                session_manager: session_mgr.clone(),
+            writer_sources.push(SourceSpec {
+                log_path: log_paths[&src.name].clone(),
+                entries: entry_rx,
                 stats: stats.source(&src.name),
-                ts_mode: self.config.server.timestamp_mode,
-                line_counter: line_counters.get(&src.name).cloned(),
-                watches: watches.clone(),
-                commit_lock: commit_lock.clone(),
-                source_meta: SourceRuntimeMeta {
+                line_counter: line_counters[&src.name].clone(),
+                level_detector: self.level_detector_for(&src.name),
+                meta: SourceRuntimeMeta {
                     source_id: src.name.clone(),
                     source_label: src.label.clone(),
                     source_kind: src.source_type.clone(),
@@ -310,13 +289,22 @@ impl LogServer {
                     app_name: self.config.server.app_name.clone(),
                     job_id: self.config.server.job_id.clone(),
                 },
-                level_detector: self.level_detector_for(&src.name),
-            };
-            let writer_handle = tokio::spawn(async move {
-                run_writer(writer_name, log_path, entry_rx, writer_runtime).await;
+                name: src.name,
             });
-            join_handles.push(writer_handle);
         }
+
+        let writer = Writer::new(
+            WriterShared {
+                broadcast_tx: broadcast_tx.clone(),
+                replay: replay.clone(),
+                session_manager: session_mgr.clone(),
+                watches: watches.clone(),
+                ts_mode: self.config.server.timestamp_mode,
+            },
+            writer_sources,
+        );
+        let (writer, writer_task) = writer.spawn();
+        join_handles.push(writer_task);
 
         // ── 10. Build config message ──
         let session_info = session_mgr.lock().unwrap().build_session_info();
@@ -330,11 +318,8 @@ impl LogServer {
             labels: pane_labels.clone(),
             frontend: self.frontend_dir.clone(),
             ts_mode: self.config.server.timestamp_mode.to_string(),
-            source_files: shared_source_files.clone(),
-            html_path: shared_html_path.clone(),
             plugins: plugins.clone(),
             session_mgr: session_mgr.clone(),
-            first_log_at: first_log_at.clone(),
             merges: serde_json::to_value(&self.config.merges).unwrap_or_else(|_| json!([])),
             source_levels: crate::levels::source_levels_json(&self.config),
         };
@@ -344,15 +329,8 @@ impl LogServer {
         let rotation_ctx = RotationContext {
             logs_root: self.logs_root.clone(),
             tab_label: tab_label.to_string(),
-            source_names: writer_log_paths.keys().cloned().collect(),
-            writer_paths: writer_log_paths.clone(),
-            source_files: shared_source_files.clone(),
-            html_path: shared_html_path.clone(),
             session_mgr: session_mgr.clone(),
-            first_log_at: first_log_at.clone(),
             replay: replay.clone(),
-            commit_lock: commit_lock.clone(),
-            line_counters: line_counters.clone(),
             frontend: self.frontend_dir.clone(),
             tabs: tabs_json.clone(),
             pane_labels: pane_labels.clone(),
@@ -370,7 +348,16 @@ impl LogServer {
             export_on_rotate: self.export_on_shutdown,
             merges: serde_json::to_value(&self.config.merges).unwrap_or_else(|_| json!([])),
         };
-        let on_rotate: RotateCallback = Arc::new(move |title| rotate_session(&rotation_ctx, title));
+        let rotation_ctx = Arc::new(rotation_ctx);
+        let on_rotate: RotateCallback = Arc::new(move |title| {
+            let ctx = rotation_ctx.clone();
+            let writer = writer.clone();
+            Box::pin(async move {
+                writer
+                    .exec(move |writer| rotate_session(&ctx, title, writer))
+                    .await?
+            })
+        });
         let shutdown_export = on_export.clone();
 
         // ── 12. Start HTTP + WS server ──
@@ -783,11 +770,8 @@ struct ExportContext {
     labels: HashMap<String, String>,
     frontend: PathBuf,
     ts_mode: String,
-    source_files: Arc<Mutex<HashMap<String, String>>>,
-    html_path: Arc<Mutex<PathBuf>>,
     plugins: LoadedPlugins,
     session_mgr: Arc<Mutex<SessionManager>>,
-    first_log_at: Arc<Mutex<Option<DateTime<Local>>>>,
     merges: serde_json::Value,
     source_levels: serde_json::Value,
 }
@@ -795,14 +779,19 @@ struct ExportContext {
 /// Export the current session to HTML from the latest complete canonical
 /// combined stream. SessionExporter serializes producers and publishes atomically.
 fn export_session(ctx: &ExportContext) -> Result<String, String> {
-    let fla = ctx.first_log_at.lock().unwrap().map(|dt| dt.to_rfc3339());
-    let export_html = ctx.html_path.lock().unwrap().clone();
-    let export_sources = ctx.source_files.lock().unwrap().clone();
-    let (export_markers, combined_file) = ctx
-        .session_mgr
-        .lock()
-        .map(|mgr| (mgr.load_markers(), mgr.combined_file()))
-        .unwrap_or_default();
+    let (fla, export_html, export_sources, export_markers, combined_file) = {
+        let mgr = ctx
+            .session_mgr
+            .lock()
+            .map_err(|_| "session manager lock failed".to_string())?;
+        (
+            mgr.first_log_at().map(str::to_string),
+            mgr.html_path(),
+            mgr.source_files().clone(),
+            mgr.load_markers(),
+            mgr.combined_file(),
+        )
+    };
 
     let exporter = SessionExporter::new(
         export_html.clone(),
@@ -844,15 +833,8 @@ fn export_session(ctx: &ExportContext) -> Result<String, String> {
 struct RotationContext {
     logs_root: PathBuf,
     tab_label: String,
-    source_names: Vec<String>,
-    writer_paths: HashMap<String, Arc<Mutex<PathBuf>>>,
-    source_files: Arc<Mutex<HashMap<String, String>>>,
-    html_path: Arc<Mutex<PathBuf>>,
     session_mgr: Arc<Mutex<SessionManager>>,
-    first_log_at: Arc<Mutex<Option<DateTime<Local>>>>,
     replay: Arc<Mutex<VecDeque<LiveMessage>>>,
-    commit_lock: Arc<Mutex<()>>,
-    line_counters: HashMap<String, Arc<AtomicU64>>,
     frontend: PathBuf,
     tabs: Vec<serde_json::Value>,
     pane_labels: HashMap<String, String>,
@@ -872,26 +854,27 @@ struct RotationContext {
 }
 
 /// Roll over to a fresh session without restarting source tasks or releasing
-/// UART ownership. Returns `(old_session_info, new_session_info)`.
+/// UART ownership. Runs inside the session writer, between two records.
+/// Returns `(old_session_info, new_session_info)`.
 fn rotate_session(
     ctx: &RotationContext,
     title: Option<String>,
+    writer: &mut Writer,
 ) -> Result<(serde_json::Value, serde_json::Value), String> {
     let title = normalize_session_title(title)?;
-    let commit_guard = ctx
-        .commit_lock
-        .lock()
-        .map_err(|_| "combined commit lock failed".to_string())?;
-    let (old_session, old_markers) = {
+    let (old_session, old_markers, old_source_files, old_html_path) = {
         let manager = ctx
             .session_mgr
             .lock()
             .map_err(|_| "session manager lock failed".to_string())?;
-        (manager.build_session_info(), manager.load_markers())
+        (
+            manager.build_session_info(),
+            manager.load_markers(),
+            manager.source_files().clone(),
+            manager.html_path(),
+        )
     };
-    let old_source_files = ctx.source_files.lock().unwrap().clone();
-    let old_html_path = ctx.html_path.lock().unwrap().clone();
-    let old_first_log_at = ctx.first_log_at.lock().unwrap().map(|dt| dt.to_rfc3339());
+    let old_first_log_at = writer.first_log_at().map(|dt| dt.to_rfc3339());
 
     let new_session_id =
         make_titled_session_id_for_root(&ctx.logs_root, ctx.job_id.as_deref(), title.as_deref())
@@ -900,7 +883,8 @@ fn rotate_session(
     std::fs::create_dir_all(&new_session_dir).map_err(|err| err.to_string())?;
 
     let mut new_source_files = HashMap::new();
-    for source_name in &ctx.source_names {
+    let mut new_log_paths = HashMap::new();
+    for source_name in writer.source_names() {
         let log_name = format!(
             "{}__{}__{}.log",
             slugify(&ctx.tab_label),
@@ -908,10 +892,8 @@ fn rotate_session(
             slugify(&new_session_id),
         );
         let log_path = new_session_dir.join(log_name);
-        new_source_files.insert(source_name.clone(), log_path.display().to_string());
-        if let Some(shared_path) = ctx.writer_paths.get(source_name) {
-            *shared_path.lock().unwrap() = log_path;
-        }
+        new_source_files.insert(source_name.to_string(), log_path.display().to_string());
+        new_log_paths.insert(source_name.to_string(), log_path);
     }
 
     let started_at = Local::now().to_rfc3339();
@@ -941,15 +923,7 @@ fn rotate_session(
         .write_manifest()
         .map_err(|err| err.to_string())?;
 
-    {
-        let mut source_files = ctx.source_files.lock().unwrap();
-        *source_files = new_source_files;
-    }
-    *ctx.html_path.lock().unwrap() = new_session_dir.join("session.html");
-    *ctx.first_log_at.lock().unwrap() = None;
-    for counter in ctx.line_counters.values() {
-        counter.store(0, std::sync::atomic::Ordering::Relaxed);
-    }
+    writer.start_session(&new_log_paths);
     // Hold the replay lock until the new config is in place, so a client that
     // connects during rotation sees either the old session or the new one.
     let mut replay = ctx.replay.lock().unwrap();
@@ -981,7 +955,6 @@ fn rotate_session(
         .lock()
         .map_err(|_| "config message lock failed".to_string())? = new_config_msg.to_string();
     drop(replay);
-    drop(commit_guard);
 
     // Export the old foreground session's HTML off the hot path. Daemons keep
     // raw artifacts only unless an explicit export is requested.
@@ -1128,31 +1101,6 @@ fn make_titled_session_id_for_root(
     )
 }
 
-#[derive(Clone, Default)]
-struct SourceRuntimeMeta {
-    source_id: String,
-    source_label: String,
-    source_kind: String,
-    tab_labels: Vec<String>,
-    app_name: String,
-    job_id: Option<String>,
-}
-
-struct WriterRuntime {
-    broadcast_tx: broadcast::Sender<LiveMessage>,
-    replay: Arc<Mutex<VecDeque<LiveMessage>>>,
-    first_log_at: Arc<Mutex<Option<DateTime<Local>>>>,
-    session_manager: Arc<Mutex<SessionManager>>,
-    stats: Option<Arc<SourceRuntimeStats>>,
-    ts_mode: TimestampMode,
-    line_counter: Option<Arc<AtomicU64>>,
-    watches: Arc<RwLock<HashMap<String, crate::net::watch::TemporaryWatch>>>,
-    commit_lock: Arc<Mutex<()>>,
-    source_meta: SourceRuntimeMeta,
-    /// Level classifier for received lines; `None` when `levels: off`.
-    level_detector: Option<crate::levels::LevelDetector>,
-}
-
 fn merge_label(merge: &crate::config::MergeConfig) -> String {
     merge.label.clone().unwrap_or_else(|| merge.name.clone())
 }
@@ -1187,336 +1135,9 @@ fn build_source_tab_labels(
     by_source
 }
 
-/// Fields that `combined.jsonl` records carry in addition to the live payload.
-/// They are constant for a writer, so they are serialized once per writer.
-const COMBINED_ONLY_KEYS: [&str; 5] = [
-    "app_name",
-    "job_id",
-    "source_label",
-    "source_kind",
-    "tab_labels",
-];
-
-/// The [`COMBINED_ONLY_KEYS`] fields serialized as the end of a JSON object:
-/// `,"app_name":…,"tab_labels":[…]}`.
-fn combined_record_tail(source_meta: &SourceRuntimeMeta) -> String {
-    let fields = json!({
-        "app_name": source_meta.app_name,
-        "job_id": source_meta.job_id,
-        "source_label": source_meta.source_label,
-        "source_kind": source_meta.source_kind,
-        "tab_labels": source_meta.tab_labels,
-    });
-    format!(",{}", &fields.to_string()[1..])
-}
-
-/// Serialize the `combined.jsonl` record for a live payload, reusing the
-/// payload's already-serialized text. Payloads whose injected metadata
-/// overlaps the combined-only fields take the general (slower) path, so
-/// the stored record never contains duplicate keys.
-fn combined_record_line(
-    payload: &serde_json::Value,
-    payload_text: &str,
-    source_meta: &SourceRuntimeMeta,
-    tail: &str,
-) -> serde_json::Result<Vec<u8>> {
-    let can_append = payload.as_object().is_some_and(|obj| {
-        obj.get("source_id").and_then(|v| v.as_str()) == Some(source_meta.source_id.as_str())
-            && !COMBINED_ONLY_KEYS.iter().any(|key| obj.contains_key(*key))
-    });
-    if can_append {
-        if let Some(body) = payload_text.strip_suffix('}') {
-            let mut line = Vec::with_capacity(body.len() + tail.len());
-            line.extend_from_slice(body.as_bytes());
-            line.extend_from_slice(tail.as_bytes());
-            return Ok(line);
-        }
-    }
-    serde_json::to_vec(&build_combined_log_entry(payload, source_meta))
-}
-
-fn build_combined_log_entry(
-    payload: &serde_json::Value,
-    source_meta: &SourceRuntimeMeta,
-) -> serde_json::Value {
-    let mut combined = payload.clone();
-    if let Some(obj) = combined.as_object_mut() {
-        obj.insert("source_id".to_string(), json!(source_meta.source_id));
-        obj.insert("app_name".to_string(), json!(source_meta.app_name));
-        obj.insert("job_id".to_string(), json!(source_meta.job_id));
-        obj.insert("source_label".to_string(), json!(source_meta.source_label));
-        obj.insert("source_kind".to_string(), json!(source_meta.source_kind));
-        obj.insert("tab_labels".to_string(), json!(source_meta.tab_labels));
-    }
-    combined
-}
-
-/// Flush the buffered source log periodically rather than once per line.
-/// This keeps the file reasonably durable while preserving BufWriter batching
-/// under high-volume capture.
-const LOG_FLUSH_EVERY_LINES: usize = 256;
-
-/// Writer task: receives log entries, writes to file, broadcasts to WS clients.
-///
-/// Tracks `first_log_at` and sends a `session_info` update when it's first set.
-async fn run_writer(
-    source_name: String,
-    log_path: Arc<Mutex<PathBuf>>,
-    mut entry_rx: mpsc::Receiver<LogEntry>,
-    runtime: WriterRuntime,
-) {
-    let mut current_log_path = log_path.lock().unwrap().clone();
-    let mut file = match open_log_file(&source_name, &current_log_path) {
-        Some(file) => file,
-        None => return,
-    };
-
-    let clock = SessionClock::new(runtime.ts_mode);
-    let combined_tail = combined_record_tail(&runtime.source_meta);
-    let mut level_detector = runtime.level_detector;
-    let mut lines_since_flush = 0usize;
-    use std::io::Write;
-
-    while let Some(entry) = entry_rx.recv().await {
-        let _commit_guard = match runtime.commit_lock.lock() {
-            Ok(guard) => guard,
-            Err(_) => {
-                error!("[{source_name}] combined commit lock poisoned");
-                break;
-            }
-        };
-        let desired_log_path = log_path.lock().unwrap().clone();
-        if desired_log_path != current_log_path {
-            let _ = file.flush();
-            lines_since_flush = 0;
-            match open_log_file(&source_name, &desired_log_path) {
-                Some(next_file) => {
-                    current_log_path = desired_log_path;
-                    file = next_file;
-                }
-                None => continue,
-            }
-        }
-
-        // Set origin on first entry for the current session and broadcast session_info update.
-        let set_first_log_at = {
-            let mut fla = runtime.first_log_at.lock().unwrap();
-            if fla.is_none() {
-                *fla = Some(entry.timestamp);
-                true
-            } else {
-                false
-            }
-        };
-        if set_first_log_at {
-            let session = if let Ok(mut manager) = runtime.session_manager.lock() {
-                let _ = manager.mark_first_log_at(entry.timestamp);
-                manager.build_session_info()
-            } else {
-                json!({
-                    "first_log_at": entry.timestamp.to_rfc3339(),
-                    "timestamp_mode": runtime.ts_mode.to_string(),
-                })
-            };
-            let session_info = json!({
-                "type": "session_info",
-                "session": session,
-            });
-            let _ = runtime.broadcast_tx.send(LiveEvent::new(session_info));
-        }
-
-        // Format for log file: [timestamp] message
-        let file_ts = clock.file_timestamp(entry.timestamp);
-        let file_line = format!("[{file_ts}] {}\n", entry.message);
-        if let Some(stats) = &runtime.stats {
-            stats.record_dequeued(file_line.len());
-        }
-
-        if let Err(e) = file.write_all(file_line.as_bytes()) {
-            error!("[{source_name}] log write error: {e}");
-        } else {
-            lines_since_flush += 1;
-            // Flush a partial batch when the queue goes idle so low-volume
-            // sources remain observable without sacrificing batching during
-            // sustained capture.
-            if lines_since_flush >= LOG_FLUSH_EVERY_LINES || entry_rx.is_empty() {
-                let _ = file.flush();
-                lines_since_flush = 0;
-            }
-        }
-
-        // Build WS payload with BOTH absolute and relative timestamps.
-        // The frontend needs both so the timestamp toggle button works.
-        let abs_ts = entry.timestamp.format("%m-%d %H:%M:%S%.3f").to_string();
-        let abs_num = entry.timestamp.timestamp_millis() as f64;
-
-        // Calculate relative timestamp from origin (first log).
-        let (rel_ts, rel_num) = {
-            let origin = runtime.first_log_at.lock().unwrap();
-            match *origin {
-                Some(origin_ts) => {
-                    let delta = entry.timestamp - origin_ts;
-                    let total_ms = delta.num_milliseconds().max(0) as u64;
-                    let rel_ts = format_relative_millis(total_ms);
-                    (rel_ts, total_ms as f64)
-                }
-                None => (format_relative_millis(0), 0.0),
-            }
-        };
-
-        // Always send absolute as the display timestamp.
-        // The frontend recalculates using metadata when the mode changes.
-        let display_ts = abs_ts.clone();
-        let ts_iso = entry.timestamp.to_rfc3339();
-
-        let data = if let Some(ref color) = entry.color {
-            if let Some(ansi) = Ansi::code(color) {
-                format!("{ansi}{}{}", entry.message, Ansi::RESET)
-            } else {
-                entry.message.clone()
-            }
-        } else {
-            entry.message.clone()
-        };
-
-        let is_tx = entry.source.starts_with("TX::");
-
-        // Derive origin:
-        // - TX::<origin> → the part after TX:: (pytest, ui, etc.)
-        // - Normal RX where entry.source == source_name → "SERIAL"
-        // - Injected where entry.source != source_name → the caller-provided origin
-        let origin = if is_tx {
-            entry
-                .source
-                .strip_prefix("TX::")
-                .unwrap_or("ui")
-                .to_string()
-        } else if entry.source == source_name {
-            "SERIAL".to_string()
-        } else {
-            entry.source.clone()
-        };
-
-        // Raw message without ANSI wrapping (for SDK / structured API).
-        let message = entry.message.clone();
-
-        // Increment per-source line counter.
-        let line_idx = runtime
-            .line_counter
-            .as_ref()
-            .map(|c| c.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
-            .unwrap_or(0);
-
-        let mut payload = json!({
-            "type": if is_tx { "tx" } else { "rx" },
-            "data": data,
-            "timestamp": display_ts,
-            "timestamp_iso": ts_iso,
-            "timestamp_num": abs_num,
-            "source_id": source_name,
-            "line_idx": line_idx,
-            "origin": origin,
-            "color": entry.color,
-            "message": message,
-            // Send both absolute and relative so the frontend can toggle.
-            "absTs": abs_ts,
-            "absNum": abs_num,
-            "relTs": rel_ts,
-            "relNum": rel_num,
-        });
-        if let (Some(payload_obj), Some(meta_obj)) = (
-            payload.as_object_mut(),
-            entry.meta.as_ref().and_then(|m| m.as_object()),
-        ) {
-            for (key, value) in meta_obj {
-                payload_obj.insert(key.clone(), value.clone());
-            }
-        }
-
-        // Classify received lines once, here, so live clients, replay,
-        // combined.jsonl and reports share one result. TX echoes have no
-        // level; an explicit `level` in injected metadata is kept as-is.
-        if !is_tx && payload.get("level").is_none() {
-            if let Some(level) = level_detector.as_mut().and_then(|d| d.detect(&message)) {
-                payload["level"] = json!(level);
-            }
-        }
-
-        // Serialize the payload once: the same text is broadcast, and the
-        // combined.jsonl record is that text plus the writer's constant fields.
-        let payload_text = match runtime.session_manager.lock() {
-            Ok(mut manager) => {
-                if let Some(object) = payload.as_object_mut() {
-                    object.insert("sequence".to_string(), json!(manager.next_sequence()));
-                    object.insert("session_id".to_string(), json!(manager.session_id()));
-                }
-                let payload_text = payload.to_string();
-                let appended = combined_record_line(
-                    &payload,
-                    &payload_text,
-                    &runtime.source_meta,
-                    &combined_tail,
-                )
-                .map_err(anyhow::Error::from)
-                .and_then(|line| manager.append_combined_line(line));
-                if let Err(error) = appended {
-                    error!("[{source_name}] failed to append combined entry: {error}");
-                    continue;
-                }
-                payload_text
-            }
-            Err(_) => {
-                error!("[{source_name}] session manager lock poisoned");
-                continue;
-            }
-        };
-
-        crate::net::watch::retain_matching_watches(
-            &runtime.watches,
-            &source_name,
-            is_tx,
-            &message,
-            &payload,
-        );
-
-        // Store in the replay buffer and broadcast to WS clients atomically.
-        crate::net::ws_server::publish_replayable(
-            &runtime.replay,
-            &runtime.broadcast_tx,
-            REPLAY_BUFFER_SIZE,
-            LiveEvent::with_text(payload, payload_text),
-        );
-    }
-
-    let _ = file.flush();
-}
-
-fn open_log_file(
-    source_name: &str,
-    log_path: &PathBuf,
-) -> Option<std::io::BufWriter<std::fs::File>> {
-    if let Some(parent) = log_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-
-    match std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_path)
-    {
-        Ok(file) => Some(std::io::BufWriter::new(file)),
-        Err(e) => {
-            error!(
-                "[{source_name}] cannot open log file {}: {e}",
-                log_path.display()
-            );
-            None
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::writer::test_support::*;
     use super::*;
 
     #[test]
@@ -1570,68 +1191,6 @@ mod tests {
         assert_eq!(summary["sources"][2]["port"], 9999);
     }
 
-    use tokio::time::{sleep, Duration};
-
-    fn temp_dir(name: &str) -> PathBuf {
-        let nanos = Local::now().timestamp_nanos_opt().unwrap_or_default();
-        let dir = std::env::temp_dir().join(format!(
-            "embed-log-runtime-{name}-{}-{nanos}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    fn test_manager(session_id: &str, dir: PathBuf, source_file: PathBuf) -> SessionManager {
-        let mut source_files = HashMap::new();
-        source_files.insert("dut".to_string(), source_file.display().to_string());
-        let combined_file = dir.join("combined.jsonl");
-        SessionManager::new(
-            session_id,
-            dir,
-            &[json!({ "label": "Main", "panes": ["dut"] })],
-            source_files,
-            combined_file.display().to_string(),
-            HashMap::from([("dut".to_string(), "DUT".to_string())]),
-            HashMap::from([("dut".to_string(), "udp".to_string())]),
-            json!({}),
-            json!({}),
-            json!({}),
-            json!({}),
-            Local::now().to_rfc3339(),
-            "embed-log",
-            None,
-            None,
-            "absolute",
-            None,
-            json!([]),
-        )
-    }
-
-    fn test_source_meta() -> SourceRuntimeMeta {
-        SourceRuntimeMeta {
-            source_id: "dut".to_string(),
-            source_label: "DUT".to_string(),
-            source_kind: "udp".to_string(),
-            tab_labels: vec!["Main".to_string()],
-            app_name: "embed-log".to_string(),
-            job_id: None,
-        }
-    }
-
-    async fn wait_file_contains(path: &PathBuf, needle: &str) {
-        for _ in 0..100 {
-            if std::fs::read_to_string(path)
-                .map(|text| text.contains(needle))
-                .unwrap_or(false)
-            {
-                return;
-            }
-            sleep(Duration::from_millis(10)).await;
-        }
-        panic!("{} did not contain {needle:?}", path.display());
-    }
-
     #[test]
     fn virtual_merge_tabs_are_attributed_to_physical_members() {
         let tabs = vec![crate::config::TabConfig {
@@ -1676,297 +1235,6 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
-    #[tokio::test]
-    async fn writer_reopens_log_file_after_rotation_path_update() {
-        let root = temp_dir("rotate-writer");
-        let first_dir = root.join("session-1");
-        let second_dir = root.join("session-2");
-        std::fs::create_dir_all(&first_dir).unwrap();
-        std::fs::create_dir_all(&second_dir).unwrap();
-
-        let first_log = first_dir.join("main__dut__session-1.log");
-        let second_log = second_dir.join("main__dut__session-2.log");
-        let path = Arc::new(Mutex::new(first_log.clone()));
-        let (entry_tx, entry_rx) = mpsc::channel(4);
-        let (broadcast_tx, _rx) = broadcast::channel(16);
-        let replay = Arc::new(Mutex::new(VecDeque::new()));
-        let first_log_at = Arc::new(Mutex::new(None));
-        let manager = Arc::new(Mutex::new(test_manager(
-            "session-1",
-            first_dir,
-            first_log.clone(),
-        )));
-
-        let runtime = WriterRuntime {
-            broadcast_tx,
-            replay,
-            first_log_at: first_log_at.clone(),
-            session_manager: manager,
-            stats: None,
-            ts_mode: TimestampMode::Absolute,
-            line_counter: None,
-            watches: Arc::new(RwLock::new(HashMap::new())),
-            commit_lock: Arc::new(Mutex::new(())),
-            source_meta: test_source_meta(),
-            level_detector: None,
-        };
-        let handle = tokio::spawn(run_writer(
-            "dut".to_string(),
-            path.clone(),
-            entry_rx,
-            runtime,
-        ));
-
-        for index in 0..LOG_FLUSH_EVERY_LINES {
-            entry_tx
-                .send(LogEntry::new(
-                    Local::now(),
-                    "dut".to_string(),
-                    if index + 1 == LOG_FLUSH_EVERY_LINES {
-                        "first".to_string()
-                    } else {
-                        format!("warmup-{index}")
-                    },
-                ))
-                .await
-                .unwrap();
-        }
-        wait_file_contains(&first_log, "first").await;
-
-        *path.lock().unwrap() = second_log.clone();
-        *first_log_at.lock().unwrap() = None;
-        for index in 0..LOG_FLUSH_EVERY_LINES {
-            entry_tx
-                .send(LogEntry::new(
-                    Local::now(),
-                    "dut".to_string(),
-                    if index + 1 == LOG_FLUSH_EVERY_LINES {
-                        "second".to_string()
-                    } else {
-                        format!("rotated-warmup-{index}")
-                    },
-                ))
-                .await
-                .unwrap();
-        }
-        wait_file_contains(&second_log, "second").await;
-
-        drop(entry_tx);
-        handle.await.unwrap();
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn combined_record_line_reuses_payload_text_and_matches_full_build() {
-        let meta = test_source_meta();
-        let tail = combined_record_tail(&meta);
-        let payload = json!({
-            "type": "rx",
-            "source_id": "dut",
-            "message": "boot \"quoted\" \u{1b}[0m",
-            "sequence": 7,
-            "session_id": "session-1",
-            "custom": {"nested": [1, 2]},
-        });
-        let text = payload.to_string();
-        let line = combined_record_line(&payload, &text, &meta, &tail).unwrap();
-        assert!(
-            line.starts_with(&text.as_bytes()[..text.len() - 1]),
-            "reuses payload text"
-        );
-        let parsed: serde_json::Value = serde_json::from_slice(&line).unwrap();
-        assert_eq!(parsed, build_combined_log_entry(&payload, &meta));
-    }
-
-    #[test]
-    fn combined_record_line_never_duplicates_injected_keys() {
-        let meta = test_source_meta();
-        let tail = combined_record_tail(&meta);
-        for payload in [
-            json!({"source_id": "dut", "source_kind": "merge", "message": "m"}),
-            json!({"source_id": "other", "message": "m"}),
-        ] {
-            let text = payload.to_string();
-            let line = combined_record_line(&payload, &text, &meta, &tail).unwrap();
-            let line = String::from_utf8(line).unwrap();
-            for key in ["\"source_id\"", "\"source_kind\""] {
-                assert_eq!(line.matches(key).count(), 1, "{line}");
-            }
-            let parsed: serde_json::Value = serde_json::from_str(&line).unwrap();
-            assert_eq!(parsed, build_combined_log_entry(&payload, &meta));
-            assert_eq!(parsed["source_kind"], "udp");
-        }
-    }
-
-    #[tokio::test]
-    async fn writer_appends_combined_jsonl_with_source_metadata() {
-        let root = temp_dir("combined-jsonl");
-        let session_dir = root.join("session-1");
-        std::fs::create_dir_all(&session_dir).unwrap();
-        let log_path = session_dir.join("main__dut__session-1.log");
-        let combined_path = session_dir.join("combined.jsonl");
-
-        let path = Arc::new(Mutex::new(log_path.clone()));
-        let (entry_tx, entry_rx) = mpsc::channel(4);
-        let (broadcast_tx, _broadcast_rx) = broadcast::channel(16);
-        let manager = Arc::new(Mutex::new(test_manager(
-            "session-1",
-            session_dir.clone(),
-            log_path.clone(),
-        )));
-
-        let runtime = WriterRuntime {
-            broadcast_tx,
-            replay: Arc::new(Mutex::new(VecDeque::new())),
-            first_log_at: Arc::new(Mutex::new(None)),
-            session_manager: manager,
-            stats: None,
-            ts_mode: TimestampMode::Absolute,
-            line_counter: None,
-            watches: Arc::new(RwLock::new(HashMap::new())),
-            commit_lock: Arc::new(Mutex::new(())),
-            source_meta: test_source_meta(),
-            level_detector: Some(
-                crate::levels::LevelDetector::new(&crate::levels::builtin_zephyr_profile(), "test")
-                    .unwrap(),
-            ),
-        };
-        let handle = tokio::spawn(run_writer("dut".to_string(), path, entry_rx, runtime));
-
-        for (source, message) in [
-            ("dut", "boot complete"),
-            ("dut", "[00:00:01.000,000] <dbg> net: rx"),
-            ("TX::ui", "<dbg> echoed command"),
-        ] {
-            entry_tx
-                .send(LogEntry::new(
-                    Local::now(),
-                    source.to_string(),
-                    message.to_string(),
-                ))
-                .await
-                .unwrap();
-        }
-        wait_file_contains(&combined_path, "echoed command").await;
-        let line = std::fs::read_to_string(&combined_path).unwrap();
-        let records: Vec<serde_json::Value> = line
-            .lines()
-            .map(|l| serde_json::from_str(l).unwrap())
-            .collect();
-        assert!(records[0].get("level").is_none(), "{}", records[0]);
-        assert_eq!(records[1]["level"], "dbg");
-        assert!(records[2].get("level").is_none(), "TX lines have no level");
-        let first = line.lines().next().unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(first).unwrap();
-        assert_eq!(parsed["source_id"], "dut");
-        assert_eq!(parsed["source_label"], "DUT");
-        assert_eq!(parsed["source_kind"], "udp");
-        assert_eq!(parsed["tab_labels"], json!(["Main"]));
-        assert_eq!(parsed["session_id"], "session-1");
-        assert_eq!(parsed["app_name"], "embed-log");
-        assert_eq!(parsed["message"], "boot complete");
-        assert_eq!(parsed["sequence"], 1);
-
-        drop(entry_tx);
-        handle.await.unwrap();
-        std::fs::remove_dir_all(root).ok();
-    }
-
-    #[tokio::test]
-    async fn concurrent_writers_commit_combined_and_broadcast_in_sequence_order() {
-        let root = temp_dir("concurrent-sequence");
-        let session_dir = root.join("session-1");
-        std::fs::create_dir_all(&session_dir).unwrap();
-        let dut_log = session_dir.join("dut.log");
-        let host_log = session_dir.join("host.log");
-        let combined_path = session_dir.join("combined.jsonl");
-        let manager = Arc::new(Mutex::new(test_manager(
-            "session-1",
-            session_dir.clone(),
-            dut_log.clone(),
-        )));
-        let (broadcast_tx, mut broadcast_rx) = broadcast::channel(256);
-        let replay = Arc::new(Mutex::new(VecDeque::new()));
-        let first_log_at = Arc::new(Mutex::new(None));
-        let watches = Arc::new(RwLock::new(HashMap::new()));
-        let commit_lock = Arc::new(Mutex::new(()));
-        let (dut_tx, dut_rx) = mpsc::channel(64);
-        let (host_tx, host_rx) = mpsc::channel(64);
-        let make_runtime = |source_id: &str, line_counter: Arc<AtomicU64>| WriterRuntime {
-            broadcast_tx: broadcast_tx.clone(),
-            replay: replay.clone(),
-            first_log_at: first_log_at.clone(),
-            session_manager: manager.clone(),
-            stats: None,
-            ts_mode: TimestampMode::Absolute,
-            line_counter: Some(line_counter),
-            watches: watches.clone(),
-            commit_lock: commit_lock.clone(),
-            level_detector: None,
-            source_meta: SourceRuntimeMeta {
-                source_id: source_id.to_string(),
-                source_label: source_id.to_string(),
-                source_kind: "file".to_string(),
-                tab_labels: vec!["Main".to_string()],
-                app_name: "embed-log".to_string(),
-                job_id: None,
-            },
-        };
-        let dut_handle = tokio::spawn(run_writer(
-            "DUT".to_string(),
-            Arc::new(Mutex::new(dut_log)),
-            dut_rx,
-            make_runtime("DUT", Arc::new(AtomicU64::new(0))),
-        ));
-        let host_handle = tokio::spawn(run_writer(
-            "HOST".to_string(),
-            Arc::new(Mutex::new(host_log)),
-            host_rx,
-            make_runtime("HOST", Arc::new(AtomicU64::new(0))),
-        ));
-        let dut_sender = tokio::spawn(async move {
-            for index in 0..50 {
-                dut_tx
-                    .send(LogEntry::new(Local::now(), "DUT", format!("dut-{index}")))
-                    .await
-                    .unwrap();
-            }
-        });
-        let host_sender = tokio::spawn(async move {
-            for index in 0..50 {
-                host_tx
-                    .send(LogEntry::new(Local::now(), "HOST", format!("host-{index}")))
-                    .await
-                    .unwrap();
-            }
-        });
-        dut_sender.await.unwrap();
-        host_sender.await.unwrap();
-        dut_handle.await.unwrap();
-        host_handle.await.unwrap();
-
-        let combined = std::fs::read_to_string(&combined_path).unwrap();
-        let sequences = combined
-            .lines()
-            .map(|line| {
-                serde_json::from_str::<serde_json::Value>(line).unwrap()["sequence"]
-                    .as_u64()
-                    .unwrap()
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(sequences, (1..=100).collect::<Vec<_>>());
-
-        let mut broadcast_sequences = Vec::new();
-        while let Ok(message) = broadcast_rx.try_recv() {
-            let value = message.value().clone();
-            if let Some(sequence) = value.get("sequence").and_then(|value| value.as_u64()) {
-                broadcast_sequences.push(sequence);
-            }
-        }
-        assert_eq!(broadcast_sequences, (1..=100).collect::<Vec<_>>());
-        std::fs::remove_dir_all(root).ok();
-    }
-
     fn empty_plugins() -> LoadedPlugins {
         LoadedPlugins {
             definitions: json!({}),
@@ -1975,51 +1243,29 @@ mod tests {
         }
     }
 
-    #[test]
-    fn rotate_session_creates_new_session_and_repoints_writers() {
+    #[tokio::test]
+    async fn rotate_session_starts_a_new_session_in_the_writer() {
         let root = temp_dir("rotate-session");
         let first_dir = root.join("session-1");
         std::fs::create_dir_all(&first_dir).unwrap();
         let first_log = first_dir.join("main__dut__session-1.log");
-
-        let writer_path = Arc::new(Mutex::new(first_log.clone()));
-        let mut writer_paths = HashMap::new();
-        writer_paths.insert("dut".to_string(), writer_path.clone());
-
-        let source_files = Arc::new(Mutex::new(HashMap::from([(
-            "dut".to_string(),
-            first_log.display().to_string(),
-        )])));
-        let html_path = Arc::new(Mutex::new(first_dir.join("session.html")));
         let mgr = test_manager("session-1", first_dir.clone(), first_log.clone());
         mgr.write_manifest().unwrap();
-        let session_mgr = Arc::new(Mutex::new(mgr));
+        let rig = TestWriter::spawn(mgr, &[("dut", first_log.clone())], 16, None);
+        rig.send("dut", "before rotation").await;
+        rig.send("dut", "before rotation 2").await;
+        wait_file_contains(&first_log, "before rotation 2").await;
 
-        let replay = Arc::new(Mutex::new(VecDeque::from([LiveEvent::new(json!("stale"))])));
         let config_msg = Arc::new(Mutex::new("old-config".to_string()));
-        let line_counter = Arc::new(AtomicU64::new(42));
-
-        let mut pane_labels = HashMap::new();
-        pane_labels.insert("dut".to_string(), "DUT".to_string());
-        let mut pane_kinds = HashMap::new();
-        pane_kinds.insert("dut".to_string(), "udp".to_string());
-
-        let ctx = RotationContext {
+        let ctx = Arc::new(RotationContext {
             logs_root: root.clone(),
             tab_label: "main".to_string(),
-            source_names: vec!["dut".to_string()],
-            writer_paths,
-            source_files: source_files.clone(),
-            html_path: html_path.clone(),
-            session_mgr,
-            first_log_at: Arc::new(Mutex::new(Some(Local::now()))),
-            replay: replay.clone(),
-            commit_lock: Arc::new(Mutex::new(())),
-            line_counters: HashMap::from([("dut".to_string(), line_counter.clone())]),
+            session_mgr: rig.manager.clone(),
+            replay: rig.replay.clone(),
             frontend: root.join("frontend"),
             tabs: vec![json!({ "label": "Main", "panes": ["dut"] })],
-            pane_labels,
-            pane_kinds,
+            pane_labels: HashMap::from([("dut".to_string(), "DUT".to_string())]),
+            pane_kinds: HashMap::from([("dut".to_string(), "udp".to_string())]),
             pane_commands: json!({}),
             runtime_config: json!({"sources": [{"name": "dut", "type": "uart"}]}),
             source_levels: json!({"dut": crate::levels::profile_summary(&crate::levels::builtin_zephyr_profile())}),
@@ -2032,33 +1278,37 @@ mod tests {
             default_dark_theme: None,
             export_on_rotate: false,
             merges: json!([]),
-        };
+        });
 
         let title = "EDHOC reconnect attempt 3".to_string();
-        let (old_session, new_session) = rotate_session(&ctx, Some(title.clone())).unwrap();
-        assert_ne!(old_session, new_session, "session info should change");
-        assert_eq!(new_session["title"], title);
-        assert!(new_session["id"]
-            .as_str()
+        let rotation = ctx.clone();
+        let rotation_title = title.clone();
+        let (old_session, new_session) = rig
+            .writer
+            .exec(move |writer| rotate_session(&rotation, Some(rotation_title), writer))
+            .await
             .unwrap()
-            .contains("_edhoc-reconnect-attempt-3"));
+            .unwrap();
+        assert_eq!(old_session["id"], "session-1");
+        assert_eq!(new_session["title"], title);
+        let new_id = new_session["id"].as_str().unwrap().to_string();
+        assert!(new_id.contains("_edhoc-reconnect-attempt-3"));
+        let new_dir = root.join(&new_id);
 
-        // Writer now points into a brand-new session directory under the root.
-        let new_writer = writer_path.lock().unwrap().clone();
-        assert_ne!(new_writer, first_log);
-        let new_dir = new_writer.parent().unwrap();
-        assert!(new_dir.exists() && new_dir != first_dir);
-
-        // Shared state was swapped to the new session.
-        assert_eq!(
-            source_files.lock().unwrap()["dut"],
-            new_writer.display().to_string()
+        // The session manager, replay and config now describe the new session.
+        let new_log = PathBuf::from(&rig.manager.lock().unwrap().source_files()["dut"]);
+        assert_eq!(new_log.parent().unwrap(), new_dir);
+        assert!(
+            rig.replay.lock().unwrap().is_empty(),
+            "replay buffer cleared"
         );
-        assert!(replay.lock().unwrap().is_empty(), "replay buffer cleared");
-        assert_eq!(line_counter.load(std::sync::atomic::Ordering::Relaxed), 0);
-        assert_ne!(*config_msg.lock().unwrap(), "old-config");
+        assert_eq!(
+            rig.counters["dut"].load(std::sync::atomic::Ordering::Relaxed),
+            0
+        );
         let rotated_config: serde_json::Value =
             serde_json::from_str(&config_msg.lock().unwrap()).unwrap();
+        assert_eq!(rotated_config["session"]["id"], new_id);
         assert_eq!(rotated_config["runtime_config"], ctx.runtime_config);
         assert_eq!(rotated_config["source_levels"], ctx.source_levels);
         let manifest: serde_json::Value =
@@ -2066,6 +1316,23 @@ mod tests {
                 .unwrap();
         assert_eq!(manifest["title"], "EDHOC reconnect attempt 3");
         assert!(!first_dir.join("session.html").exists());
+
+        // The next record starts the new session's files and numbering.
+        rig.send("dut", "after rotation").await;
+        wait_file_contains(&new_log, "after rotation").await;
+        let replayed = rig.replay.lock().unwrap().len();
+        rig.finish().await;
+        assert!(!std::fs::read_to_string(&first_log)
+            .unwrap()
+            .contains("after rotation"));
+        let records = read_jsonl(&new_dir.join("combined.jsonl"));
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["message"], "after rotation");
+        assert_eq!(records[0]["sequence"], 1);
+        assert_eq!(records[0]["line_idx"], 0);
+        assert_eq!(records[0]["session_id"], new_id);
+        assert_eq!(read_jsonl(&first_dir.join("combined.jsonl")).len(), 2);
+        assert_eq!(replayed, 1);
 
         std::fs::remove_dir_all(root).ok();
     }
@@ -2086,14 +1353,8 @@ mod tests {
             labels: HashMap::from([("dut".to_string(), "DUT".to_string())]),
             frontend: dir.join("frontend"),
             ts_mode: "absolute".to_string(),
-            source_files: Arc::new(Mutex::new(HashMap::from([(
-                "dut".to_string(),
-                log.display().to_string(),
-            )]))),
-            html_path: Arc::new(Mutex::new(html.clone())),
             plugins: empty_plugins(),
             session_mgr: Arc::new(Mutex::new(mgr)),
-            first_log_at: Arc::new(Mutex::new(None)),
             merges: json!([]),
             source_levels: json!({}),
         };
