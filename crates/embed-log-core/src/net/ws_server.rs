@@ -23,8 +23,15 @@ use crate::sources::TxCommand;
 
 /// Callback type for session export requests.
 pub type ExportCallback = Arc<dyn Fn() -> Result<String, String> + Send + Sync>;
+/// Callback type for session rotation; returns `(old_session, new_session)`.
 pub type RotateCallback = Arc<
-    dyn Fn(Option<String>) -> Result<(serde_json::Value, serde_json::Value), String> + Send + Sync,
+    dyn Fn(
+            Option<String>,
+        ) -> futures::future::BoxFuture<
+            'static,
+            Result<(serde_json::Value, serde_json::Value), String>,
+        > + Send
+        + Sync,
 >;
 
 #[derive(Default)]
@@ -807,7 +814,7 @@ async fn api_rotate_handler(
     };
 
     let title = request.and_then(|axum::Json(request)| request.title);
-    match rotate_fn(title) {
+    match rotate_fn(title).await {
         Ok((old_session, session)) => {
             let payload = serde_json::json!({
                 "type": "session_rotated",

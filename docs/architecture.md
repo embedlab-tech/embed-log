@@ -4,7 +4,7 @@ This document describes the current Rust implementation.
 
 ## Global record ordering
 
-All source writers share one commit lock. Within that serialized section Embed-log selects the active session, assigns its next global `sequence`, appends `combined.jsonl`, updates replay, matches temporary watches, and publishes the live record. Combined-file, replay, and live log-record order therefore agree even when sources emit concurrently. Titled rotation takes the same lock while swapping paths/session state and resets global sequence to 1 and source-local line counters to 0.
+One session writer task (`runtime/writer.rs`) commits every record. It reads the per-source queues round-robin and, for each record, assigns the next global `sequence`, appends the source's session log and `combined.jsonl`, matches temporary watches, and publishes the record to replay and the live broadcast. Because one task does all of this, combined-file, replay and live order agree even when sources emit concurrently, without a commit lock. Titled rotation runs inside the writer between two records (`WriterHandle::exec`): it switches the log files and session state, resets the global sequence to 1 and the source-local line counters to 0.
 
 Each session lazily opens and reuses one append handle for `combined.jsonl`. JSON and its terminating newline are submitted together, without a user-space buffer that could hide published records from readers or exports. Replacing the session manager on rotation closes the old handle. This does not add an `fsync` durability guarantee.
 
@@ -28,7 +28,7 @@ Each session lazily opens and reuses one append handle for `combined.jsonl`. JSO
                  │ LogEntry      │ LogEntry     │ LogEntry
                  ▼               ▼              ▼
           ┌─────────────────────────────────────────────────────────┐
-          │ per-source writer tasks                                 │
+          │ session writer task (one for all sources)               │
           │ - append `[timestamp] message` to session log files      │
           │ - update manifest/session metadata                      │
           │ - broadcast JSON messages to WebSocket clients           │
@@ -96,11 +96,12 @@ parser
   │ emits text lines
   ▼
 LogEntry { timestamp, source, message, color }
-  │ mpsc channel per source
+  │ bounded mpsc queue per source
   ▼
-writer task
+session writer task (reads all queues round-robin)
   ├─ appends to logs/<session>/<tab>__<source>__<session>.log
   ├─ records first_log_at in manifest
+  ├─ appends the record to combined.jsonl with the next global sequence
   ├─ updates runtime stats
   ├─ stores message in replay buffer
   └─ broadcasts JSON over tokio broadcast channel

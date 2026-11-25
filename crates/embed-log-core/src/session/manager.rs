@@ -377,7 +377,17 @@ impl SessionManager {
         self.session_dir.join("manifest.json")
     }
 
-    fn html_path(&self) -> PathBuf {
+    /// Session log file per source id.
+    pub fn source_files(&self) -> &HashMap<String, String> {
+        &self.source_files
+    }
+
+    /// Time of the session's first record (RFC 3339), once one was received.
+    pub fn first_log_at(&self) -> Option<&str> {
+        self.first_log_at.as_deref()
+    }
+
+    pub fn html_path(&self) -> PathBuf {
         self.session_dir.join("session.html")
     }
 }
