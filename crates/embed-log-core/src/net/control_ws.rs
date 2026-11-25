@@ -9,6 +9,7 @@ use tokio::sync::broadcast;
 use tracing::warn;
 
 use crate::models::LogEntry;
+use crate::net::live::{LiveEvent, LiveMessage};
 use crate::sources::TxCommand;
 
 /// Source metadata reported in the `hello.result` response.
@@ -117,15 +118,11 @@ async fn handle_control_client(mut socket: WebSocket, state: super::ServerState)
             // Incoming log entries from the broadcast channel
             result = rx.recv() => {
                 match result {
-                    Ok(payload_str) => {
-                        // Parse the broadcast message
-                        let parsed: serde_json::Value = match serde_json::from_str(&payload_str) {
-                            Ok(v) => v,
-                            Err(_) => continue,
-                        };
+                    Ok(live) => {
+                        let parsed = live.value();
 
                         // Use the shared forward decision function.
-                        if !should_forward_to_control_client(&parsed, &subscribed_sources) {
+                        if !should_forward_to_control_client(parsed, &subscribed_sources) {
                             continue;
                         }
 
@@ -133,7 +130,7 @@ async fn handle_control_client(mut socket: WebSocket, state: super::ServerState)
 
                         // markers_update and session_info are forwarded as-is.
                         if msg_type == "markers_update" || msg_type == "session_info" {
-                            if let Err(e) = socket.send(Message::Text(payload_str.clone().into())).await {
+                            if let Err(e) = socket.send(live.ws_message()).await {
                                 warn!("control WS send error: {e}");
                                 break;
                             }
@@ -145,7 +142,7 @@ async fn handle_control_client(mut socket: WebSocket, state: super::ServerState)
                             Some(s) => s.to_string(),
                             None => continue,
                         };
-                        let entry = build_log_entry(&parsed, &source_id);
+                        let entry = build_log_entry(parsed, &source_id);
                         let entry_str = match serde_json::to_string(&entry) {
                             Ok(s) => s,
                             Err(_) => continue,
@@ -997,7 +994,7 @@ async fn handle_marker_create(
                     "markers": markers,
                     "session": mgr.build_session_info(),
                 });
-                let _ = state.broadcast_tx.send(broadcast_payload.to_string());
+                let _ = state.broadcast_tx.send(LiveEvent::new(broadcast_payload));
 
                 let resp_data = serde_json::json!({
                     "ok": true,
@@ -1023,13 +1020,13 @@ async fn handle_marker_create(
 /// Search the replay buffer for a broadcast payload matching `source_id` and `line_idx`.
 /// Returns the `timestamp_num` value if found, or `None`.
 fn lookup_timestamp_in_replay(
-    replay: &std::sync::Mutex<std::collections::VecDeque<String>>,
+    replay: &std::sync::Mutex<std::collections::VecDeque<LiveMessage>>,
     source_id: &str,
     line_idx: u64,
 ) -> Option<f64> {
     let buf = replay.lock().ok()?;
-    for entry_str in buf.iter() {
-        let parsed: serde_json::Value = serde_json::from_str(entry_str).ok()?;
+    for entry in buf.iter() {
+        let parsed = entry.value();
         let same_source = parsed.get("source_id").and_then(|v| v.as_str()) == Some(source_id);
         let same_idx = parsed.get("line_idx").and_then(|v| v.as_u64()) == Some(line_idx);
         if same_source && same_idx {
@@ -1630,14 +1627,11 @@ mod tests {
         let replay = Arc::new(Mutex::new(std::collections::VecDeque::new()));
         {
             let mut buf = replay.lock().unwrap();
-            buf.push_back(
-                serde_json::json!({
-                    "source_id": "DUT_UART",
-                    "line_idx": 42,
-                    "timestamp_num": 1234567890.789,
-                })
-                .to_string(),
-            );
+            buf.push_back(LiveEvent::new(serde_json::json!({
+                "source_id": "DUT_UART",
+                "line_idx": 42,
+                "timestamp_num": 1234567890.789,
+            })));
         }
 
         let mut source_metadata = HashMap::new();
@@ -1848,20 +1842,17 @@ mod tests {
     #[tokio::test]
     async fn marker_create_broadcasts_markers_update() {
         let dir = temp_session_dir("marker-broadcast");
-        let (broadcast_tx, mut rx) = broadcast::channel::<String>(8);
+        let (broadcast_tx, mut rx) = broadcast::channel::<LiveMessage>(8);
 
         // Build a minimal state with broadcast and session
         let replay = Arc::new(Mutex::new(std::collections::VecDeque::new()));
         {
             let mut buf = replay.lock().unwrap();
-            buf.push_back(
-                serde_json::json!({
-                    "source_id": "DUT_UART",
-                    "line_idx": 42,
-                    "timestamp_num": 7000.0,
-                })
-                .to_string(),
-            );
+            buf.push_back(LiveEvent::new(serde_json::json!({
+                "source_id": "DUT_UART",
+                "line_idx": 42,
+                "timestamp_num": 7000.0,
+            })));
         }
 
         let session_mgr = {
@@ -1953,7 +1944,7 @@ mod tests {
         let broadcast_msg = rx.try_recv().ok();
         assert!(broadcast_msg.is_some(), "expected markers_update broadcast");
         if let Some(msg) = broadcast_msg {
-            let parsed: serde_json::Value = serde_json::from_str(&msg).unwrap();
+            let parsed = msg.value();
             assert_eq!(parsed["type"], "markers_update");
             assert_eq!(parsed["markers"].as_array().unwrap().len(), 1);
         }
