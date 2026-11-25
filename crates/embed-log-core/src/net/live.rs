@@ -28,6 +28,19 @@ impl LiveEvent {
         })
     }
 
+    /// Build from a value and its already-serialized JSON text, avoiding a
+    /// second serialization. `text` must be `value` serialized.
+    pub fn with_text(value: Value, text: String) -> LiveMessage {
+        debug_assert_eq!(
+            serde_json::from_str::<Value>(&text).ok(),
+            Some(value.clone())
+        );
+        Arc::new(Self {
+            text: text.into(),
+            value,
+        })
+    }
+
     /// The structured message.
     pub fn value(&self) -> &Value {
         &self.value
