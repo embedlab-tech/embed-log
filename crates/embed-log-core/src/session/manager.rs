@@ -210,15 +210,28 @@ impl SessionManager {
     /// Assign the next session-global sequence and append one combined record.
     /// Callers serialize this with live replay/broadcast publication.
     pub fn append_combined_entry(&mut self, entry: &mut serde_json::Value) -> Result<u64> {
+        if let Some(object) = entry.as_object_mut() {
+            object.insert("sequence".to_string(), json!(self.next_sequence));
+            object.insert("session_id".to_string(), json!(self.session_id));
+        }
+        self.append_combined_line(serde_json::to_vec(entry)?)
+    }
+
+    /// Sequence number the next appended combined record receives.
+    pub fn next_sequence(&self) -> u64 {
+        self.next_sequence
+    }
+
+    /// Append one already-serialized combined record (a JSON object without the
+    /// trailing newline) and return its sequence, which must be the
+    /// [`next_sequence`](Self::next_sequence) the caller put into the record.
+    /// The sequence is consumed only when the write succeeds.
+    pub fn append_combined_line(&mut self, mut line: Vec<u8>) -> Result<u64> {
         let sequence = self.next_sequence;
         let next_sequence = self
             .next_sequence
             .checked_add(1)
             .context("session sequence exhausted")?;
-        if let Some(object) = entry.as_object_mut() {
-            object.insert("sequence".to_string(), json!(sequence));
-            object.insert("session_id".to_string(), json!(self.session_id));
-        }
         if self.combined_writer.is_none() {
             self.combined_writer = Some(
                 OpenOptions::new()
@@ -229,7 +242,6 @@ impl SessionManager {
             );
         }
         // Keep records visible before publication without separate JSON/newline writes.
-        let mut line = serde_json::to_vec(entry)?;
         line.push(b'\n');
         self.combined_writer
             .as_mut()

@@ -307,7 +307,6 @@ impl LogServer {
                         .get(&src.name)
                         .cloned()
                         .unwrap_or_default(),
-                    session_id: session_id.clone(),
                     app_name: self.config.server.app_name.clone(),
                     job_id: self.config.server.job_id.clone(),
                 },
@@ -1135,7 +1134,6 @@ struct SourceRuntimeMeta {
     source_label: String,
     source_kind: String,
     tab_labels: Vec<String>,
-    session_id: String,
     app_name: String,
     job_id: Option<String>,
 }
@@ -1189,6 +1187,54 @@ fn build_source_tab_labels(
     by_source
 }
 
+/// Fields that `combined.jsonl` records carry in addition to the live payload.
+/// They are constant for a writer, so they are serialized once per writer.
+const COMBINED_ONLY_KEYS: [&str; 5] = [
+    "app_name",
+    "job_id",
+    "source_label",
+    "source_kind",
+    "tab_labels",
+];
+
+/// The [`COMBINED_ONLY_KEYS`] fields serialized as the end of a JSON object:
+/// `,"app_name":…,"tab_labels":[…]}`.
+fn combined_record_tail(source_meta: &SourceRuntimeMeta) -> String {
+    let fields = json!({
+        "app_name": source_meta.app_name,
+        "job_id": source_meta.job_id,
+        "source_label": source_meta.source_label,
+        "source_kind": source_meta.source_kind,
+        "tab_labels": source_meta.tab_labels,
+    });
+    format!(",{}", &fields.to_string()[1..])
+}
+
+/// Serialize the `combined.jsonl` record for a live payload, reusing the
+/// payload's already-serialized text. Payloads whose injected metadata
+/// overlaps the combined-only fields take the general (slower) path, so
+/// the stored record never contains duplicate keys.
+fn combined_record_line(
+    payload: &serde_json::Value,
+    payload_text: &str,
+    source_meta: &SourceRuntimeMeta,
+    tail: &str,
+) -> serde_json::Result<Vec<u8>> {
+    let can_append = payload.as_object().is_some_and(|obj| {
+        obj.get("source_id").and_then(|v| v.as_str()) == Some(source_meta.source_id.as_str())
+            && !COMBINED_ONLY_KEYS.iter().any(|key| obj.contains_key(*key))
+    });
+    if can_append {
+        if let Some(body) = payload_text.strip_suffix('}') {
+            let mut line = Vec::with_capacity(body.len() + tail.len());
+            line.extend_from_slice(body.as_bytes());
+            line.extend_from_slice(tail.as_bytes());
+            return Ok(line);
+        }
+    }
+    serde_json::to_vec(&build_combined_log_entry(payload, source_meta))
+}
+
 fn build_combined_log_entry(
     payload: &serde_json::Value,
     source_meta: &SourceRuntimeMeta,
@@ -1196,7 +1242,6 @@ fn build_combined_log_entry(
     let mut combined = payload.clone();
     if let Some(obj) = combined.as_object_mut() {
         obj.insert("source_id".to_string(), json!(source_meta.source_id));
-        obj.insert("session_id".to_string(), json!(source_meta.session_id));
         obj.insert("app_name".to_string(), json!(source_meta.app_name));
         obj.insert("job_id".to_string(), json!(source_meta.job_id));
         obj.insert("source_label".to_string(), json!(source_meta.source_label));
@@ -1227,6 +1272,7 @@ async fn run_writer(
     };
 
     let clock = SessionClock::new(runtime.ts_mode);
+    let combined_tail = combined_record_tail(&runtime.source_meta);
     let mut level_detector = runtime.level_detector;
     let mut lines_since_flush = 0usize;
     use std::io::Write;
@@ -1396,24 +1442,34 @@ async fn run_writer(
             }
         }
 
-        let mut combined_entry = build_combined_log_entry(&payload, &runtime.source_meta);
-        let (sequence, active_session_id) = match runtime.session_manager.lock() {
-            Ok(mut manager) => match manager.append_combined_entry(&mut combined_entry) {
-                Ok(sequence) => (sequence, manager.session_id().to_string()),
-                Err(error) => {
+        // Serialize the payload once: the same text is broadcast, and the
+        // combined.jsonl record is that text plus the writer's constant fields.
+        let payload_text = match runtime.session_manager.lock() {
+            Ok(mut manager) => {
+                if let Some(object) = payload.as_object_mut() {
+                    object.insert("sequence".to_string(), json!(manager.next_sequence()));
+                    object.insert("session_id".to_string(), json!(manager.session_id()));
+                }
+                let payload_text = payload.to_string();
+                let appended = combined_record_line(
+                    &payload,
+                    &payload_text,
+                    &runtime.source_meta,
+                    &combined_tail,
+                )
+                .map_err(anyhow::Error::from)
+                .and_then(|line| manager.append_combined_line(line));
+                if let Err(error) = appended {
                     error!("[{source_name}] failed to append combined entry: {error}");
                     continue;
                 }
-            },
+                payload_text
+            }
             Err(_) => {
                 error!("[{source_name}] session manager lock poisoned");
                 continue;
             }
         };
-        if let Some(object) = payload.as_object_mut() {
-            object.insert("sequence".to_string(), json!(sequence));
-            object.insert("session_id".to_string(), json!(active_session_id));
-        }
 
         crate::net::watch::retain_matching_watches(
             &runtime.watches,
@@ -1428,7 +1484,7 @@ async fn run_writer(
             &runtime.replay,
             &runtime.broadcast_tx,
             REPLAY_BUFFER_SIZE,
-            LiveEvent::new(payload),
+            LiveEvent::with_text(payload, payload_text),
         );
     }
 
@@ -1552,13 +1608,12 @@ mod tests {
         )
     }
 
-    fn test_source_meta(session_id: &str) -> SourceRuntimeMeta {
+    fn test_source_meta() -> SourceRuntimeMeta {
         SourceRuntimeMeta {
             source_id: "dut".to_string(),
             source_label: "DUT".to_string(),
             source_kind: "udp".to_string(),
             tab_labels: vec!["Main".to_string()],
-            session_id: session_id.to_string(),
             app_name: "embed-log".to_string(),
             job_id: None,
         }
@@ -1652,7 +1707,7 @@ mod tests {
             line_counter: None,
             watches: Arc::new(RwLock::new(HashMap::new())),
             commit_lock: Arc::new(Mutex::new(())),
-            source_meta: test_source_meta("session-1"),
+            source_meta: test_source_meta(),
             level_detector: None,
         };
         let handle = tokio::spawn(run_writer(
@@ -1701,6 +1756,48 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    #[test]
+    fn combined_record_line_reuses_payload_text_and_matches_full_build() {
+        let meta = test_source_meta();
+        let tail = combined_record_tail(&meta);
+        let payload = json!({
+            "type": "rx",
+            "source_id": "dut",
+            "message": "boot \"quoted\" \u{1b}[0m",
+            "sequence": 7,
+            "session_id": "session-1",
+            "custom": {"nested": [1, 2]},
+        });
+        let text = payload.to_string();
+        let line = combined_record_line(&payload, &text, &meta, &tail).unwrap();
+        assert!(
+            line.starts_with(&text.as_bytes()[..text.len() - 1]),
+            "reuses payload text"
+        );
+        let parsed: serde_json::Value = serde_json::from_slice(&line).unwrap();
+        assert_eq!(parsed, build_combined_log_entry(&payload, &meta));
+    }
+
+    #[test]
+    fn combined_record_line_never_duplicates_injected_keys() {
+        let meta = test_source_meta();
+        let tail = combined_record_tail(&meta);
+        for payload in [
+            json!({"source_id": "dut", "source_kind": "merge", "message": "m"}),
+            json!({"source_id": "other", "message": "m"}),
+        ] {
+            let text = payload.to_string();
+            let line = combined_record_line(&payload, &text, &meta, &tail).unwrap();
+            let line = String::from_utf8(line).unwrap();
+            for key in ["\"source_id\"", "\"source_kind\""] {
+                assert_eq!(line.matches(key).count(), 1, "{line}");
+            }
+            let parsed: serde_json::Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(parsed, build_combined_log_entry(&payload, &meta));
+            assert_eq!(parsed["source_kind"], "udp");
+        }
+    }
+
     #[tokio::test]
     async fn writer_appends_combined_jsonl_with_source_metadata() {
         let root = temp_dir("combined-jsonl");
@@ -1728,7 +1825,7 @@ mod tests {
             line_counter: None,
             watches: Arc::new(RwLock::new(HashMap::new())),
             commit_lock: Arc::new(Mutex::new(())),
-            source_meta: test_source_meta("session-1"),
+            source_meta: test_source_meta(),
             level_detector: Some(
                 crate::levels::LevelDetector::new(&crate::levels::builtin_zephyr_profile(), "test")
                     .unwrap(),
@@ -1811,7 +1908,6 @@ mod tests {
                 source_label: source_id.to_string(),
                 source_kind: "file".to_string(),
                 tab_labels: vec!["Main".to_string()],
-                session_id: "session-1".to_string(),
                 app_name: "embed-log".to_string(),
                 job_id: None,
             },
