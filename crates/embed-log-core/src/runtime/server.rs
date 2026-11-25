@@ -17,6 +17,7 @@ use crate::config::AppConfig;
 use crate::models::{Ansi, LogEntry, TimestampMode};
 use crate::naming::slugify;
 use crate::net::control_ws::SourceInfo;
+use crate::net::live::{LiveEvent, LiveMessage};
 use crate::net::ws_server::{
     start_server, ExportCallback, RotateCallback, RuntimeStats, ServerState, SourceRuntimeStats,
 };
@@ -225,7 +226,7 @@ impl LogServer {
         let session_mgr = Arc::new(Mutex::new(session_mgr));
 
         // ── 8. Create broadcast channel ──
-        let (broadcast_tx, _rx) = broadcast::channel::<String>(4096);
+        let (broadcast_tx, _rx) = broadcast::channel::<LiveMessage>(4096);
         let replay = Arc::new(Mutex::new(VecDeque::with_capacity(REPLAY_BUFFER_SIZE)));
         // One ordering point for sequence allocation, persistence, replay, and
         // live publication across all concurrent source writers.
@@ -850,7 +851,7 @@ struct RotationContext {
     html_path: Arc<Mutex<PathBuf>>,
     session_mgr: Arc<Mutex<SessionManager>>,
     first_log_at: Arc<Mutex<Option<DateTime<Local>>>>,
-    replay: Arc<Mutex<VecDeque<String>>>,
+    replay: Arc<Mutex<VecDeque<LiveMessage>>>,
     commit_lock: Arc<Mutex<()>>,
     line_counters: HashMap<String, Arc<AtomicU64>>,
     frontend: PathBuf,
@@ -1140,8 +1141,8 @@ struct SourceRuntimeMeta {
 }
 
 struct WriterRuntime {
-    broadcast_tx: broadcast::Sender<String>,
-    replay: Arc<Mutex<VecDeque<String>>>,
+    broadcast_tx: broadcast::Sender<LiveMessage>,
+    replay: Arc<Mutex<VecDeque<LiveMessage>>>,
     first_log_at: Arc<Mutex<Option<DateTime<Local>>>>,
     session_manager: Arc<Mutex<SessionManager>>,
     stats: Option<Arc<SourceRuntimeStats>>,
@@ -1275,7 +1276,7 @@ async fn run_writer(
                 "type": "session_info",
                 "session": session,
             });
-            let _ = runtime.broadcast_tx.send(session_info.to_string());
+            let _ = runtime.broadcast_tx.send(LiveEvent::new(session_info));
         }
 
         // Format for log file: [timestamp] message
@@ -1414,8 +1415,6 @@ async fn run_writer(
             object.insert("session_id".to_string(), json!(active_session_id));
         }
 
-        let payload_str = payload.to_string();
-
         crate::net::watch::retain_matching_watches(
             &runtime.watches,
             &source_name,
@@ -1429,7 +1428,7 @@ async fn run_writer(
             &runtime.replay,
             &runtime.broadcast_tx,
             REPLAY_BUFFER_SIZE,
-            payload_str,
+            LiveEvent::new(payload),
         );
     }
 
@@ -1863,7 +1862,7 @@ mod tests {
 
         let mut broadcast_sequences = Vec::new();
         while let Ok(message) = broadcast_rx.try_recv() {
-            let value: serde_json::Value = serde_json::from_str(&message).unwrap();
+            let value = message.value().clone();
             if let Some(sequence) = value.get("sequence").and_then(|value| value.as_u64()) {
                 broadcast_sequences.push(sequence);
             }
@@ -1900,7 +1899,7 @@ mod tests {
         mgr.write_manifest().unwrap();
         let session_mgr = Arc::new(Mutex::new(mgr));
 
-        let replay = Arc::new(Mutex::new(VecDeque::from(["stale".to_string()])));
+        let replay = Arc::new(Mutex::new(VecDeque::from([LiveEvent::new(json!("stale"))])));
         let config_msg = Arc::new(Mutex::new("old-config".to_string()));
         let line_counter = Arc::new(AtomicU64::new(42));
 

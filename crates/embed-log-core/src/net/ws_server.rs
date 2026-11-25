@@ -17,6 +17,7 @@ use tracing::{info, warn};
 
 use crate::frontend_assets::FrontendAssets;
 use crate::net::control_ws::{control_ws_handler, SourceInfo};
+use crate::net::live::{LiveEvent, LiveMessage};
 use crate::session::SessionManager;
 use crate::sources::TxCommand;
 
@@ -122,10 +123,10 @@ pub struct ServerState {
     /// New/reconnecting clients must receive the current session, not the
     /// process-start session.
     pub config_msg: Arc<Mutex<String>>,
-    /// Broadcast channel for live log messages (JSON strings).
-    pub broadcast_tx: broadcast::Sender<String>,
+    /// Broadcast channel for live messages, serialized once and shared.
+    pub broadcast_tx: broadcast::Sender<LiveMessage>,
     /// Replay buffer for late-connecting clients (log entries).
-    pub replay: Arc<Mutex<VecDeque<String>>>,
+    pub replay: Arc<Mutex<VecDeque<LiveMessage>>>,
     /// Callback to trigger HTML export.
     pub on_export: Option<ExportCallback>,
     /// Callback to rotate to a new session.
@@ -300,7 +301,7 @@ async fn handle_ws_client(mut socket: WebSocket, state: ServerState) {
 
     // 2. Send replay buffer so the client catches up.
     for msg in replay_msgs {
-        if socket.send(Message::Text(msg.into())).await.is_err() {
+        if socket.send(msg.ws_message()).await.is_err() {
             return;
         }
     }
@@ -311,7 +312,7 @@ async fn handle_ws_client(mut socket: WebSocket, state: ServerState) {
             result = rx.recv() => {
                 match result {
                     Ok(data) => {
-                        if socket.send(Message::Text(data.into())).await.is_err() {
+                        if socket.send(data.ws_message()).await.is_err() {
                             break;
                         }
                     }
@@ -374,7 +375,7 @@ async fn handle_client_command(text: &str, state: &ServerState) -> Option<String
         "export_session_html" => {
             let status = do_export_async(state).await;
             let status_str = status.to_string();
-            let _ = state.broadcast_tx.send(status_str.clone());
+            let _ = state.broadcast_tx.send(LiveEvent::new(status));
             Some(status_str)
         }
         "save_markers" => Some(handle_save_markers(&cmd, state).to_string()),
@@ -459,7 +460,7 @@ fn handle_save_markers(cmd: &serde_json::Value, state: &ServerState) -> serde_js
                 "markers": markers,
                 "session": current_session_value(state),
             });
-            let _ = state.broadcast_tx.send(payload.to_string());
+            let _ = state.broadcast_tx.send(LiveEvent::new(payload.clone()));
             payload
         }
         Err(error) => serde_json::json!({
@@ -481,7 +482,7 @@ fn handle_clear_logs(cmd: &serde_json::Value, state: &ServerState) -> serde_json
         "scope": pane.unwrap_or("all"),
         "message": "[SYSTEM] logs cleared",
     });
-    let _ = state.broadcast_tx.send(payload.to_string());
+    let _ = state.broadcast_tx.send(LiveEvent::new(payload.clone()));
     payload
 }
 
@@ -636,7 +637,9 @@ async fn api_export_handler(
 ) -> Response {
     let status_payload = do_export_async(&state).await;
     let ok = status_payload.get("html_status").and_then(|s| s.as_str()) == Some("ready");
-    let _ = state.broadcast_tx.send(status_payload.to_string());
+    let _ = state
+        .broadcast_tx
+        .send(LiveEvent::new(status_payload.clone()));
 
     if query.download && ok {
         let path = status_payload
@@ -773,9 +776,9 @@ async fn api_marker_handler(
         )
             .into_response();
     }
-    let _ = state
-        .broadcast_tx
-        .send(serde_json::json!({"type": "timeline_marker", "marker": marker}).to_string());
+    let _ = state.broadcast_tx.send(LiveEvent::new(
+        serde_json::json!({"type": "timeline_marker", "marker": marker}),
+    ));
     axum::Json(
         serde_json::json!({"ok": true, "session_id": manager.session_id(), "marker": marker}),
     )
@@ -811,7 +814,7 @@ async fn api_rotate_handler(
                 "old_session": old_session,
                 "session": session,
             });
-            let _ = state.broadcast_tx.send(payload.to_string());
+            let _ = state.broadcast_tx.send(LiveEvent::new(payload));
             (
                 StatusCode::OK,
                 axum::Json(serde_json::json!({
@@ -964,7 +967,7 @@ async fn session_file_handler(
 }
 
 /// Collect all messages from a replay buffer, leaving it intact.
-pub fn drain_replay(replay: &Arc<Mutex<VecDeque<String>>>) -> Vec<String> {
+pub fn drain_replay(replay: &Arc<Mutex<VecDeque<LiveMessage>>>) -> Vec<LiveMessage> {
     let buf = replay.lock().unwrap();
     buf.iter().cloned().collect()
 }
@@ -976,10 +979,10 @@ pub fn drain_replay(replay: &Arc<Mutex<VecDeque<String>>>) -> Vec<String> {
 /// client receives every record exactly once: either in its replay snapshot or
 /// on its live subscription, never in neither and never in both.
 pub fn publish_replayable(
-    replay: &Mutex<VecDeque<String>>,
-    broadcast_tx: &broadcast::Sender<String>,
+    replay: &Mutex<VecDeque<LiveMessage>>,
+    broadcast_tx: &broadcast::Sender<LiveMessage>,
     capacity: usize,
-    payload: String,
+    payload: LiveMessage,
 ) {
     let mut buf = replay.lock().unwrap();
     if buf.len() >= capacity {
@@ -996,7 +999,7 @@ pub fn publish_replayable(
 /// so the snapshot never mixes two sessions.
 pub fn subscribe_with_replay(
     state: &ServerState,
-) -> (String, Vec<String>, broadcast::Receiver<String>) {
+) -> (String, Vec<LiveMessage>, broadcast::Receiver<LiveMessage>) {
     let buf = state.replay.lock().unwrap();
     let config_msg = state.config_msg.lock().unwrap().clone();
     let replay = buf.iter().cloned().collect();
@@ -1079,8 +1082,8 @@ mod tests {
         )))
     }
 
-    fn test_state(dir: PathBuf) -> (ServerState, broadcast::Receiver<String>) {
-        let (broadcast_tx, rx) = broadcast::channel::<String>(16);
+    fn test_state(dir: PathBuf) -> (ServerState, broadcast::Receiver<LiveMessage>) {
+        let (broadcast_tx, rx) = broadcast::channel::<LiveMessage>(16);
         let manager = test_manager(dir.clone());
         let state = ServerState {
             config_msg: Arc::new(Mutex::new(json!({ "type": "config" }).to_string())),
@@ -1118,7 +1121,7 @@ mod tests {
             let tx = state.broadcast_tx.clone();
             std::thread::spawn(move || {
                 for seq in 1..=RECORDS {
-                    publish_replayable(&replay, &tx, REPLAY_CAPACITY, seq.to_string());
+                    publish_replayable(&replay, &tx, REPLAY_CAPACITY, LiveEvent::new(seq.into()));
                 }
             })
         };
@@ -1131,9 +1134,9 @@ mod tests {
         publisher.join().unwrap();
 
         for (replay, mut rx) in clients {
-            let mut seen: Vec<u64> = replay.iter().map(|m| m.parse().unwrap()).collect();
+            let mut seen: Vec<u64> = replay.iter().map(|m| m.value().as_u64().unwrap()).collect();
             while let Ok(msg) = rx.try_recv() {
-                seen.push(msg.parse().unwrap());
+                seen.push(msg.value().as_u64().unwrap());
             }
             let first = seen.first().copied().unwrap_or(RECORDS + 1);
             let expected: Vec<u64> = (first..=RECORDS).collect();
@@ -1202,7 +1205,7 @@ mod tests {
         assert_eq!(response["type"], "markers_update");
         assert_eq!(response["markers"][0]["line"], 7);
 
-        let broadcast: serde_json::Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+        let broadcast: serde_json::Value = rx.recv().await.unwrap().value().clone();
         assert_eq!(broadcast["type"], "markers_update");
 
         let raw: serde_json::Value =
@@ -1227,7 +1230,7 @@ mod tests {
         assert_eq!(response["html_status"], "ready");
         assert_eq!(response["download_url"], "/sessions/session-1/session.html");
 
-        let broadcast: serde_json::Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+        let broadcast: serde_json::Value = rx.recv().await.unwrap().value().clone();
         assert_eq!(broadcast["type"], "session_html_status");
         assert_eq!(broadcast["html_status"], "ready");
 
@@ -1246,7 +1249,7 @@ mod tests {
         assert_eq!(response["type"], "clear_logs");
         assert_eq!(response["scope"], "dut");
 
-        let broadcast: serde_json::Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+        let broadcast: serde_json::Value = rx.recv().await.unwrap().value().clone();
         assert_eq!(broadcast["type"], "clear_logs");
         assert_eq!(broadcast["scope"], "dut");
 
