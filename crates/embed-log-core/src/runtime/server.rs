@@ -950,7 +950,10 @@ fn rotate_session(
     for counter in ctx.line_counters.values() {
         counter.store(0, std::sync::atomic::Ordering::Relaxed);
     }
-    ctx.replay.lock().unwrap().clear();
+    // Hold the replay lock until the new config is in place, so a client that
+    // connects during rotation sees either the old session or the new one.
+    let mut replay = ctx.replay.lock().unwrap();
+    replay.clear();
 
     let new_session = new_manager.build_session_info();
     *ctx.session_mgr
@@ -977,6 +980,7 @@ fn rotate_session(
     *ctx.config_msg
         .lock()
         .map_err(|_| "config message lock failed".to_string())? = new_config_msg.to_string();
+    drop(replay);
     drop(commit_guard);
 
     // Export the old foreground session's HTML off the hot path. Daemons keep
@@ -1420,17 +1424,13 @@ async fn run_writer(
             &payload,
         );
 
-        // Store in replay buffer
-        {
-            let mut buf = runtime.replay.lock().unwrap();
-            if buf.len() >= REPLAY_BUFFER_SIZE {
-                buf.pop_front();
-            }
-            buf.push_back(payload_str.clone());
-        }
-
-        // Broadcast to WS clients (ignore if no receivers)
-        let _ = runtime.broadcast_tx.send(payload_str);
+        // Store in the replay buffer and broadcast to WS clients atomically.
+        crate::net::ws_server::publish_replayable(
+            &runtime.replay,
+            &runtime.broadcast_tx,
+            REPLAY_BUFFER_SIZE,
+            payload_str,
+        );
     }
 
     let _ = file.flush();
