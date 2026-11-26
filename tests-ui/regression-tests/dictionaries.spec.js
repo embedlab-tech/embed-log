@@ -101,7 +101,7 @@ test('rejected change preserves the active choice and displays the server error'
 test('Reload re-reads the active file, reports the result and keeps the choice on failure', async ({ page }) => {
   const peer = await setup(page, 1);
   const button = page.locator('#pane-SENSOR_A .dictionary-reload');
-  const note = page.locator('#pane-SENSOR_A .dictionary-note');
+  const note = page.locator('#pane-SENSOR_A .dictionary-pill');
   await expect(button).toBeEnabled();
 
   // Unchanged file: no new generation.
@@ -119,7 +119,7 @@ test('Reload re-reads the active file, reports the result and keeps the choice o
     return { reloaded: true };
   });
   await button.click();
-  await expect(note).toHaveText('Reloaded (a2, build A2)');
+  await expect(note).toHaveText('Reloaded · build A2');
   await expect(button).toBeEnabled();
   await button.click();
   expect(peer.requests.at(-1)).toMatchObject({ expected_generation: 1 });
@@ -128,8 +128,8 @@ test('Reload re-reads the active file, reports the result and keeps the choice o
   peer.onReload(() => ({ error: 'cannot read /images/A/database.json: No such file or directory' }));
   await button.click();
   await expect(page.getByRole('alert').filter({ hasText: 'cannot read' })).toBeVisible();
-  await expect(note).toHaveText('');
-  await expect(page.locator('#pane-SENSOR_A .dictionary-active')).toContainText('/images/A/database.json');
+  await expect(note).toBeHidden();
+  await expect(page.locator('#pane-SENSOR_A .dictionary-name')).toHaveAttribute('title', '/images/A/database.json');
   expect(peer.states.SENSOR_A.generation).toBe(1);
 });
 
@@ -142,19 +142,44 @@ test('Reload is disabled when the active dictionary was uploaded, not read from 
 test('a rebuilt file is hinted, auto-reload is labelled, and its failure is shown', async ({ page }) => {
   const { states } = await setup(page, 1);
   const pane = page.locator('#pane-SENSOR_A');
-  await expect(pane.locator('.dictionary-stale')).toHaveText('');
+  await expect(pane.locator('.dictionary-pill')).toHaveText('');
   await expect(pane.locator('.dictionary-reload')).not.toHaveClass(/attention/);
 
   states.SENSOR_A.configured[0].changed_on_disk = true;
-  await expect(pane.locator('.dictionary-stale')).toHaveText('File changed on disk — Reload to use it', { timeout: 7000 });
+  await expect(pane.locator('.dictionary-pill')).toHaveText('File changed — reload to use it', { timeout: 7000 });
   await expect(pane.locator('.dictionary-reload')).toHaveClass(/attention/);
 
   // With parser.watch the backend reloads by itself: no call to action.
   states.SENSOR_A.watch = true;
-  await expect(pane.locator('.dictionary-stale')).toHaveText('File changed, reloading…', { timeout: 7000 });
+  await expect(pane.locator('.dictionary-pill')).toHaveText('File changed · reloading…', { timeout: 7000 });
   await expect(pane.locator('.dictionary-reload')).not.toHaveClass(/attention/);
-  await expect(pane.locator('.dictionary-active')).toContainText('auto-reload on');
+  states.SENSOR_A.configured[0].changed_on_disk = false;
+  await expect(pane.locator('.dictionary-pill')).toHaveText('Auto-reload on', { timeout: 7000 });
 
   states.SENSOR_A.watch_error = 'images/A/database.json: invalid dictionary';
   await expect(pane.getByRole('alert')).toHaveText('Auto-reload failed: images/A/database.json: invalid dictionary', { timeout: 7000 });
+});
+
+test('a stale "Already up to date" does not hide that the file changed afterwards', async ({ page }) => {
+  const { states } = await setup(page, 1);
+  const pane = page.locator('#pane-SENSOR_A');
+  const pill = pane.locator('.dictionary-pill');
+  await pane.locator('.dictionary-reload').click();
+  await expect(pill).toHaveText('Already up to date');
+  // A rebuild lands right after: the hint replaces the old result at once.
+  states.SENSOR_A.configured[0].changed_on_disk = true;
+  await expect(pill).toHaveText('File changed — reload to use it', { timeout: 7000 });
+  await expect(pane.locator('.dictionary-reload')).toHaveClass(/attention/);
+});
+
+test('the dictionary row shows the file name and build, with the full path on hover', async ({ page }) => {
+  await setup(page, 1);
+  const pane = page.locator('#pane-SENSOR_A');
+  await expect(pane.locator('.dictionary-name')).toHaveText('database.json');
+  await expect(pane.locator('.dictionary-name')).toHaveAttribute('title', '/images/A/database.json');
+  await expect(pane.locator('.dictionary-meta')).toHaveText('build A · #a');
+  // Same file name in two folders: the folder is shown, so the choices differ.
+  const select = page.getByLabel('Dictionary for SENSOR_B', { exact: true });
+  await expect(select.locator('option').nth(0)).toHaveText('A/database.json · build A');
+  await expect(select.locator('option').nth(1)).toHaveText('B/database.json · build B');
 });
