@@ -12,6 +12,7 @@ const NOTE_MS = 5000;
 function setNote(source, text, status) {
     notes.set(source, {
         text, generation: status?.generation, id: status?.dictionary?.dictionary_id,
+        index: activeIndexOf(status),
         until: Date.now() + NOTE_MS,
     });
     setTimeout(render, NOTE_MS + 50);
@@ -21,7 +22,8 @@ function activeNote(source, status, activeItem) {
     const note = notes.get(source);
     if (!note) return '';
     const valid = Date.now() < note.until && !activeItem?.changed_on_disk
-        && note.generation === status.generation && note.id === status.dictionary?.dictionary_id;
+        && note.generation === status.generation && note.id === status.dictionary?.dictionary_id
+        && note.index === activeIndexOf(status);
     if (!valid) notes.delete(source);
     return valid ? note.text : '';
 }
@@ -37,12 +39,20 @@ function shortName(path, all) {
 
 const buildLabel = info => (info?.build_id != null ? `build ${info.build_id}` : '');
 
-function activate(source, status, dictionaryId) {
+// Files with identical bytes share a dictionary_id, so the choice names the entry too.
+function activate(source, status, dictionaryId, configuredIndex) {
     return control({
         type: 'dictionary.activate', source_id: source,
-        dictionary_id: dictionaryId, expected_generation: status.generation,
-        parser_type: status.parser_type,
+        dictionary_id: dictionaryId, configured_index: configuredIndex,
+        expected_generation: status.generation, parser_type: status.parser_type,
     }).then(reply => reply.status);
+}
+
+// Which configured entry is active. Older servers do not send active_index.
+function activeIndexOf(status) {
+    if (Number.isInteger(status.active_index)) return status.active_index;
+    const id = status.dictionary?.dictionary_id;
+    return id ? status.configured.findIndex(item => item.dictionary?.dictionary_id === id) : -1;
 }
 
 const reload = (source, status) => control({
@@ -55,8 +65,10 @@ function reloadMessage(reply) {
 
 // One menu open at a time; a click anywhere else closes it.
 let openMenu = null;
-function closeMenu() {
-    if (!openMenu) return;
+// Closes the open menu. With a row's wrap, only if that row owns it: a status refresh
+// of one UART must not close the list the user is using on another.
+function closeMenu(owner) {
+    if (!openMenu || (owner && openMenu.wrap !== owner)) return;
     openMenu.menu.hidden = true;
     openMenu.trigger.setAttribute('aria-expanded', 'false');
     openMenu = null;
@@ -64,7 +76,7 @@ function closeMenu() {
 document.addEventListener('pointerdown', event => {
     if (openMenu && !openMenu.wrap.contains(event.target)) closeMenu();
 });
-window.addEventListener('resize', closeMenu);
+window.addEventListener('resize', () => closeMenu());
 
 // Custom listbox instead of <select>: shows name, build and folder for every choice.
 function createDropdown(source) {
@@ -102,15 +114,16 @@ function createDropdown(source) {
     const pick = async option => {
         closeMenu();
         trigger.focus();
-        const selected = option.dataset.value;
         const current = sources[source].dictionary;
-        if (selected === (current.dictionary?.dictionary_id || '')) return;
+        const index = Number(option.dataset.value);
+        const entry = current.configured[index];
+        if (!entry?.dictionary || index === activeIndexOf(current)) return;
         pending.add(source);
         errors.delete(source);
         notes.delete(source);
         render(); // Keep showing the active one until the RX owner acknowledges.
         try {
-            const applied = await activate(source, current, selected);
+            const applied = await activate(source, current, entry.dictionary.dictionary_id, index);
             sources[source].dictionary = applied;
         } catch (error) {
             errors.set(source, error.message);
@@ -142,14 +155,14 @@ function createDropdown(source) {
     return wrap;
 }
 
-function fillMenu(menu, status, activeId, activeItem) {
+function fillMenu(menu, status, activeId, activeIndex) {
     menu.replaceChildren();
     const add = (value, title, build, path, { disabled = false, tip = '' } = {}) => {
         const option = el('li', 'dd-option');
         option.setAttribute('role', 'option');
         option.tabIndex = -1;
         option.dataset.value = value;
-        option.setAttribute('aria-selected', String(value === activeId));
+        option.setAttribute('aria-selected', String(value === (activeIndex >= 0 ? String(activeIndex) : 'uploaded')));
         if (disabled) option.setAttribute('aria-disabled', 'true');
         if (tip) option.title = tip;
         const top = el('span', 'dd-option-top');
@@ -163,14 +176,14 @@ function fillMenu(menu, status, activeId, activeItem) {
         }
         menu.append(option);
     };
-    for (const item of status.configured) {
+    status.configured.forEach((item, index) => {
         const dir = item.path.replace(/[\\/][^\\/]*$/, '');
-        add(item.dictionary?.dictionary_id || '', shortName(item.path, status.configured),
+        add(String(index), shortName(item.path, status.configured),
             item.error ? 'unavailable' : buildLabel(item.dictionary), dir,
             { disabled: !!item.error, tip: item.error || item.path });
-    }
-    if (!activeItem) {
-        add(activeId, activeId ? 'Uploaded dictionary' : 'No active dictionary', '', activeId ? `#${activeId.slice(0, 8)}` : '');
+    });
+    if (activeIndex < 0) {
+        add('uploaded', activeId ? 'Uploaded dictionary' : 'No active dictionary', '', activeId ? `#${activeId.slice(0, 8)}` : '');
     }
 }
 
@@ -256,25 +269,32 @@ function render() {
         // A choice only exists with several configured dictionaries; Reload is always useful.
         const multiple = status.configured.length > 1;
         if (multiple && !row.querySelector('.dictionary-choice')) row.prepend(createDropdown(source));
-        if (!multiple) { closeMenu(); row.querySelector('.dictionary-choice')?.remove(); }
+        if (!multiple) {
+            const own = row.querySelector('.dictionary-choice');
+            if (own) {
+                closeMenu(own);
+                own.remove();
+            }
+        }
         const activeId = status.dictionary?.dictionary_id || '';
-        const activeItem = status.configured.find(item => item.dictionary?.dictionary_id === activeId);
+        const activeIndex = activeIndexOf(status);
+        const activeItem = activeIndex >= 0 ? status.configured[activeIndex] : undefined;
         const choice = row.querySelector('.dictionary-choice');
         if (choice) {
             const trigger = choice.querySelector('.dd-trigger');
             const menu = choice.querySelector('.dd-menu');
-            const signature = JSON.stringify([status.configured, status.dictionary]);
+            const signature = JSON.stringify([status.configured, status.dictionary, status.active_index]);
             if (menu.dataset.options !== signature) {
-                fillMenu(menu, status, activeId, activeItem);
+                fillMenu(menu, status, activeId, activeIndex);
                 menu.dataset.options = signature;
             }
-            trigger.dataset.value = activeId;
+            trigger.dataset.value = activeIndex >= 0 ? String(activeIndex) : 'uploaded';
             trigger.querySelector('.dd-trigger-name').textContent = activeItem
                 ? shortName(activeItem.path, status.configured) : (activeId ? 'Uploaded dictionary' : 'No dictionary');
             trigger.querySelector('.dd-trigger-build').textContent = buildLabel(status.dictionary);
             trigger.title = activeItem?.path || activeId;
             trigger.disabled = !available || pending.has(source);
-            if (trigger.disabled) closeMenu();
+            if (trigger.disabled) closeMenu(choice);
         }
 
         // Name and details of the dictionary that is decoding right now.

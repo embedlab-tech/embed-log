@@ -330,8 +330,17 @@ async fn handle_dictionary(
                 .get("parser_type")
                 .and_then(|v| v.as_str())
                 .unwrap_or("zephyr-dict");
+            // Optional: which configured entry this is. Files with identical bytes share
+            // a dictionary_id, so the UI names the entry it picked.
+            let configured_index = match cmd.get("configured_index") {
+                None | Some(serde_json::Value::Null) => None,
+                Some(value) => match value.as_u64() {
+                    Some(index) => Some(index as usize),
+                    None => return error("configured_index must be a non-negative integer"),
+                },
+            };
             control
-                .activate(id, parser, generation)
+                .activate_configured(id, parser, generation, configured_index)
                 .await
                 .map(|status| serde_json::json!({"status": status}))
         }

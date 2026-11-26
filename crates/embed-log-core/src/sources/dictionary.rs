@@ -48,6 +48,25 @@ pub struct ConfiguredDictionary {
     stamp: Option<FileStamp>,
 }
 
+impl DictionaryStatus {
+    /// The recorded choice wins while it still holds the active dictionary
+    /// (the active one can also change out of band, for example by a raw-line
+    /// anchor); otherwise the first entry with the active id.
+    fn resolved_active_index(&self) -> Option<usize> {
+        let id = &self.dictionary.as_ref()?.dictionary_id;
+        let holds = |i: usize| {
+            self.configured[i]
+                .dictionary
+                .as_ref()
+                .map(|d| &d.dictionary_id)
+                == Some(id)
+        };
+        self.active_index
+            .filter(|&i| i < self.configured.len() && holds(i))
+            .or_else(|| (0..self.configured.len()).find(|&i| holds(i)))
+    }
+}
+
 /// Cheap change detector for a dictionary file: modification time and size.
 type FileStamp = (std::time::SystemTime, u64);
 
@@ -66,6 +85,10 @@ pub struct DictionaryStatus {
     pub raw_offset: u64,
     pub raw_error: Option<String>,
     pub configured: Vec<ConfiguredDictionary>,
+    /// The configured entry the active dictionary comes from. Two files with the
+    /// same bytes share a `dictionary_id`, so the entry is tracked on its own:
+    /// Reload and `parser.watch` follow this file, not "the first with this id".
+    pub active_index: Option<usize>,
     pub armed: Option<ArmedStatus>,
     /// `parser.watch`: the active file is reloaded automatically when it changes.
     pub watch: bool,
@@ -162,6 +185,7 @@ impl DictionaryControl {
                 raw_offset: 0,
                 raw_error: None,
                 configured: Vec::new(),
+                active_index: None,
                 armed: None,
                 watch: config.watch,
                 watch_error: None,
@@ -187,7 +211,9 @@ impl DictionaryControl {
                 let stamp = file_stamp(path);
                 let staged = read_dictionary_file(path).and_then(|json| control.stage_bytes(&json));
                 if index == 0 {
-                    control.status.lock().unwrap().dictionary = Some(staged.clone()?);
+                    let mut status = control.status.lock().unwrap();
+                    status.dictionary = Some(staged.clone()?);
+                    status.active_index = Some(0);
                 }
                 control
                     .status
@@ -228,6 +254,7 @@ impl DictionaryControl {
 
     pub fn status(&self) -> DictionaryStatus {
         let mut status = self.status.lock().unwrap().clone();
+        status.active_index = status.resolved_active_index();
         for item in &mut status.configured {
             item.changed_on_disk =
                 item.dictionary.is_some() && file_stamp(&item.path) != item.stamp;
@@ -319,8 +346,50 @@ impl DictionaryControl {
         parser_type: &str,
         expected_generation: u64,
     ) -> Result<DictionaryStatus, String> {
-        self.queue_update(dictionary_id, parser_type, expected_generation, None)
+        self.activate_configured(dictionary_id, parser_type, expected_generation, None)
             .await
+    }
+
+    /// Like `activate`, naming the configured entry it comes from. Needed when
+    /// several files hold identical bytes: they share one `dictionary_id`, so the
+    /// id alone cannot say which file Reload and `parser.watch` should follow.
+    pub async fn activate_configured(
+        &self,
+        dictionary_id: &str,
+        parser_type: &str,
+        expected_generation: u64,
+        configured_index: Option<usize>,
+    ) -> Result<DictionaryStatus, String> {
+        if let Some(index) = configured_index {
+            let status = self.status.lock().unwrap();
+            let entry = status
+                .configured
+                .get(index)
+                .ok_or("unknown configured dictionary index")?;
+            if entry.dictionary.as_ref().map(|d| d.dictionary_id.as_str()) != Some(dictionary_id) {
+                return Err("configured dictionary index does not match dictionary_id".into());
+            }
+        }
+        let current = self.status();
+        if configured_index.is_some()
+            && current
+                .dictionary
+                .as_ref()
+                .map(|d| d.dictionary_id.as_str())
+                == Some(dictionary_id)
+            && current.parser_type == parser_type
+        {
+            // Identical bytes under another file: decoding does not change, only the
+            // file that Reload follows. Idempotent like a repeated activation.
+            self.status.lock().unwrap().active_index = configured_index;
+            return Ok(self.status());
+        }
+        self.queue_update(dictionary_id, parser_type, expected_generation, None)
+            .await?;
+        if configured_index.is_some() {
+            self.status.lock().unwrap().active_index = configured_index;
+        }
+        Ok(self.status())
     }
 
     /// Re-read the configured file behind the active dictionary and activate it.
@@ -330,14 +399,20 @@ impl DictionaryControl {
     /// one. A missing or invalid file leaves the active dictionary untouched.
     pub async fn reload(&self, expected_generation: u64) -> Result<ReloadOutcome, String> {
         let status = self.status();
+        // Checked up front: an unchanged file must not hide that another client
+        // changed the dictionary since the caller last looked.
+        if status.generation != expected_generation {
+            return Err(format!(
+                "generation conflict: active generation is {}",
+                status.generation
+            ));
+        }
         let active = status
             .dictionary
             .as_ref()
             .ok_or("no active dictionary to reload")?;
         let index = status
-            .configured
-            .iter()
-            .position(|item| item.dictionary.as_ref().map(|d| &d.dictionary_id) == Some(&active.dictionary_id))
+            .active_index
             .ok_or("the active dictionary was uploaded, not read from a configured file; select a configured dictionary first")?;
         let path = status.configured[index].path.clone();
         // Stamp before reading: a write that lands after the read stays "changed".
@@ -370,6 +445,7 @@ impl DictionaryControl {
                 item.error = None;
                 item.stamp = stamp;
             }
+            current.active_index = Some(index);
             // Frequent rebuilds must not exhaust the per-source staging budget.
             let still_used = current.configured.iter().any(|item| {
                 item.dictionary.as_ref().map(|d| &d.dictionary_id) == Some(&active.dictionary_id)
@@ -402,12 +478,7 @@ impl DictionaryControl {
                 return;
             }
             let status = self.status();
-            let Some(item) = status.dictionary.as_ref().and_then(|active| {
-                status.configured.iter().find(|item| {
-                    item.dictionary.as_ref().map(|d| &d.dictionary_id)
-                        == Some(&active.dictionary_id)
-                })
-            }) else {
+            let Some(item) = status.active_index.and_then(|i| status.configured.get(i)) else {
                 continue;
             };
             if !item.changed_on_disk {

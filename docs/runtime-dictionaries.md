@@ -63,6 +63,14 @@ that source only, through the same owner-acknowledged path as a manual switch:
   `changed_on_disk` is part of each `configured` entry in `dictionary.status` and
   `/api/v1/status`. A touched file with identical bytes clears the hint on Reload
   without a new generation.
+- **Which file is followed.** Files with identical bytes share one `dictionary_id`,
+  so the id cannot tell them apart. `dictionary.status` reports `active_index` (the
+  position in `configured`) and the UI sends `configured_index` with
+  `dictionary.activate`; Reload and `parser.watch` follow that entry. Choosing a
+  file whose bytes equal the active one only moves this choice (no new generation).
+  An activation without `configured_index` picks the first entry with that id.
+- A Reload with a stale `expected_generation` is rejected (`generation conflict`)
+  even when the file is unchanged, like every other change.
 - The button is disabled when the active dictionary was uploaded (`stage`) and is
   not backed by a configured file. Select a configured entry first.
 

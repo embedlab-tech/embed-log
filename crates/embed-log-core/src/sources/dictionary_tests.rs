@@ -579,3 +579,130 @@ async fn watch_reloads_a_rebuilt_file_and_reports_a_bad_one_once() {
     task.abort();
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// A UART source on a pty that applies this control's updates.
+fn spawn_uart(
+    runtime: DictionaryRuntime,
+    config: &ParserConfig,
+) -> (
+    serialport::TTYPort,
+    tokio::task::JoinHandle<anyhow::Result<()>>,
+) {
+    let (master, mut slave) = serialport::TTYPort::pair().unwrap();
+    slave.set_timeout(Duration::from_millis(100)).unwrap();
+    let (tx, mut rx) = mpsc::channel::<LogEntry>(128);
+    tokio::spawn(async move { while rx.recv().await.is_some() {} });
+    let mut source =
+        UartSource::from_port("UART_A", Box::new(slave), "text").with_parser(config.clone());
+    source.set_dictionary_runtime(runtime);
+    (master, tokio::spawn(Box::new(source).run(tx)))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn files_with_identical_bytes_are_told_apart_by_entry_not_by_id() {
+    let (dir, manager) = setup();
+    std::fs::create_dir_all(&dir).unwrap();
+    let debug = dir.join("debug.json");
+    let release = dir.join("release.json");
+    std::fs::write(&debug, dictionary("image-A")).unwrap();
+    std::fs::write(&release, dictionary("image-A")).unwrap();
+    let config = ParserConfig {
+        parser_type: "zephyr-dict".into(),
+        database: Some(crate::config::models::DictionaryPaths::Multiple(vec![
+            debug.to_string_lossy().into_owned(),
+            release.to_string_lossy().into_owned(),
+        ])),
+        ..Default::default()
+    };
+    let (control, runtime) = DictionaryControl::new("UART_A", &config, manager).unwrap();
+    let (_master, task) = spawn_uart(runtime, &config);
+    let status = control.status();
+    let id = status.configured[0]
+        .dictionary
+        .clone()
+        .unwrap()
+        .dictionary_id;
+    assert_eq!(
+        status.configured[1]
+            .dictionary
+            .as_ref()
+            .unwrap()
+            .dictionary_id,
+        id
+    );
+    assert_eq!(status.active_index, Some(0));
+
+    // Choosing the second file changes nothing about decoding, but Reload must follow it.
+    let chosen = control
+        .activate_configured(&id, "zephyr-dict", 0, Some(1))
+        .await
+        .unwrap();
+    assert_eq!((chosen.generation, chosen.active_index), (0, Some(1)));
+    assert!(control
+        .activate_configured(&id, "zephyr-dict", 0, Some(5))
+        .await
+        .is_err());
+
+    // Only release.json is rebuilt: that is the file that must be re-read.
+    std::fs::write(&release, dictionary("image-B")).unwrap();
+    let status = control.status();
+    assert!(!status.configured[0].changed_on_disk);
+    assert!(status.configured[1].changed_on_disk);
+    let outcome = control.reload(0).await.unwrap();
+    assert!(
+        outcome.reloaded,
+        "the rebuilt file is read, not the first match"
+    );
+    assert_eq!(outcome.path, release.to_string_lossy());
+    assert_eq!(outcome.status.generation, 1);
+    assert_eq!(outcome.status.active_index, Some(1));
+    assert_ne!(outcome.dictionary.dictionary_id, id);
+    // debug.json keeps its own snapshot.
+    assert_eq!(
+        outcome.status.configured[0]
+            .dictionary
+            .as_ref()
+            .unwrap()
+            .dictionary_id,
+        id
+    );
+    task.abort();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reload_of_an_unchanged_file_still_rejects_a_stale_generation() {
+    let (dir, manager) = setup();
+    std::fs::create_dir_all(&dir).unwrap();
+    let first = dir.join("first.json");
+    let second = dir.join("second.json");
+    std::fs::write(&first, dictionary("image-A")).unwrap();
+    std::fs::write(&second, dictionary("image-B")).unwrap();
+    let config = ParserConfig {
+        parser_type: "zephyr-dict".into(),
+        database: Some(crate::config::models::DictionaryPaths::Multiple(vec![
+            first.to_string_lossy().into_owned(),
+            second.to_string_lossy().into_owned(),
+        ])),
+        ..Default::default()
+    };
+    let (control, runtime) = DictionaryControl::new("UART_A", &config, manager).unwrap();
+    let (_master, task) = spawn_uart(runtime, &config);
+    let second_id = control.status().configured[1]
+        .dictionary
+        .clone()
+        .unwrap()
+        .dictionary_id;
+    // Another client switches the dictionary: generation 0 -> 1.
+    control
+        .activate_configured(&second_id, "zephyr-dict", 0, Some(1))
+        .await
+        .unwrap();
+    assert_eq!(control.status().generation, 1);
+    // The file did not change, but the caller's generation is stale.
+    let error = control.reload(0).await.unwrap_err();
+    assert!(error.contains("generation conflict"), "{error}");
+    assert!(!control.reload(1).await.unwrap().reloaded);
+    task.abort();
+    std::fs::remove_dir_all(dir).unwrap();
+}
