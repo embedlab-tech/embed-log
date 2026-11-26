@@ -70,7 +70,12 @@ impl StoredLine {
             rel_ts: p.rel_ts.clone(),
             rel_num: p.rel_num,
             message: p.message.clone(),
-            data: p.data.clone(),
+            // Servers send `data` only when it differs from `message`.
+            data: if p.data.is_empty() {
+                p.message.clone()
+            } else {
+                p.data.clone()
+            },
             color: p.color.clone(),
             origin: p.origin.clone(),
             line_idx: p.line_idx,

@@ -1030,7 +1030,10 @@ fn lookup_timestamp_in_replay(
         let same_source = parsed.get("source_id").and_then(|v| v.as_str()) == Some(source_id);
         let same_idx = parsed.get("line_idx").and_then(|v| v.as_u64()) == Some(line_idx);
         if same_source && same_idx {
-            return parsed.get("timestamp_num").and_then(|v| v.as_f64());
+            return parsed
+                .get("absNum")
+                .or_else(|| parsed.get("timestamp_num"))
+                .and_then(|v| v.as_f64());
         }
     }
     None

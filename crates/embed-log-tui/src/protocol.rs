@@ -162,21 +162,16 @@ impl PanePluginEntry {
 /// toggle needs no recompute round-trip.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct LogPayload {
-    /// ANSI-wrapped message (server-applied color).
+    /// ANSI-wrapped message (server-applied color). Sent only when it
+    /// differs from `message`; empty otherwise.
     #[serde(default)]
     pub data: String,
     /// Raw logical message (no ANSI).
     #[serde(default)]
     pub message: String,
-    /// Display timestamp string (absolute): `"06-14 09:30:45.123"`.
-    #[serde(default)]
-    pub timestamp: String,
     /// RFC3339 timestamp.
     #[serde(default)]
     pub timestamp_iso: String,
-    /// Epoch millis (absolute).
-    #[serde(default)]
-    pub timestamp_num: f64,
     /// Original physical source id.
     #[serde(default)]
     pub source_id: String,
@@ -195,10 +190,10 @@ pub struct LogPayload {
     /// Color name (`"cyan"`, …) or null.
     #[serde(default)]
     pub color: Option<String>,
-    /// Absolute timestamp string (duplicate of `timestamp`).
+    /// Absolute display timestamp: `"06-14 09:30:45.123"`.
     #[serde(default, rename = "absTs")]
     pub abs_ts: String,
-    /// Absolute epoch millis (duplicate of `timestamp_num`).
+    /// Absolute epoch millis.
     #[serde(default, rename = "absNum")]
     pub abs_num: f64,
     /// Relative timestamp string: `"00:00:45.123"`.
