@@ -24,7 +24,7 @@ use crate::session::manager::atomic_write_file;
 use crate::session::{SessionExporter, SessionManager};
 use crate::sources::{FileSource, LogSource, TxCommand, UartSource, UdpSource};
 
-use super::writer::{SourceRuntimeMeta, SourceSpec, Writer, WriterShared, REPLAY_BUFFER_SIZE};
+use super::writer::{SourceSpec, Writer, WriterShared, REPLAY_BUFFER_SIZE};
 
 /// The main server orchestrator.
 pub struct LogServer {
@@ -227,8 +227,6 @@ impl LogServer {
 
         let mut join_handles: Vec<JoinHandle<()>> = Vec::new();
 
-        let source_tab_labels = build_source_tab_labels(&self.config.tabs, &self.config.merges);
-
         // ── 9. Start sources and the session writer ──
         let mut writer_sources = Vec::new();
         for mut src in sources {
@@ -278,17 +276,6 @@ impl LogServer {
                 stats: stats.source(&src.name),
                 line_counter: line_counters[&src.name].clone(),
                 level_detector: self.level_detector_for(&src.name),
-                meta: SourceRuntimeMeta {
-                    source_id: src.name.clone(),
-                    source_label: src.label.clone(),
-                    source_kind: src.source_type.clone(),
-                    tab_labels: source_tab_labels
-                        .get(&src.name)
-                        .cloned()
-                        .unwrap_or_default(),
-                    app_name: self.config.server.app_name.clone(),
-                    job_id: self.config.server.job_id.clone(),
-                },
                 name: src.name,
             });
         }
@@ -1105,36 +1092,6 @@ fn merge_label(merge: &crate::config::MergeConfig) -> String {
     merge.label.clone().unwrap_or_else(|| merge.name.clone())
 }
 
-fn build_source_tab_labels(
-    tabs: &[crate::config::TabConfig],
-    merges: &[crate::config::MergeConfig],
-) -> HashMap<String, Vec<String>> {
-    let merge_members: HashMap<&str, &[String]> = merges
-        .iter()
-        .map(|merge| (merge.name.as_str(), merge.of.as_slice()))
-        .collect();
-    let mut by_source: HashMap<String, Vec<String>> = HashMap::new();
-    for tab in tabs {
-        for pane in &tab.panes {
-            let pane_name = pane.source_name();
-            if let Some(members) = merge_members.get(pane_name) {
-                for member in *members {
-                    by_source
-                        .entry(member.clone())
-                        .or_default()
-                        .push(tab.label.clone());
-                }
-            } else {
-                by_source
-                    .entry(pane_name.to_string())
-                    .or_default()
-                    .push(tab.label.clone());
-            }
-        }
-    }
-    by_source
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::writer::test_support::*;
@@ -1189,23 +1146,6 @@ mod tests {
         );
         assert_eq!(summary["sources"][1]["port"], "COM4");
         assert_eq!(summary["sources"][2]["port"], 9999);
-    }
-
-    #[test]
-    fn virtual_merge_tabs_are_attributed_to_physical_members() {
-        let tabs = vec![crate::config::TabConfig {
-            label: "Link".to_string(),
-            panes: vec![crate::config::PaneConfig::Simple("MCU_LINK".to_string())],
-        }];
-        let merges = vec![crate::config::MergeConfig {
-            name: "MCU_LINK".to_string(),
-            label: Some("MCU Link".to_string()),
-            of: vec!["MCU_TX".to_string(), "MCU_RX".to_string()],
-        }];
-        let labels = build_source_tab_labels(&tabs, &merges);
-        assert_eq!(labels["MCU_TX"], ["Link"]);
-        assert_eq!(labels["MCU_RX"], ["Link"]);
-        assert!(!labels.contains_key("MCU_LINK"));
     }
 
     #[test]

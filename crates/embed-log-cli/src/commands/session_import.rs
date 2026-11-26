@@ -152,8 +152,6 @@ fn import_into_session(
             "absTs": abs_ts,
             "absNum": abs_num,
             "source_id": source_id,
-            "source_kind": "file-import",
-            "source_label": pane_label,
             "origin": "IMPORT",
             "line_idx": line_idx,
             "sequence": next_sequence,
@@ -408,9 +406,15 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(dir.path().join("manifest.json")).unwrap())
                 .unwrap();
         assert_eq!(updated["tabs"][0]["panes"][0], "DEVICE");
+        assert_eq!(updated["pane_kinds"]["DEVICE"], "file-import");
+        assert_eq!(updated["pane_labels"]["DEVICE"], "Device");
+        assert_eq!(updated["tabs"][0]["label"], "Device log");
         let line = fs::read_to_string(combined).unwrap();
         assert!(line.contains("\"sequence\":8"));
-        assert!(line.contains("\"source_kind\":\"file-import\""));
+        assert!(
+            !line.contains("source_kind"),
+            "source constants live in the manifest"
+        );
         assert!(line.contains("\"timestamp_domain\":\"device\""));
     }
 }
