@@ -4,8 +4,91 @@ let available = false;
 let sessionId;
 const pending = new Set();
 const errors = new Map();
+const notes = new Map();
 
 function activate(source, status, dictionaryId) {
+    return control({
+        type: 'dictionary.activate', source_id: source,
+        dictionary_id: dictionaryId, expected_generation: status.generation,
+        parser_type: status.parser_type,
+    }).then(reply => reply.status);
+}
+
+const reload = (source, status) => control({
+    type: 'dictionary.reload', source_id: source, expected_generation: status.generation,
+});
+
+function reloadMessage(reply) {
+    const id = reply.dictionary?.dictionary_id?.slice(0, 12) || '';
+    const build = reply.dictionary?.build_id != null ? `, build ${reply.dictionary.build_id}` : '';
+    return reply.reloaded ? `Reloaded (${id}${build})` : 'Already up to date';
+}
+
+function createSelect(source) {
+    const label = document.createElement('label');
+    label.textContent = 'Dictionary ';
+    const select = document.createElement('select');
+    select.setAttribute('aria-label', `Dictionary for ${source}`);
+    label.append(select);
+    select.addEventListener('change', async () => {
+        const current = sources[source].dictionary;
+        const selected = select.value;
+        pending.add(source);
+        errors.delete(source);
+        notes.delete(source);
+        render(); // Restore the active value until the RX owner acknowledges.
+        try {
+            const applied = await activate(source, current, selected);
+            sources[source].dictionary = applied;
+        } catch (error) {
+            errors.set(source, error.message);
+        } finally {
+            pending.delete(source);
+            render();
+            await refresh(); // Reconcile timeouts and changes by other clients.
+        }
+    });
+    return label;
+}
+
+function createRow(source) {
+    const row = document.createElement('div');
+    row.className = 'dictionary-control';
+    const active = document.createElement('span');
+    active.className = 'dictionary-active';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'dictionary-reload';
+    button.textContent = 'Reload';
+    button.addEventListener('click', async () => {
+        const current = sources[source].dictionary;
+        pending.add(source);
+        errors.delete(source);
+        notes.delete(source);
+        render();
+        try {
+            const reply = await reload(source, current);
+            sources[source].dictionary = reply.status;
+            notes.set(source, reloadMessage(reply));
+        } catch (error) {
+            errors.set(source, error.message);
+        } finally {
+            pending.delete(source);
+            render();
+            await refresh();
+        }
+    });
+    const note = document.createElement('span');
+    note.className = 'dictionary-note';
+    note.setAttribute('role', 'status');
+    const error = document.createElement('span');
+    error.className = 'dictionary-error';
+    error.setAttribute('role', 'alert');
+    row.append(active, button, note, error);
+    return row;
+}
+
+function control(request) {
     return new Promise((resolve, reject) => {
         const url = new URL('/api/v1/control', location.href);
         url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -20,16 +103,12 @@ function activate(source, status, dictionaryId) {
             if (error) reject(error); else resolve(result);
         };
         const timer = setTimeout(() => finish(new Error('Change not confirmed; checking live status.')), 15000);
-        socket.onopen = () => socket.send(JSON.stringify({
-            type: 'dictionary.activate', id, source_id: source,
-            dictionary_id: dictionaryId, expected_generation: status.generation,
-            parser_type: status.parser_type,
-        }));
+        socket.onopen = () => socket.send(JSON.stringify({ ...request, id }));
         socket.onmessage = event => {
             let reply;
             try { reply = JSON.parse(event.data); } catch { return; }
             if (reply.id !== id) return;
-            finish(reply.ok ? null : new Error(reply.error || 'Dictionary change rejected'), reply.status);
+            finish(reply.ok ? null : new Error(reply.error || 'Dictionary change rejected'), reply);
         };
         socket.onerror = () => finish(new Error('Dictionary control connection failed.'));
         socket.onclose = () => finish(new Error('Dictionary control connection closed.'));
@@ -41,47 +120,22 @@ function render() {
         const source = pane.id.slice('pane-'.length);
         const status = sources[source]?.dictionary;
         let row = pane.querySelector('.dictionary-control');
-        if ((status?.configured?.length || 0) < 2) {
+        if (!status?.configured?.length) {
             if (row) row.remove();
             continue;
         }
         if (!row) {
-            row = document.createElement('div');
-            row.className = 'dictionary-control';
-            const label = document.createElement('label');
-            label.textContent = 'Dictionary ';
-            const select = document.createElement('select');
-            select.setAttribute('aria-label', `Dictionary for ${source}`);
-            label.append(select);
-            const active = document.createElement('span');
-            active.className = 'dictionary-active';
-            const error = document.createElement('span');
-            error.className = 'dictionary-error';
-            error.setAttribute('role', 'alert');
-            row.append(label, active, error);
+            row = createRow(source);
             pane.insertBefore(row, pane.querySelector('.filter-bar'));
-            select.addEventListener('change', async () => {
-                const current = sources[source].dictionary;
-                const selected = select.value;
-                pending.add(source);
-                errors.delete(source);
-                render(); // Restore the active value until the RX owner acknowledges.
-                try {
-                    const applied = await activate(source, current, selected);
-                    sources[source].dictionary = applied;
-                } catch (error) {
-                    errors.set(source, error.message);
-                } finally {
-                    pending.delete(source);
-                    render();
-                    await refresh(); // Reconcile timeouts and changes by other clients.
-                }
-            });
         }
+        // A choice only exists with several configured dictionaries; Reload is always useful.
+        const multiple = status.configured.length > 1;
+        if (multiple && !row.querySelector('select')) row.prepend(createSelect(source));
+        if (!multiple) row.querySelector('label')?.remove();
         const select = row.querySelector('select');
         const activeId = status.dictionary?.dictionary_id || '';
         const signature = JSON.stringify([status.configured, status.dictionary]);
-        if (select.dataset.options !== signature) {
+        if (select && select.dataset.options !== signature) {
             select.replaceChildren();
             for (const item of status.configured) {
                 const option = document.createElement('option');
@@ -99,12 +153,21 @@ function render() {
             }
             select.dataset.options = signature;
         }
-        select.value = activeId;
-        select.disabled = !available || pending.has(source);
+        if (select) {
+            select.value = activeId;
+            select.disabled = !available || pending.has(source);
+        }
+        const button = row.querySelector('.dictionary-reload');
+        const fromFile = status.configured.some(item => item.dictionary?.dictionary_id === activeId);
+        button.disabled = !available || pending.has(source) || !fromFile;
+        button.title = fromFile
+            ? 'Re-read the active dictionary file, e.g. after rebuilding the firmware'
+            : 'The active dictionary was uploaded, not read from a file';
         const active = row.querySelector('.dictionary-active');
         const activePath = status.configured.find(item => item.dictionary?.dictionary_id === activeId)?.path;
         active.textContent = pending.has(source) ? 'Switching…' : (available ? `Active: ${activePath || activeId || 'none'}` : 'Status unavailable');
         active.title = activePath || activeId;
+        row.querySelector('.dictionary-note').textContent = notes.get(source) || '';
         row.querySelector('.dictionary-error').textContent = errors.get(source) || '';
     }
 }

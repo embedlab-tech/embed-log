@@ -40,6 +40,26 @@ reads backend state; it does not reset the dictionary. Other UARTs are unaffecte
 After restarting the logger, the first YAML entry is active again. Configured
 snapshots do not change if the original file is subsequently edited.
 
+### Reload after a rebuild
+
+A firmware build overwrites `log_dictionary.json` in place, but the logger keeps
+decoding with its startup snapshot. The **Reload** button next to the active
+path (shown for every UART with a configured dictionary, even a single one)
+re-reads the configured file behind the active dictionary and activates it for
+that source only, through the same owner-acknowledged path as a manual switch:
+
+- The pane reports `Reloaded (<id>, build <build_id>)`, or `Already up to date`
+  when the file is byte-identical. An unchanged file does not create a new generation.
+- A missing, unreadable or invalid file shows the error and **keeps the previous
+  dictionary active**. A concurrent change from another client is rejected
+  (`generation conflict`).
+- The new bytes are snapshotted into the session's `dictionaries/` folder like any
+  staged dictionary. Earlier decoded lines are not rewritten. The superseded
+  snapshot is released from memory, so frequent rebuilds do not use up the
+  64 MiB staging budget; its file stays in the session.
+- The button is disabled when the active dictionary was uploaded (`stage`) and is
+  not backed by a configured file. Select a configured entry first.
+
 There is **no fallback or guessing from decoded output**. A consumer can explicitly
 arm one raw-line anchor as described below. A manual choice can be wrong even if
 its output looks plausible. Earlier decoded logs are not rewritten.
@@ -51,7 +71,12 @@ Non-UART sources use the first path only; runtime selection is UART-only.
 embed-log dictionary --instance bench --source UART_A --json stage target-log_dictionary.json
 embed-log dictionary --instance bench --source UART_A --json status
 embed-log dictionary --instance bench --source UART_A --json activate <dictionary_id> --expected-generation 0
+embed-log dictionary --instance bench --source UART_A --json reload
 ```
+
+`reload` re-reads the configured file of the active dictionary (see above). It
+uses the generation reported by the daemon unless `--expected-generation` is given.
+The JSON result has `reloaded`, `path`, `dictionary` and `status`.
 
 `--url http://127.0.0.1:18080` can replace `--instance bench`. `source` identifies
 one physical UART, never a tab or combined stream. `activate` accepts
@@ -65,6 +90,10 @@ with EmbedLogClient("ws://127.0.0.1:18080/api/v1/control") as client:
     before = client.dictionary_status("UART_A")
     applied = client.activate_dictionary(
         "UART_A", target["dictionary_id"], before["generation"])
+
+    # After rebuilding the firmware: re-read the configured file of the active DB.
+    result = client.reload_dictionary("UART_A")
+    print(result["reloaded"], result["dictionary"]["build_id"])
 ```
 
 Staging uploads the **exact UTF-8 JSON file bytes**, validates Zephyr v3, and returns

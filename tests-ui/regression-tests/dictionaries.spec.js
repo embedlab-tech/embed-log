@@ -14,6 +14,7 @@ async function setup(page, firstCount = 3) {
     states[source] = { generation: 0, parser_type: 'zephyr-dict', dictionary: configured[0].dictionary, configured };
   }
   let rejectNext = false;
+  let reloadHandler = null;
   const requests = [];
   await page.route('**/api/v1/status', route => route.fulfill({ json: {
     ok: true, control_api: true, session_id: 'test-session',
@@ -25,6 +26,13 @@ async function setup(page, firstCount = 3) {
       requests.push(request);
       await new Promise(resolve => setTimeout(resolve, 350));
       const status = states[request.source_id];
+      if (request.type === 'dictionary.reload') {
+        const reply = reloadHandler ? reloadHandler(status, request) : { reloaded: false };
+        ws.send(JSON.stringify(reply.error
+          ? { id: request.id, ok: false, error: reply.error }
+          : { id: request.id, ok: true, reloaded: reply.reloaded, dictionary: status.dictionary, status }));
+        return;
+      }
       if (rejectNext) {
         rejectNext = false;
         ws.send(JSON.stringify({ id: request.id, ok: false, error: 'generation conflict' }));
@@ -36,7 +44,11 @@ async function setup(page, firstCount = 3) {
     });
   });
   await page.goto('/');
-  return { states, requests, reject: () => { rejectNext = true; } };
+  return {
+    states, requests,
+    reject: () => { rejectNext = true; },
+    onReload: handler => { reloadHandler = handler; },
+  };
 }
 
 test('configured choices wait for ACK, remain per-source, and survive reload/rebuild', async ({ page }) => {
@@ -60,7 +72,7 @@ test('configured choices wait for ACK, remain per-source, and survive reload/reb
   await expect(page.getByLabel('Dictionary for SENSOR_A', { exact: true })).toHaveValue('b');
 });
 
-test('single configured dictionary has no selector, including after a status update', async ({ page }) => {
+test('single configured dictionary has no selector but can be reloaded, including after a status update', async ({ page }) => {
   const { states } = await setup(page, 1);
   const single = page.getByLabel('Dictionary for SENSOR_A', { exact: true });
   const multiple = page.getByLabel('Dictionary for SENSOR_B', { exact: true });
@@ -69,6 +81,7 @@ test('single configured dictionary has no selector, including after a status upd
   await page.evaluate(async () => (await import('/tabcreate.js')).rebuildLayout());
   await expect(multiple).toHaveCount(1);
   await expect(single).toHaveCount(0);
+  await expect(page.locator('#pane-SENSOR_A .dictionary-reload')).toBeEnabled();
   states.SENSOR_B.configured.splice(1);
   await expect(multiple).toHaveCount(0, { timeout: 7000 });
 });
@@ -83,4 +96,45 @@ test('rejected change preserves the active choice and displays the server error'
   await expect(select).toBeEnabled();
   await expect(select).toHaveValue('a');
   expect(peer.states.SENSOR_A.generation).toBe(0);
+});
+
+test('Reload re-reads the active file, reports the result and keeps the choice on failure', async ({ page }) => {
+  const peer = await setup(page, 1);
+  const button = page.locator('#pane-SENSOR_A .dictionary-reload');
+  const note = page.locator('#pane-SENSOR_A .dictionary-note');
+  await expect(button).toBeEnabled();
+
+  // Unchanged file: no new generation.
+  await button.click();
+  await expect(button).toBeDisabled();
+  await expect(note).toHaveText('Already up to date');
+  expect(peer.requests.at(-1)).toMatchObject({ type: 'dictionary.reload', source_id: 'SENSOR_A', expected_generation: 0 });
+  expect(peer.states.SENSOR_A.generation).toBe(0);
+
+  // Rebuilt file: the backend applies it and the pane follows the new binding.
+  peer.onReload(status => {
+    status.generation++;
+    status.dictionary = { dictionary_id: 'a2', build_id: 'A2' };
+    status.configured[0].dictionary = status.dictionary;
+    return { reloaded: true };
+  });
+  await button.click();
+  await expect(note).toHaveText('Reloaded (a2, build A2)');
+  await expect(button).toBeEnabled();
+  await button.click();
+  expect(peer.requests.at(-1)).toMatchObject({ expected_generation: 1 });
+
+  // Invalid file: error shown, active dictionary unchanged.
+  peer.onReload(() => ({ error: 'cannot read /images/A/database.json: No such file or directory' }));
+  await button.click();
+  await expect(page.getByRole('alert').filter({ hasText: 'cannot read' })).toBeVisible();
+  await expect(note).toHaveText('');
+  await expect(page.locator('#pane-SENSOR_A .dictionary-active')).toContainText('/images/A/database.json');
+  expect(peer.states.SENSOR_A.generation).toBe(1);
+});
+
+test('Reload is disabled when the active dictionary was uploaded, not read from a file', async ({ page }) => {
+  const { states } = await setup(page, 1);
+  states.SENSOR_A.dictionary = { dictionary_id: 'uploaded', build_id: null };
+  await expect(page.locator('#pane-SENSOR_A .dictionary-reload')).toBeDisabled({ timeout: 7000 });
 });

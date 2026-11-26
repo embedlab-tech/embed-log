@@ -56,6 +56,26 @@ pub struct DictionaryStatus {
     pub armed: Option<ArmedStatus>,
 }
 
+/// Result of re-reading the active configured dictionary file.
+#[derive(Clone, Debug, Serialize)]
+pub struct ReloadOutcome {
+    /// `false` when the file is byte-identical to the active dictionary.
+    pub reloaded: bool,
+    pub path: String,
+    pub dictionary: DictionaryInfo,
+    pub status: DictionaryStatus,
+}
+
+fn read_dictionary_file(path: &str) -> Result<String, String> {
+    let mut json = String::new();
+    File::open(path)
+        .map_err(|e| e.to_string())?
+        .take((MAX_DICTIONARY_BYTES + 1) as u64)
+        .read_to_string(&mut json)
+        .map_err(|e| e.to_string())?;
+    Ok(json)
+}
+
 type ActivationResult = (
     Result<DictionaryStatus, String>,
     oneshot::Sender<Result<DictionaryStatus, String>>,
@@ -144,15 +164,7 @@ impl DictionaryControl {
                 return Err("dictionary path list is empty".into());
             }
             for (index, path) in paths.iter().enumerate() {
-                let staged = (|| {
-                    let mut json = String::new();
-                    File::open(path)
-                        .map_err(|e| e.to_string())?
-                        .take((MAX_DICTIONARY_BYTES + 1) as u64)
-                        .read_to_string(&mut json)
-                        .map_err(|e| e.to_string())?;
-                    control.stage_bytes(&json)
-                })();
+                let staged = read_dictionary_file(path).and_then(|json| control.stage_bytes(&json));
                 if index == 0 {
                     control.status.lock().unwrap().dictionary = Some(staged.clone()?);
                 }
@@ -275,6 +287,68 @@ impl DictionaryControl {
     ) -> Result<DictionaryStatus, String> {
         self.queue_update(dictionary_id, parser_type, expected_generation, None)
             .await
+    }
+
+    /// Re-read the configured file behind the active dictionary and activate it.
+    ///
+    /// For the common rebuild loop: the firmware build overwrites the dictionary
+    /// file in place, while the startup snapshot keeps decoding with the old
+    /// one. A missing or invalid file leaves the active dictionary untouched.
+    pub async fn reload(&self, expected_generation: u64) -> Result<ReloadOutcome, String> {
+        let status = self.status();
+        let active = status
+            .dictionary
+            .as_ref()
+            .ok_or("no active dictionary to reload")?;
+        let index = status
+            .configured
+            .iter()
+            .position(|item| item.dictionary.as_ref().map(|d| &d.dictionary_id) == Some(&active.dictionary_id))
+            .ok_or("the active dictionary was uploaded, not read from a configured file; select a configured dictionary first")?;
+        let path = status.configured[index].path.clone();
+        let info = read_dictionary_file(&path)
+            .map_err(|e| format!("cannot read {path}: {e}"))
+            .and_then(|json| self.stage_bytes(&json).map_err(|e| format!("{path}: {e}")))?;
+        if info.dictionary_id == active.dictionary_id {
+            return Ok(ReloadOutcome {
+                reloaded: false,
+                path,
+                dictionary: info,
+                status,
+            });
+        }
+        let applied = self
+            .queue_update(
+                &info.dictionary_id,
+                &status.parser_type,
+                expected_generation,
+                None,
+            )
+            .await?;
+        // Keep the selector bound to the file: it now holds the new content.
+        let mut current = self.status.lock().unwrap();
+        if let Some(item) = current.configured.get_mut(index) {
+            item.dictionary = Some(info.clone());
+            item.error = None;
+        }
+        // Frequent rebuilds must not exhaust the per-source staging budget.
+        let still_used = |id: &str| {
+            current
+                .configured
+                .iter()
+                .any(|item| item.dictionary.as_ref().map(|d| d.dictionary_id.as_str()) == Some(id))
+        };
+        if !still_used(&active.dictionary_id) {
+            self.staged.lock().unwrap().remove(&active.dictionary_id);
+        }
+        let mut result = applied;
+        result.configured = current.configured.clone();
+        Ok(ReloadOutcome {
+            reloaded: true,
+            path,
+            dictionary: info,
+            status: result,
+        })
     }
 
     async fn queue_update(

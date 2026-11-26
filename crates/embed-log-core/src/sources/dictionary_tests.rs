@@ -409,3 +409,91 @@ async fn runtime_switch_is_acknowledged_per_uart_and_discards_partial_record() {
     drop((master_a, master_b));
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reload_rereads_the_configured_file_and_keeps_the_old_one_on_failure() {
+    let (dir, manager) = setup();
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("log_dictionary.json");
+    std::fs::write(&file, dictionary("image-A")).unwrap();
+    let config = ParserConfig {
+        parser_type: "zephyr-dict".into(),
+        database: Some(file.to_string_lossy().into_owned().into()),
+    };
+    let (control, runtime) = DictionaryControl::new("UART_A", &config, manager).unwrap();
+    let (mut master, mut slave) = serialport::TTYPort::pair().unwrap();
+    slave.set_timeout(Duration::from_millis(100)).unwrap();
+    let (tx, mut rx) = mpsc::channel::<LogEntry>(128);
+    let mut source =
+        UartSource::from_port("UART_A", Box::new(slave), "text").with_parser(config.clone());
+    source.set_dictionary_runtime(runtime);
+    let task = tokio::spawn(Box::new(source).run(tx));
+    let next_message = |master: &mut serialport::TTYPort| {
+        tokio::task::block_in_place(|| master.write_all(&record()).unwrap());
+    };
+
+    // The file did not change: nothing to apply, generation stays.
+    let outcome = control.reload(0).await.unwrap();
+    assert!(!outcome.reloaded);
+    assert_eq!(outcome.status.generation, 0);
+
+    // A rebuild overwrites the file in place; the startup snapshot keeps decoding.
+    std::fs::write(&file, dictionary("image-B")).unwrap();
+    next_message(&mut master);
+    let entry = timeout(Duration::from_secs(3), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(entry.message.ends_with("image-A"), "{}", entry.message);
+
+    // Invalid, missing and stale-generation reloads leave the active one alone.
+    std::fs::write(&file, "{ not a dictionary").unwrap();
+    assert!(control.reload(0).await.is_err());
+    std::fs::remove_file(&file).unwrap();
+    assert!(control.reload(0).await.unwrap_err().contains("cannot read"));
+    assert_eq!(control.status().generation, 0);
+    std::fs::write(&file, dictionary("image-B")).unwrap();
+    assert!(control
+        .reload(5)
+        .await
+        .unwrap_err()
+        .contains("generation conflict"));
+
+    let outcome = control.reload(0).await.unwrap();
+    assert!(outcome.reloaded);
+    assert_eq!(outcome.status.generation, 1);
+    assert_eq!(outcome.path, file.to_string_lossy());
+    // The selector entry follows the file, so the active id is still "configured".
+    let status = control.status();
+    assert_eq!(status.dictionary, status.configured[0].dictionary);
+    assert_eq!(status.dictionary.as_ref(), Some(&outcome.dictionary));
+    // The superseded snapshot is released but stays on disk for the session.
+    assert_eq!(control.staged.lock().unwrap().len(), 1);
+    next_message(&mut master);
+    let entry = timeout(Duration::from_secs(3), async {
+        loop {
+            let entry = rx.recv().await.unwrap();
+            if entry.message.contains("app:") && entry.message.ends_with("image-B") {
+                return entry;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert!(entry.message.ends_with("image-B"));
+
+    // Unchanged again: still generation 1.
+    let outcome = control.reload(1).await.unwrap();
+    assert!(!outcome.reloaded);
+    assert_eq!(outcome.status.generation, 1);
+
+    // An uploaded dictionary is not backed by a file, so there is nothing to reload.
+    let uploaded = control.stage(&dictionary("image-C")).unwrap();
+    control
+        .activate(&uploaded.dictionary_id, "zephyr-dict", 1)
+        .await
+        .unwrap();
+    assert!(control.reload(2).await.unwrap_err().contains("uploaded"));
+    task.abort();
+    std::fs::remove_dir_all(dir).unwrap();
+}

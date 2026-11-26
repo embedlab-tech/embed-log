@@ -39,6 +39,14 @@ pub(crate) enum DictionaryCommand {
         #[arg(long, default_value = "zephyr-dict", value_parser = ["zephyr-dict", "zephyr-dict-hex"])]
         parser_type: String,
     },
+    /// Re-read the configured file behind the active dictionary and activate it,
+    /// for example after rebuilding the firmware. Keeps the old one on failure.
+    Reload {
+        /// Fails if the source changed dictionary since this generation.
+        /// Defaults to the generation reported by the daemon right now.
+        #[arg(long)]
+        expected_generation: Option<u64>,
+    },
     /// Show active DB, generation and raw capture offset.
     Status,
 }
@@ -81,10 +89,30 @@ async fn run(args: &DictionaryArgs) -> Result<()> {
         } => {
             json!({"type": "dictionary.activate", "dictionary_id": dictionary_id, "expected_generation": expected_generation, "parser_type": parser_type})
         }
+        DictionaryCommand::Reload {
+            expected_generation,
+        } => json!({"type": "dictionary.reload", "expected_generation": expected_generation}),
         DictionaryCommand::Status => json!({"type": "dictionary.status"}),
     };
     request["source_id"] = json!(args.source);
     let mut client = ControlClient::connect(&endpoint).await?;
+    if matches!(request["expected_generation"], serde_json::Value::Null)
+        && request["type"] == "dictionary.reload"
+    {
+        let status = client
+            .request(json!({"type": "dictionary.status", "source_id": args.source}))
+            .await?;
+        request["expected_generation"] = status
+            .pointer("/status/generation")
+            .cloned()
+            .with_context(|| {
+                status
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("dictionary status unavailable")
+                    .to_string()
+            })?;
+    }
     let response = client.request(request).await?;
     client.close().await;
     anyhow::ensure!(
@@ -131,6 +159,22 @@ mod tests {
             matches!(args.command, DictionaryCommand::Stage { activate_on_regex: Some(pattern), .. }
                          if pattern == "^READY:target$")
         );
+    }
+
+    #[test]
+    fn reload_generation_is_optional() {
+        for (extra, expected) in [
+            (vec![], None),
+            (vec!["--expected-generation", "3"], Some(3)),
+        ] {
+            let mut argv = vec!["dictionary", "--source", "UART_A", "reload"];
+            argv.extend(extra);
+            let args = Cli::try_parse_from(argv).unwrap().args;
+            assert!(matches!(
+                args.command,
+                DictionaryCommand::Reload { expected_generation } if expected_generation == expected
+            ));
+        }
     }
 
     #[test]

@@ -248,6 +248,25 @@ class EmbedLogClient:
                    "expected_generation": expected_generation, "parser_type": parser_type},
         )["status"]
 
+    def reload_dictionary(self, source_id: str, expected_generation: int | None = None) -> dict:
+        """Re-read the configured file behind the active DB and activate it.
+
+        For the rebuild loop: the firmware build overwrites the dictionary file,
+        while the running logger keeps its startup snapshot. Returns
+        ``{"reloaded": bool, "path": ..., "dictionary": ..., "status": ...}``;
+        ``reloaded`` is False when the file is unchanged. A missing or invalid
+        file raises ServerError and keeps the active DB. Without
+        expected_generation the current one is read first.
+        """
+        if expected_generation is None:
+            expected_generation = self.dictionary_status(source_id)["generation"]
+        self.assert_writable(source_id)
+        response = self._send_and_wait(
+            f"dictionary-{time.time_ns()}", "dictionary.reload", "dictionary.reload.result",
+            extra={"source_id": source_id, "expected_generation": expected_generation},
+        )
+        return {key: response[key] for key in ("reloaded", "path", "dictionary", "status")}
+
     def subscribe(self, sources: list[str]) -> None:
         """Subscribe to selected sources as structured ``log.entry`` messages."""
         body: dict = {"sources": sources}
