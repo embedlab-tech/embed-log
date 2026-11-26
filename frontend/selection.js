@@ -618,6 +618,7 @@ function _buildRangeLogData(entries) {
             sourceId: e.line.sourceId,
             sessionId: e.line.sessionId,
             sequence: e.line.sequence,
+            lineIdx: e.line.serverLineIdx,
             recordOrdinal: e.line.recordOrdinal,
             originalBytes: originalRecordBytes(e.paneId, e.line.rawText || '', e.line),
             absTs: e.line.absTs ?? null,

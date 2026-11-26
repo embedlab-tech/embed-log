@@ -1602,6 +1602,10 @@ function _entryServerLineIdx(entry, paneId, idx) {
 function _rowServerId(paneId, rawIdx) {
     const entry = state.rawLines[paneId]?.[rawIdx];
     if (entry === undefined) return null;
+    // A merged pane mixes sources, and a line index is only unique within one source:
+    // A's first line and B's first line both have index 0. A marker names no source, so
+    // in a merged pane a row is told apart by its position.
+    if (window.__embedLogMerges?.some(merge => merge?.name === paneId)) return rawIdx;
     return _entryServerLineIdx(entry, paneId, rawIdx) ?? rawIdx;
 }
 

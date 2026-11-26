@@ -1,4 +1,6 @@
+import fs from 'node:fs';
 import { expect, test } from '@playwright/test';
+import { openHtmlFile, saveDownload, waitForRangePair } from './helpers.js';
 
 // Review follow-ups for the large-log audit work: markers identify a line by its
 // server line index, a short reconnect keeps what is loaded, and the byte counter
@@ -88,4 +90,42 @@ test('the live byte counter counts the logged message, not the added colour', as
   // Three records of four bytes each.
   await expect(page.locator('[data-pane-stats="A"]')).toContainText('3 lines · 12 B');
   await expect(page.locator('#toolbar-stats')).toContainText('3 lines · 12 B');
+});
+
+test('in a merged pane one marker marks one row, although line indexes repeat across sources', async ({ page }) => {
+  const merged = n => ({
+    type: 'rx', data: `msg${n}`, message: `msg${n}`, source_id: n === 1 ? 'A' : 'B', source_kind: 'uart',
+    timestamp: '12:00:00', sequence: n, session_id: SESSION, line_idx: 0, // first line of each source
+  });
+  await mockServer(page, [[{
+    type: 'config', session: { id: SESSION },
+    tabs: [{ label: 'Sources', panes: ['A', 'B'] }, { label: 'All', panes: ['ALL'] }],
+    pane_kinds: { A: 'uart', B: 'uart', ALL: 'merge' },
+    merges: [{ name: 'ALL', of: ['A', 'B'] }],
+    markers: [{ paneId: 'ALL', lineIdx: 0, endIdx: 0, numTs: 1, description: 'look here', createdAt: 'now' }],
+  }, merged(1), merged(2)]]);
+  await page.goto('/');
+  await page.locator('#tab-bar').getByRole('button', { name: 'All', exact: true }).click();
+  await expect(page.locator('#log-ALL')).toContainText('msg2');
+  await expect(page.locator('#log-ALL .has-marker')).toHaveCount(1);
+  await expect(page.locator('#log-ALL .has-marker')).toContainText('msg1');
+});
+
+test('an exported selection keeps markers on their own lines', async ({ page, browser }, testInfo) => {
+  // msg1 carries the marker; only msg2 and msg3 are exported.
+  await mockServer(page, [[config([marker(0)]), record(1), record(2), record(3)]]);
+  await page.goto('/');
+  await expect(page.locator('#log-A')).toContainText('msg3');
+  await page.locator('#log-A .log-line', { hasText: 'msg2' }).click();
+  await page.locator('#log-A .log-line', { hasText: 'msg3' }).click({ modifiers: ['Shift'] });
+  const download = page.waitForEvent('download');
+  await page.evaluate(() => document.getElementById('export-html-A').click());
+  const file = await saveDownload(await download, testInfo);
+  expect(fs.readFileSync(file, 'utf-8')).toContain('"lineIdx":1');
+
+  const exported = await openHtmlFile(browser, file);
+  await expect(exported.locator('#log-A')).toContainText('msg2');
+  // The exported page holds msg2 and msg3, not the marked msg1: nothing is marked.
+  await expect(exported.locator('#log-A .has-marker')).toHaveCount(0);
+  await exported.close();
 });

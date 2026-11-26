@@ -148,6 +148,9 @@ export async function exportHtmlSnapshot(options = {}) {
             if (line.sourceId) meta.sourceId = line.sourceId;
             if (line.level) meta.level = line.level;
             if (line.sessionId) meta.sessionId = line.sessionId;
+            // Markers name server line indexes; without it the page would use positions.
+            const lineIdx = line.serverLineIdx ?? line.lineIdx;
+            if (Number.isFinite(lineIdx)) meta.lineIdx = lineIdx;
             if (Number.isFinite(line.sequence)) meta.sequence = line.sequence;
             if (Number.isFinite(line.recordOrdinal)) meta.recordOrdinal = line.recordOrdinal;
             if (Number.isFinite(line.originalBytes)) meta.originalBytes = line.originalBytes;
