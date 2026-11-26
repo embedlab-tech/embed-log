@@ -543,6 +543,12 @@ function _addPaneGroups(tabIdx) {
     }
 
     function showForButton(btn) {
+        // In UNWRAP mode a tab is one pane and data-tab-idx is the pane's index, not a
+        // view's: the menu would edit the wrong group. The layout is edited when grouped.
+        if (state.unwrap) {
+            hideMenu();
+            return;
+        }
         const tabIdx = Number(btn.dataset.tabIdx);
         if (!Number.isInteger(tabIdx) || !TABS[tabIdx]) return;
 

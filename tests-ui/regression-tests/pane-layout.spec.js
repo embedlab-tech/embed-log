@@ -188,4 +188,22 @@ test.describe('pane add / remove', () => {
     await expect(exported.locator('#pane-SENSOR_B')).toBeVisible();
     await exported.close();
   });
+
+  test('the tab menu edits nothing in UNWRAP mode, where a tab is a pane and not a view', async ({ page }) => {
+    await page.getByRole('button', { name: /^(Unwrap|Split tabs)$/ }).click();
+    // DevA = [DEVICE_A, HOST], DevB = [AUX]: hovering the tab of HOST (the second pane) used to
+    // open the menu of the second view and let ✕ hide AUX.
+    for (const name of ['DEVICE_A-DevA', 'HOST-DevA', 'AUX-DevB']) {
+      await page.getByRole('button', { name, exact: true }).hover();
+      await page.waitForTimeout(150);
+      await expect(page.locator('#tab-swap-menu.open')).toHaveCount(0);
+    }
+    // Nothing was hidden: still the same single pane on screen, AUX untouched.
+    await expect.poll(() => visiblePaneNames(page)).toEqual(['DEVICE_A-DevA']);
+    await expect(page.locator('#hidden-panes #pane-SENSOR_C')).toHaveCount(0);
+    // Back in grouped mode the menu works again, on the right view.
+    await page.getByRole('button', { name: /^(Unwrap|Split tabs|Group tabs)$/ }).click();
+    await openTabMenu(page, 'DevB');
+    await expect(page.locator('#tab-swap-menu .tab-swap-title')).toHaveText('Panes in “DevB”');
+  });
 });
