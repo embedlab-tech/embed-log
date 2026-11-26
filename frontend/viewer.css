@@ -324,6 +324,13 @@ button.active { background: var(--selection); border-color: var(--accent); color
     font-size: 12px;
 }
 
+#tab-swap-menu .tab-swap-remove { padding: 1px 7px; line-height: 1.2; }
+#tab-swap-menu .tab-add-row { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+#tab-swap-menu .tab-reset-layout { margin-top: 8px; font-size: 11px; width: 100%; }
+#hidden-panes { display: none; }
+.pane-close-btn { margin-left: 4px; }
+.pane-close-btn[hidden] { display: none; }
+
 #pane-plugin-menu {
     position: fixed;
     z-index: 1100;

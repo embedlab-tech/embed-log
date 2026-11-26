@@ -263,6 +263,7 @@ async function _handleConfigMessage(msg) {
             createTabWithPanes(tab.label, tab.panes, { switchTo: false, paneLabels: tab.pane_labels || paneLabels })
         );
         switchTab(0);
+        window.__embedLogApplySavedLayout?.();
     }
     // Apply markers from config if present
     if (msg.markers && Array.isArray(msg.markers)) {

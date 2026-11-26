@@ -1,7 +1,7 @@
 import { state, TABS, PANES, paneLabel, unwrapPaneLabel } from './state.js';
 
 import { _linesSetupPane, repopulatePaneLogs } from './lines.js';
-import { _uiSetupPane, _uiSetupTxPane } from './ui.js';
+import { _uiSetupPane, _uiSetupTxPane, refreshPaneControls } from './ui.js';
 import { _selectionSetupPane, applyMarkers } from './selection.js';
 import { renderTabBar, switchTab } from './tabs.js';
 import { renderPaneShell } from './renderPane.js';
@@ -62,6 +62,7 @@ export function createTabWithPanes(label, paneIds, { switchTo = true, paneLabels
 
     // ---- 4. Show ----
     renderTabBar();
+    refreshPaneControls();
     if (switchTo) switchTab(tabIdx);
     window.__embedLogSchedulePersist?.();
 }
@@ -120,6 +121,18 @@ export function rebuildLayout(previousUnwrap = state.unwrap) {
         });
     }
 
+    // Panes that were removed from every view stay alive, parked out of sight.
+    const parked = state.unwrap ? [] : PANES.filter(id => !TABS.some(tab => tab.panes.includes(id)));
+    if (parked.length) {
+        const parking = document.createElement("div");
+        parking.id = "hidden-panes";
+        parking.innerHTML = parked.map(paneId => {
+            const kind = window.__embedLogPaneKinds?.[paneId] || "";
+            return renderPaneShell(paneId, paneLabel(paneId), { showTx: kind === "uart", paneKind: kind });
+        }).join("\n");
+        container.appendChild(parking);
+    }
+
     // Re-wire per-pane handlers and repopulate logs
     PANES.forEach(paneId => {
         _linesSetupPane(paneId);
@@ -130,6 +143,7 @@ export function rebuildLayout(previousUnwrap = state.unwrap) {
     PANES.forEach(paneId => repopulatePaneLogs(paneId));
     applyMarkers();
     renderTabBar();
+    refreshPaneControls();
     const targetTab = state.unwrap
         ? (state.activePaneTab < PANES.length ? state.activePaneTab : 0)
         : (state.activeTab < TABS.length ? state.activeTab : 0);

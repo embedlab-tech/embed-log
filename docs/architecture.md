@@ -202,6 +202,17 @@ The browser viewer is plain ES modules in `frontend/`. It supports:
 
 The terminal UI is a separate Rust client in `crates/embed-log-tui`.
 
+### Pane layout (browser)
+
+Each view (tab) shows the panes the configuration gives it. In the browser the user can rearrange them:
+
+- **Swap** two panes (also across views) from the popup that opens when hovering a tab label.
+- **Remove** a pane from a view with the `✕` in its header or in the tab popup. A view keeps at least one pane.
+- **Add** a pane from the popup: a hidden pane, or one moved over from another view that keeps at least one pane.
+- **Reset layout** (shown in the popup once the layout differs) returns to the configured views.
+
+This only changes the layout. A removed pane is parked in a hidden `#hidden-panes` element, keeps receiving and storing its lines, and shows its full history when it is added back; the source keeps recording. A pane lives in one view at a time. In the live viewer the layout is saved in `localStorage`, keyed by the configured views and panes, so it survives a reload and a new session, and is dropped when the configuration changes. It is a UI preference only: it does not touch the session recording or the configuration summary. In UNWRAP mode every pane is shown, and the remove buttons are hidden.
+
 Important files:
 
 | File | Responsibility |

@@ -1,5 +1,5 @@
 import { state, TABS, PANES, paneLabel } from './state.js';
-import { rerenderPane, reanalyzePanePlugins, setTimestampMode, canDisplayTimestampMode, hidePluginOverlays, updatePaneSearch, navigatePaneSearch } from './lines.js';
+import { rerenderPane, scrollPaneToBottom, reanalyzePanePlugins, setTimestampMode, canDisplayTimestampMode, hidePluginOverlays, updatePaneSearch, navigatePaneSearch } from './lines.js';
 import { PhraseSearch } from './search.js';
 import {
     countLevels, hiddenLevelCount, hiddenLevels, paneLevelDefs, setLevelVisible, showAllLevels,
@@ -255,6 +255,136 @@ function _swapPanes(a, b) {
     window.__embedLogSchedulePersist?.();
 }
 
+// ---------------------------------------------------------------------------
+// Pane add / remove (dynamic layout)
+//
+// A pane that is not in any view is "hidden": its element is parked in
+// #hidden-panes (display: none) and keeps receiving and storing its lines, so
+// it shows its full history when it is added back. Hiding only changes the
+// layout; the source keeps recording.
+// ---------------------------------------------------------------------------
+const _LAYOUT_KEY = "embed-log:layout:v1:";
+let _configuredLayout = null;
+
+const _layoutSnapshot = () => TABS.map(tab => ({ label: tab.label, panes: [...tab.panes] }));
+const _ensureConfiguredLayout = () => { _configuredLayout ||= _layoutSnapshot(); };
+// The saved layout belongs to this configuration: same views with the same panes.
+const _layoutKey = () => _LAYOUT_KEY + JSON.stringify(
+    (_configuredLayout || []).map(tab => [tab.label, [...tab.panes].sort()]),
+);
+const _sameLayout = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+function _hiddenPanes() {
+    return PANES.filter(id => !_findPaneLocation(id));
+}
+
+function _canRemovePane(paneId) {
+    const loc = _findPaneLocation(paneId);
+    return !!loc && TABS[loc.tabIdx].panes.length > 1;
+}
+
+function _parkingEl() {
+    let el = document.getElementById("hidden-panes");
+    if (!el) {
+        el = document.createElement("div");
+        el.id = "hidden-panes";
+        document.getElementById("container")?.appendChild(el);
+    }
+    return el;
+}
+
+export function refreshPaneControls() {
+    PANES.forEach(id => {
+        const button = document.querySelector(`#pane-${id} .pane-close-btn`);
+        if (button) button.hidden = state.unwrap || !_canRemovePane(id);
+    });
+}
+
+function _saveLayout() {
+    if (window.__embedLogProfile?.capabilities?.persistCache !== true || !_configuredLayout) return;
+    try {
+        const key = _layoutKey();
+        if (_sameLayout(_layoutSnapshot(), _configuredLayout)) localStorage.removeItem(key);
+        else localStorage.setItem(key, JSON.stringify(_layoutSnapshot()));
+    } catch { /* storage unavailable: the layout just does not persist */ }
+}
+
+// Apply a layout that was already written to TABS: move elements, re-flow, keep scroll.
+function _commitLayout(tabIdxs, paneIds) {
+    const paneElMap = {};
+    PANES.forEach(id => {
+        const el = document.getElementById("pane-" + id);
+        if (el) paneElMap[id] = el;
+    });
+    const scrollTops = new Map();
+    paneIds.forEach(id => {
+        const el = document.getElementById("log-" + id);
+        if (el) scrollTops.set(id, el.scrollTop);
+    });
+
+    const parking = _parkingEl();
+    _hiddenPanes().forEach(id => { if (paneElMap[id]) parking.appendChild(paneElMap[id]); });
+    tabIdxs.forEach(tabIdx => _rebuildTabContent(tabIdx, paneElMap));
+    refreshPaneControls();
+
+    // Moving an element resets its scroll position.
+    paneIds.forEach(id => {
+        if (state.atBottom[id] !== false) scrollPaneToBottom(id);
+        else {
+            const el = document.getElementById("log-" + id);
+            if (el && scrollTops.has(id)) el.scrollTop = scrollTops.get(id);
+        }
+    });
+    window.__embedLogSchedulePersist?.();
+    _saveLayout();
+}
+
+function _removePane(paneId) {
+    const loc = _findPaneLocation(paneId);
+    if (!loc || !_canRemovePane(paneId)) return;
+    _ensureConfiguredLayout();
+    TABS[loc.tabIdx].panes.splice(loc.paneIdx, 1);
+    _commitLayout([loc.tabIdx], TABS[loc.tabIdx].panes);
+}
+
+// From the hidden panes, or moved here from another view that keeps at least one pane.
+function _addPane(tabIdx, paneId) {
+    if (!TABS[tabIdx] || TABS[tabIdx].panes.includes(paneId)) return;
+    const from = _findPaneLocation(paneId);
+    if (from && !_canRemovePane(paneId)) return;
+    _ensureConfiguredLayout();
+    if (from) TABS[from.tabIdx].panes.splice(from.paneIdx, 1);
+    TABS[tabIdx].panes.push(paneId);
+    const tabs = [...new Set([tabIdx, from?.tabIdx].filter(i => i !== undefined))];
+    _commitLayout(tabs, tabs.flatMap(i => TABS[i].panes));
+    _pulsePane(paneId);
+}
+
+function _resetLayout() {
+    if (!_configuredLayout) return;
+    _configuredLayout.forEach((tab, i) => { if (TABS[i]) TABS[i].panes = [...tab.panes]; });
+    _commitLayout(TABS.map((_, i) => i), PANES);
+}
+
+function _layoutIsCustom() {
+    return !!_configuredLayout && !_sameLayout(_layoutSnapshot(), _configuredLayout);
+}
+
+// Called by ws.js once the configured views exist: restore this browser's layout.
+window.__embedLogApplySavedLayout = function __embedLogApplySavedLayout() {
+    _configuredLayout = _layoutSnapshot();
+    if (window.__embedLogProfile?.capabilities?.persistCache !== true) return;
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(_layoutKey()) || "null"); } catch { saved = null; }
+    const ids = Array.isArray(saved) ? saved.flatMap(tab => (Array.isArray(tab?.panes) ? tab.panes : [])) : [];
+    const valid = Array.isArray(saved) && saved.length === TABS.length
+        && saved.every((tab, i) => tab && tab.label === TABS[i].label && Array.isArray(tab.panes) && tab.panes.length > 0)
+        && ids.every(id => PANES.includes(id)) && new Set(ids).size === ids.length;
+    if (!valid || _sameLayout(saved.map(({ label, panes }) => ({ label, panes })), _configuredLayout)) return;
+    saved.forEach((tab, i) => { TABS[i].panes = [...tab.panes]; });
+    rebuildLayout();
+};
+
 function _buildSwapTargetOptions(select, fromPaneId) {
     select.innerHTML = "";
     const placeholder = document.createElement("option");
@@ -274,7 +404,38 @@ function _buildSwapTargetOptions(select, fromPaneId) {
     });
 }
 
-// Hover popup on tab labels — compact place for pane-swap controls.
+function _buildAddOptions(select, tabIdx) {
+    select.innerHTML = "";
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "add pane…";
+    placeholder.selected = true;
+    select.appendChild(placeholder);
+
+    const group = (label, ids, text) => {
+        if (!ids.length) return;
+        const optgroup = document.createElement("optgroup");
+        optgroup.label = label;
+        ids.forEach(id => {
+            const opt = document.createElement("option");
+            opt.value = id;
+            opt.textContent = text(id);
+            optgroup.appendChild(opt);
+        });
+        select.appendChild(optgroup);
+    };
+    const hidden = _hiddenPanes();
+    const movable = PANES.filter(id => {
+        const loc = _findPaneLocation(id);
+        return loc && loc.tabIdx !== tabIdx && TABS[loc.tabIdx].panes.length > 1;
+    });
+    group("Hidden", hidden, id => paneLabel(id));
+    group("Move from another view", movable, id => `${paneLabel(id)} · ${TABS[_findPaneLocation(id).tabIdx].label}`);
+    select.disabled = !hidden.length && !movable.length;
+    select.title = select.disabled ? "Every source is already in this view" : "";
+}
+
+// Hover popup on tab labels — compact place for pane controls (swap, add, remove).
 (function _setupTabSwapPopup() {
     const tabBar = document.getElementById("tab-bar");
     if (!tabBar) return;
@@ -307,7 +468,7 @@ function _buildSwapTargetOptions(select, fromPaneId) {
 
         const title = document.createElement("div");
         title.className = "tab-swap-title";
-        title.textContent = `Swap panes in “${TABS[tabIdx].label}”`;
+        title.textContent = `Panes in “${TABS[tabIdx].label}”`;
         menu.appendChild(title);
 
         panes.forEach(paneId => {
@@ -328,10 +489,55 @@ function _buildSwapTargetOptions(select, fromPaneId) {
                 showForButton(btn); // refresh options + tab membership labels
             });
 
+            const remove = document.createElement("button");
+            remove.type = "button";
+            remove.className = "tab-swap-remove";
+            remove.textContent = "✕";
+            remove.disabled = !_canRemovePane(paneId);
+            remove.title = remove.disabled
+                ? "A view keeps at least one pane"
+                : "Remove from this view (the source keeps recording)";
+            remove.setAttribute("aria-label", `Remove ${paneLabel(paneId)} from this view`);
+            remove.addEventListener("click", () => {
+                _removePane(paneId);
+                showForButton(btn);
+            });
+
             row.appendChild(name);
             row.appendChild(select);
+            row.appendChild(remove);
             menu.appendChild(row);
         });
+
+        const addRow = document.createElement("div");
+        addRow.className = "tab-swap-row tab-add-row";
+        const addLabel = document.createElement("span");
+        addLabel.className = "tab-swap-pane-name";
+        addLabel.textContent = "Add";
+        const addSelect = document.createElement("select");
+        addSelect.className = "tab-swap-select";
+        addSelect.setAttribute("aria-label", `Add a pane to ${TABS[tabIdx].label}`);
+        _buildAddOptions(addSelect, tabIdx);
+        addSelect.addEventListener("change", () => {
+            if (!addSelect.value) return;
+            _addPane(tabIdx, addSelect.value);
+            showForButton(btn);
+        });
+        addRow.append(addLabel, addSelect);
+        menu.appendChild(addRow);
+
+        if (_layoutIsCustom()) {
+            const reset = document.createElement("button");
+            reset.type = "button";
+            reset.className = "tab-reset-layout";
+            reset.textContent = "Reset layout";
+            reset.title = "Back to the configured views and panes";
+            reset.addEventListener("click", () => {
+                _resetLayout();
+                showForButton(btn);
+            });
+            menu.appendChild(reset);
+        }
 
         const rect = btn.getBoundingClientRect();
         menu.style.left = `${Math.max(8, rect.left)}px`;
@@ -475,6 +681,18 @@ window.__embedLogRefreshLevelControls = () => {
 const FILTER_INPUT_DEBOUNCE_MS = 150;
 
 export function _uiSetupPane(id) {
+    const header = document.querySelector(`#pane-${id} .pane-header`);
+    if (header && !header.querySelector('.pane-close-btn')) {
+        const close = document.createElement('button');
+        close.type = 'button';
+        close.className = 'pane-close-btn';
+        close.textContent = '✕';
+        close.title = 'Remove from this view (the source keeps recording)';
+        close.setAttribute('aria-label', `Remove ${paneLabel(id)} from this view`);
+        close.hidden = true; // shown by refreshPaneControls once the layout is known
+        close.addEventListener('click', () => _removePane(id));
+        header.append(close);
+    }
     const input = document.querySelector(`.filter-input[data-pane="${id}"]`);
     if (input && !input.dataset.searchInitialized) {
         input.dataset.searchInitialized = 'true';
