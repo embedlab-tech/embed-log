@@ -1593,20 +1593,36 @@ function _entryServerLineIdx(entry, paneId, idx) {
 }
 
 /**
- * Markers name a line by the server's per-source line index, not by a position in
- * this pane. The pane may hold only part of the session (a replay is bounded, and
- * a reconnect brings back only the recent records), so the position of a row says
- * nothing about which line it is. Rows without a server index (static reports,
- * old caches) fall back to their position, which is what they always meant.
+ * Which row a marker belongs to.
+ *
+ * Plain pane: the marker names a line by the server's per-source line index, not by a
+ * position in this pane, because the pane may hold only part of the session (a replay is
+ * bounded, a reconnect brings back only recent records). Rows without a server index
+ * (static reports, old caches) fall back to their position.
+ *
+ * Merged pane: a line index is only unique within one source (A's first line and B's
+ * first line are both 0) and a marker names no source, so the index cannot tell rows
+ * apart. The record itself is the identity: its session sequence when the marker has
+ * one, else its timestamp. Both travel with the row into exports, so leaving the marked
+ * record out of a selection cannot move the marker to another row.
  */
-function _rowServerId(paneId, rawIdx) {
+const _isMergePane = paneId => window.__embedLogMerges?.some(merge => merge?.name === paneId) ?? false;
+
+function _rowRecord(paneId, rawIdx) {
     const entry = state.rawLines[paneId]?.[rawIdx];
     if (entry === undefined) return null;
-    // A merged pane mixes sources, and a line index is only unique within one source:
-    // A's first line and B's first line both have index 0. A marker names no source, so
-    // in a merged pane a row is told apart by its position.
-    if (window.__embedLogMerges?.some(merge => merge?.name === paneId)) return rawIdx;
-    return _entryServerLineIdx(entry, paneId, rawIdx) ?? rawIdx;
+    const meta = _isRawTuple(entry) ? (entry[3] || {}) : entry;
+    const num = meta.absNum ?? meta.numTs;
+    return {
+        sequence: Number.isFinite(meta.sequence) ? meta.sequence : null,
+        num: Number.isFinite(num) ? num : null,
+        serverLineIdx: _entryServerLineIdx(entry, paneId, rawIdx),
+    };
+}
+
+function _rowServerId(paneId, rawIdx) {
+    const row = _rowRecord(paneId, rawIdx);
+    return row === null ? null : (row.serverLineIdx ?? rawIdx);
 }
 
 /** Server line index of a row (its position when it has none). */
@@ -1615,8 +1631,13 @@ export function serverLineIdxOf(paneId, rawIdx) {
 }
 
 export function markerCoversRow(paneId, marker, rawIdx) {
-    const id = _rowServerId(paneId, rawIdx);
-    if (id === null) return false;
+    const row = _rowRecord(paneId, rawIdx);
+    if (row === null) return false;
+    if (_isMergePane(paneId) && (row.sequence !== null || row.num !== null)) {
+        if (Number.isFinite(marker.sequence)) return row.sequence === marker.sequence;
+        return Number.isFinite(marker.numTs) && row.num === marker.numTs;
+    }
+    const id = row.serverLineIdx ?? rawIdx;
     return id >= marker.lineIdx && id <= (marker.endIdx ?? marker.lineIdx);
 }
 

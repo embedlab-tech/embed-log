@@ -92,23 +92,65 @@ test('the live byte counter counts the logged message, not the added colour', as
   await expect(page.locator('#toolbar-stats')).toContainText('3 lines · 12 B');
 });
 
-test('in a merged pane one marker marks one row, although line indexes repeat across sources', async ({ page }) => {
-  const merged = n => ({
-    type: 'rx', data: `msg${n}`, message: `msg${n}`, source_id: n === 1 ? 'A' : 'B', source_kind: 'uart',
-    timestamp: '12:00:00', sequence: n, session_id: SESSION, line_idx: 0, // first line of each source
-  });
-  await mockServer(page, [[{
-    type: 'config', session: { id: SESSION },
-    tabs: [{ label: 'Sources', panes: ['A', 'B'] }, { label: 'All', panes: ['ALL'] }],
-    pane_kinds: { A: 'uart', B: 'uart', ALL: 'merge' },
-    merges: [{ name: 'ALL', of: ['A', 'B'] }],
-    markers: [{ paneId: 'ALL', lineIdx: 0, endIdx: 0, numTs: 1, description: 'look here', createdAt: 'now' }],
-  }, merged(1), merged(2)]]);
+// A merged pane of A and B, where each source's first line has line_idx 0.
+const mergedConfig = markers => ({
+  type: 'config', session: { id: SESSION },
+  tabs: [{ label: 'Sources', panes: ['A', 'B'] }, { label: 'Merged', panes: ['ALL'] }],
+  pane_kinds: { A: 'uart', B: 'uart', ALL: 'merge' },
+  merges: [{ name: 'ALL', of: ['A', 'B'] }],
+  markers,
+});
+const mergedRecord = (n, source, time) => ({
+  type: 'rx', data: `msg${n}`, message: `msg${n}`, source_id: source, source_kind: 'uart',
+  timestamp: '12:00:00', timestamp_num: time, absNum: time, sequence: n, session_id: SESSION, line_idx: 0,
+});
+const mergedMarker = extra => ({
+  paneId: 'ALL', lineIdx: 0, endIdx: 0, description: 'look here', createdAt: 'now', ...extra,
+});
+
+test('a merged-pane marker marks the record it names, not the row at its line index', async ({ page }) => {
+  // The marker is for B's record (time 2000); A's record also has line_idx 0.
+  await mockServer(page, [[
+    mergedConfig([mergedMarker({ numTs: 2000 })]),
+    mergedRecord(1, 'A', 1000), mergedRecord(2, 'B', 2000),
+  ]]);
   await page.goto('/');
-  await page.locator('#tab-bar').getByRole('button', { name: 'All', exact: true }).click();
+  await page.locator('#tab-bar').getByRole('button', { name: 'Merged', exact: true }).click();
   await expect(page.locator('#log-ALL')).toContainText('msg2');
   await expect(page.locator('#log-ALL .has-marker')).toHaveCount(1);
+  await expect(page.locator('#log-ALL .has-marker')).toContainText('msg2');
+});
+
+test('a merged-pane marker with a sequence is matched by it, even for equal timestamps', async ({ page }) => {
+  await mockServer(page, [[
+    mergedConfig([mergedMarker({ numTs: 1000, sequence: 2 })]),
+    mergedRecord(1, 'A', 1000), mergedRecord(2, 'B', 1000),
+  ]]);
+  await page.goto('/');
+  await page.locator('#tab-bar').getByRole('button', { name: 'Merged', exact: true }).click();
+  await expect(page.locator('#log-ALL')).toContainText('msg2');
+  await expect(page.locator('#log-ALL .has-marker')).toHaveCount(1);
+  await expect(page.locator('#log-ALL .has-marker')).toContainText('msg2');
+});
+
+test('exporting only B from a merged pane does not hand it the marker of A', async ({ page, browser }, testInfo) => {
+  await mockServer(page, [[
+    mergedConfig([mergedMarker({ numTs: 1000, sequence: 1 })]), // A: msg1 is marked
+    mergedRecord(1, 'A', 1000), mergedRecord(2, 'B', 2000),
+  ]]);
+  await page.goto('/');
+  await page.locator('#tab-bar').getByRole('button', { name: 'Merged', exact: true }).click();
   await expect(page.locator('#log-ALL .has-marker')).toContainText('msg1');
+  await page.locator('#log-ALL .log-line', { hasText: 'msg2' }).click();
+  const download = page.waitForEvent('download');
+  await page.evaluate(() => document.getElementById('export-html-ALL').click());
+  const file = await saveDownload(await download, testInfo);
+
+  const exported = await openHtmlFile(browser, file);
+  await exported.locator('#tab-bar').getByRole('button', { name: 'Merged', exact: true }).click();
+  await expect(exported.locator('#log-ALL')).toContainText('msg2');
+  await expect(exported.locator('#log-ALL .has-marker')).toHaveCount(0);
+  await exported.close();
 });
 
 test('an exported selection keeps markers on their own lines', async ({ page, browser }, testInfo) => {

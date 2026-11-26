@@ -1,5 +1,5 @@
 import { state, TABS, PANES, paneLabel, unwrapPaneLabel } from './state.js';
-import { onLineClick, hidePluginOverlays, ensureLineVisible, getLine, originalRecordBytes, markerCoversRow, markerRawIndex, serverLineIdxOf } from './lines.js';
+import { onLineClick, hidePluginOverlays, ensureLineVisible, getLine, originalRecordBytes, markerCoversRow, markerRawIndex } from './lines.js';
 import { exportHtmlSnapshot } from './export.js';
 import { switchTab } from './tabs.js';
 import { _escHtml } from './renderPane.js';
@@ -563,17 +563,15 @@ function _applyMarkerAnnotations(paneId, items) {
     if (!paneMarkers.length) return items.map(i => i.text).join("\n");
     const out = [];
     for (const item of items) {
-        // Markers name server line indexes, not positions in this pane.
-        const serverIdx = serverLineIdxOf(paneId, item.idx);
+        // Same row identity as the marker highlight, not a position in this pane.
         for (const m of paneMarkers) {
-            if (m.lineIdx === serverIdx) {
+            if (markerCoversRow(paneId, m, item.idx) && !markerCoversRow(paneId, m, item.idx - 1)) {
                 out.push(`USER_MARKER_START = ${m.description}`);
             }
         }
         out.push(item.text);
         for (const m of paneMarkers) {
-            const end = m.endIdx ?? m.lineIdx;
-            if (end === serverIdx) {
+            if (markerCoversRow(paneId, m, item.idx) && !markerCoversRow(paneId, m, item.idx + 1)) {
                 out.push("USER_MARKER_END");
             }
         }
