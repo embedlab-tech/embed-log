@@ -15,6 +15,9 @@ use regex::Regex;
 pub(super) struct LogEntry {
     pub(super) source_id: Option<String>,
     pub(super) sequence: Option<u64>,
+    pub(super) session_id: Option<String>,
+    pub(super) record_ordinal: Option<usize>,
+    pub(super) original_bytes: Option<usize>,
     pub(super) ts: String,
     pub(super) text: String,
     pub(super) is_tx: bool,
@@ -55,6 +58,9 @@ pub(super) fn parse_log_file(
             pending = Some(LogEntry {
                 source_id: pane_id.map(str::to_string),
                 sequence: None,
+                session_id: None,
+                record_ordinal: None,
+                original_bytes: None,
                 ts,
                 text: clean_text,
                 is_tx,
