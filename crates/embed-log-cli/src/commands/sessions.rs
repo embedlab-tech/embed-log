@@ -1466,7 +1466,15 @@ impl SearchFilters {
             }
         }
         if let Some(kind) = &self.kind {
-            let source_kind = entry.get("source_kind").and_then(|v| v.as_str());
+            // Records store their source kind only in sessions recorded by
+            // 1.6 and earlier; newer sessions keep it in the manifest.
+            let source_kind = entry
+                .get("source_kind")
+                .or_else(|| {
+                    let source_id = entry.get("source_id")?.as_str()?;
+                    session.manifest.get("pane_kinds")?.get(source_id)
+                })
+                .and_then(|v| v.as_str());
             if source_kind != Some(kind.as_str()) {
                 return false;
             }
@@ -2094,19 +2102,21 @@ pub(crate) fn export_session_jsonl_deduped(session: &SessionRecord, output: Path
 
     let combined_path = manifest_combined_file(session)?;
 
-    // manifest.json's own `app_name` field isn't reliably populated (seen
-    // `null` there even when every combined.jsonl record carries a real
-    // value) — peek the first record instead.
-    let app_name = {
-        let file = std::fs::File::open(&combined_path)
-            .with_context(|| format!("open {}", combined_path.display()))?;
-        BufReader::new(file)
-            .lines()
-            .next()
-            .transpose()?
-            .and_then(|line| serde_json::from_str::<serde_json::Value>(&line).ok())
-            .and_then(|entry| entry.get("app_name").cloned())
-            .unwrap_or(serde_json::Value::Null)
+    // Manifests written by 1.6 and earlier have no `app_name`; those
+    // sessions carry it on each record, so fall back to the first record.
+    let app_name = match session.manifest.get("app_name").filter(|v| v.is_string()) {
+        Some(app_name) => app_name.clone(),
+        None => {
+            let file = std::fs::File::open(&combined_path)
+                .with_context(|| format!("open {}", combined_path.display()))?;
+            BufReader::new(file)
+                .lines()
+                .next()
+                .transpose()?
+                .and_then(|line| serde_json::from_str::<serde_json::Value>(&line).ok())
+                .and_then(|entry| entry.get("app_name").cloned())
+                .unwrap_or(serde_json::Value::Null)
+        }
     };
     let job_id = session
         .manifest
@@ -2601,6 +2611,37 @@ mod tests {
     }
 
     #[test]
+    fn kind_filter_reads_the_manifest_when_records_omit_source_kind() {
+        let filters = SearchFilters::compile(
+            vec![],
+            None,
+            vec![],
+            Some("uart".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            false,
+        )
+        .unwrap();
+        let session = SessionRecord {
+            id: "s1".to_string(),
+            dir: PathBuf::from("/tmp/s1"),
+            manifest: serde_json::json!({"pane_kinds": {"DUT": "uart", "HOST": "udp"}}),
+        };
+        let dut = serde_json::json!({"source_id": "DUT", "message": "boot"});
+        let host = serde_json::json!({"source_id": "HOST", "message": "ready"});
+        assert!(filters.matches_entry(&session, &dut));
+        assert!(!filters.matches_entry(&session, &host));
+        // A record that still carries its kind (older sessions) keeps using it.
+        let legacy =
+            serde_json::json!({"source_id": "HOST", "source_kind": "uart", "message": "x"});
+        assert!(filters.matches_entry(&session, &legacy));
+    }
+
+    #[test]
     fn virtual_source_filter_expands_members_and_legacy_merge_records_are_hidden() {
         let session = SessionRecord {
             id: "s1".to_string(),
@@ -3045,6 +3086,41 @@ mod tests {
             config: Some(root.join("nonexistent.yml")),
         };
         assert_eq!(resolve_sessions_dir(&args).unwrap(), PathBuf::from("logs"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn export_session_jsonl_deduped_reads_constants_from_the_manifest() {
+        let root = temp_log_dir();
+        let dir = root.join("s2");
+        std::fs::create_dir_all(&dir).unwrap();
+        let combined_path = dir.join("combined.jsonl");
+        std::fs::write(
+            &combined_path,
+            "{\"message\":\"boot\",\"absNum\":1.0,\"absTs\":\"07-06 00:00:00.000\",\"timestamp_iso\":\"2026-07-06T00:00:00+00:00\",\"session_id\":\"s2\",\"source_id\":\"DUT\",\"line_idx\":0,\"sequence\":1}\n",
+        )
+        .unwrap();
+        let manifest = serde_json::json!({
+            "session_id": "s2",
+            "app_name": "bench",
+            "job_id": "nightly",
+            "combined_file": combined_path.display().to_string(),
+            "pane_kinds": {"DUT": "uart"},
+            "pane_labels": {"DUT": "Device"},
+            "tabs": [{"label": "Main", "panes": ["DUT"]}],
+        });
+        std::fs::write(dir.join("manifest.json"), manifest.to_string()).unwrap();
+
+        let session = resolve_session(&root, "s2").unwrap();
+        let output = dir.join("session.jsonl");
+        export_session_jsonl_deduped(&session, output.clone()).unwrap();
+        let text = std::fs::read_to_string(&output).unwrap();
+        let header: serde_json::Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+        assert_eq!(header["app_name"], "bench");
+        assert_eq!(header["job_id"], "nightly");
+        assert_eq!(header["sources"]["DUT"]["kind"], "uart");
+        assert_eq!(header["sources"]["DUT"]["label"], "Device");
+        assert_eq!(header["sources"]["DUT"]["tabs"][0], "Main");
         std::fs::remove_dir_all(root).unwrap();
     }
 

@@ -37,17 +37,6 @@ pub(crate) const REPLAY_BUFFER_SIZE: usize = 5000;
 /// under high-volume capture.
 pub(crate) const LOG_FLUSH_EVERY_LINES: usize = 256;
 
-/// Source-constant metadata stored with every `combined.jsonl` record.
-#[derive(Clone, Default)]
-pub(crate) struct SourceRuntimeMeta {
-    pub source_id: String,
-    pub source_label: String,
-    pub source_kind: String,
-    pub tab_labels: Vec<String>,
-    pub app_name: String,
-    pub job_id: Option<String>,
-}
-
 /// State shared between the writer and the HTTP/WebSocket server.
 pub(crate) struct WriterShared {
     pub broadcast_tx: broadcast::Sender<LiveMessage>,
@@ -67,7 +56,6 @@ pub(crate) struct SourceSpec {
     pub line_counter: Arc<AtomicU64>,
     /// Level classifier for received lines; `None` when `levels: off`.
     pub level_detector: Option<LevelDetector>,
-    pub meta: SourceRuntimeMeta,
 }
 
 struct SourceWriter {
@@ -81,9 +69,6 @@ struct SourceWriter {
     stats: Option<Arc<SourceRuntimeStats>>,
     line_counter: Arc<AtomicU64>,
     level_detector: Option<LevelDetector>,
-    meta: SourceRuntimeMeta,
-    /// [`SourceRuntimeMeta`] fields pre-serialized for `combined.jsonl`.
-    combined_tail: String,
 }
 
 impl SourceWriter {
@@ -143,7 +128,6 @@ impl Writer {
                     return None;
                 };
                 Some(SourceWriter {
-                    combined_tail: combined_record_tail(&spec.meta),
                     name: spec.name,
                     entries: Some(spec.entries),
                     log_path: spec.log_path,
@@ -152,7 +136,6 @@ impl Writer {
                     stats: spec.stats,
                     line_counter: spec.line_counter,
                     level_detector: spec.level_detector,
-                    meta: spec.meta,
                 })
             })
             .collect();
@@ -391,8 +374,9 @@ impl Writer {
             }
         }
 
-        // Serialize the payload once: the same text is broadcast, and the
-        // combined.jsonl record is that text plus the source's constant fields.
+        // Serialize the payload once: the same text is the combined.jsonl
+        // record and the live broadcast. Session- and source-constant values
+        // (app name, job, source label/kind, tabs) live in manifest.json.
         let payload_text = match self.shared.session_manager.lock() {
             Ok(mut manager) => {
                 if let Some(object) = payload.as_object_mut() {
@@ -400,15 +384,7 @@ impl Writer {
                     object.insert("session_id".to_string(), json!(manager.session_id()));
                 }
                 let payload_text = payload.to_string();
-                let appended = combined_record_line(
-                    &payload,
-                    &payload_text,
-                    &source.meta,
-                    &source.combined_tail,
-                )
-                .map_err(anyhow::Error::from)
-                .and_then(|line| manager.append_combined_line(line));
-                if let Err(error) = appended {
+                if let Err(error) = manager.append_combined_line(payload_text.as_bytes().to_vec()) {
                     error!("[{source_name}] failed to append combined entry: {error}");
                     return;
                 }
@@ -436,70 +412,6 @@ impl Writer {
             LiveEvent::with_text(payload, payload_text),
         );
     }
-}
-
-/// Fields that `combined.jsonl` records carry in addition to the live payload.
-/// They are constant for a source, so they are serialized once per source.
-const COMBINED_ONLY_KEYS: [&str; 5] = [
-    "app_name",
-    "job_id",
-    "source_label",
-    "source_kind",
-    "tab_labels",
-];
-
-/// The [`COMBINED_ONLY_KEYS`] fields serialized as the end of a JSON object:
-/// `,"app_name":…,"tab_labels":[…]}`.
-fn combined_record_tail(source_meta: &SourceRuntimeMeta) -> String {
-    let fields = json!({
-        "app_name": source_meta.app_name,
-        "job_id": source_meta.job_id,
-        "source_label": source_meta.source_label,
-        "source_kind": source_meta.source_kind,
-        "tab_labels": source_meta.tab_labels,
-    });
-    format!(",{}", &fields.to_string()[1..])
-}
-
-/// Serialize the `combined.jsonl` record for a live payload, reusing the
-/// payload's already-serialized text. Payloads whose injected metadata
-/// overlaps the combined-only fields take the general (slower) path, so
-/// the stored record never contains duplicate keys.
-fn combined_record_line(
-    payload: &serde_json::Value,
-    payload_text: &str,
-    source_meta: &SourceRuntimeMeta,
-    tail: &str,
-) -> serde_json::Result<Vec<u8>> {
-    let can_append = payload.as_object().is_some_and(|obj| {
-        obj.get("source_id").and_then(|v| v.as_str()) == Some(source_meta.source_id.as_str())
-            && !COMBINED_ONLY_KEYS.iter().any(|key| obj.contains_key(*key))
-    });
-    if can_append {
-        if let Some(body) = payload_text.strip_suffix('}') {
-            let mut line = Vec::with_capacity(body.len() + tail.len());
-            line.extend_from_slice(body.as_bytes());
-            line.extend_from_slice(tail.as_bytes());
-            return Ok(line);
-        }
-    }
-    serde_json::to_vec(&build_combined_log_entry(payload, source_meta))
-}
-
-fn build_combined_log_entry(
-    payload: &serde_json::Value,
-    source_meta: &SourceRuntimeMeta,
-) -> serde_json::Value {
-    let mut combined = payload.clone();
-    if let Some(obj) = combined.as_object_mut() {
-        obj.insert("source_id".to_string(), json!(source_meta.source_id));
-        obj.insert("app_name".to_string(), json!(source_meta.app_name));
-        obj.insert("job_id".to_string(), json!(source_meta.job_id));
-        obj.insert("source_label".to_string(), json!(source_meta.source_label));
-        obj.insert("source_kind".to_string(), json!(source_meta.source_kind));
-        obj.insert("tab_labels".to_string(), json!(source_meta.tab_labels));
-    }
-    combined
 }
 
 fn open_log_file(source_name: &str, log_path: &Path) -> Option<BufWriter<std::fs::File>> {
@@ -564,17 +476,6 @@ pub(crate) mod test_support {
         )
     }
 
-    pub fn test_source_meta() -> SourceRuntimeMeta {
-        SourceRuntimeMeta {
-            source_id: "dut".to_string(),
-            source_label: "DUT".to_string(),
-            source_kind: "udp".to_string(),
-            tab_labels: vec!["Main".to_string()],
-            app_name: "embed-log".to_string(),
-            job_id: None,
-        }
-    }
-
     pub async fn wait_file_contains(path: &Path, needle: &str) {
         for _ in 0..200 {
             if std::fs::read_to_string(path)
@@ -609,8 +510,7 @@ pub(crate) mod test_support {
 
     impl TestWriter {
         /// Spawn a writer for `sources` (`(name, session log path)`), each with
-        /// a queue of `queue` entries. Source `dut` uses [`test_source_meta`]
-        /// and `dut_levels`.
+        /// a queue of `queue` entries. Source `dut` uses `dut_levels`.
         pub fn spawn(
             manager: SessionManager,
             sources: &[(&str, PathBuf)],
@@ -628,18 +528,6 @@ pub(crate) mod test_support {
                 let counter = Arc::new(AtomicU64::new(0));
                 senders.insert(name.to_string(), tx);
                 counters.insert(name.to_string(), counter.clone());
-                let meta = if *name == "dut" {
-                    test_source_meta()
-                } else {
-                    SourceRuntimeMeta {
-                        source_id: name.to_string(),
-                        source_label: name.to_string(),
-                        source_kind: "file".to_string(),
-                        tab_labels: vec!["Main".to_string()],
-                        app_name: "embed-log".to_string(),
-                        job_id: None,
-                    }
-                };
                 specs.push(SourceSpec {
                     name: name.to_string(),
                     log_path: log_path.clone(),
@@ -651,7 +539,6 @@ pub(crate) mod test_support {
                     } else {
                         None
                     },
-                    meta,
                 });
             }
             let (writer, task) = Writer::new(
@@ -704,50 +591,8 @@ mod tests {
     use super::test_support::*;
     use super::*;
 
-    #[test]
-    fn combined_record_line_reuses_payload_text_and_matches_full_build() {
-        let meta = test_source_meta();
-        let tail = combined_record_tail(&meta);
-        let payload = json!({
-            "type": "rx",
-            "source_id": "dut",
-            "message": "boot \"quoted\" \u{1b}[0m",
-            "sequence": 7,
-            "session_id": "session-1",
-            "custom": {"nested": [1, 2]},
-        });
-        let text = payload.to_string();
-        let line = combined_record_line(&payload, &text, &meta, &tail).unwrap();
-        assert!(
-            line.starts_with(&text.as_bytes()[..text.len() - 1]),
-            "reuses payload text"
-        );
-        let parsed: serde_json::Value = serde_json::from_slice(&line).unwrap();
-        assert_eq!(parsed, build_combined_log_entry(&payload, &meta));
-    }
-
-    #[test]
-    fn combined_record_line_never_duplicates_injected_keys() {
-        let meta = test_source_meta();
-        let tail = combined_record_tail(&meta);
-        for payload in [
-            json!({"source_id": "dut", "source_kind": "merge", "message": "m"}),
-            json!({"source_id": "other", "message": "m"}),
-        ] {
-            let text = payload.to_string();
-            let line = combined_record_line(&payload, &text, &meta, &tail).unwrap();
-            let line = String::from_utf8(line).unwrap();
-            for key in ["\"source_id\"", "\"source_kind\""] {
-                assert_eq!(line.matches(key).count(), 1, "{line}");
-            }
-            let parsed: serde_json::Value = serde_json::from_str(&line).unwrap();
-            assert_eq!(parsed, build_combined_log_entry(&payload, &meta));
-            assert_eq!(parsed["source_kind"], "udp");
-        }
-    }
-
     #[tokio::test]
-    async fn writer_appends_combined_jsonl_with_source_metadata() {
+    async fn writer_appends_combined_jsonl_records() {
         let dir = temp_dir("combined-jsonl");
         let log = dir.join("main__dut__session-1.log");
         let levels = LevelDetector::new(&crate::levels::builtin_zephyr_profile(), "test").unwrap();
@@ -770,11 +615,19 @@ mod tests {
         assert_eq!(records[2]["origin"], "ui");
         let first = &records[0];
         assert_eq!(first["source_id"], "dut");
-        assert_eq!(first["source_label"], "DUT");
-        assert_eq!(first["source_kind"], "udp");
-        assert_eq!(first["tab_labels"], json!(["Main"]));
         assert_eq!(first["session_id"], "session-1");
-        assert_eq!(first["app_name"], "embed-log");
+        for constant in [
+            "app_name",
+            "job_id",
+            "source_label",
+            "source_kind",
+            "tab_labels",
+        ] {
+            assert!(
+                first.get(constant).is_none(),
+                "{constant} belongs in manifest.json"
+            );
+        }
         assert_eq!(first["message"], "boot complete");
         assert_eq!(first["origin"], "SERIAL");
         assert_eq!(first["sequence"], 1);

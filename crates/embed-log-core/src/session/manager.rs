@@ -337,6 +337,7 @@ impl SessionManager {
             "session_dir": self.session_dir.display().to_string(),
             "started_at": self.started_at,
             "system_timezone": Local::now().offset().to_string(),
+            "app_name": self.app_name,
             "job_id": self.job_id,
             "title": self.title,
             "config_path": self.config_path,
@@ -461,6 +462,23 @@ mod tests {
             None,
             json!([]),
         )
+    }
+
+    #[test]
+    fn manifest_holds_the_session_and_source_constants() {
+        let dir = temp_session_dir("manifest-constants");
+        let mgr = manager(dir.clone());
+        mgr.write_manifest().unwrap();
+        let manifest: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap())
+                .unwrap();
+        // combined.jsonl records do not repeat these; readers take them from here.
+        assert_eq!(manifest["app_name"], "embed-log");
+        assert_eq!(manifest["job_id"], "job-1");
+        assert_eq!(manifest["pane_labels"]["dut"], "DUT");
+        assert_eq!(manifest["pane_kinds"]["dut"], "udp");
+        assert_eq!(manifest["tabs"][0]["panes"][0], "dut");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
