@@ -53,20 +53,62 @@ function reloadMessage(reply) {
     return reply.reloaded ? `Reloaded${buildLabel(reply.dictionary) ? ` · ${buildLabel(reply.dictionary)}` : ''}` : 'Already up to date';
 }
 
-function createSelect(source) {
-    const label = document.createElement('label');
-    label.className = 'dictionary-choice';
-    label.textContent = 'Dictionary ';
-    const select = document.createElement('select');
-    select.setAttribute('aria-label', `Dictionary for ${source}`);
-    label.append(select);
-    select.addEventListener('change', async () => {
+// One menu open at a time; a click anywhere else closes it.
+let openMenu = null;
+function closeMenu() {
+    if (!openMenu) return;
+    openMenu.menu.hidden = true;
+    openMenu.trigger.setAttribute('aria-expanded', 'false');
+    openMenu = null;
+}
+document.addEventListener('pointerdown', event => {
+    if (openMenu && !openMenu.wrap.contains(event.target)) closeMenu();
+});
+window.addEventListener('resize', closeMenu);
+
+// Custom listbox instead of <select>: shows name, build and folder for every choice.
+function createDropdown(source) {
+    const wrap = el('div', 'dictionary-choice');
+    const trigger = el('button', 'dd-trigger');
+    trigger.type = 'button';
+    trigger.setAttribute('role', 'combobox');
+    trigger.setAttribute('aria-haspopup', 'listbox');
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.setAttribute('aria-label', `Dictionary for ${source}`);
+    trigger.append(el('span', 'dd-trigger-name'), el('span', 'dd-trigger-build'), el('span', 'dd-caret', '▾'));
+    const menu = el('ul', 'dd-menu');
+    menu.setAttribute('role', 'listbox');
+    menu.hidden = true;
+    wrap.append(el('span', 'dictionary-choice-label', 'Dictionary'), trigger, menu);
+
+    const options = () => [...menu.querySelectorAll('[role="option"]:not([aria-disabled="true"])')];
+    const focusOption = (offset, from) => {
+        const list = options();
+        if (!list.length) return;
+        const index = Math.max(0, Math.min(list.length - 1, (from ?? list.findIndex(o => o.getAttribute('aria-selected') === 'true')) + offset));
+        list[index].focus();
+    };
+    const open = () => {
+        if (trigger.disabled) return;
+        closeMenu();
+        const box = trigger.getBoundingClientRect();
+        // Fixed so the pane's overflow cannot clip it.
+        Object.assign(menu.style, { left: `${box.left}px`, top: `${box.bottom + 2}px`, minWidth: `${box.width}px` });
+        menu.hidden = false;
+        trigger.setAttribute('aria-expanded', 'true');
+        openMenu = { wrap, menu, trigger };
+        focusOption(0);
+    };
+    const pick = async option => {
+        closeMenu();
+        trigger.focus();
+        const selected = option.dataset.value;
         const current = sources[source].dictionary;
-        const selected = select.value;
+        if (selected === (current.dictionary?.dictionary_id || '')) return;
         pending.add(source);
         errors.delete(source);
         notes.delete(source);
-        render(); // Restore the active value until the RX owner acknowledges.
+        render(); // Keep showing the active one until the RX owner acknowledges.
         try {
             const applied = await activate(source, current, selected);
             sources[source].dictionary = applied;
@@ -77,8 +119,59 @@ function createSelect(source) {
             render();
             await refresh(); // Reconcile timeouts and changes by other clients.
         }
+    };
+    trigger.addEventListener('click', () => (openMenu?.trigger === trigger ? closeMenu() : open()));
+    trigger.addEventListener('keydown', event => {
+        if (['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); open(); }
     });
-    return label;
+    menu.addEventListener('click', event => {
+        const option = event.target.closest('[role="option"]');
+        if (option && option.getAttribute('aria-disabled') !== 'true') pick(option);
+    });
+    menu.addEventListener('keydown', event => {
+        const list = options();
+        const at = list.indexOf(document.activeElement);
+        if (event.key === 'ArrowDown') { event.preventDefault(); focusOption(1, at); }
+        else if (event.key === 'ArrowUp') { event.preventDefault(); focusOption(-1, at); }
+        else if (event.key === 'Home') { event.preventDefault(); focusOption(0, 0); }
+        else if (event.key === 'End') { event.preventDefault(); focusOption(0, list.length - 1); }
+        else if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (at >= 0) pick(list[at]); }
+        else if (event.key === 'Escape') { event.preventDefault(); closeMenu(); trigger.focus(); }
+        else if (event.key === 'Tab') closeMenu();
+    });
+    return wrap;
+}
+
+function fillMenu(menu, status, activeId, activeItem) {
+    menu.replaceChildren();
+    const add = (value, title, build, path, { disabled = false, tip = '' } = {}) => {
+        const option = el('li', 'dd-option');
+        option.setAttribute('role', 'option');
+        option.tabIndex = -1;
+        option.dataset.value = value;
+        option.setAttribute('aria-selected', String(value === activeId));
+        if (disabled) option.setAttribute('aria-disabled', 'true');
+        if (tip) option.title = tip;
+        const top = el('span', 'dd-option-top');
+        top.append(el('span', 'dd-option-name', title));
+        if (build) top.append(el('span', 'dd-option-build', build));
+        option.append(top);
+        if (path) {
+            const line = el('span', 'dd-option-path');
+            line.append(el('bdi', '', path)); // rtl + bdi: ellipsis on the left, order intact
+            option.append(line);
+        }
+        menu.append(option);
+    };
+    for (const item of status.configured) {
+        const dir = item.path.replace(/[\\/][^\\/]*$/, '');
+        add(item.dictionary?.dictionary_id || '', shortName(item.path, status.configured),
+            item.error ? 'unavailable' : buildLabel(item.dictionary), dir,
+            { disabled: !!item.error, tip: item.error || item.path });
+    }
+    if (!activeItem) {
+        add(activeId, activeId ? 'Uploaded dictionary' : 'No active dictionary', '', activeId ? `#${activeId.slice(0, 8)}` : '');
+    }
 }
 
 function el(tag, className, text) {
@@ -116,7 +209,7 @@ function createRow(source) {
     });
     const error = el('span', 'dictionary-error');
     error.setAttribute('role', 'alert');
-    row.append(name, meta, pill, button, error);
+    row.append(name, meta, button, pill, error);
     return row;
 }
 
@@ -162,35 +255,26 @@ function render() {
         }
         // A choice only exists with several configured dictionaries; Reload is always useful.
         const multiple = status.configured.length > 1;
-        if (multiple && !row.querySelector('select')) row.prepend(createSelect(source));
-        if (!multiple) row.querySelector('label')?.remove();
-        const select = row.querySelector('select');
+        if (multiple && !row.querySelector('.dictionary-choice')) row.prepend(createDropdown(source));
+        if (!multiple) { closeMenu(); row.querySelector('.dictionary-choice')?.remove(); }
         const activeId = status.dictionary?.dictionary_id || '';
         const activeItem = status.configured.find(item => item.dictionary?.dictionary_id === activeId);
-        const signature = JSON.stringify([status.configured, status.dictionary]);
-        if (select && select.dataset.options !== signature) {
-            select.replaceChildren();
-            for (const item of status.configured) {
-                const option = document.createElement('option');
-                option.value = item.dictionary?.dictionary_id || '';
-                const build = buildLabel(item.dictionary);
-                option.textContent = shortName(item.path, status.configured)
-                    + (build ? ` · ${build}` : '') + (item.error ? ' (unavailable)' : '');
-                option.title = item.error || item.path;
-                option.disabled = !!item.error;
-                select.append(option);
+        const choice = row.querySelector('.dictionary-choice');
+        if (choice) {
+            const trigger = choice.querySelector('.dd-trigger');
+            const menu = choice.querySelector('.dd-menu');
+            const signature = JSON.stringify([status.configured, status.dictionary]);
+            if (menu.dataset.options !== signature) {
+                fillMenu(menu, status, activeId, activeItem);
+                menu.dataset.options = signature;
             }
-            if (!activeItem) {
-                const option = document.createElement('option');
-                option.value = activeId;
-                option.textContent = activeId ? `Uploaded · ${activeId.slice(0, 8)}` : 'No active dictionary';
-                select.append(option);
-            }
-            select.dataset.options = signature;
-        }
-        if (select) {
-            select.value = activeId;
-            select.disabled = !available || pending.has(source);
+            trigger.dataset.value = activeId;
+            trigger.querySelector('.dd-trigger-name').textContent = activeItem
+                ? shortName(activeItem.path, status.configured) : (activeId ? 'Uploaded dictionary' : 'No dictionary');
+            trigger.querySelector('.dd-trigger-build').textContent = buildLabel(status.dictionary);
+            trigger.title = activeItem?.path || activeId;
+            trigger.disabled = !available || pending.has(source);
+            if (trigger.disabled) closeMenu();
         }
 
         // Name and details of the dictionary that is decoding right now.

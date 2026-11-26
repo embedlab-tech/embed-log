@@ -2,6 +2,12 @@ import { expect, test } from '@playwright/test';
 
 // These tests use real page widgets and control sockets, with a deterministic
 // control peer so delayed acknowledgements and rejection can be exercised.
+const option = (page, source, id) => page.locator(`#pane-${source} .dd-option[data-value="${id}"]`);
+const chooseDictionary = async (page, source, id) => {
+  await page.getByLabel(`Dictionary for ${source}`, { exact: true }).click();
+  await option(page, source, id).click();
+};
+
 async function setup(page, firstCount = 3) {
   const states = {};
   for (const source of ['SENSOR_A', 'SENSOR_B']) {
@@ -55,28 +61,29 @@ test('configured choices wait for ACK, remain per-source, and survive reload/reb
   const { requests } = await setup(page);
   const first = page.getByLabel('Dictionary for SENSOR_A', { exact: true });
   const other = page.getByLabel('Dictionary for SENSOR_B', { exact: true });
-  await expect(first).toHaveValue('a');
-  await expect(first.locator('option', { hasText: 'missing' })).toHaveJSProperty('disabled', true);
-  await first.selectOption('b');
+  await expect(first).toHaveAttribute('data-value', 'a');
+  await first.click();
+  await expect(page.locator('#pane-SENSOR_A .dd-option', { hasText: 'missing' })).toHaveAttribute('aria-disabled', 'true');
+  await option(page, 'SENSOR_A', 'b').click();
   await expect(first).toBeDisabled();
-  await expect(first).toHaveValue('a');
+  await expect(first).toHaveAttribute('data-value', 'a');
   await expect(first).toBeEnabled();
-  await expect(first).toHaveValue('b');
-  await expect(other).toHaveValue('a');
+  await expect(first).toHaveAttribute('data-value', 'b');
+  await expect(other).toHaveAttribute('data-value', 'a');
   expect(requests).toHaveLength(1);
   expect(requests[0]).toMatchObject({ type: 'dictionary.activate', source_id: 'SENSOR_A', expected_generation: 0 });
   await page.reload();
-  await expect(page.getByLabel('Dictionary for SENSOR_A', { exact: true })).toHaveValue('b');
+  await expect(page.getByLabel('Dictionary for SENSOR_A', { exact: true })).toHaveAttribute('data-value', 'b');
   await page.evaluate(async () => (await import('/tabcreate.js')).rebuildLayout());
   await expect(page.getByLabel('Dictionary for SENSOR_A', { exact: true })).toHaveCount(1);
-  await expect(page.getByLabel('Dictionary for SENSOR_A', { exact: true })).toHaveValue('b');
+  await expect(page.getByLabel('Dictionary for SENSOR_A', { exact: true })).toHaveAttribute('data-value', 'b');
 });
 
 test('single configured dictionary has no selector but can be reloaded, including after a status update', async ({ page }) => {
   const { states } = await setup(page, 1);
   const single = page.getByLabel('Dictionary for SENSOR_A', { exact: true });
   const multiple = page.getByLabel('Dictionary for SENSOR_B', { exact: true });
-  await expect(multiple).toHaveValue('a');
+  await expect(multiple).toHaveAttribute('data-value', 'a');
   await expect(single).toHaveCount(0);
   await page.evaluate(async () => (await import('/tabcreate.js')).rebuildLayout());
   await expect(multiple).toHaveCount(1);
@@ -90,11 +97,11 @@ test('rejected change preserves the active choice and displays the server error'
   const peer = await setup(page);
   peer.reject();
   const select = page.getByLabel('Dictionary for SENSOR_A', { exact: true });
-  await expect(select).toHaveValue('a');
-  await select.selectOption('b');
+  await expect(select).toHaveAttribute('data-value', 'a');
+  await chooseDictionary(page, 'SENSOR_A', 'b');
   await expect(page.getByRole('alert').filter({ hasText: 'generation conflict' })).toBeVisible();
   await expect(select).toBeEnabled();
-  await expect(select).toHaveValue('a');
+  await expect(select).toHaveAttribute('data-value', 'a');
   expect(peer.states.SENSOR_A.generation).toBe(0);
 });
 
@@ -179,7 +186,56 @@ test('the dictionary row shows the file name and build, with the full path on ho
   await expect(pane.locator('.dictionary-name')).toHaveAttribute('title', '/images/A/database.json');
   await expect(pane.locator('.dictionary-meta')).toHaveText('build A · #a');
   // Same file name in two folders: the folder is shown, so the choices differ.
-  const select = page.getByLabel('Dictionary for SENSOR_B', { exact: true });
-  await expect(select.locator('option').nth(0)).toHaveText('A/database.json · build A');
-  await expect(select.locator('option').nth(1)).toHaveText('B/database.json · build B');
+  await page.getByLabel('Dictionary for SENSOR_B', { exact: true }).click();
+  const names = page.locator('#pane-SENSOR_B .dd-option-name');
+  await expect(names.nth(0)).toHaveText('A/database.json');
+  await expect(names.nth(1)).toHaveText('B/database.json');
+  await expect(page.locator('#pane-SENSOR_B .dd-option-build').nth(1)).toHaveText('build B');
+  await expect(option(page, 'SENSOR_B', 'a')).toHaveAttribute('aria-selected', 'true');
+});
+
+test('the dictionary menu works from the keyboard and closes on Escape or an outside click', async ({ page }) => {
+  const { requests } = await setup(page);
+  const trigger = page.getByLabel('Dictionary for SENSOR_A', { exact: true });
+  const menu = page.locator('#pane-SENSOR_A .dd-menu');
+  await trigger.focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(menu).toBeVisible();
+  await expect(option(page, 'SENSOR_A', 'a')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await page.mouse.click(5, 300);
+  await expect(menu).toBeHidden();
+  await trigger.click();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await expect(menu).toBeHidden();
+  await expect(trigger).toHaveAttribute('data-value', 'b');
+  expect(requests).toHaveLength(1);
+  expect(requests[0]).toMatchObject({ type: 'dictionary.activate', dictionary_id: 'b' });
+});
+
+test('messages appear to the right of Reload and never move it or the selector', async ({ page }) => {
+  const { states } = await setup(page);
+  const reload = page.locator('#pane-SENSOR_A .dictionary-reload');
+  const trigger = page.getByLabel('Dictionary for SENSOR_A', { exact: true });
+  const pill = page.locator('#pane-SENSOR_A .dictionary-pill');
+  const x = async locator => (await locator.boundingBox()).x;
+  const before = [await x(trigger), await x(reload)];
+
+  await reload.click();
+  await expect(pill).toHaveText('Already up to date');
+  expect(await x(pill)).toBeGreaterThan(await x(reload));
+  expect([await x(trigger), await x(reload)]).toEqual(before);
+
+  states.SENSOR_A.configured[0].changed_on_disk = true;
+  await expect(pill).toHaveText('File changed — reload to use it', { timeout: 7000 });
+  expect([await x(trigger), await x(reload)]).toEqual(before);
+
+  // Switching to a dictionary with a different name does not resize the selector either.
+  await chooseDictionary(page, 'SENSOR_A', 'b');
+  await expect(trigger).toHaveAttribute('data-value', 'b');
+  expect([await x(trigger), await x(reload)]).toEqual(before);
 });

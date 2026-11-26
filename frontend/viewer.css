@@ -13,8 +13,31 @@
     min-width: 0;
     border-bottom: 1px solid var(--border);
 }
-.dictionary-choice { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--ansi-0); }
-.dictionary-control select { max-width: 280px; text-overflow: ellipsis; padding: 2px 6px; }
+.dictionary-choice { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.dictionary-choice-label { color: var(--ansi-0); }
+/* Fixed width: switching dictionary must not move the controls to its right. */
+.dd-trigger {
+    display: inline-flex; align-items: center; gap: 8px; width: 270px; max-width: 100%;
+    padding: 2px 8px; text-align: left;
+}
+.dd-trigger-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.dd-trigger-build { color: var(--ansi-0); white-space: nowrap; }
+.dd-caret { color: var(--ansi-0); font-size: 10px; }
+.dd-menu {
+    position: fixed; z-index: 1000; margin: 0; padding: 4px; list-style: none;
+    max-width: min(560px, 90vw); max-height: 50vh; overflow: auto;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .25); font-size: 11px;
+}
+.dd-menu[hidden] { display: none; }
+.dd-option { display: flex; flex-direction: column; gap: 1px; padding: 5px 8px 5px 22px; border-radius: 4px; cursor: pointer; position: relative; }
+.dd-option:hover, .dd-option:focus { background: var(--selection); outline: none; }
+.dd-option[aria-selected="true"]::before { content: "✓"; position: absolute; left: 7px; color: var(--accent); }
+.dd-option[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+.dd-option-top { display: flex; gap: 10px; justify-content: space-between; }
+.dd-option-name { font-weight: 700; white-space: nowrap; }
+.dd-option-build { color: var(--ansi-0); white-space: nowrap; }
+.dd-option-path { color: var(--ansi-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; font-size: 10px; }
 .dictionary-name { font-weight: 700; white-space: nowrap; max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
 .dictionary-meta { color: var(--ansi-0); white-space: nowrap; }
 .dictionary-meta:empty, .dictionary-name[hidden] { display: none; }
