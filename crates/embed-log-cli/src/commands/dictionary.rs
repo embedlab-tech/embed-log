@@ -1,5 +1,5 @@
 //! Explicit runtime dictionary control through the existing control WebSocket.
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
@@ -15,8 +15,9 @@ pub(crate) struct DictionaryArgs {
     pub instance: Option<String>,
     #[arg(long, global = true)]
     pub url: Option<String>,
+    /// UART source to control. Required by every command except `decode`.
     #[arg(long)]
-    pub source: String,
+    pub source: Option<String>,
     #[arg(long, global = true)]
     pub json: bool,
     #[command(subcommand)]
@@ -41,6 +42,76 @@ pub(crate) enum DictionaryCommand {
     },
     /// Show active DB, generation and raw capture offset.
     Status,
+    /// Turn a `.log` that holds undecoded `[dict-raw:v1]` records (captured while
+    /// no dictionary was available) into readable text. Works offline.
+    Decode {
+        /// The `.log` file to decode, or `-` for stdin.
+        file: PathBuf,
+        /// The dictionary of the firmware that produced the log.
+        #[arg(long)]
+        database: PathBuf,
+        #[arg(long, default_value = "zephyr-dict", value_parser = ["zephyr-dict", "zephyr-dict-hex"])]
+        parser_type: String,
+        /// Write the result here instead of standard output.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+}
+
+impl DictionaryArgs {
+    fn source(&self) -> Result<&str> {
+        self.source
+            .as_deref()
+            .context("--source is required for this command")
+    }
+}
+
+fn run_decode(
+    file: &Path,
+    database: &Path,
+    parser_type: &str,
+    output: Option<&Path>,
+) -> Result<()> {
+    use std::io::{Read, Write};
+    let mut bytes = Vec::new();
+    if file.as_os_str() == "-" {
+        std::io::stdin().read_to_end(&mut bytes)?;
+    } else {
+        bytes = std::fs::read(file).with_context(|| format!("read {}", file.display()))?;
+    }
+    let input = String::from_utf8_lossy(&bytes);
+    let (decoded, report) = embed_log_core::parsers::raw_decode::decode_log_with_database(
+        &input,
+        parser_type,
+        &database.to_string_lossy(),
+    )
+    .map_err(anyhow::Error::msg)?;
+    match output {
+        Some(path) => {
+            std::fs::write(path, &decoded).with_context(|| format!("write {}", path.display()))?
+        }
+        None => std::io::stdout().write_all(decoded.as_bytes())?,
+    }
+    eprintln!(
+        "decoded {} messages from {} raw lines ({} bytes){}{}",
+        report.decoded_lines,
+        report.raw_lines,
+        report.raw_bytes,
+        if report.notices > 0 {
+            format!("; {} parser notices in the output", report.notices)
+        } else {
+            String::new()
+        },
+        if report.invalid_lines > 0 {
+            format!(
+                "; {} unreadable raw lines kept as they were",
+                report.invalid_lines
+            )
+        } else {
+            String::new()
+        },
+    );
+    Ok(())
 }
 
 pub(crate) async fn cmd_dictionary(args: DictionaryArgs) -> Result<()> {
@@ -56,6 +127,16 @@ pub(crate) async fn cmd_dictionary(args: DictionaryArgs) -> Result<()> {
 }
 
 async fn run(args: &DictionaryArgs) -> Result<()> {
+    if let DictionaryCommand::Decode {
+        file,
+        database,
+        parser_type,
+        output,
+    } = &args.command
+    {
+        return run_decode(file, database, parser_type, output.as_deref());
+    }
+    let source = args.source()?.to_string();
     let (_, endpoint) = resolve_mutating_endpoint(args.instance.as_deref(), args.url.as_deref())?;
     let mut request = match &args.command {
         DictionaryCommand::Stage {
@@ -82,8 +163,9 @@ async fn run(args: &DictionaryArgs) -> Result<()> {
             json!({"type": "dictionary.activate", "dictionary_id": dictionary_id, "expected_generation": expected_generation, "parser_type": parser_type})
         }
         DictionaryCommand::Status => json!({"type": "dictionary.status"}),
+        DictionaryCommand::Decode { .. } => unreachable!("handled above"),
     };
-    request["source_id"] = json!(args.source);
+    request["source_id"] = json!(source);
     let mut client = ControlClient::connect(&endpoint).await?;
     let response = client.request(request).await?;
     client.close().await;
@@ -134,6 +216,28 @@ mod tests {
     }
 
     #[test]
+    fn decode_needs_no_source_but_a_file_and_a_database() {
+        let args = Cli::try_parse_from([
+            "dictionary",
+            "decode",
+            "session.log",
+            "--database",
+            "db.json",
+            "-o",
+            "out.log",
+        ])
+        .unwrap()
+        .args;
+        assert!(args.source.is_none());
+        assert!(matches!(
+            args.command,
+            DictionaryCommand::Decode { ref parser_type, output: Some(_), .. }
+                if parser_type == "zephyr-dict"
+        ));
+        assert!(Cli::try_parse_from(["dictionary", "decode", "session.log"]).is_err());
+    }
+
+    #[test]
     fn dictionary_cli_requires_source_and_activation_generation() {
         assert!(
             Cli::try_parse_from(["dictionary", "--source", "UART_A", "--json", "status"])
@@ -141,7 +245,9 @@ mod tests {
                 .args
                 .json
         );
-        assert!(Cli::try_parse_from(["dictionary", "status"]).is_err());
+        // Runtime commands need a source; `decode` does not (checked when run).
+        let no_source = Cli::try_parse_from(["dictionary", "status"]).unwrap().args;
+        assert!(no_source.source().is_err());
         assert!(
             Cli::try_parse_from(["dictionary", "--source", "UART_A", "activate", "sha256"])
                 .is_err()

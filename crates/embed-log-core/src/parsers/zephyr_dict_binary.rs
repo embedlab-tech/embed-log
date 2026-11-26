@@ -12,6 +12,65 @@ use std::time::Duration;
 
 const INCOMPLETE_RECORD_IDLE_DEADLINE: Duration = Duration::from_secs(5);
 
+// Without a dictionary the pointer and timestamp sizes are unknown, so a record
+// is framed for the most common Zephyr target: little-endian, 32-bit pointers
+// and timestamps. A target that differs still loses nothing: the offline
+// decoder feeds the concatenated bytes to the real parser, which re-acquires.
+const ASSUMED_PTR_SIZE: usize = 4;
+const ASSUMED_TIMESTAMP_SIZE: usize = 4;
+/// Package and hexdump sections of a real record are far smaller than this;
+/// larger declared lengths are treated as noise, not as a record to wait for.
+const ASSUMED_MAX_SECTION: usize = 2048;
+
+enum AssumedFrame {
+    NeedMore,
+    Record(usize),
+    NotARecord,
+}
+
+fn assumed_frame(bytes: &[u8]) -> AssumedFrame {
+    match bytes[0] {
+        MSG_TYPE_DROPPED => {
+            if bytes.len() < 3 {
+                AssumedFrame::NeedMore
+            } else {
+                AssumedFrame::Record(3)
+            }
+        }
+        MSG_TYPE_NORMAL => {
+            if bytes.len() >= 2 && bytes[1] >> 4 > 4 {
+                return AssumedFrame::NotARecord;
+            }
+            if bytes.len() < 6 {
+                return AssumedFrame::NeedMore;
+            }
+            let package = u16::from_le_bytes([bytes[2], bytes[3]]) as usize;
+            let data = u16::from_le_bytes([bytes[4], bytes[5]]) as usize;
+            if !(4 + ASSUMED_PTR_SIZE..=ASSUMED_MAX_SECTION).contains(&package)
+                || data > ASSUMED_MAX_SECTION
+            {
+                return AssumedFrame::NotARecord;
+            }
+            let total = 6 + ASSUMED_PTR_SIZE + ASSUMED_TIMESTAMP_SIZE + package + data;
+            if bytes.len() < total {
+                AssumedFrame::NeedMore
+            } else {
+                AssumedFrame::Record(total)
+            }
+        }
+        _ => AssumedFrame::NotARecord,
+    }
+}
+
+fn raw_line(bytes: &[u8]) -> String {
+    use base64::Engine;
+    format!(
+        "{}{}",
+        crate::parsers::RAW_LINE_PREFIX,
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    )
+}
+
 pub struct ZephyrDictBinaryParser {
     state: LoadState,
     pending: Vec<u8>,
@@ -42,6 +101,34 @@ impl ZephyrDictBinaryParser {
             reported_load_error: false,
             console_text: Vec::new(),
         }
+    }
+
+    /// No dictionary: keep console text readable and store every dictionary
+    /// record as one Base64 line, so nothing is lost and it can be decoded later.
+    fn feed_without_dictionary(&mut self, data: &[u8], lines: &mut Vec<String>) {
+        self.pending.extend_from_slice(data);
+        let mut offset = 0;
+        while offset < self.pending.len() {
+            let bytes = &self.pending[offset..];
+            let byte = bytes[0];
+            if byte == MSG_TYPE_NORMAL || byte == MSG_TYPE_DROPPED {
+                match assumed_frame(bytes) {
+                    AssumedFrame::NeedMore => break,
+                    AssumedFrame::Record(len) => {
+                        flush_binary_console(&mut self.console_text, lines);
+                        lines.push(raw_line(&bytes[..len]));
+                        offset += len;
+                        continue;
+                    }
+                    // A stray NUL/SOH in console output: dropped, as it always was.
+                    AssumedFrame::NotARecord => {}
+                }
+            } else if byte >= 0x20 || matches!(byte, b'\t' | b'\r' | b'\n' | 0x1b) {
+                push_binary_console(&mut self.console_text, byte, lines);
+            }
+            offset += 1;
+        }
+        self.pending.drain(..offset);
     }
 
     fn consume(&mut self, lines: &mut Vec<String>, expired: bool) {
@@ -172,11 +259,7 @@ impl StreamParser for ZephyrDictBinaryParser {
                     "[zephyr-dict: database not loaded ({err}); dictionary decoding disabled, preserving console text]"
                 ));
             }
-            for &byte in data {
-                if byte >= 0x20 || matches!(byte, b'\t' | b'\r' | b'\n' | 0x1b) {
-                    push_binary_console(&mut self.console_text, byte, &mut lines);
-                }
-            }
+            self.feed_without_dictionary(data, &mut lines);
             return lines;
         }
         for chunk in data.chunks(4096) {
@@ -195,6 +278,16 @@ impl StreamParser for ZephyrDictBinaryParser {
 
     fn on_idle(&mut self, idle_for: Duration) -> Vec<String> {
         let mut lines = Vec::new();
+        if matches!(self.state, LoadState::Failed(_)) {
+            // A record that stalls is stored as it is, so the offline decoder sees every byte.
+            if idle_for >= INCOMPLETE_RECORD_IDLE_DEADLINE && !self.pending.is_empty() {
+                flush_binary_console(&mut self.console_text, &mut lines);
+                lines.push(raw_line(&self.pending));
+                self.pending.clear();
+            }
+            flush_binary_console(&mut self.console_text, &mut lines);
+            return lines;
+        }
         // shortcut: valid data delayed beyond 5 s can be lost; only explicit
         // framing/reset signals could make bounded recovery lossless.
         if idle_for >= INCOMPLETE_RECORD_IDLE_DEADLINE && !self.pending.is_empty() {
@@ -537,6 +630,126 @@ mod tests {
         assert!(parser.console_text.len() < 64 * 1024);
         let msg = encode_normal_message(3, 1, 1, 0x1000, &[], &[]);
         assert!(parser.feed(&msg).last().unwrap().contains("app: ok"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn raw_payload(line: &str) -> Vec<u8> {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD
+            .decode(line.strip_prefix(crate::parsers::RAW_LINE_PREFIX).unwrap())
+            .unwrap()
+    }
+
+    #[test]
+    fn without_a_dictionary_records_become_base64_lines_and_console_text_stays_readable() {
+        let record = encode_normal_message(3, 1, 7, 0x1000, &[], &[]);
+        let mut stream = b"shell ready\r\n".to_vec();
+        stream.extend(&record);
+        stream.extend(b"tail\r\n");
+        let mut failed = ZephyrDictBinaryParser::new("/nonexistent/binary-dictionary.json");
+        let lines = failed.feed(&stream);
+        assert!(lines[0].contains("database not loaded"));
+        assert_eq!(lines[1], "shell ready");
+        assert!(lines[2].starts_with(crate::parsers::RAW_LINE_PREFIX));
+        assert_eq!(
+            raw_payload(&lines[2]),
+            record,
+            "every byte of the record is kept"
+        );
+        assert_eq!(lines[3], "tail");
+        assert_eq!(lines.len(), 4);
+        assert!(
+            lines.iter().all(|line| line.is_ascii()),
+            "only printable ASCII"
+        );
+
+        // The same stream in arbitrary pieces gives the same lines.
+        let mut piecewise = ZephyrDictBinaryParser::new("/nonexistent/binary-dictionary.json");
+        let mut again = Vec::new();
+        for byte in &stream {
+            again.extend(piecewise.feed(&[*byte]));
+        }
+        assert_eq!(again, lines);
+
+        // A record that stalls is stored as it is after the idle deadline.
+        let mut stalled = ZephyrDictBinaryParser::new("/nonexistent/binary-dictionary.json");
+        stalled.feed(&record[..9]);
+        let flushed = stalled.on_idle(INCOMPLETE_RECORD_IDLE_DEADLINE);
+        assert_eq!(flushed.len(), 1);
+        assert_eq!(raw_payload(&flushed[0]), &record[..9]);
+        assert!(stalled.on_idle(INCOMPLETE_RECORD_IDLE_DEADLINE).is_empty());
+    }
+
+    #[test]
+    fn decoding_stored_raw_lines_matches_live_decoding() {
+        use crate::parsers::raw_decode::decode_log_with_database;
+        let dir = temp_dir("raw-decode");
+        let db = write_test_db(&dir, &[(0x1000, "hello"), (0x2000, "world")]);
+        let mut stream = b"shell ready\r\n".to_vec();
+        for (n, string) in [(1u32, 0x1000u32), (2, 0x2000), (3, 0x1000)] {
+            stream.extend(encode_normal_message(3, 1, n, string, &[], &[]));
+            stream.extend(format!("console {n}\r\n").as_bytes());
+        }
+        stream.extend([MSG_TYPE_DROPPED, 5, 0]);
+
+        let mut live = ZephyrDictBinaryParser::new(&db);
+        let expected = live.feed(&stream);
+        assert!(expected.iter().any(|line| line.contains("app: world")));
+
+        // What the session .log holds when the dictionary was missing.
+        let mut failed = ZephyrDictBinaryParser::new("/nonexistent/binary-dictionary.json");
+        let mut log = String::new();
+        for line in failed.feed(&stream) {
+            log.push_str(&format!("[2026-11-26 17:05:26.787] {line}\n"));
+        }
+        let (decoded, report) = decode_log_with_database(&log, "zephyr-dict", &db).unwrap();
+        let lines: Vec<&str> = decoded
+            .lines()
+            .map(|line| line.strip_prefix("[2026-11-26 17:05:26.787] ").unwrap())
+            .filter(|line| !line.contains("database not loaded"))
+            .collect();
+        assert_eq!(
+            lines,
+            expected.iter().map(String::as_str).collect::<Vec<_>>()
+        );
+        assert_eq!(report.raw_lines, 4);
+        // Three log records and one drop marker, no parser notices.
+        assert_eq!((report.decoded_lines, report.notices), (4, 0));
+
+        // A different firmware's dictionary is reported, not shown as plausible text.
+        let other = dir.join("other.json");
+        let mut other_db: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&db).unwrap()).unwrap();
+        let instances = other_db["log_subsys"]["log_instances"]["1"].take();
+        other_db["log_subsys"]["log_instances"] = serde_json::json!({ "9": instances });
+        std::fs::write(&other, other_db.to_string()).unwrap();
+        let error =
+            decode_log_with_database(&log, "zephyr-dict", other.to_str().unwrap()).unwrap_err();
+        assert!(error.contains("does not match"), "{error}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn hex_logs_are_already_ascii_and_decode_offline() {
+        use crate::parsers::raw_decode::decode_log_with_database;
+        let dir = temp_dir("raw-decode-hex");
+        let db = write_test_db(&dir, &[(0x1000, "hello")]);
+        let record = encode_normal_message(3, 1, 7, 0x1000, &[], &[]);
+        let hex: String = record.iter().map(|b| format!("{b:02x}")).collect();
+        let mut failed = ZephyrDictParser::new("/nonexistent/database.json");
+        let log: String = failed
+            .feed(format!("shell ready\r\n##ZLOGV1##{hex}\r\n").as_bytes())
+            .iter()
+            .map(|line| format!("[ts] {line}\n"))
+            .collect();
+        assert!(
+            log.contains(&format!("##ZLOGV1##{hex}")),
+            "the hex record is kept"
+        );
+        let (decoded, report) = decode_log_with_database(&log, "zephyr-dict-hex", &db).unwrap();
+        assert!(decoded.contains("[ts] shell ready\n"));
+        assert!(decoded.contains("app: hello"), "{decoded}");
+        assert_eq!(report.raw_lines, 1);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
