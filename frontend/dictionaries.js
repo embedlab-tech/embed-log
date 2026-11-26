@@ -78,13 +78,16 @@ function createRow(source) {
             await refresh();
         }
     });
+    const stale = document.createElement('span');
+    stale.className = 'dictionary-stale';
+    stale.setAttribute('role', 'status');
     const note = document.createElement('span');
     note.className = 'dictionary-note';
     note.setAttribute('role', 'status');
     const error = document.createElement('span');
     error.className = 'dictionary-error';
     error.setAttribute('role', 'alert');
-    row.append(active, button, note, error);
+    row.append(active, button, stale, note, error);
     return row;
 }
 
@@ -164,11 +167,22 @@ function render() {
             ? 'Re-read the active dictionary file, e.g. after rebuilding the firmware'
             : 'The active dictionary was uploaded, not read from a file';
         const active = row.querySelector('.dictionary-active');
-        const activePath = status.configured.find(item => item.dictionary?.dictionary_id === activeId)?.path;
-        active.textContent = pending.has(source) ? 'Switching…' : (available ? `Active: ${activePath || activeId || 'none'}` : 'Status unavailable');
+        const activeItem = status.configured.find(item => item.dictionary?.dictionary_id === activeId);
+        const activePath = activeItem?.path;
+        const idle = !pending.has(source);
+        active.textContent = pending.has(source) ? 'Switching…' : (available
+            ? `Active: ${activePath || activeId || 'none'}${status.watch ? ' · auto-reload on' : ''}`
+            : 'Status unavailable');
         active.title = activePath || activeId;
+        // The backend compares the file with the snapshot it decodes with.
+        const changed = !!activeItem?.changed_on_disk && available && idle;
+        row.querySelector('.dictionary-stale').textContent = changed && !notes.has(source)
+            ? (status.watch ? 'File changed, reloading…' : 'File changed on disk — Reload to use it')
+            : '';
+        button.classList.toggle('attention', changed && !status.watch);
         row.querySelector('.dictionary-note').textContent = notes.get(source) || '';
-        row.querySelector('.dictionary-error').textContent = errors.get(source) || '';
+        row.querySelector('.dictionary-error').textContent = errors.get(source)
+            || (status.watch_error ? `Auto-reload failed: ${status.watch_error}` : '');
     }
 }
 

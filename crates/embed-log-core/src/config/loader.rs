@@ -515,6 +515,12 @@ fn validate_config(config: &mut AppConfig, config_path: &Path) -> Result<(), Con
                 ctx()
             )));
         }
+        if src.parser.watch && !matches!(parser_type.as_str(), "zephyr-dict" | "zephyr-dict-hex") {
+            return Err(ConfigError::validation(format!(
+                "{}.parser.watch is only valid for parser.type 'zephyr-dict' or 'zephyr-dict-hex' (got {parser_type:?})",
+                ctx()
+            )));
+        }
         if parser_type == "slip-coap" && stype != "uart" {
             return Err(ConfigError::validation(format!(
                 "{}.parser.type 'slip-coap' is only valid for UART sources (got source type {stype:?})",
@@ -1244,6 +1250,33 @@ tabs:
             assert_eq!(config.sources[0].parser.parser_type, name);
             std::fs::remove_file(path).unwrap();
         }
+    }
+
+    #[test]
+    fn dictionary_watch_is_opt_in_and_only_for_dictionary_parsers() {
+        let base =
+            "version: 2\nsources:\n  DUT:\n    type: uart\n    path: /dev/ttyUSB0\n    parser:\n";
+        let path = std::env::temp_dir().join("dictionary-watch-validation.yml");
+        std::fs::write(
+            &path,
+            format!("{base}      type: zephyr-dict\n      database: d.json\n"),
+        )
+        .unwrap();
+        assert!(!load_config(&path).unwrap().sources[0].parser.watch);
+        std::fs::write(
+            &path,
+            format!("{base}      type: zephyr-dict\n      database: d.json\n      watch: true\n"),
+        )
+        .unwrap();
+        assert!(load_config(&path).unwrap().sources[0].parser.watch);
+        std::fs::write(
+            &path,
+            format!("{base}      type: text\n      watch: true\n"),
+        )
+        .unwrap();
+        let error = load_config(&path).unwrap_err().to_string();
+        assert!(error.contains("parser.watch is only valid"), "{error}");
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

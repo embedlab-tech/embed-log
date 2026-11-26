@@ -17,6 +17,8 @@
 .dictionary-active { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .dictionary-control button { font-size: 11px; padding: 1px 8px; }
 .dictionary-note { color: var(--ansi-2); }
+.dictionary-stale { color: var(--ansi-3); }
+.dictionary-control button.attention { border-color: var(--ansi-3); color: var(--ansi-3); }
 .dictionary-error { color: var(--ansi-1); }
 
 /* Bundled so the UI renders correctly even when JetBrains Mono isn't

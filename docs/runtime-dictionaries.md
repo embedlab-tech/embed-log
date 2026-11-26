@@ -57,6 +57,12 @@ that source only, through the same owner-acknowledged path as a manual switch:
   staged dictionary. Earlier decoded lines are not rewritten. The superseded
   snapshot is released from memory, so frequent rebuilds do not use up the
   64 MiB staging budget; its file stays in the session.
+- **File-changed hint.** The backend compares the active file with the snapshot it
+  decodes with (modification time and size). When they differ, the pane shows
+  `File changed on disk — Reload to use it` and highlights the button.
+  `changed_on_disk` is part of each `configured` entry in `dictionary.status` and
+  `/api/v1/status`. A touched file with identical bytes clears the hint on Reload
+  without a new generation.
 - The button is disabled when the active dictionary was uploaded (`stage`) and is
   not backed by a configured file. Select a configured entry first.
 
@@ -64,6 +70,30 @@ There is **no fallback or guessing from decoded output**. A consumer can explici
 arm one raw-line anchor as described below. A manual choice can be wrong even if
 its output looks plausible. Earlier decoded logs are not rewritten.
 Non-UART sources use the first path only; runtime selection is UART-only.
+
+### Automatic reload (`parser.watch`)
+
+```yaml
+sources:
+  UART_A:
+    type: uart
+    path: /dev/ttyUSB0
+    parser:
+      type: zephyr-dict
+      database: build/zephyr/log_dictionary.json
+      watch: true            # default: false
+```
+
+With `watch: true` embed-log applies the same reload by itself whenever a
+rebuild overwrites the **active** configured file. It polls once per second
+and waits until the file stops changing, so a half-written dictionary is not
+read. Each file version is tried once. A bad one is reported in the pane
+(`Auto-reload failed: …`) and in `dictionary.status` (`watch_error`) while the
+previous dictionary stays active; the next good build recovers and clears it.
+Switching to another configured dictionary moves the watch to that file.
+Valid only for `zephyr-dict` / `zephyr-dict-hex`, and it needs
+`server.control_api` (otherwise a warning is logged). Opt-in: a dictionary that
+changes under a running capture is never swapped silently unless you ask for it.
 
 ## CLI
 

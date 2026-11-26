@@ -107,6 +107,7 @@ async fn cancelled_or_expired_activation_does_not_apply_later() {
     let config = ParserConfig {
         parser_type: "zephyr-dict".into(),
         database: Some(path.to_string_lossy().into_owned().into()),
+        ..Default::default()
     };
     let mut current_config = ParserConfig::default();
     let mut current = create_parser(&current_config);
@@ -147,6 +148,7 @@ async fn unused_runtime_does_not_write_rotated_session() {
     let config = ParserConfig {
         parser_type: "zephyr-dict".into(),
         database: Some(initial.to_string_lossy().into_owned().into()),
+        ..Default::default()
     };
     let (_, runtime) = DictionaryControl::new("UART_A", &config, manager.clone()).unwrap();
     let (mut master, mut slave) = serialport::TTYPort::pair().unwrap();
@@ -237,6 +239,7 @@ fn configured_dictionaries_are_snapshotted_and_bad_alternatives_are_visible() {
                 .map(|path| path.to_string_lossy().into_owned())
                 .collect(),
         )),
+        ..Default::default()
     };
     let (control, runtime) = DictionaryControl::new("UART_A", &config, manager).unwrap();
     let status = control.status();
@@ -269,6 +272,7 @@ async fn runtime_switch_is_acknowledged_per_uart_and_discards_partial_record() {
     let config = ParserConfig {
         parser_type: "zephyr-dict".into(),
         database: Some(initial.to_string_lossy().into_owned().into()),
+        ..Default::default()
     };
     let (control_a, runtime_a) =
         DictionaryControl::new("UART_A", &config, manager.clone()).unwrap();
@@ -419,6 +423,7 @@ async fn reload_rereads_the_configured_file_and_keeps_the_old_one_on_failure() {
     let config = ParserConfig {
         parser_type: "zephyr-dict".into(),
         database: Some(file.to_string_lossy().into_owned().into()),
+        ..Default::default()
     };
     let (control, runtime) = DictionaryControl::new("UART_A", &config, manager).unwrap();
     let (mut master, mut slave) = serialport::TTYPort::pair().unwrap();
@@ -438,7 +443,9 @@ async fn reload_rereads_the_configured_file_and_keeps_the_old_one_on_failure() {
     assert_eq!(outcome.status.generation, 0);
 
     // A rebuild overwrites the file in place; the startup snapshot keeps decoding.
+    assert!(!control.status().configured[0].changed_on_disk);
     std::fs::write(&file, dictionary("image-B")).unwrap();
+    assert!(control.status().configured[0].changed_on_disk);
     next_message(&mut master);
     let entry = timeout(Duration::from_secs(3), rx.recv())
         .await
@@ -462,6 +469,7 @@ async fn reload_rereads_the_configured_file_and_keeps_the_old_one_on_failure() {
     let outcome = control.reload(0).await.unwrap();
     assert!(outcome.reloaded);
     assert_eq!(outcome.status.generation, 1);
+    assert!(!outcome.status.configured[0].changed_on_disk);
     assert_eq!(outcome.path, file.to_string_lossy());
     // The selector entry follows the file, so the active id is still "configured".
     let status = control.status();
@@ -482,8 +490,12 @@ async fn reload_rereads_the_configured_file_and_keeps_the_old_one_on_failure() {
     .unwrap();
     assert!(entry.message.ends_with("image-B"));
 
-    // Unchanged again: still generation 1.
+    // Touching the file changes its stamp but not its content: the hint clears
+    // without a new generation.
+    std::fs::write(&file, dictionary("image-B")).unwrap();
+    assert!(control.status().configured[0].changed_on_disk);
     let outcome = control.reload(1).await.unwrap();
+    assert!(!outcome.status.configured[0].changed_on_disk);
     assert!(!outcome.reloaded);
     assert_eq!(outcome.status.generation, 1);
 
@@ -494,6 +506,76 @@ async fn reload_rereads_the_configured_file_and_keeps_the_old_one_on_failure() {
         .await
         .unwrap();
     assert!(control.reload(2).await.unwrap_err().contains("uploaded"));
+    task.abort();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn watch_reloads_a_rebuilt_file_and_reports_a_bad_one_once() {
+    let (dir, manager) = setup();
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("log_dictionary.json");
+    std::fs::write(&file, dictionary("image-A")).unwrap();
+    let config = ParserConfig {
+        parser_type: "zephyr-dict".into(),
+        database: Some(file.to_string_lossy().into_owned().into()),
+        watch: true,
+    };
+    let (control, runtime) = DictionaryControl::new("UART_A", &config, manager).unwrap();
+    assert!(control.status().watch);
+    let (mut master, mut slave) = serialport::TTYPort::pair().unwrap();
+    slave.set_timeout(Duration::from_millis(100)).unwrap();
+    let (tx, mut rx) = mpsc::channel::<LogEntry>(128);
+    let mut source =
+        UartSource::from_port("UART_A", Box::new(slave), "text").with_parser(config.clone());
+    source.set_dictionary_runtime(runtime);
+    let task = tokio::spawn(Box::new(source).run(tx));
+    let watcher = tokio::spawn(control.clone().watch_active_file());
+    let wait_for = |what: &'static str, check: Box<dyn Fn(&DictionaryStatus) -> bool>| {
+        let control = control.clone();
+        async move {
+            timeout(Duration::from_secs(10), async {
+                while !check(&control.status()) {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("timed out waiting for {what}"));
+        }
+    };
+
+    // A rebuild: the watcher applies it without any request.
+    std::fs::write(&file, dictionary("image-B")).unwrap();
+    wait_for("automatic reload", Box::new(|s| s.generation == 1)).await;
+    assert!(!control.status().configured[0].changed_on_disk);
+    tokio::task::block_in_place(|| master.write_all(&record()).unwrap());
+    let entry = timeout(Duration::from_secs(3), async {
+        loop {
+            let entry = rx.recv().await.unwrap();
+            if entry.message.contains("app:") {
+                return entry;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert!(entry.message.ends_with("image-B"), "{}", entry.message);
+
+    // A broken file is reported, the active dictionary stays, and it is tried once.
+    std::fs::write(&file, "{ half written").unwrap();
+    wait_for("watch error", Box::new(|s| s.watch_error.is_some())).await;
+    assert_eq!(control.status().generation, 1);
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert_eq!(control.status().generation, 1);
+
+    // The next good build recovers and clears the error.
+    std::fs::write(&file, dictionary("image-C")).unwrap();
+    wait_for(
+        "recovery",
+        Box::new(|s| s.generation == 2 && s.watch_error.is_none()),
+    )
+    .await;
+    watcher.abort();
     task.abort();
     std::fs::remove_dir_all(dir).unwrap();
 }

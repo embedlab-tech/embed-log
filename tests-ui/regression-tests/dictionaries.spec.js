@@ -138,3 +138,23 @@ test('Reload is disabled when the active dictionary was uploaded, not read from 
   states.SENSOR_A.dictionary = { dictionary_id: 'uploaded', build_id: null };
   await expect(page.locator('#pane-SENSOR_A .dictionary-reload')).toBeDisabled({ timeout: 7000 });
 });
+
+test('a rebuilt file is hinted, auto-reload is labelled, and its failure is shown', async ({ page }) => {
+  const { states } = await setup(page, 1);
+  const pane = page.locator('#pane-SENSOR_A');
+  await expect(pane.locator('.dictionary-stale')).toHaveText('');
+  await expect(pane.locator('.dictionary-reload')).not.toHaveClass(/attention/);
+
+  states.SENSOR_A.configured[0].changed_on_disk = true;
+  await expect(pane.locator('.dictionary-stale')).toHaveText('File changed on disk — Reload to use it', { timeout: 7000 });
+  await expect(pane.locator('.dictionary-reload')).toHaveClass(/attention/);
+
+  // With parser.watch the backend reloads by itself: no call to action.
+  states.SENSOR_A.watch = true;
+  await expect(pane.locator('.dictionary-stale')).toHaveText('File changed, reloading…', { timeout: 7000 });
+  await expect(pane.locator('.dictionary-reload')).not.toHaveClass(/attention/);
+  await expect(pane.locator('.dictionary-active')).toContainText('auto-reload on');
+
+  states.SENSOR_A.watch_error = 'images/A/database.json: invalid dictionary';
+  await expect(pane.getByRole('alert')).toHaveText('Auto-reload failed: images/A/database.json: invalid dictionary', { timeout: 7000 });
+});
