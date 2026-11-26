@@ -146,11 +146,8 @@ fn import_into_session(
         let timestamp_iso = entry.timestamp.to_rfc3339();
         let record = json!({
             "type": "rx",
-            "data": entry.message,
             "message": entry.message,
-            "timestamp": abs_ts,
             "timestamp_iso": timestamp_iso,
-            "timestamp_num": abs_num,
             "timestamp_domain": "device",
             "absTs": abs_ts,
             "absNum": abs_num,

@@ -1217,7 +1217,7 @@ fn agent_relative_time(record: &serde_json::Value) -> String {
 }
 
 /// `HH:MM:SS.mmm` clock time, preferring `timestamp_iso`, falling back to the
-/// raw `timestamp` string field.
+/// raw `absTs` (or, in sessions recorded by 1.6 and earlier, `timestamp`) string field.
 fn clock_time(entry: &serde_json::Value) -> String {
     if let Some(iso) = entry.get("timestamp_iso").and_then(|v| v.as_str()) {
         if let Ok(dt) = DateTime::parse_from_rfc3339(iso) {
@@ -1225,7 +1225,8 @@ fn clock_time(entry: &serde_json::Value) -> String {
         }
     }
     entry
-        .get("timestamp")
+        .get("absTs")
+        .or_else(|| entry.get("timestamp"))
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string()

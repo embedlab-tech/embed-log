@@ -50,13 +50,13 @@ window.__embedLogLoadSearchHistory = function (paneId) {
             if (!Number.isFinite(record.sequence) || typeof record.message !== 'string') throw new Error('Invalid session history record');
             if (record.sequence >= cutoff) continue;
             const label = PANE_LABELS[record.source_id] || record.source_id;
-            rows.push([record.timestamp || record.absTs || '',
+            rows.push([record.absTs || record.timestamp || '',
                 (merge ? `${label}: ` : '') + record.message,
                 record.type === 'tx' || record.is_tx === true,
                 { sourceId: record.source_id, sequence: record.sequence, sessionId,
                     lineIdx: record.line_idx, absTs: record.absTs, absNum: record.absNum,
                     relTs: record.relTs, relNum: record.relNum,
-                    timestampIso: record.timestamp_iso, numTs: record.timestamp_num,
+                    timestampIso: record.timestamp_iso, numTs: record.absNum ?? record.timestamp_num,
                     ...(typeof record.level === 'string' ? { level: record.level } : {}) }]);
         }
         prependPaneHistory(paneId, rows);
@@ -340,8 +340,14 @@ function wsConnect() {
 
         if (msg.type !== "rx" && msg.type !== "tx") return;
 
-        const { type, data, timestamp, timestamp_iso, timestamp_num, source_id,
+        const { type, message, timestamp_iso, source_id,
                 absTs, absNum, relTs, relNum, line_idx, sequence, session_id, level } = msg;
+        // Servers up to 1.6 also sent `timestamp`/`timestamp_num` (copies of
+        // absTs/absNum) and always sent `data`; newer ones send `data` only
+        // when it differs from `message` (server-applied color).
+        const data = msg.data ?? message;
+        const timestamp = absTs ?? msg.timestamp;
+        const timestamp_num = absNum ?? msg.timestamp_num;
         if (!source_id) return;
 
         const destinations = [];

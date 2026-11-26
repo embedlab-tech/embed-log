@@ -318,20 +318,15 @@ impl Writer {
             None => (format_relative_millis(0), 0.0),
         };
 
-        // Always send absolute as the display timestamp.
-        // The frontend recalculates using metadata when the mode changes.
-        let display_ts = abs_ts.clone();
         let ts_iso = entry.timestamp.to_rfc3339();
 
-        let data = if let Some(ref color) = entry.color {
-            if let Some(ansi) = Ansi::code(color) {
-                format!("{ansi}{}{}", entry.message, Ansi::RESET)
-            } else {
-                entry.message.clone()
-            }
-        } else {
-            entry.message.clone()
-        };
+        // `data` is the message with its server-applied color. It is sent only
+        // when it differs from `message`; readers use `data ?? message`.
+        let data = entry
+            .color
+            .as_deref()
+            .and_then(Ansi::code)
+            .map(|ansi| format!("{ansi}{}{}", entry.message, Ansi::RESET));
 
         let is_tx = entry.source.starts_with("TX::");
 
@@ -359,10 +354,7 @@ impl Writer {
 
         let mut payload = json!({
             "type": if is_tx { "tx" } else { "rx" },
-            "data": data,
-            "timestamp": display_ts,
             "timestamp_iso": ts_iso,
-            "timestamp_num": abs_num,
             "source_id": source_name,
             "line_idx": line_idx,
             "origin": origin,
@@ -374,6 +366,9 @@ impl Writer {
             "relTs": rel_ts,
             "relNum": rel_num,
         });
+        if let (Some(data), Some(payload_obj)) = (data, payload.as_object_mut()) {
+            payload_obj.insert("data".to_string(), json!(data));
+        }
         if let (Some(payload_obj), Some(meta_obj)) = (
             payload.as_object_mut(),
             entry.meta.as_ref().and_then(|m| m.as_object()),
@@ -783,6 +778,50 @@ mod tests {
         assert_eq!(first["message"], "boot complete");
         assert_eq!(first["origin"], "SERIAL");
         assert_eq!(first["sequence"], 1);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test]
+    async fn records_carry_each_value_once() {
+        let dir = temp_dir("no-duplicates");
+        let log = dir.join("dut.log");
+        let rig = TestWriter::spawn(
+            test_manager("session-1", dir.clone(), log.clone()),
+            &[("dut", log)],
+            4,
+            None,
+        );
+        rig.send("dut", "plain").await;
+        rig.senders["dut"]
+            .send(LogEntry::new(Local::now(), "TX::ui", "help").with_color("cyan"))
+            .await
+            .unwrap();
+        let replay = rig.replay.clone();
+        rig.finish().await;
+
+        let records = read_jsonl(&dir.join("combined.jsonl"));
+        let live: Vec<serde_json::Value> = replay
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|m| m.value().clone())
+            .collect();
+        for record in records.iter().chain(&live) {
+            for copy in ["timestamp", "timestamp_num"] {
+                assert!(
+                    record.get(copy).is_none(),
+                    "{copy} duplicates absTs/absNum: {record}"
+                );
+            }
+            assert!(record["absTs"].is_string() && record["absNum"].is_number());
+        }
+        assert!(
+            records[0].get("data").is_none(),
+            "uncolored data equals message"
+        );
+        assert_eq!(records[1]["message"], "help");
+        assert_eq!(records[1]["data"], "\u{1b}[36mhelp\u{1b}[0m");
+        assert_eq!(live[1]["data"], records[1]["data"]);
         std::fs::remove_dir_all(dir).ok();
     }
 

@@ -322,10 +322,11 @@ Formats:
 - `jsonl-deduped`: a lossless, structurally deduplicated single-file JSONL export — same
   information as `combined.jsonl`, minus pure per-line duplication. `combined.jsonl` repeats
   several fields that never change within a session (`app_name`, `job_id`, `session_id`,
-  `source_kind`, `source_label`, `tab_labels`) on every single line, plus a few fields that are
-  exact duplicates of another field (`data`≡`message`, `timestamp_num`≡`absNum`,
-  `timestamp`≡`absTs`). `jsonl-deduped` hoists the constants into a one-time header line and
-  drops the exact duplicates — **~48% smaller on a measured real session, zero information
+  `source_kind`, `source_label`, `tab_labels`) on every single line. Sessions recorded by
+  embed-log 1.6 and earlier also contain exact duplicates of other fields (`data`≡`message`,
+  `timestamp_num`≡`absNum`, `timestamp`≡`absTs`); newer records omit them and include `data`
+  only when it differs from `message` (a server-applied color). `jsonl-deduped` hoists the
+  constants into a one-time header line and drops the exact duplicates — **~48% smaller on a measured real session, zero information
   lost**. Meant for handing a whole session to another tool or agent for offline analysis,
   without shipping the original `combined.jsonl` (raw session files are never modified — this is
   a read-time export). Output shape:

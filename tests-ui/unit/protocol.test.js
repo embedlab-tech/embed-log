@@ -66,6 +66,18 @@ test('normalizes rx and tx messages into log commands', () => {
   assert.equal(tx.rawText, 'sent');
 });
 
+test('reads records without the duplicate timestamp and data fields', () => {
+  const plain = normalizeMessage({
+    type: 'rx', source_id: 'A', message: 'boot', absTs: '01-01 00:00:01.000', absNum: 1000,
+    timestamp_iso: '2026-01-01T00:00:01.000+00:00',
+  });
+  assert.equal(plain.ts, '01-01 00:00:01.000');
+  assert.equal(plain.rawText, 'boot');
+  assert.equal(plain.meta.numTs, 1000);
+  const colored = normalizeMessage({ type: 'tx', source_id: 'A', message: 'help', data: '\x1b[36mhelp\x1b[0m', absNum: 2 });
+  assert.equal(colored.rawText, '\x1b[36mhelp\x1b[0m');
+});
+
 test('invalid and unknown messages are explicit no-op commands', () => {
   assert.deepEqual(normalizeMessage('{'), { type: 'invalid', reason: 'invalid_json', raw: '{' });
   assert.deepEqual(normalizeMessage({ type: 'rx', data: 'missing source' }), {

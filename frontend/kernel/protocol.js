@@ -37,12 +37,12 @@ export function normalizeMessage(input) {
     return {
       type: 'log',
       paneId: raw.source_id,
-      ts: raw.timestamp || '',
-      rawText: raw.data || '',
+      ts: raw.absTs ?? raw.timestamp ?? '',
+      rawText: raw.data ?? raw.message ?? '',
       isTx: raw.type === 'tx',
       meta: {
         timestampIso: raw.timestamp_iso,
-        numTs: raw.timestamp_num,
+        numTs: raw.absNum ?? raw.timestamp_num,
       },
       raw,
     };
