@@ -361,7 +361,9 @@ impl DictionaryControl {
         configured_index: Option<usize>,
     ) -> Result<DictionaryStatus, String> {
         if let Some(index) = configured_index {
-            let status = self.status.lock().unwrap();
+            // One critical section: validate the entry, check the generation and move the
+            // choice. A delayed request must not redirect later reloads to another file.
+            let mut status = self.status.lock().unwrap();
             let entry = status
                 .configured
                 .get(index)
@@ -369,20 +371,22 @@ impl DictionaryControl {
             if entry.dictionary.as_ref().map(|d| d.dictionary_id.as_str()) != Some(dictionary_id) {
                 return Err("configured dictionary index does not match dictionary_id".into());
             }
-        }
-        let current = self.status();
-        if configured_index.is_some()
-            && current
-                .dictionary
-                .as_ref()
-                .map(|d| d.dictionary_id.as_str())
+            let already_active = status.dictionary.as_ref().map(|d| d.dictionary_id.as_str())
                 == Some(dictionary_id)
-            && current.parser_type == parser_type
-        {
-            // Identical bytes under another file: decoding does not change, only the
-            // file that Reload follows. Idempotent like a repeated activation.
-            self.status.lock().unwrap().active_index = configured_index;
-            return Ok(self.status());
+                && status.parser_type == parser_type;
+            if already_active {
+                // Identical bytes under another file: decoding does not change, only the
+                // file that Reload follows.
+                if status.generation != expected_generation {
+                    return Err(format!(
+                        "generation conflict: active generation is {}",
+                        status.generation
+                    ));
+                }
+                status.active_index = Some(index);
+                drop(status);
+                return Ok(self.status());
+            }
         }
         self.queue_update(dictionary_id, parser_type, expected_generation, None)
             .await?;

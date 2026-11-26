@@ -706,3 +706,67 @@ async fn reload_of_an_unchanged_file_still_rejects_a_stale_generation() {
     task.abort();
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stale_client_cannot_move_the_followed_file() {
+    let (dir, manager) = setup();
+    std::fs::create_dir_all(&dir).unwrap();
+    let debug = dir.join("debug.json");
+    let release = dir.join("release.json");
+    let other = dir.join("other.json");
+    std::fs::write(&debug, dictionary("image-A")).unwrap();
+    std::fs::write(&release, dictionary("image-A")).unwrap();
+    std::fs::write(&other, dictionary("image-B")).unwrap();
+    let config = ParserConfig {
+        parser_type: "zephyr-dict".into(),
+        database: Some(crate::config::models::DictionaryPaths::Multiple(
+            [&debug, &release, &other]
+                .iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect(),
+        )),
+        ..Default::default()
+    };
+    let (control, runtime) = DictionaryControl::new("UART_A", &config, manager).unwrap();
+    let (_master, task) = spawn_uart(runtime, &config);
+    let status = control.status();
+    let id_a = status.configured[0]
+        .dictionary
+        .clone()
+        .unwrap()
+        .dictionary_id;
+    let id_b = status.configured[2]
+        .dictionary
+        .clone()
+        .unwrap()
+        .dictionary_id;
+
+    // Another client goes A -> B -> A: generation 0 -> 2, followed file debug.json.
+    control
+        .activate_configured(&id_b, "zephyr-dict", 0, Some(2))
+        .await
+        .unwrap();
+    control
+        .activate_configured(&id_a, "zephyr-dict", 1, Some(0))
+        .await
+        .unwrap();
+    assert_eq!(control.status().generation, 2);
+
+    // A request made back at generation 0 arrives late and names release.json,
+    // which holds the active bytes. It must be refused, not redirect Reload.
+    let error = control
+        .activate_configured(&id_a, "zephyr-dict", 0, Some(1))
+        .await
+        .unwrap_err();
+    assert!(error.contains("generation conflict"), "{error}");
+    assert_eq!(control.status().active_index, Some(0));
+
+    // With the current generation the same choice is accepted.
+    let moved = control
+        .activate_configured(&id_a, "zephyr-dict", 2, Some(1))
+        .await
+        .unwrap();
+    assert_eq!((moved.generation, moved.active_index), (2, Some(1)));
+    task.abort();
+    std::fs::remove_dir_all(dir).unwrap();
+}
