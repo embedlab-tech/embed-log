@@ -10,7 +10,7 @@ import { renderPaneShell } from './renderPane.js';
 // Tab creation
 //
 // createTabWithPanes(label, paneIds, [opts])
-//   Core function. Creates a tab containing 1 or 2 panes side-by-side.
+//   Core function. Creates a tab containing 1 to 3 panes side-by-side.
 //   Used by ws.js (config-driven layout).
 // ---------------------------------------------------------------------------
 

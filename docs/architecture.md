@@ -204,7 +204,7 @@ The terminal UI is a separate Rust client in `crates/embed-log-tui`.
 
 ### Pane layout (browser)
 
-Each view (tab) shows the panes the configuration gives it. In the browser the user can rearrange them:
+Each view (tab) shows the panes the configuration gives it, 1 to 3 side by side (the TUI splits two by the splitter ratio and three equally; `h`/`l` move focus). In the browser the user can rearrange them:
 
 - **Swap** two panes (also across views) from the popup that opens when hovering a tab label.
 - **Remove** a pane from a view with the `✕` in its header or in the tab popup. A view keeps at least one pane.
