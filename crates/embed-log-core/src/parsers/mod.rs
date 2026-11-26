@@ -18,12 +18,15 @@ pub use zephyr_dict::{validate_dictionary, ZephyrDictParser};
 /// (gedit, Notepad) open the session `.log` as UTF-16, showing the whole file
 /// as CJK characters. Other control characters keep their terminal meaning
 /// (ESC sequences, CR, backspace) and are left as they are.
-pub(crate) fn console_text(bytes: &[u8]) -> String {
+///
+/// Borrowed for the usual case (valid UTF-8, no NUL), so a caller that trims and
+/// copies the line makes one allocation, not two.
+pub(crate) fn console_text(bytes: &[u8]) -> std::borrow::Cow<'_, str> {
     let text = String::from_utf8_lossy(bytes);
     if text.contains('\0') {
-        text.replace('\0', "")
+        std::borrow::Cow::Owned(text.replace('\0', ""))
     } else {
-        text.into_owned()
+        text
     }
 }
 
@@ -64,5 +67,26 @@ pub fn create_parser(parser: &ParserConfig) -> Box<dyn StreamParser> {
             );
             Box::new(TextParser::new())
         }
+    }
+}
+
+#[cfg(test)]
+mod console_text_tests {
+    use super::console_text;
+    use std::borrow::Cow;
+
+    #[test]
+    fn plain_text_is_not_copied() {
+        assert!(matches!(console_text(b"uart:~$ ready"), Cow::Borrowed(_)));
+        assert!(matches!(
+            console_text("zażółć".as_bytes()),
+            Cow::Borrowed(_)
+        ));
+    }
+
+    #[test]
+    fn nul_and_invalid_utf8_are_still_cleaned() {
+        assert_eq!(console_text(b"a\0b\0"), "ab");
+        assert_eq!(console_text(b"ok\xff!"), "ok\u{fffd}!");
     }
 }

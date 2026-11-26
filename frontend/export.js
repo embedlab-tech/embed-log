@@ -218,7 +218,7 @@ export async function exportHtmlSnapshot(options = {}) {
         var flat = [];
         Object.keys(state.markers).forEach(function (pid) {
             (state.markers[pid] || []).forEach(function (mk) {
-                flat.push({ paneId: pid, lineIdx: mk.lineIdx, numTs: mk.numTs });
+                flat.push({ paneId: pid, lineIdx: mk.lineIdx, endIdx: mk.endIdx, numTs: mk.numTs });
             });
         });
         flat.sort(function (a, b) { return (a.numTs || 0) - (b.numTs || 0); });
@@ -229,8 +229,11 @@ export async function exportHtmlSnapshot(options = {}) {
             if (TABS[t].panes.indexOf(target.paneId) >= 0) { tabIdx = t; break; }
         }
         if (tabIdx >= 0 && typeof switchTab === 'function') switchTab(tabIdx);
-        if (typeof ensureLineVisible === 'function') ensureLineVisible(target.paneId, target.lineIdx, { align: 'center' });
-        var div = document.querySelector('#log-' + target.paneId + ' [data-idx="' + target.lineIdx + '"]');
+        // Markers name server line indexes; find the row that holds that line.
+        var rawIdx = typeof markerRawIndex === 'function' ? markerRawIndex(target.paneId, target) : target.lineIdx;
+        if (rawIdx === null) return;
+        if (typeof ensureLineVisible === 'function') ensureLineVisible(target.paneId, rawIdx, { align: 'center' });
+        var div = document.querySelector('#log-' + target.paneId + ' [data-idx="' + rawIdx + '"]');
         if (!div) return;
         var logEl = document.getElementById('log-' + target.paneId);
         if (!logEl) return;

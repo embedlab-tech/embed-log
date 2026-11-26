@@ -622,8 +622,7 @@ function _markerAt(paneId, idx, line = null) {
     const markers = state.markers[paneId];
     if (!markers) return null;
     for (const m of markers) {
-        const end = m.endIdx ?? m.lineIdx;
-        if (idx >= m.lineIdx && idx <= end) return m;
+        if (markerCoversRow(paneId, m, idx)) return m;
     }
     return null;
 }
@@ -979,7 +978,9 @@ function _recordPaneBytes(paneId, newLines) {
     for (const line of newLines) {
         const text = (Array.isArray(line) ? line[1] : line?.rawText) || '';
         const meta = Array.isArray(line) ? line[3] : line;
-        const bytes = _byteSize(text);
+        // A pane counts the record as logged, not the colour added for display. A merged
+        // pane shows a source prefix too and keeps counting what it renders.
+        const bytes = !isMerge && Number.isFinite(meta?.originalBytes) ? meta.originalBytes : _byteSize(text);
         delta += bytes;
         if (!_adjustRecord(paneId, text, meta, 1, isMerge, bytes)) {
             const originalBytes = originalRecordBytes(paneId, text, meta, bytes, isMerge);
@@ -1589,6 +1590,39 @@ function _entryServerLineIdx(entry, paneId, idx) {
         return null;
     }
     return Number.isFinite(entry?.serverLineIdx) ? entry.serverLineIdx : null;
+}
+
+/**
+ * Markers name a line by the server's per-source line index, not by a position in
+ * this pane. The pane may hold only part of the session (a replay is bounded, and
+ * a reconnect brings back only the recent records), so the position of a row says
+ * nothing about which line it is. Rows without a server index (static reports,
+ * old caches) fall back to their position, which is what they always meant.
+ */
+function _rowServerId(paneId, rawIdx) {
+    const entry = state.rawLines[paneId]?.[rawIdx];
+    if (entry === undefined) return null;
+    return _entryServerLineIdx(entry, paneId, rawIdx) ?? rawIdx;
+}
+
+/** Server line index of a row (its position when it has none). */
+export function serverLineIdxOf(paneId, rawIdx) {
+    return _rowServerId(paneId, rawIdx);
+}
+
+export function markerCoversRow(paneId, marker, rawIdx) {
+    const id = _rowServerId(paneId, rawIdx);
+    if (id === null) return false;
+    return id >= marker.lineIdx && id <= (marker.endIdx ?? marker.lineIdx);
+}
+
+/** Local index of the row a marker starts on, or null while that line is not loaded. */
+export function markerRawIndex(paneId, marker) {
+    const lines = state.rawLines[paneId] || [];
+    for (let i = 0; i < lines.length; i++) {
+        if (markerCoversRow(paneId, marker, i)) return i;
+    }
+    return null;
 }
 
 // A time-sync target can be a hidden row (filtered out or an erased console

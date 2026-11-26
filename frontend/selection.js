@@ -1,5 +1,5 @@
 import { state, TABS, PANES, paneLabel, unwrapPaneLabel } from './state.js';
-import { onLineClick, hidePluginOverlays, ensureLineVisible, getLine, originalRecordBytes } from './lines.js';
+import { onLineClick, hidePluginOverlays, ensureLineVisible, getLine, originalRecordBytes, markerCoversRow, markerRawIndex, serverLineIdxOf } from './lines.js';
 import { exportHtmlSnapshot } from './export.js';
 import { switchTab } from './tabs.js';
 import { _escHtml } from './renderPane.js';
@@ -223,13 +223,11 @@ function _flatMarkerList() {
     return all;
 }
 
-function _markerMatchesRawIndex(paneId, marker, rawIdx) {
-    const end = marker.endIdx ?? marker.lineIdx;
-    return rawIdx >= marker.lineIdx && rawIdx <= end;
-}
+const _markerMatchesRawIndex = markerCoversRow;
 
+// null while the marked line is not loaded (for example before older history arrives).
 function _markerRawIndex(marker) {
-    return marker.lineIdx;
+    return markerRawIndex(marker.paneId, marker);
 }
 
 export function applyMarkers() {
@@ -345,6 +343,7 @@ document.getElementById("marker-nav-next")?.addEventListener("click", () => {
 function _jumpMarker(m) {
     const paneId = m.paneId;
     const rawIdx = _markerRawIndex(m);
+    if (rawIdx === null) return; // the line is not in this pane yet; the marker appears once it loads
     // Switch to the tab containing this pane
     const tabIdx = TABS.findIndex(t => t.panes.includes(paneId));
     if (tabIdx >= 0) switchTab(tabIdx);
@@ -564,15 +563,17 @@ function _applyMarkerAnnotations(paneId, items) {
     if (!paneMarkers.length) return items.map(i => i.text).join("\n");
     const out = [];
     for (const item of items) {
+        // Markers name server line indexes, not positions in this pane.
+        const serverIdx = serverLineIdxOf(paneId, item.idx);
         for (const m of paneMarkers) {
-            if (m.lineIdx === item.idx) {
+            if (m.lineIdx === serverIdx) {
                 out.push(`USER_MARKER_START = ${m.description}`);
             }
         }
         out.push(item.text);
         for (const m of paneMarkers) {
             const end = m.endIdx ?? m.lineIdx;
-            if (end === item.idx) {
+            if (end === serverIdx) {
                 out.push("USER_MARKER_END");
             }
         }
