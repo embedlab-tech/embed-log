@@ -239,20 +239,15 @@ function _swapPanes(a, b) {
     const locB = _findPaneLocation(b);
     if (!locA || !locB) return;
 
-    // Snapshot pane DOM nodes BEFORE any tab content is rebuilt.
-    const paneElMap = {};
-    PANES.forEach(id => {
-        const el = document.getElementById("pane-" + id);
-        if (el) paneElMap[id] = el;
-    });
-
+    _ensureConfiguredLayout();
     TABS[locA.tabIdx].panes[locA.paneIdx] = b;
     TABS[locB.tabIdx].panes[locB.paneIdx] = a;
 
-    [...new Set([locA.tabIdx, locB.tabIdx])].forEach(tabIdx => _rebuildTabContent(tabIdx, paneElMap));
+    // Same path as add/remove: re-flow, refresh the ✕ buttons, save the layout.
+    const tabs = [...new Set([locA.tabIdx, locB.tabIdx])];
+    _commitLayout(tabs, tabs.flatMap(i => TABS[i].panes));
     _pulsePane(a);
     _pulsePane(b);
-    window.__embedLogSchedulePersist?.();
 }
 
 // ---------------------------------------------------------------------------
@@ -655,6 +650,13 @@ function _addPaneGroups(tabIdx) {
 
     menu.addEventListener("mouseenter", cancelHide);
     menu.addEventListener("mouseleave", scheduleHide);
+    // A dropdown inside the popup can close under the pointer without a mouseleave;
+    // the popup would then stay open. Any move away from it and the tab bar hides it.
+    document.addEventListener("mousemove", ev => {
+        if (!menu.classList.contains("open")) return;
+        if (menu.contains(ev.target) || tabBar.contains(ev.target)) return;
+        scheduleHide();
+    });
 })();
 
 // ---------------------------------------------------------------------------
@@ -1071,7 +1073,7 @@ if (window.__embedLogProfile?.capabilities?.tx) {
                 else if (!paneRight) paneRight = child;
             }
         }
-        return { tabContent, paneLeft, paneRight };
+        return { paneLeft, paneRight };
     }
 
     function eventX(ev) {
@@ -1081,7 +1083,7 @@ if (window.__embedLogProfile?.capabilities?.tx) {
     }
 
     function startDrag(splitter, ev) {
-        const { tabContent, paneLeft, paneRight } = findNeighborPanes(splitter);
+        const { paneLeft, paneRight } = findNeighborPanes(splitter);
         if (!paneLeft || !paneRight) return;
 
         ev.preventDefault();
@@ -1090,7 +1092,9 @@ if (window.__embedLogProfile?.capabilities?.tx) {
 
         const startX = eventX(ev);
         const startLeftW = paneLeft.getBoundingClientRect().width;
-        const totalW = tabContent.getBoundingClientRect().width - splitter.offsetWidth;
+        // Only the two neighbours trade width. Sharing the whole tab would squeeze
+        // a third pane to nothing.
+        const totalW = startLeftW + paneRight.getBoundingClientRect().width;
 
         function onMove(moveEv) {
             moveEv.preventDefault();

@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { collectPageErrors, visiblePaneNames } from './helpers.js';
+import fs from 'node:fs';
+import { collectPageErrors, openHtmlFile, saveDownload, visiblePaneNames, waitForRangePair } from './helpers.js';
 
 // Feature: add and remove panes in a view. Views: DevA = [DEVICE_A, HOST],
 // DevB = [AUX], UART = [DUT, DEBUG]. A removed pane keeps recording.
@@ -126,5 +127,65 @@ test.describe('pane add / remove', () => {
     await page.keyboard.press('Enter');
     await expect.poll(() => visiblePaneNames(page)).toEqual(['AUX']);
     await expect(page.locator('#tab-content-1 #pane-SENSOR_A')).toHaveCount(1);
+  });
+
+  test('dragging a separator between two panes never squeezes the third', async ({ page }) => {
+    // UART = [DUT, DEBUG]; bring HOST over so that the view reads DUT | DEBUG | HOST.
+    await page.locator('#pane-SENSOR_B .pane-close-btn').click();
+    await page.getByRole('button', { name: 'UART', exact: true }).click();
+    await openTabMenu(page, 'UART');
+    await pickFromMenu(page, 'Add a pane to UART', 'SENSOR_B');
+    await expect.poll(() => visiblePaneNames(page)).toEqual(['DUT', 'DEBUG', 'HOST']);
+
+    await page.mouse.move(700, 400); // off the tab: let its popup close
+    await expect(page.locator('#tab-swap-menu.open')).toHaveCount(0);
+    const width = id => page.locator(`#pane-${id}`).evaluate(el => el.getBoundingClientRect().width);
+    const before = { debug: await width('UART_DEBUG'), third: await width('SENSOR_B') };
+    const splitter = page.locator('#tab-content-4 .splitter').first();
+    const box = await splitter.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + 40);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 60, box.y + 40, { steps: 5 });
+    await page.mouse.up();
+
+    expect(await width('UART_DEBUG')).toBeLessThan(before.debug - 30); // it did move
+    expect(Math.abs((await width('SENSOR_B')) - before.third)).toBeLessThan(2); // the third did not
+  });
+
+  test('swapping panes refreshes the remove buttons, enables Reset and survives a reload', async ({ page }) => {
+    // DevA = [DEVICE_A, HOST], DevB = [AUX]: after swapping DEVICE_A with AUX, DevA = [AUX, HOST].
+    await openTabMenu(page, 'DevA');
+    await pickFromMenu(page, 'Swap DEVICE_A with', 'SENSOR_C');
+    await expect.poll(() => visiblePaneNames(page)).toEqual(['AUX', 'HOST']);
+    // The pane that moved to the two-pane view can be removed; the one now alone cannot.
+    await expect(page.locator('#pane-SENSOR_C .pane-close-btn')).toBeVisible();
+    await page.getByRole('button', { name: 'DevB', exact: true }).click();
+    await expect(page.locator('#pane-SENSOR_A .pane-close-btn')).toBeHidden();
+    await page.getByRole('button', { name: 'DevA', exact: true }).click();
+    await openTabMenu(page, 'DevA');
+    await expect(page.getByRole('button', { name: 'Reset layout' })).toBeVisible();
+
+    await page.reload();
+    await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+    await expect.poll(() => visiblePaneNames(page)).toEqual(['AUX', 'HOST']);
+  });
+
+  test('a hidden pane can be added back in an exported selection', async ({ page, browser }, testInfo) => {
+    await page.locator('#pane-SENSOR_B .pane-close-btn').click();
+    await expect.poll(() => visiblePaneNames(page)).toEqual(['DEVICE_A']);
+    const { start, end } = await waitForRangePair(page, 'SENSOR_A', 'kind=prefix-cleanup', 'kind=timestamp-cleanup');
+    await start.click();
+    await end.click({ modifiers: ['Shift'] });
+    const download = page.waitForEvent('download');
+    await page.evaluate(() => document.getElementById('export-html-SENSOR_A').click());
+    const file = await saveDownload(await download, testInfo);
+    expect(fs.readFileSync(file, 'utf-8')).toContain('id="pane-SENSOR_B"');
+
+    const exported = await openHtmlFile(browser, file);
+    await exported.getByRole('button', { name: 'DevA', exact: true }).hover();
+    await pickFromMenu(exported, 'Add a pane to DevA', 'SENSOR_B');
+    await expect.poll(() => visiblePaneNames(exported)).toEqual(['DEVICE_A', 'HOST']);
+    await expect(exported.locator('#pane-SENSOR_B')).toBeVisible();
+    await exported.close();
   });
 });
