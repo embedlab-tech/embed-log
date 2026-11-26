@@ -220,6 +220,12 @@ impl DictionaryControl {
             .join("dictionaries")
     }
 
+    /// The RX owner is gone. Sources that cannot switch dictionaries at runtime
+    /// (anything but UART) drop their runtime straight away.
+    pub fn is_closed(&self) -> bool {
+        self.updates.is_closed()
+    }
+
     pub fn status(&self) -> DictionaryStatus {
         let mut status = self.status.lock().unwrap().clone();
         for item in &mut status.configured {
