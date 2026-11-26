@@ -153,6 +153,62 @@ test('exporting only B from a merged pane does not hand it the marker of A', asy
   await exported.close();
 });
 
+test('an older merged-pane marker whose time is shared by two sources is not drawn', async ({ page }) => {
+  await mockServer(page, [[
+    mergedConfig([mergedMarker({ numTs: 1000 })]), // no sequence: A and B both have time 1000
+    mergedRecord(1, 'A', 1000), mergedRecord(2, 'B', 1000),
+  ]]);
+  await page.goto('/');
+  await page.locator('#tab-bar').getByRole('button', { name: 'Merged', exact: true }).click();
+  await expect(page.locator('#log-ALL')).toContainText('msg2');
+  await expect(page.locator('#log-ALL .has-marker')).toHaveCount(0);
+});
+
+test('an older marker keeps its record in an export, and a tied one is not guessed', async ({ page, browser }, testInfo) => {
+  // Unique time 2000 names B; time 1000 is shared. Export only A and B's tied sibling.
+  await mockServer(page, [[
+    mergedConfig([mergedMarker({ numTs: 2000 }), mergedMarker({ lineIdx: 1, endIdx: 1, numTs: 1000 })]),
+    mergedRecord(1, 'A', 1000), mergedRecord(2, 'B', 2000), mergedRecord(3, 'B', 1000),
+  ]]);
+  await page.goto('/');
+  await page.locator('#tab-bar').getByRole('button', { name: 'Merged', exact: true }).click();
+  await expect(page.locator('#log-ALL .has-marker')).toHaveCount(1); // only the unique one: msg2
+  await page.locator('#log-ALL .log-line', { hasText: 'msg1' }).click();
+  const download = page.waitForEvent('download');
+  await page.evaluate(() => document.getElementById('export-html-ALL').click());
+  const file = await saveDownload(await download, testInfo);
+
+  const exported = await openHtmlFile(browser, file);
+  await exported.locator('#tab-bar').getByRole('button', { name: 'Merged', exact: true }).click();
+  await expect(exported.locator('#log-ALL')).toContainText('msg1');
+  // msg1 alone is now unique for time 1000, but the marker was tied in the session: not guessed.
+  await expect(exported.locator('#log-ALL .has-marker')).toHaveCount(0);
+  await exported.close();
+});
+
+test('the #marker-1 link of an export focuses the record the marker names', async ({ page, browser }, testInfo) => {
+  await mockServer(page, [[
+    mergedConfig([mergedMarker({ numTs: 1000, sequence: 2 })]), // B's record, same time as A's
+    mergedRecord(1, 'A', 1000), mergedRecord(2, 'B', 1000),
+  ]]);
+  await page.goto('/');
+  await page.locator('#tab-bar').getByRole('button', { name: 'Merged', exact: true }).click();
+  await expect(page.locator('#log-ALL')).toContainText('msg2');
+  await page.locator('#log-ALL .log-line', { hasText: 'msg1' }).click();
+  await page.locator('#log-ALL .log-line', { hasText: 'msg2' }).click({ modifiers: ['Shift'] });
+  const download = page.waitForEvent('download');
+  await page.evaluate(() => document.getElementById('export-html-ALL').click());
+  const file = await saveDownload(await download, testInfo);
+
+  const exported = await browser.newPage();
+  await exported.goto(`file://${file}#marker-1`);
+  await expect(exported.locator('#log-ALL .has-marker')).toContainText('msg2');
+  // The focused (sync-highlighted) row is the marked one, not msg1.
+  await expect(exported.locator('#log-ALL .sync-highlight')).toContainText('msg2');
+  await expect(exported.locator('#log-ALL .sync-highlight')).toHaveCount(1);
+  await exported.close();
+});
+
 test('an exported selection keeps markers on their own lines', async ({ page, browser }, testInfo) => {
   // msg1 carries the marker; only msg2 and msg3 are exported.
   await mockServer(page, [[config([marker(0)]), record(1), record(2), record(3)]]);

@@ -294,6 +294,11 @@ pub struct Marker {
     pub description: String,
     #[serde(default)]
     pub created_at: String,
+    /// Session sequence of the marked record, when known. Unlike `line_idx` it is
+    /// unique across sources, so it identifies the record in a merged pane. Kept
+    /// when the marker set is saved back, or the server would lose it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<u64>,
 }
 
 // ---------------------------------------------------------------------------

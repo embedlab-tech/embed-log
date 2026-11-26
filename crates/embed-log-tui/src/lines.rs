@@ -90,6 +90,16 @@ pub fn marker_for_line(markers: &[Marker], line_idx: u64) -> Option<(char, Color
     Some(('▎', Color::Cyan))
 }
 
+/// The marker gutter symbol for a stored row. A marker with a sequence names exactly one
+/// record; one without falls back to the source-local line index.
+pub fn marker_for_stored_line(markers: &[Marker], line: &StoredLine) -> Option<(char, Color)> {
+    markers.iter().find(|m| match m.sequence {
+        Some(sequence) => sequence == line.sequence,
+        None => m.line_idx <= line.line_idx && line.line_idx <= m.end_idx.max(m.line_idx),
+    })?;
+    Some(('▎', Color::Cyan))
+}
+
 /// A single formatted log line ready to render.
 pub fn format_line(
     line: &StoredLine,
@@ -112,7 +122,7 @@ pub fn format_line(
     let ts_span = Span::styled(ts, Style::default().fg(Color::DarkGray));
 
     // Marker gutter.
-    let gutter: Span = match marker_for_line(markers, line.line_idx) {
+    let gutter: Span = match marker_for_stored_line(markers, line) {
         Some((ch, color)) => Span::styled(ch.to_string(), Style::default().fg(color)),
         None => Span::raw(" "),
     };
@@ -311,6 +321,32 @@ mod tests {
         assert!(format_line(&l, &[], TimestampMode::Absolute, Some(&rx)).is_none());
         let l2 = line("FATAL ERROR", None, false);
         assert!(format_line(&l2, &[], TimestampMode::Absolute, Some(&rx)).is_some());
+    }
+
+    #[test]
+    fn marker_gutter_follows_the_sequence_when_there_is_one() {
+        let at = |sequence, line_idx| StoredLine {
+            sequence,
+            line_idx,
+            ..Default::default()
+        };
+        let by_sequence = vec![Marker {
+            line_idx: 0,
+            end_idx: 0,
+            sequence: Some(2),
+            ..Default::default()
+        }];
+        // Two sources' first lines share line index 0; only the marked record gets the gutter.
+        assert!(marker_for_stored_line(&by_sequence, &at(1, 0)).is_none());
+        assert!(marker_for_stored_line(&by_sequence, &at(2, 0)).is_some());
+        // A marker without a sequence still goes by line index.
+        let legacy = vec![Marker {
+            line_idx: 5,
+            end_idx: 5,
+            ..Default::default()
+        }];
+        assert!(marker_for_stored_line(&legacy, &at(9, 5)).is_some());
+        assert!(marker_for_stored_line(&legacy, &at(5, 6)).is_none());
     }
 
     #[test]

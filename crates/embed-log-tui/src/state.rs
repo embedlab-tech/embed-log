@@ -705,12 +705,15 @@ impl State {
         let line = &self.raw_lines[&pane][raw_idx];
         let line_idx = line.line_idx;
         let num_ts = line.abs_num;
+        let sequence = line.sequence;
         let merged = !line.source_id.is_empty() && line.source_id != pane;
         let markers = self.markers.entry(pane.clone()).or_default();
-        // Toggle: remove if one exists at this line, else add.
-        let exists = markers
-            .iter()
-            .position(|m| m.line_idx == line_idx && (!merged || m.num_ts == num_ts));
+        // Toggle: remove if one exists at this record, else add. The sequence is the
+        // identity; markers without one fall back to the line (and time in a merged pane).
+        let exists = markers.iter().position(|m| match m.sequence {
+            Some(marked) => marked == sequence,
+            None => m.line_idx == line_idx && (!merged || m.num_ts == num_ts),
+        });
         if let Some(pos) = exists {
             markers.remove(pos);
         } else {
@@ -721,6 +724,7 @@ impl State {
                 num_ts,
                 description: String::new(),
                 created_at: chrono::Local::now().to_rfc3339(),
+                sequence: Some(sequence),
             });
         }
     }
@@ -1032,6 +1036,39 @@ mod tests {
         let elapsed = started.elapsed();
         eprintln!("100,000 appends to a full pane: {elapsed:?}");
         assert!(elapsed < std::time::Duration::from_secs(1), "{elapsed:?}");
+    }
+
+    #[test]
+    fn toggling_a_marker_in_a_merged_pane_records_the_record_sequence() {
+        let mut s = State::default();
+        s.apply_config(&cfg_with(vec![("T", vec!["ALL"])]));
+        // A's and B's first lines: same line index, same time, different sequence.
+        let line = |source: &str, sequence| StoredLine {
+            source_id: source.into(),
+            sequence,
+            line_idx: 0,
+            abs_num: 1000.0,
+            ..Default::default()
+        };
+        s.append_line("ALL", line("A", 1));
+        s.append_line("ALL", line("B", 2));
+        s.toggle_marker_active("ALL".into(), 1);
+        let markers = s.all_markers();
+        assert_eq!(markers.len(), 1);
+        assert_eq!(
+            markers[0].sequence,
+            Some(2),
+            "the marked record, not just its line index"
+        );
+        // The same row toggles it off; the other row does not.
+        s.toggle_marker_active("ALL".into(), 0);
+        assert_eq!(s.all_markers().len(), 2);
+        s.toggle_marker_active("ALL".into(), 1);
+        assert_eq!(s.all_markers().len(), 1);
+        assert_eq!(s.all_markers()[0].sequence, Some(1));
+        // It survives being saved back to the server.
+        let json = serde_json::to_string(&s.all_markers()[0]).unwrap();
+        assert!(json.contains(r#""sequence":1"#), "{json}");
     }
 
     #[test]

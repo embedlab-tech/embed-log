@@ -1630,12 +1630,48 @@ export function serverLineIdxOf(paneId, rawIdx) {
     return _rowServerId(paneId, rawIdx);
 }
 
+// Rows of a merged pane whose time equals a marker's, counted incrementally: new rows are
+// scanned as they arrive and the result is dropped when the rows are replaced (history
+// prepended, pane cleared).
+const _timeMatchCache = new WeakMap(); // marker object -> scan state (never serialized with it)
+function _timeMatches(paneId, marker) {
+    const lines = state.rawLines[paneId] || [];
+    let found = _timeMatchCache.get(marker);
+    if (!found || found.lines !== lines) {
+        found = { lines, scanned: 0, count: 0, index: -1 };
+        _timeMatchCache.set(marker, found);
+    }
+    for (; found.scanned < lines.length; found.scanned++) {
+        if (_rowRecord(paneId, found.scanned)?.num === marker.numTs) {
+            found.count++;
+            found.index = found.scanned;
+        }
+    }
+    return found;
+}
+
+/**
+ * For an export: give an older merged-pane marker the sequence of the record it names, so
+ * the exported page keeps the identity. A marker whose time is shared by several rows, or
+ * by none, cannot be told apart and is marked unresolved: the page will not draw it.
+ */
+export function markerForExport(paneId, marker) {
+    if (!_isMergePane(paneId) || Number.isFinite(marker.sequence)) return marker;
+    const found = _timeMatches(paneId, marker);
+    const sequence = found.count === 1 ? _rowRecord(paneId, found.index)?.sequence : null;
+    return Number.isFinite(sequence) ? { ...marker, sequence } : { ...marker, unresolved: true };
+}
+
 export function markerCoversRow(paneId, marker, rawIdx) {
     const row = _rowRecord(paneId, rawIdx);
     if (row === null) return false;
     if (_isMergePane(paneId) && (row.sequence !== null || row.num !== null)) {
         if (Number.isFinite(marker.sequence)) return row.sequence === marker.sequence;
-        return Number.isFinite(marker.numTs) && row.num === marker.numTs;
+        if (marker.unresolved) return false;
+        // An older marker names no record. Its time is only safe to go by when it belongs
+        // to exactly one row; with a tie between sources it is not drawn at all.
+        const found = _timeMatches(paneId, marker);
+        return found.count === 1 && found.index === rawIdx;
     }
     const id = row.serverLineIdx ?? rawIdx;
     return id >= marker.lineIdx && id <= (marker.endIdx ?? marker.lineIdx);
