@@ -10,6 +10,12 @@ const lineCount = (page, paneId) => page.evaluate(id => {
   return Number((/([\d,]+) lines/.exec(text)?.[1] || '0').replace(/,/g, ''));
 }, paneId);
 
+// The tab popup uses custom dropdowns: open the trigger, then pick an option.
+const pickFromMenu = async (page, label, value) => {
+  await page.getByLabel(label, { exact: true }).click();
+  await page.locator(`.dd-menu:not([hidden]) .dd-option[data-value="${value}"]`).click();
+};
+
 const openTabMenu = async (page, label) => {
   await page.getByRole('button', { name: label, exact: true }).hover();
   await expect(page.locator('#tab-swap-menu.open')).toBeVisible();
@@ -51,7 +57,7 @@ test.describe('pane add / remove', () => {
     const before = await lineCount(page, 'SENSOR_B');
 
     await openTabMenu(page, 'DevA');
-    await page.getByLabel('Add a pane to DevA').selectOption('SENSOR_B');
+    await pickFromMenu(page, 'Add a pane to DevA', 'SENSOR_B');
     await expect.poll(() => visiblePaneNames(page)).toEqual(['DEVICE_A', 'HOST']);
     await expect(page.locator('#tab-content-0 .splitter')).toHaveCount(1);
     expect(await lineCount(page, 'SENSOR_B')).toBeGreaterThanOrEqual(before);
@@ -60,10 +66,11 @@ test.describe('pane add / remove', () => {
 
   test('a pane of another view can be moved in, but never out of a one-pane view', async ({ page }) => {
     await openTabMenu(page, 'DevA');
-    const add = page.getByLabel('Add a pane to DevA');
+    await page.getByLabel('Add a pane to DevA', { exact: true }).click();
     // AUX is alone in DevB, so it is not offered; DUT and DEBUG share UART, so they are.
-    await expect(add.locator('option[value="SENSOR_C"]')).toHaveCount(0);
-    await add.selectOption('UART_DEBUG');
+    await expect(page.locator('.dd-menu:not([hidden]) .dd-option[data-value="SENSOR_C"]')).toHaveCount(0);
+    await expect(page.locator('.dd-menu:not([hidden]) .dd-group')).toHaveText(['Move from another view']);
+    await page.locator('.dd-menu:not([hidden]) .dd-option[data-value="UART_DEBUG"]').click();
     await expect.poll(() => visiblePaneNames(page)).toEqual(['DEVICE_A', 'HOST', 'DEBUG']);
 
     await page.getByRole('button', { name: 'UART', exact: true }).click();
@@ -99,5 +106,25 @@ test.describe('pane add / remove', () => {
     await expect.poll(() => visiblePaneNames(page)).toEqual(['DEVICE_A']);
     await expect(page.locator('#pane-SENSOR_B')).toHaveCount(1);
     await expect(page.locator('#hidden-panes #pane-SENSOR_B')).toHaveCount(1);
+  });
+
+  test('swap and add use custom dropdowns that work from the keyboard', async ({ page }) => {
+    await openTabMenu(page, 'DevA');
+    // Hidden panes are listed under their own heading and shown with the view they are in.
+    await page.locator('#tab-swap-menu').getByRole('button', { name: 'Remove HOST from this view' }).click();
+    await page.getByLabel('Add a pane to DevA', { exact: true }).click();
+    await expect(page.locator('.dd-menu:not([hidden]) .dd-group').first()).toHaveText('Hidden');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.dd-menu:not([hidden])')).toHaveCount(0);
+
+    // Swap DEVICE_A with the pane of DevB from the keyboard.
+    const swap = page.getByLabel('Swap DEVICE_A with', { exact: true });
+    await swap.focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(page.locator('.dd-menu:not([hidden])')).toBeVisible();
+    await page.locator('.dd-menu:not([hidden]) .dd-option[data-value="SENSOR_C"]').focus();
+    await page.keyboard.press('Enter');
+    await expect.poll(() => visiblePaneNames(page)).toEqual(['AUX']);
+    await expect(page.locator('#tab-content-1 #pane-SENSOR_A')).toHaveCount(1);
   });
 });

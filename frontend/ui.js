@@ -385,54 +385,141 @@ window.__embedLogApplySavedLayout = function __embedLogApplySavedLayout() {
     rebuildLayout();
 };
 
-function _buildSwapTargetOptions(select, fromPaneId) {
-    select.innerHTML = "";
-    const placeholder = document.createElement("option");
-    placeholder.value = "";
-    placeholder.textContent = "swap with…";
-    placeholder.selected = true;
-    select.appendChild(placeholder);
+// One custom listbox open at a time; a click anywhere else closes it.
+let _openMenuSelect = null;
+function _closeMenuSelect() {
+    if (!_openMenuSelect) return;
+    _openMenuSelect.menu.hidden = true;
+    _openMenuSelect.trigger.setAttribute("aria-expanded", "false");
+    _openMenuSelect = null;
+}
+document.addEventListener("pointerdown", event => {
+    if (_openMenuSelect && !_openMenuSelect.wrap.contains(event.target)) _closeMenuSelect();
+});
+window.addEventListener("resize", _closeMenuSelect);
 
-    PANES.forEach(otherId => {
-        if (otherId === fromPaneId) return;
-        const loc = _findPaneLocation(otherId);
-        const tabLabel = loc ? TABS[loc.tabIdx].label : "?";
-        const opt = document.createElement("option");
-        opt.value = otherId;
-        opt.textContent = `${paneLabel(otherId)} · ${tabLabel}`;
-        select.appendChild(opt);
+/**
+ * Custom listbox instead of <select>, in the look of the other dropdowns.
+ * groups: [{ label?, items: [{ value, name, detail? }] }]; onPick(value) runs on choice.
+ */
+function _createMenuSelect({ placeholder, ariaLabel, groups, onPick, disabled = false, title = "" }) {
+    const wrap = document.createElement("div");
+    wrap.className = "dictionary-choice dd-block";
+    const trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.className = "dd-trigger";
+    trigger.setAttribute("role", "combobox");
+    trigger.setAttribute("aria-haspopup", "listbox");
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.setAttribute("aria-label", ariaLabel);
+    trigger.disabled = disabled;
+    trigger.title = title;
+    const text = document.createElement("span");
+    text.className = "dd-trigger-name dd-placeholder";
+    text.textContent = placeholder;
+    const caret = document.createElement("span");
+    caret.className = "dd-caret";
+    caret.textContent = "▾";
+    trigger.append(text, caret);
+
+    const menu = document.createElement("ul");
+    menu.className = "dd-menu";
+    menu.setAttribute("role", "listbox");
+    menu.hidden = true;
+    groups.forEach(group => {
+        if (group.label) {
+            const heading = document.createElement("li");
+            heading.className = "dd-group";
+            heading.setAttribute("role", "presentation");
+            heading.textContent = group.label;
+            menu.appendChild(heading);
+        }
+        group.items.forEach(item => {
+            const option = document.createElement("li");
+            option.className = "dd-option";
+            option.setAttribute("role", "option");
+            option.tabIndex = -1;
+            option.dataset.value = item.value;
+            const top = document.createElement("span");
+            top.className = "dd-option-top";
+            const name = document.createElement("span");
+            name.className = "dd-option-name";
+            name.textContent = item.name;
+            top.appendChild(name);
+            if (item.detail) {
+                const detail = document.createElement("span");
+                detail.className = "dd-option-build";
+                detail.textContent = item.detail;
+                top.appendChild(detail);
+            }
+            option.appendChild(top);
+            menu.appendChild(option);
+        });
     });
+    wrap.append(trigger, menu);
+
+    const options = () => [...menu.querySelectorAll('[role="option"]')];
+    const focusAt = index => {
+        const list = options();
+        if (list.length) list[Math.max(0, Math.min(list.length - 1, index))].focus();
+    };
+    const open = () => {
+        if (trigger.disabled) return;
+        _closeMenuSelect();
+        const box = trigger.getBoundingClientRect();
+        Object.assign(menu.style, { left: `${box.left}px`, top: `${box.bottom + 2}px`, minWidth: `${box.width}px` });
+        menu.hidden = false;
+        trigger.setAttribute("aria-expanded", "true");
+        _openMenuSelect = { wrap, menu, trigger };
+        focusAt(0);
+    };
+    trigger.addEventListener("click", () => (_openMenuSelect?.trigger === trigger ? _closeMenuSelect() : open()));
+    trigger.addEventListener("keydown", event => {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); open(); }
+    });
+    menu.addEventListener("click", event => {
+        const option = event.target.closest('[role="option"]');
+        if (!option) return;
+        _closeMenuSelect();
+        onPick(option.dataset.value);
+    });
+    menu.addEventListener("keydown", event => {
+        const list = options();
+        const at = list.indexOf(document.activeElement);
+        if (event.key === "ArrowDown") { event.preventDefault(); focusAt(at + 1); }
+        else if (event.key === "ArrowUp") { event.preventDefault(); focusAt(at - 1); }
+        else if (event.key === "Home") { event.preventDefault(); focusAt(0); }
+        else if (event.key === "End") { event.preventDefault(); focusAt(list.length - 1); }
+        else if ((event.key === "Enter" || event.key === " ") && at >= 0) {
+            event.preventDefault();
+            _closeMenuSelect();
+            onPick(list[at].dataset.value);
+        } else if (event.key === "Escape") { event.preventDefault(); _closeMenuSelect(); trigger.focus(); }
+        else if (event.key === "Tab") _closeMenuSelect();
+    });
+    return wrap;
 }
 
-function _buildAddOptions(select, tabIdx) {
-    select.innerHTML = "";
-    const placeholder = document.createElement("option");
-    placeholder.value = "";
-    placeholder.textContent = "add pane…";
-    placeholder.selected = true;
-    select.appendChild(placeholder);
+function _swapTargetGroups(fromPaneId) {
+    // Swapping is between panes that are in a view; hidden ones are brought back with "Add".
+    const items = PANES.filter(id => id !== fromPaneId && _findPaneLocation(id)).map(id => ({
+        value: id,
+        name: paneLabel(id),
+        detail: TABS[_findPaneLocation(id).tabIdx].label,
+    }));
+    return items.length ? [{ items }] : [];
+}
 
-    const group = (label, ids, text) => {
-        if (!ids.length) return;
-        const optgroup = document.createElement("optgroup");
-        optgroup.label = label;
-        ids.forEach(id => {
-            const opt = document.createElement("option");
-            opt.value = id;
-            opt.textContent = text(id);
-            optgroup.appendChild(opt);
-        });
-        select.appendChild(optgroup);
-    };
-    const hidden = _hiddenPanes();
+function _addPaneGroups(tabIdx) {
+    const hidden = _hiddenPanes().map(id => ({ value: id, name: paneLabel(id) }));
     const movable = PANES.filter(id => {
         const loc = _findPaneLocation(id);
         return loc && loc.tabIdx !== tabIdx && TABS[loc.tabIdx].panes.length > 1;
-    });
-    group("Hidden", hidden, id => paneLabel(id));
-    group("Move from another view", movable, id => `${paneLabel(id)} · ${TABS[_findPaneLocation(id).tabIdx].label}`);
-    select.disabled = !hidden.length && !movable.length;
-    select.title = select.disabled ? "Every source is already in this view" : "";
+    }).map(id => ({ value: id, name: paneLabel(id), detail: TABS[_findPaneLocation(id).tabIdx].label }));
+    return [
+        ...(hidden.length ? [{ label: "Hidden", items: hidden }] : []),
+        ...(movable.length ? [{ label: "Move from another view", items: movable }] : []),
+    ];
 }
 
 // Hover popup on tab labels — compact place for pane controls (swap, add, remove).
@@ -447,6 +534,7 @@ function _buildAddOptions(select, tabIdx) {
     let hideTimer = null;
 
     function hideMenu() {
+        _closeMenuSelect();
         menu.classList.remove("open");
     }
 
@@ -464,6 +552,7 @@ function _buildAddOptions(select, tabIdx) {
         if (!Number.isInteger(tabIdx) || !TABS[tabIdx]) return;
 
         const panes = TABS[tabIdx].panes;
+        _closeMenuSelect();
         menu.innerHTML = "";
 
         const title = document.createElement("div");
@@ -479,14 +568,16 @@ function _buildAddOptions(select, tabIdx) {
             name.className = "tab-swap-pane-name";
             name.textContent = paneLabel(paneId);
 
-            const select = document.createElement("select");
-            select.className = "tab-swap-select";
-            _buildSwapTargetOptions(select, paneId);
-            select.addEventListener("change", () => {
-                const target = select.value;
-                if (!target) return;
-                _swapPanes(paneId, target);
-                showForButton(btn); // refresh options + tab membership labels
+            const swapGroups = _swapTargetGroups(paneId);
+            const select = _createMenuSelect({
+                placeholder: "swap with…",
+                ariaLabel: `Swap ${paneLabel(paneId)} with`,
+                groups: swapGroups,
+                disabled: !swapGroups.length,
+                onPick: target => {
+                    _swapPanes(paneId, target);
+                    showForButton(btn); // refresh options + tab membership labels
+                },
             });
 
             const remove = document.createElement("button");
@@ -514,14 +605,17 @@ function _buildAddOptions(select, tabIdx) {
         const addLabel = document.createElement("span");
         addLabel.className = "tab-swap-pane-name";
         addLabel.textContent = "Add";
-        const addSelect = document.createElement("select");
-        addSelect.className = "tab-swap-select";
-        addSelect.setAttribute("aria-label", `Add a pane to ${TABS[tabIdx].label}`);
-        _buildAddOptions(addSelect, tabIdx);
-        addSelect.addEventListener("change", () => {
-            if (!addSelect.value) return;
-            _addPane(tabIdx, addSelect.value);
-            showForButton(btn);
+        const addGroups = _addPaneGroups(tabIdx);
+        const addSelect = _createMenuSelect({
+            placeholder: "add pane…",
+            ariaLabel: `Add a pane to ${TABS[tabIdx].label}`,
+            groups: addGroups,
+            disabled: !addGroups.length,
+            title: addGroups.length ? "" : "Every source is already in this view",
+            onPick: value => {
+                _addPane(tabIdx, value);
+                showForButton(btn);
+            },
         });
         addRow.append(addLabel, addSelect);
         menu.appendChild(addRow);
