@@ -26,6 +26,26 @@ enum AssumedFrame {
     NeedMore,
     Record(usize),
     NotARecord,
+    /// Plausible header but an unusually long record that does not look binary: it may be
+    /// console text after a stray NUL, or a real record. Carries the declared total length.
+    Uncertain(usize),
+}
+
+/// Bytes of an unclear record start, kept aside while the same bytes are also shown as text,
+/// so a real record is never lost to the guess that it was text.
+struct Shadow {
+    bytes: Vec<u8>,
+    total: usize,
+}
+
+/// A record header has several control bytes (zero high bytes of lengths, source and
+/// timestamp); console text has none.
+fn looks_binary(header: &[u8]) -> bool {
+    header
+        .iter()
+        .filter(|&&b| b < 0x20 && !matches!(b, b'\t' | b'\r' | b'\n' | 0x1b))
+        .count()
+        >= 3
 }
 
 fn assumed_frame(bytes: &[u8]) -> AssumedFrame {
@@ -49,21 +69,19 @@ fn assumed_frame(bytes: &[u8]) -> AssumedFrame {
             if package < 4 + ASSUMED_PTR_SIZE {
                 return AssumedFrame::NotARecord;
             }
-            // Both lengths are u16, so a real record can be up to ~128 KiB: never cap what
-            // may be a valid record, or its bytes would be dropped and read as text. Only
-            // an unusually long one has to look like a record header before we wait for it:
-            // a source id that fits 16 bits (high bytes zero). Console text after a stray
-            // NUL would not.
-            if (package > ASSUMED_USUAL_SECTION || data > ASSUMED_USUAL_SECTION)
-                && !(bytes.len() >= 10 && bytes[8] == 0 && bytes[9] == 0)
-            {
-                return if bytes.len() < 10 {
-                    AssumedFrame::NeedMore
-                } else {
-                    AssumedFrame::NotARecord
-                };
-            }
+            // Both lengths are u16, so a real record can be up to ~128 KiB: never refuse
+            // one for its size. An unusually long one has to look like a record header
+            // before we simply wait for it; otherwise it is unclear and handled as such.
             let total = 6 + ASSUMED_PTR_SIZE + ASSUMED_TIMESTAMP_SIZE + package + data;
+            if package > ASSUMED_USUAL_SECTION || data > ASSUMED_USUAL_SECTION {
+                let header = 6 + ASSUMED_PTR_SIZE + ASSUMED_TIMESTAMP_SIZE;
+                if bytes.len() < header {
+                    return AssumedFrame::NeedMore;
+                }
+                if !looks_binary(&bytes[1..header]) {
+                    return AssumedFrame::Uncertain(total);
+                }
+            }
             if bytes.len() < total {
                 AssumedFrame::NeedMore
             } else {
@@ -91,6 +109,7 @@ pub struct ZephyrDictBinaryParser {
     reported_load_error: bool,
     console_text: Vec<u8>,
     records: usize,
+    shadow: Option<Shadow>,
 }
 
 impl ZephyrDictBinaryParser {
@@ -114,6 +133,7 @@ impl ZephyrDictBinaryParser {
             reported_load_error: false,
             console_text: Vec::new(),
             records: 0,
+            shadow: None,
         }
     }
 
@@ -121,18 +141,28 @@ impl ZephyrDictBinaryParser {
     /// record as one Base64 line, so nothing is lost and it can be decoded later.
     fn feed_without_dictionary(&mut self, data: &[u8], lines: &mut Vec<String>) {
         self.pending.extend_from_slice(data);
+        let mut shadow = self.shadow.take();
         let mut offset = 0;
         while offset < self.pending.len() {
             let bytes = &self.pending[offset..];
             let byte = bytes[0];
-            if byte == MSG_TYPE_NORMAL || byte == MSG_TYPE_DROPPED {
+            let mut step = 1;
+            // Inside an unclear long record the bytes are only shown as text, not re-framed.
+            if shadow.is_none() && (byte == MSG_TYPE_NORMAL || byte == MSG_TYPE_DROPPED) {
                 match assumed_frame(bytes) {
                     AssumedFrame::NeedMore => break,
                     AssumedFrame::Record(len) => {
                         flush_binary_console(&mut self.console_text, lines);
                         lines.push(raw_line(&bytes[..len]));
-                        offset += len;
-                        continue;
+                        step = len;
+                    }
+                    AssumedFrame::Uncertain(total) => {
+                        if shadow.is_none() {
+                            shadow = Some(Shadow {
+                                bytes: Vec::new(),
+                                total,
+                            });
+                        }
                     }
                     // A stray NUL/SOH in console output: dropped, as it always was.
                     AssumedFrame::NotARecord => {}
@@ -140,8 +170,19 @@ impl ZephyrDictBinaryParser {
             } else if byte >= 0x20 || matches!(byte, b'\t' | b'\r' | b'\n' | 0x1b) {
                 push_binary_console(&mut self.console_text, byte, lines);
             }
-            offset += 1;
+            if let Some(unclear) = shadow.as_mut() {
+                unclear.bytes.extend_from_slice(&bytes[..step]);
+                if unclear.bytes.len() >= unclear.total {
+                    // The declared length has arrived: keep those bytes too, whatever they
+                    // were shown as.
+                    flush_binary_console(&mut self.console_text, lines);
+                    lines.push(raw_line(&unclear.bytes[..unclear.total]));
+                    shadow = None;
+                }
+            }
+            offset += step;
         }
+        self.shadow = shadow;
         self.pending.drain(..offset);
     }
 
@@ -795,6 +836,53 @@ mod tests {
                 lines.len(),
                 4,
                 "{extra}: no stray text from the record: {lines:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_long_record_is_kept_whatever_its_source_id() {
+        for source in [1u32, 65_535, 0x0001_0000, 0x4142_4344, 0xFFFF_FFFF] {
+            for extra in [2049usize, 5000, 60_000] {
+                let data: Vec<u8> = (0..extra).map(|i| (i % 251) as u8).collect();
+                let record = encode_normal_message(3, source, 7, 0x1000, &[], &data);
+                let mut failed = ZephyrDictBinaryParser::new("/nonexistent/binary-dictionary.json");
+                let lines = failed.feed(&record);
+                let raw: Vec<&String> = lines
+                    .iter()
+                    .filter(|l| l.starts_with(crate::parsers::RAW_LINE_PREFIX))
+                    .collect();
+                assert_eq!(raw.len(), 1, "source {source:#x}, {extra} B: {lines:?}");
+                assert_eq!(raw_payload(raw[0]), record, "source {source:#x}, {extra} B");
+                assert_eq!(
+                    lines.len(),
+                    2,
+                    "source {source:#x}: nothing else, no stray text"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_long_record_whose_header_does_not_look_binary_is_still_kept() {
+        // Large source id and timestamp, printable length bytes: nothing in the header says
+        // "binary". It may be shown as text too, but its bytes must be stored intact.
+        for extra in [2049usize, 20_000, 40_000] {
+            let data: Vec<u8> = (0..extra).map(|i| (i % 251) as u8).collect();
+            let record = encode_normal_message(3, 0xFFFF_FFFF, 0x4142_4344, 0x1000, &[], &data);
+            let mut stream = b"before\r\n".to_vec();
+            stream.extend(&record);
+            stream.extend(b"after\r\n");
+            let mut failed = ZephyrDictBinaryParser::new("/nonexistent/binary-dictionary.json");
+            let lines = failed.feed(&stream);
+            let raw: Vec<&String> = lines
+                .iter()
+                .filter(|l| l.starts_with(crate::parsers::RAW_LINE_PREFIX))
+                .collect();
+            assert!(
+                raw.iter().any(|l| raw_payload(l) == record),
+                "{extra} B: the record is stored intact ({} raw lines)",
+                raw.len()
             );
         }
     }
