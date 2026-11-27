@@ -737,7 +737,7 @@ impl State {
         if let Some(pos) = exists {
             markers.remove(pos);
         } else {
-            markers.push(Marker {
+            let marker = Marker {
                 pane_id: pane.clone(),
                 line_idx,
                 end_idx: line_idx,
@@ -747,7 +747,12 @@ impl State {
                 // 0 is "no sequence": a record without the field defaults to it.
                 sequence: (sequence != 0).then_some(sequence),
                 exact: false,
-            });
+            };
+            // A marker that could not name one row would be invisible and pile up on every
+            // keypress, so it is not added.
+            if resolve_marker(lines, merged, &marker).is_some() {
+                markers.push(marker);
+            }
         }
     }
 
@@ -1182,6 +1187,27 @@ mod tests {
         let left = s.all_markers();
         assert_eq!(left.len(), 1);
         assert_eq!(left[0].sequence, Some(1), "A's new marker stays");
+    }
+
+    #[test]
+    fn toggling_an_indistinguishable_row_adds_no_invisible_marker() {
+        let mut s = State::default();
+        s.apply_config(&cfg_with(vec![("T", vec!["ALL"])]));
+        for source in ["A", "B"] {
+            s.append_line(
+                "ALL",
+                StoredLine {
+                    source_id: source.into(),
+                    line_idx: 5,
+                    abs_num: 100.0,
+                    ..Default::default() // sequence 0
+                },
+            );
+        }
+        for _ in 0..3 {
+            s.toggle_marker_active("ALL".into(), 0);
+        }
+        assert!(s.all_markers().is_empty(), "nothing invisible is added");
     }
 
     #[test]
