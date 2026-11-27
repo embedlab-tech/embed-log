@@ -340,10 +340,18 @@ impl StreamParser for ZephyrDictBinaryParser {
         let mut lines = Vec::new();
         if matches!(self.state, LoadState::Failed(_)) {
             // A record that stalls is stored as it is, so the offline decoder sees every byte.
-            if idle_for >= INCOMPLETE_RECORD_IDLE_DEADLINE && !self.pending.is_empty() {
-                flush_binary_console(&mut self.console_text, &mut lines);
-                lines.push(raw_line(&self.pending));
-                self.pending.clear();
+            if idle_for >= INCOMPLETE_RECORD_IDLE_DEADLINE {
+                // Bytes kept aside for an unclear long record are stored too: a real record
+                // that arrived after stray text would otherwise be lost with the session.
+                if let Some(unclear) = self.shadow.take() {
+                    flush_binary_console(&mut self.console_text, &mut lines);
+                    lines.push(raw_line(&unclear.bytes));
+                }
+                if !self.pending.is_empty() {
+                    flush_binary_console(&mut self.console_text, &mut lines);
+                    lines.push(raw_line(&self.pending));
+                    self.pending.clear();
+                }
             }
             flush_binary_console(&mut self.console_text, &mut lines);
             return lines;
@@ -885,6 +893,27 @@ mod tests {
                 raw.len()
             );
         }
+    }
+
+    #[test]
+    fn a_record_after_unclear_text_is_stored_when_the_stream_goes_idle() {
+        // NUL + text can look like the start of a long record; a real record follows and
+        // then the session goes quiet.
+        let record = encode_normal_message(3, 1, 7, 0x1000, &[], b"payload");
+        let mut stream = b"\x00 READY for input\r\n".to_vec();
+        stream.extend(&record);
+        let mut failed = ZephyrDictBinaryParser::new("/nonexistent/binary-dictionary.json");
+        let mut lines = failed.feed(&stream);
+        lines.extend(failed.on_idle(INCOMPLETE_RECORD_IDLE_DEADLINE));
+        let stored: Vec<u8> = lines
+            .iter()
+            .filter(|l| l.starts_with(crate::parsers::RAW_LINE_PREFIX))
+            .flat_map(|l| raw_payload(l))
+            .collect();
+        assert!(
+            stored.windows(record.len()).any(|w| w == record.as_slice()),
+            "the record's bytes are recoverable from the stored lines"
+        );
     }
 
     #[test]
