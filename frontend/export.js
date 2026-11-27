@@ -7,7 +7,7 @@ import {
 const STATIC_EXPORT_PROFILE =
     typeof STATIC_PROFILE !== 'undefined' ? STATIC_PROFILE : window.__embedLogProfile;
 
-import { renderPaneWindow, updateJumpBtn, getLine, hydratePaneRows, refreshStatsUi } from './lines.js';
+import { renderPaneWindow, updateJumpBtn, getLine, hydratePaneRows, refreshStatsUi, markerForExport } from './lines.js';
 
 import { state, TABS, PANES, PANE_LABELS } from './state.js';
 import { isEditableTarget, isComposingEvent } from './keyboard.js';
@@ -148,6 +148,9 @@ export async function exportHtmlSnapshot(options = {}) {
             if (line.sourceId) meta.sourceId = line.sourceId;
             if (line.level) meta.level = line.level;
             if (line.sessionId) meta.sessionId = line.sessionId;
+            // Markers name server line indexes; without it the page would use positions.
+            const lineIdx = line.serverLineIdx ?? line.lineIdx;
+            if (Number.isFinite(lineIdx)) meta.lineIdx = lineIdx;
             if (Number.isFinite(line.sequence)) meta.sequence = line.sequence;
             if (Number.isFinite(line.recordOrdinal)) meta.recordOrdinal = line.recordOrdinal;
             if (Number.isFinite(line.originalBytes)) meta.originalBytes = line.originalBytes;
@@ -203,7 +206,7 @@ export async function exportHtmlSnapshot(options = {}) {
     if (typeof window.__embedLogUpdateTimestampModeUi === "function") {
         window.__embedLogUpdateTimestampModeUi();
     }
-    var _markers = ${_safeJson(Object.values(state.markers).flat() || [])};
+    var _markers = ${_safeJson(Object.entries(state.markers).flatMap(([paneId, list]) => (list || []).map(marker => markerForExport(paneId, marker))))};
     if (_markers.length) {
         state.markers = {};
         _markers.forEach(function (m) {
@@ -223,7 +226,7 @@ export async function exportHtmlSnapshot(options = {}) {
         var flat = [];
         Object.keys(state.markers).forEach(function (pid) {
             (state.markers[pid] || []).forEach(function (mk) {
-                flat.push({ paneId: pid, lineIdx: mk.lineIdx, numTs: mk.numTs });
+                flat.push(Object.assign({}, mk, { paneId: pid }));
             });
         });
         flat.sort(function (a, b) { return (a.numTs || 0) - (b.numTs || 0); });
@@ -234,8 +237,11 @@ export async function exportHtmlSnapshot(options = {}) {
             if (TABS[t].panes.indexOf(target.paneId) >= 0) { tabIdx = t; break; }
         }
         if (tabIdx >= 0 && typeof switchTab === 'function') switchTab(tabIdx);
-        if (typeof ensureLineVisible === 'function') ensureLineVisible(target.paneId, target.lineIdx, { align: 'center' });
-        var div = document.querySelector('#log-' + target.paneId + ' [data-idx="' + target.lineIdx + '"]');
+        // Markers name server line indexes; find the row that holds that line.
+        var rawIdx = typeof markerRawIndex === 'function' ? markerRawIndex(target.paneId, target) : target.lineIdx;
+        if (rawIdx === null) return;
+        if (typeof ensureLineVisible === 'function') ensureLineVisible(target.paneId, rawIdx, { align: 'center' });
+        var div = document.querySelector('#log-' + target.paneId + ' [data-idx="' + rawIdx + '"]');
         if (!div) return;
         var logEl = document.getElementById('log-' + target.paneId);
         if (!logEl) return;

@@ -6,7 +6,7 @@ import { configurePanePlugins, resetPanePlugins } from './pluginRuntime.js';
 import { invalidatePaneFilterProjection } from './lines.js';
 
 import { switchTab } from './tabs.js';
-import { updatePaneSearch } from './lines.js';
+import { updatePaneSearch, utf8ByteLength } from './lines.js';
 
 let ws = null;
 let wsRetryDelay = 1000;
@@ -16,6 +16,10 @@ let currentSessionId = null;
 let pendingLogMessages = [];
 let pendingLogFlush = false;
 let configReady = false;
+// Highest record sequence seen in the current session (sequences are global and contiguous),
+// and whether the first record after a reconnect still has to prove there is no gap.
+let lastSequence = 0;
+let checkReplayGap = false;
 let virtualMerges = [];
 const LOG_FLUSH_MAX_LINES = 1000;
 const searchHistoryRequests = new Map();
@@ -222,9 +226,21 @@ async function _handleConfigMessage(msg) {
         try {
             skipCachedLines ||= !!sessionId && sessionStorage.getItem(STREAM_GAP_SESSION_KEY) === sessionId;
         } catch {}
+        // Same session again, after a dropped connection and with no known gap: the
+        // loaded records stay. The replay only brings the recent ones, and records
+        // already held are skipped by sequence. Clearing would drop older history, the
+        // selection and the markers' rows for something the server cannot resend.
+        const resumesSession = !!currentSessionId && !isSessionChange && sessionId === currentSessionId && !state.streamGap;
         hideStreamGap();
-        if (isSessionChange) resetLayoutForNewSession();
-        else clearAllPaneContents();
+        if (isSessionChange) {
+            resetLayoutForNewSession();
+            lastSequence = 0;
+        } else if (resumesSession) {
+            checkReplayGap = lastSequence > 0;
+        } else {
+            clearAllPaneContents();
+            lastSequence = 0;
+        }
         window.__embedLogSetSession?.(msg.session || null, { skipCachedLines });
     }
     currentSessionId = sessionId || currentSessionId;
@@ -356,6 +372,8 @@ function wsConnect() {
             state.syncTs = null;
             state.syncTabSwitch = false;
             clearAllPaneContents();
+            lastSequence = 0;
+            checkReplayGap = false;
             setTimestampContext({
                 mode: msg.session?.timestamp_mode || "absolute",
                 firstLogAt: msg.session?.first_log_at,
@@ -402,8 +420,17 @@ function wsConnect() {
         if (msg.type !== "rx" && msg.type !== "tx") return;
 
         const { type, data, timestamp, timestamp_iso, timestamp_num, source_id,
-                absTs, absNum, relTs, relNum, line_idx, sequence, session_id, level } = msg;
+                absTs, absNum, relTs, relNum, line_idx, sequence, session_id, level, message } = msg;
         if (!source_id) return;
+        if (Number.isFinite(sequence) && (!session_id || session_id === currentSessionId)) {
+            // Sequences are contiguous. If the first record after a reconnect starts past
+            // the last one seen, records were missed that this client cannot get back.
+            if (checkReplayGap) {
+                checkReplayGap = false;
+                if (sequence > lastSequence + 1) showStreamGap();
+            }
+            if (sequence > lastSequence) lastSequence = sequence;
+        }
 
         const destinations = [];
         if (PANES.includes(source_id)) destinations.push({ paneId: source_id, virtual: false });
@@ -427,7 +454,9 @@ function wsConnect() {
             absTs, absNum, relTs, relNum,
             lineIdx: line_idx,
             sessionId: session_id || currentSessionId,
-            ...(hasMerge ? { originalBytes: messageEncoder.encode(text).length } : {}),
+            // The record as the device sent it. `data` also holds the colour the server adds
+            // for display, which must not count as logged bytes (the exports use `message`).
+            originalBytes: utf8ByteLength(typeof message === "string" ? message : text),
             ...(Number.isFinite(sequence) ? { sequence } : { recordOrdinal: nextRecordOrdinal++ }),
             ...(typeof level === "string" && level ? { level } : {}),
         };

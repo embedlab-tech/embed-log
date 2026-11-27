@@ -136,17 +136,10 @@ body {
 /* ---- Toolbar ---- */
 #toolbar {
     display: grid;
-    /* Side columns are `auto` (their own content's natural width — never
-       clipped, never fought over), Live's column is the single `1fr` and
-       absorbs whatever's left. `justify-self: center` on .btn-live then
-       centers it within that leftover gap. This toolbar's two sides are
-       rarely balanced (many buttons left, one WS badge right), so this
-       centers Live in the visually free space between them rather than
-       in the dead-center of the whole window — which would either clip
-       real buttons off the fuller side or require JS-measured columns to
-       force true equal widths. Unlike absolute positioning, grid tracks
-       never overlap, so Live can't overlap the side content either way. */
-    grid-template-columns: auto 1fr auto;
+    /* Two columns: the left group takes the free space, the right group (Live, the
+       line counter, settings, connection state) sits at its natural width at the end.
+       Live used to be a third, centred column, away from the counter it belongs to. */
+    grid-template-columns: 1fr auto;
     align-items: center;
     height: 44px;
     background: var(--header);
@@ -177,7 +170,6 @@ body {
 }
 
 .btn-live {
-    justify-self: center;
     background: var(--accent);
     border-color: var(--accent);
     color: #fff;
@@ -213,12 +205,11 @@ body {
         scrollbar-width: thin;
     }
     #toolbar > .toolbar-left,
-    #toolbar > .toolbar-right,
-    #toolbar > .btn-live {
+    #toolbar > .toolbar-right {
         flex: 0 0 auto;
     }
-    #toolbar > .btn-live {
-        margin-inline: auto;
+    #toolbar > .toolbar-right {
+        margin-left: auto;
     }
     .toolbar-group {
         min-width: max-content;

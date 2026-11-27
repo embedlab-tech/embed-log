@@ -15,8 +15,8 @@ const ACTIONS = [
 /**
  * Render the toolbar HTML for a given profile.
  * Returns the full <div id="toolbar">…</div> string.
- * Three grid columns (left / Live / right) so the Live button sits truly
- * centered without overlapping the stats or ws-status content — see viewer.css.
+ * Two grid columns (left / right). Live sits at the start of the right group,
+ * next to the line counter it relates to — see viewer.css.
  */
 export function renderToolbar(profile) {
     const caps = profile.capabilities;
@@ -39,9 +39,8 @@ export function renderToolbar(profile) {
 
     parts.push('    </div>');
 
-    parts.push(`    <button id="btn-jump-all" class="btn-live" title="${_escAttr('Jump every pane to its latest line and keep tab switches live (Shift+L)')}">Live</button>`);
-
     parts.push('    <div class="toolbar-group toolbar-right">');
+    parts.push(`        <button id="btn-jump-all" class="btn-live" title="${_escAttr('Jump every pane to its latest line and keep tab switches live (Shift+L)')}">Live</button>`);
     parts.push('        <div id="toolbar-stats" class="toolbar-stats"></div>');
     if (caps.wsStatus) {
         parts.push('        <div id="ws-status" class="disconnected">WS: disconnected</div>');
