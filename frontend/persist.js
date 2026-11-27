@@ -9,6 +9,9 @@ const STORAGE_KEY_SUFFIX = ':v1';
 const LAST_SESSION_KEY = 'embed-log:last-session-id';
 const MAX_LINES_PER_PANE = 1500;
 const SAVE_DEBOUNCE_MS = 500;
+// Live panes append every frame, so a pure debounce would never fire while
+// logs stream. Save at least this often while changes keep coming.
+const SAVE_MAX_WAIT_MS = 2000;
 
 let _storageKey = `${STORAGE_KEY_PREFIX}default${STORAGE_KEY_SUFFIX}`;
 let _hasSessionInfo = false;
@@ -17,6 +20,7 @@ let _restoreDone = false;
 let _skipCachedLines = false;
 let _restoring = false;
 let _saveTimer = null;
+let _firstPendingAt = 0;
 
 function _safeJsonParse(text) {
     try { return JSON.parse(text); } catch { return null; }
@@ -27,7 +31,8 @@ function _snapshot() {
     PANES.forEach(paneId => {
         const src = state.rawLines[paneId] || [];
         const start = Math.max(0, src.length - MAX_LINES_PER_PANE);
-        const sliced = src.slice(start).map((_, offset) => {
+        const sliced = src.slice(start).map((entry, offset) => {
+            if (Array.isArray(entry)) return _snapshotTuple(entry);
             const line = getLine(paneId, start + offset);
             return {
                 ts: line?.ts ?? '',
@@ -56,6 +61,29 @@ function _snapshot() {
         panePluginUiState: getPanePluginUiState(),
         lines,
         savedAt: Date.now(),
+    };
+}
+
+const _finiteOrNull = value => (Number.isFinite(value) ? value : null);
+
+// Compact rows ([ts, rawText, isTx, meta]) are saved as they are. Building the
+// full line object would parse ANSI and run plugins for every saved row and
+// keep the object in memory, though most rows are never displayed.
+function _snapshotTuple([ts, text, isTx, meta]) {
+    const m = meta && typeof meta === 'object' ? meta : {};
+    return {
+        ts: ts ?? '',
+        text: text ?? '',
+        isTx: !!isTx,
+        sequence: _finiteOrNull(m.sequence),
+        sessionId: m.sessionId || null,
+        lineIdx: _finiteOrNull(m.lineIdx),
+        sourceId: m.sourceId || null,
+        level: typeof m.level === 'string' && m.level ? m.level : null,
+        absTs: m.absTs ?? null,
+        absNum: _finiteOrNull(m.absNum),
+        relTs: m.relTs ?? null,
+        relNum: _finiteOrNull(m.relNum),
     };
 }
 
@@ -142,8 +170,14 @@ function _restoreIfPossible() {
 }
 
 window.__embedLogSchedulePersist = function __embedLogSchedulePersist() {
+    const now = Date.now();
+    if (_saveTimer === null) _firstPendingAt = now;
     clearTimeout(_saveTimer);
-    _saveTimer = setTimeout(_saveNow, SAVE_DEBOUNCE_MS);
+    const delay = Math.min(SAVE_DEBOUNCE_MS, Math.max(0, _firstPendingAt + SAVE_MAX_WAIT_MS - now));
+    _saveTimer = setTimeout(() => {
+        _saveTimer = null;
+        _saveNow();
+    }, delay);
 };
 
 window.__embedLogSetSession = function __embedLogSetSession(session, { skipCachedLines = false } = {}) {
@@ -181,6 +215,7 @@ window.__embedLogAfterConfig = function __embedLogAfterConfig() {
 
 window.__embedLogClearCache = function __embedLogClearCache() {
     clearTimeout(_saveTimer);
+    _saveTimer = null;
     try {
         const keys = [];
         for (let i = 0; i < localStorage.length; i++) {

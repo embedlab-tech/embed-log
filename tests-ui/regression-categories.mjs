@@ -22,6 +22,7 @@ const categories = {
     'regression-tests/reconnect-markers-bytes.spec.js',
     'regression-tests/level-filter.spec.js',
     'regression-tests/live-filter-incremental.spec.js',
+    'regression-tests/persist-streaming.spec.js',
     'regression-tests/layout-sync.spec.js',
     'regression-tests/pane-layout.spec.js',
     'regression-tests/toolbar-clarity.spec.js',
