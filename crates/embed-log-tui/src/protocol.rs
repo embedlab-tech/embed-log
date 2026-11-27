@@ -299,6 +299,10 @@ pub struct Marker {
     /// when the marker set is saved back, or the server would lose it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sequence: Option<u64>,
+    /// Set only on a resolved marker (never sent): match the row by line index and time
+    /// exactly. Used for an older marker in a merged pane whose row has no sequence.
+    #[serde(skip)]
+    pub exact: bool,
 }
 
 // ---------------------------------------------------------------------------

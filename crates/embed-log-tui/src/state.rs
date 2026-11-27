@@ -455,25 +455,15 @@ impl State {
     /// rather than guessed. Drawing, toggling and jumping all go by this one rule.
     pub fn resolved_markers(&self, pane_id: &str) -> Vec<Marker> {
         let markers = self.markers_for(pane_id);
-        if markers.iter().all(|m| m.sequence.is_some()) {
-            return markers;
-        }
         let Some(lines) = self.raw_lines.get(pane_id) else {
             return markers;
         };
-        if !is_merged_pane(lines, pane_id) {
-            return markers;
-        }
+        // 0 counts as no sequence, like everywhere else.
+        let merged = markers.iter().any(|m| matches!(m.sequence, None | Some(0)))
+            && is_merged_pane(lines, pane_id);
         markers
-            .into_iter()
-            .filter_map(|mut marker| {
-                if marker.sequence.is_none() {
-                    let target = legacy_merged_target(lines, &marker)?;
-                    // 0 is "no sequence" (a real one starts at 1): keep going by line index.
-                    marker.sequence = (target != 0).then_some(target);
-                }
-                Some(marker)
-            })
+            .iter()
+            .filter_map(|m| resolve_marker(lines, merged, m))
             .collect()
     }
 
@@ -739,12 +729,10 @@ impl State {
         let merged = is_merged_pane(lines, &pane);
         let markers = self.markers.entry(pane.clone()).or_default();
         // Toggle: remove the marker that names this record, else add one. Same rule as the
-        // drawing: a sequence is the identity; an older marker in a merged pane counts only
-        // if its line index and time single out this row.
-        let exists = markers.iter().position(|m| match m.sequence {
-            Some(marked) => marked == sequence,
-            None if merged => legacy_merged_target(lines, m) == Some(sequence),
-            None => crate::lines::marker_hits(m, line),
+        // drawing: markers are resolved first, so a merged-pane marker that cannot be told
+        // apart (equal line index and time in two sources) names no row.
+        let exists = markers.iter().position(|m| {
+            resolve_marker(lines, merged, m).is_some_and(|m| crate::lines::marker_hits(&m, line))
         });
         if let Some(pos) = exists {
             markers.remove(pos);
@@ -756,7 +744,9 @@ impl State {
                 num_ts,
                 description: String::new(),
                 created_at: chrono::Local::now().to_rfc3339(),
-                sequence: Some(sequence),
+                // 0 is "no sequence": a record without the field defaults to it.
+                sequence: (sequence != 0).then_some(sequence),
+                exact: false,
             });
         }
     }
@@ -923,14 +913,35 @@ fn is_merged_pane(lines: &[StoredLine], pane: &str) -> bool {
         .any(|l| !l.source_id.is_empty() && l.source_id != pane)
 }
 
-/// The sequence of the one row whose line index and time equal an older marker's, if there
-/// is exactly one. Two sources can share both (index 0, same millisecond).
-fn legacy_merged_target(lines: &[StoredLine], marker: &Marker) -> Option<u64> {
+/// The one row whose line index and time equal an older marker's, if there is exactly
+/// one. Two sources can share both (index 0, same millisecond).
+fn legacy_merged_target<'a>(lines: &'a [StoredLine], marker: &Marker) -> Option<&'a StoredLine> {
     let mut hits = lines
         .iter()
         .filter(|l| l.line_idx == marker.line_idx && l.abs_num == marker.num_ts);
     let first = hits.next()?;
-    hits.next().is_none().then_some(first.sequence)
+    hits.next().is_none().then_some(first)
+}
+
+/// A marker ready to match rows. A sequence of 0 means none. In a merged pane an older
+/// marker (no sequence) must single out one row by line index and time: it then gets that
+/// row's sequence, or, if the row has none either, is matched exactly by index and time.
+/// One that fits several rows, or none, names nothing.
+fn resolve_marker(lines: &[StoredLine], merged: bool, marker: &Marker) -> Option<Marker> {
+    let mut marker = marker.clone();
+    if marker.sequence == Some(0) {
+        marker.sequence = None;
+    }
+    if marker.sequence.is_some() || !merged {
+        return Some(marker);
+    }
+    let target = legacy_merged_target(lines, &marker)?;
+    if target.sequence != 0 {
+        marker.sequence = Some(target.sequence);
+    } else {
+        marker.exact = true;
+    }
+    Some(marker)
 }
 
 #[cfg(test)]
@@ -1184,6 +1195,70 @@ mod tests {
         assert_eq!(all.len(), 2);
         assert!(all.iter().any(|m| m.sequence == Some(1)));
         assert_eq!(drawn_rows(&s), vec![1]);
+    }
+
+    #[test]
+    fn rows_without_a_sequence_are_told_apart_by_line_index_and_time() {
+        // A record without the field defaults to sequence 0: it must not become the identity.
+        let mut s = State::default();
+        s.apply_config(&cfg_with(vec![("T", vec!["ALL"])]));
+        for (source, time) in [("A", 1000.0), ("B", 2000.0)] {
+            s.append_line(
+                "ALL",
+                StoredLine {
+                    source_id: source.into(),
+                    line_idx: 0,
+                    abs_num: time,
+                    ..Default::default() // sequence 0
+                },
+            );
+        }
+        let marked = |s: &State| -> Vec<f64> {
+            let markers = s.resolved_markers("ALL");
+            s.raw_lines["ALL"]
+                .iter()
+                .filter(|l| crate::lines::marker_for_stored_line(&markers, l).is_some())
+                .map(|l| l.abs_num)
+                .collect()
+        };
+        s.toggle_marker_active("ALL".into(), 0);
+        assert_eq!(
+            s.all_markers()[0].sequence,
+            None,
+            "0 is not stored as a sequence"
+        );
+        assert_eq!(marked(&s), vec![1000.0], "only the row that was marked");
+
+        // Toggling the other row adds its own marker; it does not remove the first.
+        s.toggle_marker_active("ALL".into(), 1);
+        assert_eq!(s.all_markers().len(), 2);
+        assert_eq!(marked(&s), vec![1000.0, 2000.0]);
+        // And toggling a marked row removes exactly its marker.
+        s.toggle_marker_active("ALL".into(), 0);
+        assert_eq!(s.all_markers().len(), 1);
+        assert_eq!(marked(&s), vec![2000.0]);
+
+        // A marker saved with sequence 0 means the same as none, and jumping goes to that
+        // same single row.
+        let mut other = State::default();
+        other.apply_config(&cfg_with(vec![("T", vec!["ALL"])]));
+        for (source, time) in [("A", 1000.0), ("B", 2000.0)] {
+            other.append_line(
+                "ALL",
+                StoredLine {
+                    source_id: source.into(),
+                    line_idx: 0,
+                    abs_num: time,
+                    ..Default::default()
+                },
+            );
+        }
+        let mut zero = old_marker(2000.0);
+        zero.sequence = Some(0);
+        other.apply_markers(&[zero]);
+        assert_eq!(marked(&other), vec![2000.0]);
+        other.jump_marker("ALL".into(), true, 4);
+        assert_eq!(other.marker_jump.as_ref().map(|(_, raw)| *raw), Some(1));
     }
 
     #[test]

@@ -90,13 +90,15 @@ pub fn marker_for_line(markers: &[Marker], line_idx: u64) -> Option<(char, Color
     Some(('▎', Color::Cyan))
 }
 
-/// Does a marker name this row? A marker with a sequence names exactly one record; one
-/// without goes by the source-local line index. (A legacy marker in a merged pane is
-/// resolved to a sequence first: `State::resolved_markers`.)
+/// Does a marker name this row? A sequence names exactly one record (0 means "none":
+/// real ones start at 1, and a record without the field defaults to 0). Without one the
+/// marker goes by the source-local line index, or, once resolved for a merged pane
+/// (`State::resolved_markers`), by line index and time together.
 pub fn marker_hits(marker: &Marker, line: &StoredLine) -> bool {
     match marker.sequence {
-        Some(sequence) => sequence == line.sequence,
-        None => {
+        Some(sequence) if sequence != 0 => sequence == line.sequence,
+        _ if marker.exact => marker.line_idx == line.line_idx && marker.num_ts == line.abs_num,
+        _ => {
             marker.line_idx <= line.line_idx && line.line_idx <= marker.end_idx.max(marker.line_idx)
         }
     }
