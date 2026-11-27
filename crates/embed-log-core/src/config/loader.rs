@@ -521,6 +521,12 @@ fn validate_config(config: &mut AppConfig, config_path: &Path) -> Result<(), Con
                 ctx()
             )));
         }
+        if src.parser.raw_capture && parser_type != "zephyr-dict" {
+            return Err(ConfigError::validation(format!(
+                "{}.parser.raw_capture is only valid for parser.type 'zephyr-dict' (got {parser_type:?})",
+                ctx()
+            )));
+        }
         if parser_type == "slip-coap" && stype != "uart" {
             return Err(ConfigError::validation(format!(
                 "{}.parser.type 'slip-coap' is only valid for UART sources (got source type {stype:?})",
@@ -1250,6 +1256,40 @@ tabs:
             assert_eq!(config.sources[0].parser.parser_type, name);
             std::fs::remove_file(path).unwrap();
         }
+    }
+
+    #[test]
+    fn raw_capture_is_opt_in_and_only_for_the_binary_dictionary_parser() {
+        let base =
+            "version: 2\nsources:\n  DUT:\n    type: uart\n    path: /dev/ttyUSB0\n    parser:\n";
+        let path = std::env::temp_dir().join("dictionary-raw-capture-validation.yml");
+        std::fs::write(
+            &path,
+            format!("{base}      type: zephyr-dict\n      database: d.json\n"),
+        )
+        .unwrap();
+        assert!(!load_config(&path).unwrap().sources[0].parser.raw_capture);
+        std::fs::write(
+            &path,
+            format!(
+                "{base}      type: zephyr-dict\n      database: d.json\n      raw_capture: true\n"
+            ),
+        )
+        .unwrap();
+        assert!(load_config(&path).unwrap().sources[0].parser.raw_capture);
+        for other in ["zephyr-dict-hex\n      database: d.json", "text"] {
+            std::fs::write(
+                &path,
+                format!("{base}      type: {other}\n      raw_capture: true\n"),
+            )
+            .unwrap();
+            let error = load_config(&path).unwrap_err().to_string();
+            assert!(
+                error.contains("parser.raw_capture is only valid"),
+                "{error}"
+            );
+        }
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

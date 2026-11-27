@@ -119,6 +119,12 @@ fn run_decode(
             String::new()
         },
     );
+    if report.capture_lines > 0 {
+        eprintln!(
+            "the log was written with parser.raw_capture: replayed {} capture lines; {} live-decoded lines left out (the replay produces them again)",
+            report.capture_lines, report.dropped_live_lines
+        );
+    }
     Ok(())
 }
 

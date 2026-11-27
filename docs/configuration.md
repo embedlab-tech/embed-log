@@ -173,6 +173,29 @@ The database path resolves relative to the configuration file and must match the
 After a rebuild, the pane's **Reload** button re-reads the file, or set
 `parser.watch: true` to do that automatically; see `docs/runtime-dictionaries.md`.
 
+### Keeping the raw bytes (`parser.raw_capture`)
+
+When the live decoder loses the stream (`skipped N bytes while acquiring stream`,
+`incomplete record abandoned`), the `.log` only holds the text it produced, so
+nobody can tell whether the device sent bad records or the decoder framed them
+wrong. With
+
+```yaml
+parser: {type: zephyr-dict, database: build/zephyr/log_dictionary.json, raw_capture: true}
+```
+
+the parser also writes every received read to the `.log` as
+`[dict-capture:v1] <base64>`, before the lines it decoded from it, and
+`[dict-capture:v1] @idle` where it gave up on a record after 5 s of silence.
+Only `type: zephyr-dict` (binary) supports it, and it is off by default: the
+log grows by about a third of the raw byte count on top of the decoded text.
+
+`embed-log dictionary decode session.log --database log_dictionary.json` replays
+the capture lines through the same decoder. The live-decoded lines are left out
+(the replay produces them again) and the command says how many. Use it with the
+dictionary that matched the firmware, or with a fixed decoder, to analyse the
+stream offline.
+
 UART TX is independent of the receive parser. A dictionary configuration can
 still be used to send shell commands to plaintext firmware. If the database
 cannot be loaded (missing or invalid file), both dictionary parsers report the

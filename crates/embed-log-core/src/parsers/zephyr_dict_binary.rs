@@ -101,6 +101,15 @@ fn raw_line(bytes: &[u8]) -> String {
     )
 }
 
+fn capture_line(bytes: &[u8]) -> String {
+    use base64::Engine;
+    format!(
+        "{}{}",
+        crate::parsers::CAPTURE_LINE_PREFIX,
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    )
+}
+
 pub struct ZephyrDictBinaryParser {
     state: LoadState,
     pending: Vec<u8>,
@@ -110,6 +119,7 @@ pub struct ZephyrDictBinaryParser {
     console_text: Vec<u8>,
     records: usize,
     shadow: Option<Shadow>,
+    capture: bool,
 }
 
 impl ZephyrDictBinaryParser {
@@ -134,7 +144,14 @@ impl ZephyrDictBinaryParser {
             console_text: Vec::new(),
             records: 0,
             shadow: None,
+            capture: false,
         }
+    }
+
+    /// Write the received bytes to the log as `[dict-capture:v1]` lines (see the constant).
+    pub fn with_raw_capture(mut self, capture: bool) -> Self {
+        self.capture = capture;
+        self
     }
 
     /// No dictionary: keep console text readable and store every dictionary
@@ -323,6 +340,9 @@ impl StreamParser for ZephyrDictBinaryParser {
             return lines;
         }
         for chunk in data.chunks(4096) {
+            if self.capture {
+                lines.push(capture_line(chunk));
+            }
             self.pending.extend_from_slice(chunk);
             self.consume(&mut lines, false);
             // Wire length fields are u16; even a maximum-sized record is less
@@ -359,6 +379,13 @@ impl StreamParser for ZephyrDictBinaryParser {
         // shortcut: valid data delayed beyond 5 s can be lost; only explicit
         // framing/reset signals could make bounded recovery lossless.
         if idle_for >= INCOMPLETE_RECORD_IDLE_DEADLINE && !self.pending.is_empty() {
+            if self.capture {
+                lines.push(format!(
+                    "{}{}",
+                    crate::parsers::CAPTURE_LINE_PREFIX,
+                    crate::parsers::CAPTURE_IDLE
+                ));
+            }
             self.synchronized = false;
             lines.push(
                 "[zephyr-dict: incomplete record abandoned after 5 s idle; synchronization lost; valid delayed data may be lost]".into(),
@@ -747,6 +774,73 @@ mod tests {
         assert_eq!(flushed.len(), 1);
         assert_eq!(raw_payload(&flushed[0]), &record[..9]);
         assert!(stalled.on_idle(INCOMPLETE_RECORD_IDLE_DEADLINE).is_empty());
+    }
+
+    /// What the session `.log` holds: every parser line under one timestamp prefix.
+    fn log_of(lines: &[String]) -> String {
+        lines.iter().map(|l| format!("[T] {l}\n")).collect()
+    }
+
+    #[test]
+    fn raw_capture_replays_exactly_what_the_live_decoder_saw() {
+        use crate::parsers::raw_decode::decode_log_with_database;
+        let dir = temp_dir("raw-capture");
+        let db = write_test_db(&dir, &[(0x1000, "hello"), (0x2000, "world")]);
+        // Boot noise, a record whose declared length never arrives (the decoder waits for
+        // it), more records, and finally silence: the idle abandon is part of what happened.
+        let mut stream = vec![0u8];
+        stream.extend(b"boot\r\n");
+        let mut stalled = encode_normal_message(3, 1, 9, 0x1000, &[], &[]);
+        stalled[4] = 0x60;
+        stalled[5] = 0xEA;
+        stream.extend(&stalled);
+        for n in 1..=3u32 {
+            stream.extend(encode_normal_message(3, 1, n, 0x2000, &[], &[]));
+            stream.extend(format!("console {n}\r\n").as_bytes());
+        }
+
+        let mut live = ZephyrDictBinaryParser::new(&db).with_raw_capture(true);
+        let mut lines = Vec::new();
+        for piece in stream.chunks(7) {
+            lines.extend(live.feed(piece));
+        }
+        lines.extend(live.on_idle(INCOMPLETE_RECORD_IDLE_DEADLINE));
+        let live_text: Vec<&String> = lines
+            .iter()
+            .filter(|l| !l.starts_with(crate::parsers::CAPTURE_LINE_PREFIX))
+            .collect();
+        assert!(
+            lines
+                .iter()
+                .any(|l| l == &format!("{}@idle", crate::parsers::CAPTURE_LINE_PREFIX)),
+            "the idle abandon is recorded"
+        );
+        assert!(
+            live_text.iter().any(|l| l.contains("abandoned")),
+            "the stream really stalled: {live_text:?}"
+        );
+
+        let (decoded, report) =
+            decode_log_with_database(&log_of(&lines), "zephyr-dict", &db).unwrap();
+        let replayed: Vec<&str> = decoded
+            .lines()
+            .map(|l| l.strip_prefix("[T] ").unwrap())
+            .collect();
+        assert_eq!(
+            replayed,
+            live_text.iter().map(|l| l.as_str()).collect::<Vec<_>>(),
+            "replaying the capture gives the live output, once"
+        );
+        assert_eq!(report.raw_bytes, stream.len());
+        assert_eq!(report.dropped_live_lines, live_text.len());
+
+        // Off by default: no capture lines at all.
+        let mut plain = ZephyrDictBinaryParser::new(&db);
+        assert!(!plain
+            .feed(&stream)
+            .iter()
+            .any(|l| l.starts_with(crate::parsers::CAPTURE_LINE_PREFIX)));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

@@ -520,6 +520,7 @@ async fn watch_reloads_a_rebuilt_file_and_reports_a_bad_one_once() {
         parser_type: "zephyr-dict".into(),
         database: Some(file.to_string_lossy().into_owned().into()),
         watch: true,
+        ..Default::default()
     };
     let (control, runtime) = DictionaryControl::new("UART_A", &config, manager).unwrap();
     assert!(control.status().watch);

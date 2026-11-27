@@ -157,6 +157,8 @@ pub struct DictionaryControl {
     session: Arc<Mutex<SessionManager>>,
     artifact_name: String,
     capture_raw: Arc<AtomicBool>,
+    /// `parser.raw_capture`: a parser created at runtime keeps writing capture lines.
+    parser_raw_capture: bool,
 }
 
 pub struct DictionaryRuntime {
@@ -193,6 +195,7 @@ impl DictionaryControl {
             session,
             artifact_name: format!("{:x}", Sha256::digest(source.as_bytes())),
             capture_raw: Arc::new(AtomicBool::new(false)),
+            parser_raw_capture: config.raw_capture,
         };
         if matches!(
             config.parser_type.as_str(),
@@ -543,6 +546,7 @@ impl DictionaryControl {
             ParserConfig {
                 parser_type: parser_type.into(),
                 database: Some(path.to_string_lossy().into_owned().into()),
+                raw_capture: self.parser_raw_capture,
                 ..Default::default()
             }
         };

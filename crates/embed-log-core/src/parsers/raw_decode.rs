@@ -6,7 +6,9 @@
 //! so the line itself is the capture. Either way the bytes are fed to the real
 //! parser in file order, so decoding is the same code path as live decoding.
 //! Every other line is copied unchanged.
-use super::{try_create_dictionary_parser, StreamParser, RAW_LINE_PREFIX};
+use super::{
+    try_create_dictionary_parser, StreamParser, CAPTURE_IDLE, CAPTURE_LINE_PREFIX, RAW_LINE_PREFIX,
+};
 use crate::config::models::ParserConfig;
 use base64::Engine;
 use std::time::Duration;
@@ -27,6 +29,10 @@ pub struct DecodeReport {
     pub notices: usize,
     /// Raw lines whose Base64 could not be read; kept as they were.
     pub invalid_lines: usize,
+    /// Lines written by `parser.raw_capture` (a read of bytes, or an idle mark).
+    pub capture_lines: usize,
+    /// Live-decoded lines left out because the capture lines are replayed instead.
+    pub dropped_live_lines: usize,
 }
 
 /// Decode with the dictionary at `database`. Fails when the data does not match it.
@@ -38,7 +44,7 @@ pub fn decode_log_with_database(
     let mut parser = try_create_dictionary_parser(&ParserConfig {
         parser_type: parser_type.into(),
         database: Some(database.to_string().into()),
-        watch: false,
+        ..Default::default()
     })?;
     decode_log(input, parser.as_mut(), parser_type == "zephyr-dict-hex")
 }
@@ -73,9 +79,45 @@ pub fn decode_log(
     let mut out = String::with_capacity(input.len());
     let mut report = DecodeReport::default();
     let mut prefix = String::new();
+    // A log written with `parser.raw_capture` holds the decoded lines too. Replaying the
+    // capture reproduces them, so they are left out instead of appearing twice.
+    let captured = !hex && input.lines().any(|l| l.contains(CAPTURE_LINE_PREFIX));
 
     for original in input.split_inclusive('\n') {
         let line = original.trim_end_matches(['\n', '\r']);
+        if captured {
+            if let Some(at) = line.find(CAPTURE_LINE_PREFIX) {
+                let payload = line[at + CAPTURE_LINE_PREFIX.len()..].trim();
+                report.capture_lines += 1;
+                prefix = line[..at].to_string();
+                if payload == CAPTURE_IDLE {
+                    emit(
+                        parser.on_idle(Duration::from_secs(6)),
+                        &prefix,
+                        &mut out,
+                        &mut report,
+                        false,
+                    );
+                    continue;
+                }
+                match base64::engine::general_purpose::STANDARD.decode(payload) {
+                    Ok(bytes) if !bytes.is_empty() => {
+                        report.raw_lines += 1;
+                        report.raw_bytes += bytes.len();
+                        emit(parser.feed(&bytes), &prefix, &mut out, &mut report, false);
+                    }
+                    _ => {
+                        report.invalid_lines += 1;
+                        out.push_str(original);
+                    }
+                }
+                continue;
+            }
+            if !line.contains(RAW_LINE_PREFIX) {
+                report.dropped_live_lines += 1;
+                continue;
+            }
+        }
         let found = if hex {
             line.find(HEX_MARKER)
                 .map(|at| (at, line.as_bytes()[at..].to_vec()))
