@@ -275,7 +275,7 @@ fn draw_pane_content(f: &mut Frame, state: &State, area: Rect) {
         }
 
         let stored = stored.unwrap();
-        let markers = state.markers_for(pane_id);
+        let markers = state.resolved_markers(pane_id);
         let visible = usize::from(content_area.height);
         let (scroll, match_count, rows) = state.viewport(pane_id, visible);
         let mut lines = Vec::with_capacity(rows.len());

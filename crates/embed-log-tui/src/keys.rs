@@ -382,6 +382,7 @@ mod tests {
                 "merged",
                 StoredLine {
                     source_id: if i % 2 == 0 { "A" } else { "B" }.into(),
+                    sequence: i as u64 + 1,
                     line_idx: (i / 2) as u64,
                     abs_num: i as f64,
                     message: format!("row-{i}"),

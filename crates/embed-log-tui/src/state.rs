@@ -448,6 +448,35 @@ impl State {
         ms
     }
 
+    /// Markers as they should be drawn and navigated. In a merged pane a line index is only
+    /// unique within one source, so a marker without a sequence names a record only if its
+    /// line index and time match exactly one row; it then gets that row's sequence. A marker
+    /// that matches several rows (two sources with the same time) or none is left out
+    /// rather than guessed. Drawing, toggling and jumping all go by this one rule.
+    pub fn resolved_markers(&self, pane_id: &str) -> Vec<Marker> {
+        let markers = self.markers_for(pane_id);
+        if markers.iter().all(|m| m.sequence.is_some()) {
+            return markers;
+        }
+        let Some(lines) = self.raw_lines.get(pane_id) else {
+            return markers;
+        };
+        if !is_merged_pane(lines, pane_id) {
+            return markers;
+        }
+        markers
+            .into_iter()
+            .filter_map(|mut marker| {
+                if marker.sequence.is_none() {
+                    let target = legacy_merged_target(lines, &marker)?;
+                    // 0 is "no sequence" (a real one starts at 1): keep going by line index.
+                    marker.sequence = (target != 0).then_some(target);
+                }
+                Some(marker)
+            })
+            .collect()
+    }
+
     /// Teardown for session rotation / full reconnect: drop layout + lines, keep
     /// connection state. The next `config` message rebuilds everything.
     pub fn teardown_layout(&mut self) {
@@ -702,17 +731,20 @@ impl State {
 
     /// Toggle a persisted marker on the given row in the active pane.
     pub fn toggle_marker_active(&mut self, pane: String, raw_idx: usize) {
-        let line = &self.raw_lines[&pane][raw_idx];
+        let lines = &self.raw_lines[&pane];
+        let line = &lines[raw_idx];
         let line_idx = line.line_idx;
         let num_ts = line.abs_num;
         let sequence = line.sequence;
-        let merged = !line.source_id.is_empty() && line.source_id != pane;
+        let merged = is_merged_pane(lines, &pane);
         let markers = self.markers.entry(pane.clone()).or_default();
-        // Toggle: remove if one exists at this record, else add. The sequence is the
-        // identity; markers without one fall back to the line (and time in a merged pane).
+        // Toggle: remove the marker that names this record, else add one. Same rule as the
+        // drawing: a sequence is the identity; an older marker in a merged pane counts only
+        // if its line index and time single out this row.
         let exists = markers.iter().position(|m| match m.sequence {
             Some(marked) => marked == sequence,
-            None => m.line_idx == line_idx && (!merged || m.num_ts == num_ts),
+            None if merged => legacy_merged_target(lines, m) == Some(sequence),
+            None => crate::lines::marker_hits(m, line),
         });
         if let Some(pos) = exists {
             markers.remove(pos);
@@ -738,23 +770,18 @@ impl State {
 
     /// Jump to the previous/next marker whose start row is retained and visible to the filter.
     pub fn jump_marker(&mut self, pane: String, forward: bool, visible: usize) {
-        let Some(markers) = self.markers.get(&pane).filter(|m| !m.is_empty()) else {
+        if self.markers.get(&pane).map_or(true, |m| m.is_empty()) {
             return;
-        };
+        }
         let (_, len, rows) = self.viewport(&pane, visible);
         let Some(&top) = rows.first() else { return };
         let current = match &self.marker_jump {
             Some((id, idx)) if id == &pane => *idx,
             _ => top,
         };
+        let resolved = self.resolved_markers(&pane);
         let lines = &self.raw_lines[&pane];
         let filter = self.filter_for(&pane);
-        let merged = lines
-            .iter()
-            .any(|l| !l.source_id.is_empty() && l.source_id != pane);
-        // shortcut: legacy merge markers can collide on index and timestamp; use source IDs if the format gains them.
-        let key = |idx, ts: f64| (idx, merged.then(|| ts.to_bits()));
-        let targets: HashSet<_> = markers.iter().map(|m| key(m.line_idx, m.num_ts)).collect();
         let mut matches = lines
             .iter()
             .enumerate()
@@ -765,7 +792,7 @@ impl State {
                     *raw > current
                 } else {
                     *raw < current
-                }) && targets.contains(&key(line.line_idx, line.abs_num))
+                }) && resolved.iter().any(|m| crate::lines::marker_hits(m, line))
             });
         let target = if forward {
             matches.next()
@@ -888,6 +915,23 @@ fn nearest_line_by_ts(lines: &[StoredLine], num_ts: f64) -> usize {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+/// A merged pane shows records of several sources.
+fn is_merged_pane(lines: &[StoredLine], pane: &str) -> bool {
+    lines
+        .iter()
+        .any(|l| !l.source_id.is_empty() && l.source_id != pane)
+}
+
+/// The sequence of the one row whose line index and time equal an older marker's, if there
+/// is exactly one. Two sources can share both (index 0, same millisecond).
+fn legacy_merged_target(lines: &[StoredLine], marker: &Marker) -> Option<u64> {
+    let mut hits = lines
+        .iter()
+        .filter(|l| l.line_idx == marker.line_idx && l.abs_num == marker.num_ts);
+    let first = hits.next()?;
+    hits.next().is_none().then_some(first.sequence)
+}
 
 #[cfg(test)]
 mod tests {
@@ -1069,6 +1113,77 @@ mod tests {
         // It survives being saved back to the server.
         let json = serde_json::to_string(&s.all_markers()[0]).unwrap();
         assert!(json.contains(r#""sequence":1"#), "{json}");
+    }
+
+    /// A merged pane of A and B whose first rows both have line index 0.
+    fn merged_pane(times: (f64, f64)) -> State {
+        let mut s = State::default();
+        s.apply_config(&cfg_with(vec![("T", vec!["ALL"])]));
+        for (source, sequence, time) in [("A", 1, times.0), ("B", 2, times.1)] {
+            s.append_line(
+                "ALL",
+                StoredLine {
+                    source_id: source.into(),
+                    sequence,
+                    line_idx: 0,
+                    abs_num: time,
+                    ..Default::default()
+                },
+            );
+        }
+        s
+    }
+
+    fn old_marker(time: f64) -> Marker {
+        Marker {
+            pane_id: "ALL".into(),
+            line_idx: 0,
+            end_idx: 0,
+            num_ts: time,
+            ..Default::default()
+        }
+    }
+
+    fn drawn_rows(s: &State) -> Vec<u64> {
+        let markers = s.resolved_markers("ALL");
+        s.raw_lines["ALL"]
+            .iter()
+            .filter(|l| crate::lines::marker_for_stored_line(&markers, l).is_some())
+            .map(|l| l.sequence)
+            .collect()
+    }
+
+    #[test]
+    fn an_older_marker_in_a_merged_pane_names_one_record() {
+        // A and B both have line index 0, at different times: the marker is about B's time.
+        let mut s = merged_pane((1000.0, 2000.0));
+        s.apply_markers(&[old_marker(2000.0)]);
+        assert_eq!(
+            drawn_rows(&s),
+            vec![2],
+            "only B, not both rows with line index 0"
+        );
+
+        // Toggling follows the same rule: on A it adds a marker, on B it removes the old one.
+        s.toggle_marker_active("ALL".into(), 0);
+        assert_eq!(s.all_markers().len(), 2);
+        s.toggle_marker_active("ALL".into(), 1);
+        let left = s.all_markers();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].sequence, Some(1), "A's new marker stays");
+    }
+
+    #[test]
+    fn an_older_marker_whose_time_is_shared_by_two_sources_is_not_guessed() {
+        let mut s = merged_pane((1000.0, 1000.0));
+        s.apply_markers(&[old_marker(1000.0)]);
+        assert!(drawn_rows(&s).is_empty(), "neither row is marked");
+        // Toggling a row adds a marker that names it; the tied old one is left alone.
+        s.toggle_marker_active("ALL".into(), 0);
+        let all = s.all_markers();
+        assert_eq!(all.len(), 2);
+        assert!(all.iter().any(|m| m.sequence == Some(1)));
+        assert_eq!(drawn_rows(&s), vec![1]);
     }
 
     #[test]

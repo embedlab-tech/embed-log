@@ -90,13 +90,21 @@ pub fn marker_for_line(markers: &[Marker], line_idx: u64) -> Option<(char, Color
     Some(('▎', Color::Cyan))
 }
 
-/// The marker gutter symbol for a stored row. A marker with a sequence names exactly one
-/// record; one without falls back to the source-local line index.
-pub fn marker_for_stored_line(markers: &[Marker], line: &StoredLine) -> Option<(char, Color)> {
-    markers.iter().find(|m| match m.sequence {
+/// Does a marker name this row? A marker with a sequence names exactly one record; one
+/// without goes by the source-local line index. (A legacy marker in a merged pane is
+/// resolved to a sequence first: `State::resolved_markers`.)
+pub fn marker_hits(marker: &Marker, line: &StoredLine) -> bool {
+    match marker.sequence {
         Some(sequence) => sequence == line.sequence,
-        None => m.line_idx <= line.line_idx && line.line_idx <= m.end_idx.max(m.line_idx),
-    })?;
+        None => {
+            marker.line_idx <= line.line_idx && line.line_idx <= marker.end_idx.max(marker.line_idx)
+        }
+    }
+}
+
+/// The marker gutter symbol for a stored row.
+pub fn marker_for_stored_line(markers: &[Marker], line: &StoredLine) -> Option<(char, Color)> {
+    markers.iter().find(|m| marker_hits(m, line))?;
     Some(('▎', Color::Cyan))
 }
 
