@@ -18,6 +18,14 @@ pub use zephyr_dict::{validate_dictionary, ZephyrDictParser};
 /// back into text once the matching dictionary is known.
 pub const RAW_LINE_PREFIX: &str = "[dict-raw:v1] ";
 
+/// Prefix of a `.log` line that records bytes the parser received while it decoded them
+/// (`parser.raw_capture: true`). The rest is the Base64 of one read, or `@idle` where the
+/// parser gave up on an incomplete record after an idle period. The decoded lines stay
+/// in the log too; offline decoding replays the capture lines instead of them.
+pub const CAPTURE_LINE_PREFIX: &str = "[dict-capture:v1] ";
+/// Payload of a capture line that marks an idle abandon.
+pub const CAPTURE_IDLE: &str = "@idle";
+
 /// Decode one line of device console text.
 ///
 /// Invalid UTF-8 becomes U+FFFD, and NUL bytes are removed: devices often
@@ -47,7 +55,9 @@ pub fn try_create_dictionary_parser(
         .as_deref()
         .ok_or("dictionary path is missing")?;
     match parser.parser_type.as_str() {
-        "zephyr-dict" => Ok(Box::new(ZephyrDictBinaryParser::try_new(path)?)),
+        "zephyr-dict" => Ok(Box::new(
+            ZephyrDictBinaryParser::try_new(path)?.with_raw_capture(parser.raw_capture),
+        )),
         "zephyr-dict-hex" => Ok(Box::new(ZephyrDictParser::try_new(path)?)),
         _ => Err("parser_type must be zephyr-dict or zephyr-dict-hex".into()),
     }
@@ -61,9 +71,10 @@ pub fn create_parser(parser: &ParserConfig) -> Box<dyn StreamParser> {
         "text" => Box::new(TextParser::new()),
         "hex-coap" => Box::new(HexCoapParser::new()),
         "slip-coap" => Box::new(SlipCoapParser::new()),
-        "zephyr-dict" => Box::new(ZephyrDictBinaryParser::new(
-            parser.database.as_deref().unwrap_or_default(),
-        )),
+        "zephyr-dict" => Box::new(
+            ZephyrDictBinaryParser::new(parser.database.as_deref().unwrap_or_default())
+                .with_raw_capture(parser.raw_capture),
+        ),
         "zephyr-dict-hex" => Box::new(ZephyrDictParser::new(
             parser.database.as_deref().unwrap_or_default(),
         )),

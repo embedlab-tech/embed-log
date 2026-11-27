@@ -124,6 +124,12 @@ pub struct ParserConfig {
     /// it. Only for `zephyr-dict` / `zephyr-dict-hex`; needs the control API.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub watch: bool,
+    /// Also write every received byte to the `.log` as `[dict-capture:v1] <base64>`
+    /// lines, in arrival order, next to the decoded text. Only for `zephyr-dict`
+    /// (binary). `embed-log dictionary decode` replays them, so a stream the live
+    /// decoder lost can be analysed offline.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub raw_capture: bool,
 }
 
 impl ParserConfig {
@@ -138,6 +144,7 @@ impl Default for ParserConfig {
             parser_type: "text".to_string(),
             database: None,
             watch: false,
+            raw_capture: false,
         }
     }
 }
