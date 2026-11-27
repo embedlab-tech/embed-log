@@ -93,8 +93,8 @@ fn run_decode(
         None => std::io::stdout().write_all(decoded.as_bytes())?,
     }
     eprintln!(
-        "decoded {} messages from {} raw lines ({} bytes){}{}",
-        report.decoded_lines,
+        "decoded {} records from {} raw lines ({} bytes){}{}",
+        report.records,
         report.raw_lines,
         report.raw_bytes,
         if report.notices > 0 {

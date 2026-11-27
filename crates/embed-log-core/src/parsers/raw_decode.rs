@@ -19,7 +19,9 @@ pub struct DecodeReport {
     pub raw_lines: usize,
     /// Bytes fed to the parser from those lines.
     pub raw_bytes: usize,
-    /// Decoded log messages produced.
+    /// Dictionary records the parser decoded. Console text it passes through does not count.
+    pub records: usize,
+    /// Output lines from decoded records and other parser output.
     pub decoded_lines: usize,
     /// Parser notices such as skipped bytes or lost synchronization.
     pub notices: usize,
@@ -110,7 +112,8 @@ pub fn decode_log(
         true,
     );
 
-    if report.raw_bytes > 0 && report.decoded_lines == 0 {
+    report.records = parser.decoded_records();
+    if report.raw_bytes > 0 && report.records == 0 {
         return Err(format!(
             "none of the {} raw dictionary lines could be decoded with this dictionary; \
              it does not match the firmware that produced the log (or the target is not \

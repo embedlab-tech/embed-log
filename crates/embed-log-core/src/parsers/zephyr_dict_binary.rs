@@ -18,9 +18,9 @@ const INCOMPLETE_RECORD_IDLE_DEADLINE: Duration = Duration::from_secs(5);
 // decoder feeds the concatenated bytes to the real parser, which re-acquires.
 const ASSUMED_PTR_SIZE: usize = 4;
 const ASSUMED_TIMESTAMP_SIZE: usize = 4;
-/// Package and hexdump sections of a real record are far smaller than this;
-/// larger declared lengths are treated as noise, not as a record to wait for.
-const ASSUMED_MAX_SECTION: usize = 2048;
+/// Package and hexdump sections of a typical record stay below this. Larger ones are
+/// still records (lengths are u16), but are only waited for if the header looks binary.
+const ASSUMED_USUAL_SECTION: usize = 2048;
 
 enum AssumedFrame {
     NeedMore,
@@ -46,10 +46,22 @@ fn assumed_frame(bytes: &[u8]) -> AssumedFrame {
             }
             let package = u16::from_le_bytes([bytes[2], bytes[3]]) as usize;
             let data = u16::from_le_bytes([bytes[4], bytes[5]]) as usize;
-            if !(4 + ASSUMED_PTR_SIZE..=ASSUMED_MAX_SECTION).contains(&package)
-                || data > ASSUMED_MAX_SECTION
-            {
+            if package < 4 + ASSUMED_PTR_SIZE {
                 return AssumedFrame::NotARecord;
+            }
+            // Both lengths are u16, so a real record can be up to ~128 KiB: never cap what
+            // may be a valid record, or its bytes would be dropped and read as text. Only
+            // an unusually long one has to look like a record header before we wait for it:
+            // a source id that fits 16 bits (high bytes zero). Console text after a stray
+            // NUL would not.
+            if (package > ASSUMED_USUAL_SECTION || data > ASSUMED_USUAL_SECTION)
+                && !(bytes.len() >= 10 && bytes[8] == 0 && bytes[9] == 0)
+            {
+                return if bytes.len() < 10 {
+                    AssumedFrame::NeedMore
+                } else {
+                    AssumedFrame::NotARecord
+                };
             }
             let total = 6 + ASSUMED_PTR_SIZE + ASSUMED_TIMESTAMP_SIZE + package + data;
             if bytes.len() < total {
@@ -78,6 +90,7 @@ pub struct ZephyrDictBinaryParser {
     skipped: usize,
     reported_load_error: bool,
     console_text: Vec<u8>,
+    records: usize,
 }
 
 impl ZephyrDictBinaryParser {
@@ -100,6 +113,7 @@ impl ZephyrDictBinaryParser {
             skipped: 0,
             reported_load_error: false,
             console_text: Vec::new(),
+            records: 0,
         }
     }
 
@@ -223,6 +237,7 @@ impl ZephyrDictBinaryParser {
                     self.skipped += 1;
                 }
                 TakeResult::Consumed { len, mut output } => {
+                    self.records += 1;
                     flush_binary_console(&mut self.console_text, lines);
                     if self.skipped != 0 {
                         lines.push(format!(
@@ -250,6 +265,10 @@ impl ZephyrDictBinaryParser {
 }
 
 impl StreamParser for ZephyrDictBinaryParser {
+    fn decoded_records(&self) -> usize {
+        self.records
+    }
+
     fn feed(&mut self, data: &[u8]) -> Vec<String> {
         let mut lines = Vec::new();
         if let LoadState::Failed(err) = &self.state {
@@ -750,6 +769,77 @@ mod tests {
         assert!(decoded.contains("[ts] shell ready\n"));
         assert!(decoded.contains("app: hello"), "{decoded}");
         assert_eq!(report.raw_lines, 1);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_valid_record_is_stored_byte_for_byte_whatever_its_length() {
+        // Lengths are u16, so a record can carry a hexdump well past 2 KiB.
+        for extra in [0usize, 255, 2047, 2048, 2049, 3000, 20_000, 65_000] {
+            let data: Vec<u8> = (0..extra).map(|i| (i % 251) as u8).collect();
+            let record = encode_normal_message(3, 1, 7, 0x1000, &[], &data);
+            let mut stream = b"shell ready\r\n".to_vec();
+            stream.extend(&record);
+            stream.extend(b"tail\r\n");
+            let mut failed = ZephyrDictBinaryParser::new("/nonexistent/binary-dictionary.json");
+            let lines = failed.feed(&stream);
+            let raw: Vec<&String> = lines
+                .iter()
+                .filter(|l| l.starts_with(crate::parsers::RAW_LINE_PREFIX))
+                .collect();
+            assert_eq!(raw.len(), 1, "{extra}: one record, one line: {lines:?}");
+            assert_eq!(raw_payload(raw[0]), record, "{extra}: bytes differ");
+            assert_eq!(lines.iter().filter(|l| *l == "shell ready").count(), 1);
+            assert_eq!(lines.last().unwrap(), "tail");
+            assert_eq!(
+                lines.len(),
+                4,
+                "{extra}: no stray text from the record: {lines:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_stray_nul_before_console_text_still_does_not_swallow_the_text() {
+        // The long-record allowance must not make text after a NUL look like a record.
+        let mut failed = ZephyrDictBinaryParser::new("/nonexistent/binary-dictionary.json");
+        let lines = failed.feed(b"\0PROMPT> ready for input\r\nnext line\r\n");
+        assert!(
+            lines.contains(&"PROMPT> ready for input".to_string()),
+            "{lines:?}"
+        );
+        assert!(lines.contains(&"next line".to_string()), "{lines:?}");
+        assert!(!lines
+            .iter()
+            .any(|l| l.starts_with(crate::parsers::RAW_LINE_PREFIX)));
+    }
+
+    #[test]
+    fn console_text_from_a_mismatched_dictionary_is_not_a_successful_decode() {
+        use crate::parsers::raw_decode::decode_log_with_database;
+        let dir = temp_dir("raw-decode-text");
+        let db = write_test_db(&dir, &[(0x1000, "hello")]);
+        // A record of a source this dictionary does not know, carrying printable text and a
+        // newline: the parser can only pass that through as console text.
+        let record = encode_normal_message(3, 9, 7, 0x1000, &[], b"printable text\n");
+        let mut failed = ZephyrDictBinaryParser::new("/nonexistent/binary-dictionary.json");
+        let log: String = failed
+            .feed(&record)
+            .iter()
+            .map(|line| format!("[ts] {line}\n"))
+            .collect();
+        let error = decode_log_with_database(&log, "zephyr-dict", &db).unwrap_err();
+        assert!(error.contains("does not match"), "{error}");
+        // The matching one decodes it.
+        let good = write_test_db(&dir, &[(0x1000, "hello")]);
+        let ok_record = encode_normal_message(3, 1, 7, 0x1000, &[], b"printable text\n");
+        let ok_log: String = ZephyrDictBinaryParser::new("/nonexistent/binary-dictionary.json")
+            .feed(&ok_record)
+            .iter()
+            .map(|line| format!("[ts] {line}\n"))
+            .collect();
+        let (_, report) = decode_log_with_database(&ok_log, "zephyr-dict", &good).unwrap();
+        assert_eq!(report.records, 1);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
