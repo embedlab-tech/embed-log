@@ -355,11 +355,42 @@ button.active { background: var(--selection); border-color: var(--accent); color
     font-size: 12px;
     color: var(--accent);
 }
-#tab-swap-menu .tab-swap-select {
+#tab-swap-menu .tab-swap-select,
+#tab-swap-menu .dd-block {
     flex: 1;
     min-width: 0;
     font-size: 12px;
 }
+
+#tab-swap-menu .tab-swap-remove { padding: 1px 7px; line-height: 1.2; }
+#tab-swap-menu .tab-add-row { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+#tab-swap-menu .tab-reset-layout { margin-top: 8px; font-size: 11px; width: 100%; }
+#hidden-panes { display: none; }
+/* Custom dropdowns (also used by the dictionary row when that is present). */
+.dictionary-choice { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.dd-trigger {
+    display: inline-flex; align-items: center; gap: 8px; width: 270px; max-width: 100%;
+    padding: 2px 8px; text-align: left;
+}
+.dd-block .dd-trigger { width: 100%; }
+.dd-trigger-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.dd-placeholder { font-weight: 400; color: var(--ansi-0); }
+.dd-caret { color: var(--ansi-0); font-size: 10px; }
+.dd-menu {
+    position: fixed; z-index: 1100; margin: 0; padding: 4px; list-style: none;
+    max-width: min(560px, 90vw); max-height: 50vh; overflow: auto;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .25); font-size: 12px;
+}
+.dd-menu[hidden] { display: none; }
+.dd-group { padding: 6px 8px 2px; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--ansi-0); }
+.dd-option { display: flex; flex-direction: column; gap: 1px; padding: 5px 8px; border-radius: 4px; cursor: pointer; }
+.dd-option:hover, .dd-option:focus { background: var(--selection); outline: none; }
+.dd-option-top { display: flex; gap: 10px; justify-content: space-between; }
+.dd-option-name { font-weight: 700; white-space: nowrap; }
+.dd-option-build { color: var(--ansi-0); white-space: nowrap; }
+.pane-close-btn { margin-left: 4px; }
+.pane-close-btn[hidden] { display: none; }
 
 #pane-plugin-menu {
     position: fixed;

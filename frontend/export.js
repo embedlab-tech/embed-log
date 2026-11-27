@@ -185,6 +185,11 @@ export async function exportHtmlSnapshot(options = {}) {
             return `    <div class="tab-content" id="tab-content-${i}">\n${inner}\n    </div>`;
         }).join("\n");
 
+        // Panes removed from every view are still in PANES, so the page can add them
+        // back: give them elements, parked out of sight like in the live viewer.
+        const hiddenPanesHtml = PANES.filter(id => !TABS.some(tab => tab.panes.includes(id)))
+            .map(id => _paneHtml(id)).join("\n");
+
         // ------------------------------------------------------------------
         // Bootstrap: lazy hydration via compact JSON + windowed rendering
         // ------------------------------------------------------------------
@@ -270,6 +275,9 @@ export async function exportHtmlSnapshot(options = {}) {
 
 <div id="container">
 ${tabContentsHtml}
+<div id="hidden-panes">
+${hiddenPanesHtml}
+</div>
 </div>
 
 <script>${configJs}</script>

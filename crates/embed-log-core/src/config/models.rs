@@ -213,7 +213,7 @@ pub enum PanePluginEntry {
     Detailed(PanePluginConfig),
 }
 
-/// A tab in the UI, containing 1–2 panes.
+/// A tab in the UI, containing 1–3 panes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TabConfig {
     pub label: String,

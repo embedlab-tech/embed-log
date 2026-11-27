@@ -174,7 +174,7 @@ pub struct State {
     pub conn: ConnState,
     /// Active tab index.
     pub active_tab: usize,
-    /// Active pane index within the active tab (0 or 1 for 1–2 pane tabs).
+    /// Active pane index within the active tab (0..=2 for tabs of 1–3 panes).
     pub active_pane: usize,
     /// Unwrap mode (each pane is its own tab).
     pub unwrap: bool,
