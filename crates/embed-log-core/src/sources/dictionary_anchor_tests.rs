@@ -16,6 +16,7 @@ fn fixture() -> Fixture {
     let config = ParserConfig {
         parser_type: "zephyr-dict".into(),
         database: Some(path.to_string_lossy().into_owned().into()),
+        ..Default::default()
     };
     let (control, runtime) = DictionaryControl::new("UART_A", &config, manager).unwrap();
     let config = runtime.current_config(config).unwrap();

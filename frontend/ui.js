@@ -1,5 +1,5 @@
 import { state, TABS, PANES, paneLabel } from './state.js';
-import { rerenderPane, reanalyzePanePlugins, setTimestampMode, canDisplayTimestampMode, hidePluginOverlays, updatePaneSearch, navigatePaneSearch } from './lines.js';
+import { rerenderPane, scrollPaneToBottom, reanalyzePanePlugins, setTimestampMode, canDisplayTimestampMode, hidePluginOverlays, updatePaneSearch, navigatePaneSearch } from './lines.js';
 import { PhraseSearch } from './search.js';
 import {
     countLevels, hiddenLevelCount, hiddenLevels, paneLevelDefs, setLevelVisible, showAllLevels,
@@ -239,42 +239,285 @@ function _swapPanes(a, b) {
     const locB = _findPaneLocation(b);
     if (!locA || !locB) return;
 
-    // Snapshot pane DOM nodes BEFORE any tab content is rebuilt.
+    _ensureConfiguredLayout();
+    TABS[locA.tabIdx].panes[locA.paneIdx] = b;
+    TABS[locB.tabIdx].panes[locB.paneIdx] = a;
+
+    // Same path as add/remove: re-flow, refresh the ✕ buttons, save the layout.
+    const tabs = [...new Set([locA.tabIdx, locB.tabIdx])];
+    _commitLayout(tabs, tabs.flatMap(i => TABS[i].panes));
+    _pulsePane(a);
+    _pulsePane(b);
+}
+
+// ---------------------------------------------------------------------------
+// Pane add / remove (dynamic layout)
+//
+// A pane that is not in any view is "hidden": its element is parked in
+// #hidden-panes (display: none) and keeps receiving and storing its lines, so
+// it shows its full history when it is added back. Hiding only changes the
+// layout; the source keeps recording.
+// ---------------------------------------------------------------------------
+const _LAYOUT_KEY = "embed-log:layout:v1:";
+let _configuredLayout = null;
+
+const _layoutSnapshot = () => TABS.map(tab => ({ label: tab.label, panes: [...tab.panes] }));
+const _ensureConfiguredLayout = () => { _configuredLayout ||= _layoutSnapshot(); };
+// The saved layout belongs to this configuration: same views with the same panes.
+const _layoutKey = () => _LAYOUT_KEY + JSON.stringify(
+    (_configuredLayout || []).map(tab => [tab.label, [...tab.panes].sort()]),
+);
+const _sameLayout = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+function _hiddenPanes() {
+    return PANES.filter(id => !_findPaneLocation(id));
+}
+
+function _canRemovePane(paneId) {
+    const loc = _findPaneLocation(paneId);
+    return !!loc && TABS[loc.tabIdx].panes.length > 1;
+}
+
+function _parkingEl() {
+    let el = document.getElementById("hidden-panes");
+    if (!el) {
+        el = document.createElement("div");
+        el.id = "hidden-panes";
+        document.getElementById("container")?.appendChild(el);
+    }
+    return el;
+}
+
+export function refreshPaneControls() {
+    PANES.forEach(id => {
+        const button = document.querySelector(`#pane-${id} .pane-close-btn`);
+        if (button) button.hidden = state.unwrap || !_canRemovePane(id);
+    });
+}
+
+function _saveLayout() {
+    if (window.__embedLogProfile?.capabilities?.persistCache !== true || !_configuredLayout) return;
+    try {
+        const key = _layoutKey();
+        if (_sameLayout(_layoutSnapshot(), _configuredLayout)) localStorage.removeItem(key);
+        else localStorage.setItem(key, JSON.stringify(_layoutSnapshot()));
+    } catch { /* storage unavailable: the layout just does not persist */ }
+}
+
+// Apply a layout that was already written to TABS: move elements, re-flow, keep scroll.
+function _commitLayout(tabIdxs, paneIds) {
     const paneElMap = {};
     PANES.forEach(id => {
         const el = document.getElementById("pane-" + id);
         if (el) paneElMap[id] = el;
     });
-
-    TABS[locA.tabIdx].panes[locA.paneIdx] = b;
-    TABS[locB.tabIdx].panes[locB.paneIdx] = a;
-
-    [...new Set([locA.tabIdx, locB.tabIdx])].forEach(tabIdx => _rebuildTabContent(tabIdx, paneElMap));
-    _pulsePane(a);
-    _pulsePane(b);
-    window.__embedLogSchedulePersist?.();
-}
-
-function _buildSwapTargetOptions(select, fromPaneId) {
-    select.innerHTML = "";
-    const placeholder = document.createElement("option");
-    placeholder.value = "";
-    placeholder.textContent = "swap with…";
-    placeholder.selected = true;
-    select.appendChild(placeholder);
-
-    PANES.forEach(otherId => {
-        if (otherId === fromPaneId) return;
-        const loc = _findPaneLocation(otherId);
-        const tabLabel = loc ? TABS[loc.tabIdx].label : "?";
-        const opt = document.createElement("option");
-        opt.value = otherId;
-        opt.textContent = `${paneLabel(otherId)} · ${tabLabel}`;
-        select.appendChild(opt);
+    const scrollTops = new Map();
+    paneIds.forEach(id => {
+        const el = document.getElementById("log-" + id);
+        if (el) scrollTops.set(id, el.scrollTop);
     });
+
+    const parking = _parkingEl();
+    _hiddenPanes().forEach(id => { if (paneElMap[id]) parking.appendChild(paneElMap[id]); });
+    tabIdxs.forEach(tabIdx => _rebuildTabContent(tabIdx, paneElMap));
+    refreshPaneControls();
+
+    // Moving an element resets its scroll position.
+    paneIds.forEach(id => {
+        if (state.atBottom[id] !== false) scrollPaneToBottom(id);
+        else {
+            const el = document.getElementById("log-" + id);
+            if (el && scrollTops.has(id)) el.scrollTop = scrollTops.get(id);
+        }
+    });
+    window.__embedLogSchedulePersist?.();
+    _saveLayout();
 }
 
-// Hover popup on tab labels — compact place for pane-swap controls.
+function _removePane(paneId) {
+    const loc = _findPaneLocation(paneId);
+    if (!loc || !_canRemovePane(paneId)) return;
+    _ensureConfiguredLayout();
+    TABS[loc.tabIdx].panes.splice(loc.paneIdx, 1);
+    _commitLayout([loc.tabIdx], TABS[loc.tabIdx].panes);
+}
+
+// From the hidden panes, or moved here from another view that keeps at least one pane.
+function _addPane(tabIdx, paneId) {
+    if (!TABS[tabIdx] || TABS[tabIdx].panes.includes(paneId)) return;
+    const from = _findPaneLocation(paneId);
+    if (from && !_canRemovePane(paneId)) return;
+    _ensureConfiguredLayout();
+    if (from) TABS[from.tabIdx].panes.splice(from.paneIdx, 1);
+    TABS[tabIdx].panes.push(paneId);
+    const tabs = [...new Set([tabIdx, from?.tabIdx].filter(i => i !== undefined))];
+    _commitLayout(tabs, tabs.flatMap(i => TABS[i].panes));
+    _pulsePane(paneId);
+}
+
+function _resetLayout() {
+    if (!_configuredLayout) return;
+    _configuredLayout.forEach((tab, i) => { if (TABS[i]) TABS[i].panes = [...tab.panes]; });
+    _commitLayout(TABS.map((_, i) => i), PANES);
+}
+
+function _layoutIsCustom() {
+    return !!_configuredLayout && !_sameLayout(_layoutSnapshot(), _configuredLayout);
+}
+
+// Called by ws.js once the configured views exist: restore this browser's layout.
+window.__embedLogApplySavedLayout = function __embedLogApplySavedLayout() {
+    _configuredLayout = _layoutSnapshot();
+    if (window.__embedLogProfile?.capabilities?.persistCache !== true) return;
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(_layoutKey()) || "null"); } catch { saved = null; }
+    const ids = Array.isArray(saved) ? saved.flatMap(tab => (Array.isArray(tab?.panes) ? tab.panes : [])) : [];
+    const valid = Array.isArray(saved) && saved.length === TABS.length
+        && saved.every((tab, i) => tab && tab.label === TABS[i].label && Array.isArray(tab.panes) && tab.panes.length > 0)
+        && ids.every(id => PANES.includes(id)) && new Set(ids).size === ids.length;
+    if (!valid || _sameLayout(saved.map(({ label, panes }) => ({ label, panes })), _configuredLayout)) return;
+    saved.forEach((tab, i) => { TABS[i].panes = [...tab.panes]; });
+    rebuildLayout();
+};
+
+// One custom listbox open at a time; a click anywhere else closes it.
+let _openMenuSelect = null;
+function _closeMenuSelect() {
+    if (!_openMenuSelect) return;
+    _openMenuSelect.menu.hidden = true;
+    _openMenuSelect.trigger.setAttribute("aria-expanded", "false");
+    _openMenuSelect = null;
+}
+document.addEventListener("pointerdown", event => {
+    if (_openMenuSelect && !_openMenuSelect.wrap.contains(event.target)) _closeMenuSelect();
+});
+window.addEventListener("resize", _closeMenuSelect);
+
+/**
+ * Custom listbox instead of <select>, in the look of the other dropdowns.
+ * groups: [{ label?, items: [{ value, name, detail? }] }]; onPick(value) runs on choice.
+ */
+function _createMenuSelect({ placeholder, ariaLabel, groups, onPick, disabled = false, title = "" }) {
+    const wrap = document.createElement("div");
+    wrap.className = "dictionary-choice dd-block";
+    const trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.className = "dd-trigger";
+    trigger.setAttribute("role", "combobox");
+    trigger.setAttribute("aria-haspopup", "listbox");
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.setAttribute("aria-label", ariaLabel);
+    trigger.disabled = disabled;
+    trigger.title = title;
+    const text = document.createElement("span");
+    text.className = "dd-trigger-name dd-placeholder";
+    text.textContent = placeholder;
+    const caret = document.createElement("span");
+    caret.className = "dd-caret";
+    caret.textContent = "▾";
+    trigger.append(text, caret);
+
+    const menu = document.createElement("ul");
+    menu.className = "dd-menu";
+    menu.setAttribute("role", "listbox");
+    menu.hidden = true;
+    groups.forEach(group => {
+        if (group.label) {
+            const heading = document.createElement("li");
+            heading.className = "dd-group";
+            heading.setAttribute("role", "presentation");
+            heading.textContent = group.label;
+            menu.appendChild(heading);
+        }
+        group.items.forEach(item => {
+            const option = document.createElement("li");
+            option.className = "dd-option";
+            option.setAttribute("role", "option");
+            option.tabIndex = -1;
+            option.dataset.value = item.value;
+            const top = document.createElement("span");
+            top.className = "dd-option-top";
+            const name = document.createElement("span");
+            name.className = "dd-option-name";
+            name.textContent = item.name;
+            top.appendChild(name);
+            if (item.detail) {
+                const detail = document.createElement("span");
+                detail.className = "dd-option-build";
+                detail.textContent = item.detail;
+                top.appendChild(detail);
+            }
+            option.appendChild(top);
+            menu.appendChild(option);
+        });
+    });
+    wrap.append(trigger, menu);
+
+    const options = () => [...menu.querySelectorAll('[role="option"]')];
+    const focusAt = index => {
+        const list = options();
+        if (list.length) list[Math.max(0, Math.min(list.length - 1, index))].focus();
+    };
+    const open = () => {
+        if (trigger.disabled) return;
+        _closeMenuSelect();
+        const box = trigger.getBoundingClientRect();
+        Object.assign(menu.style, { left: `${box.left}px`, top: `${box.bottom + 2}px`, minWidth: `${box.width}px` });
+        menu.hidden = false;
+        trigger.setAttribute("aria-expanded", "true");
+        _openMenuSelect = { wrap, menu, trigger };
+        focusAt(0);
+    };
+    trigger.addEventListener("click", () => (_openMenuSelect?.trigger === trigger ? _closeMenuSelect() : open()));
+    trigger.addEventListener("keydown", event => {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); open(); }
+    });
+    menu.addEventListener("click", event => {
+        const option = event.target.closest('[role="option"]');
+        if (!option) return;
+        _closeMenuSelect();
+        onPick(option.dataset.value);
+    });
+    menu.addEventListener("keydown", event => {
+        const list = options();
+        const at = list.indexOf(document.activeElement);
+        if (event.key === "ArrowDown") { event.preventDefault(); focusAt(at + 1); }
+        else if (event.key === "ArrowUp") { event.preventDefault(); focusAt(at - 1); }
+        else if (event.key === "Home") { event.preventDefault(); focusAt(0); }
+        else if (event.key === "End") { event.preventDefault(); focusAt(list.length - 1); }
+        else if ((event.key === "Enter" || event.key === " ") && at >= 0) {
+            event.preventDefault();
+            _closeMenuSelect();
+            onPick(list[at].dataset.value);
+        } else if (event.key === "Escape") { event.preventDefault(); _closeMenuSelect(); trigger.focus(); }
+        else if (event.key === "Tab") _closeMenuSelect();
+    });
+    return wrap;
+}
+
+function _swapTargetGroups(fromPaneId) {
+    // Swapping is between panes that are in a view; hidden ones are brought back with "Add".
+    const items = PANES.filter(id => id !== fromPaneId && _findPaneLocation(id)).map(id => ({
+        value: id,
+        name: paneLabel(id),
+        detail: TABS[_findPaneLocation(id).tabIdx].label,
+    }));
+    return items.length ? [{ items }] : [];
+}
+
+function _addPaneGroups(tabIdx) {
+    const hidden = _hiddenPanes().map(id => ({ value: id, name: paneLabel(id) }));
+    const movable = PANES.filter(id => {
+        const loc = _findPaneLocation(id);
+        return loc && loc.tabIdx !== tabIdx && TABS[loc.tabIdx].panes.length > 1;
+    }).map(id => ({ value: id, name: paneLabel(id), detail: TABS[_findPaneLocation(id).tabIdx].label }));
+    return [
+        ...(hidden.length ? [{ label: "Hidden", items: hidden }] : []),
+        ...(movable.length ? [{ label: "Move from another view", items: movable }] : []),
+    ];
+}
+
+// Hover popup on tab labels — compact place for pane controls (swap, add, remove).
 (function _setupTabSwapPopup() {
     const tabBar = document.getElementById("tab-bar");
     if (!tabBar) return;
@@ -286,6 +529,7 @@ function _buildSwapTargetOptions(select, fromPaneId) {
     let hideTimer = null;
 
     function hideMenu() {
+        _closeMenuSelect();
         menu.classList.remove("open");
     }
 
@@ -299,15 +543,22 @@ function _buildSwapTargetOptions(select, fromPaneId) {
     }
 
     function showForButton(btn) {
+        // In UNWRAP mode a tab is one pane and data-tab-idx is the pane's index, not a
+        // view's: the menu would edit the wrong group. The layout is edited when grouped.
+        if (state.unwrap) {
+            hideMenu();
+            return;
+        }
         const tabIdx = Number(btn.dataset.tabIdx);
         if (!Number.isInteger(tabIdx) || !TABS[tabIdx]) return;
 
         const panes = TABS[tabIdx].panes;
+        _closeMenuSelect();
         menu.innerHTML = "";
 
         const title = document.createElement("div");
         title.className = "tab-swap-title";
-        title.textContent = `Swap panes in “${TABS[tabIdx].label}”`;
+        title.textContent = `Panes in “${TABS[tabIdx].label}”`;
         menu.appendChild(title);
 
         panes.forEach(paneId => {
@@ -318,20 +569,70 @@ function _buildSwapTargetOptions(select, fromPaneId) {
             name.className = "tab-swap-pane-name";
             name.textContent = paneLabel(paneId);
 
-            const select = document.createElement("select");
-            select.className = "tab-swap-select";
-            _buildSwapTargetOptions(select, paneId);
-            select.addEventListener("change", () => {
-                const target = select.value;
-                if (!target) return;
-                _swapPanes(paneId, target);
-                showForButton(btn); // refresh options + tab membership labels
+            const swapGroups = _swapTargetGroups(paneId);
+            const select = _createMenuSelect({
+                placeholder: "swap with…",
+                ariaLabel: `Swap ${paneLabel(paneId)} with`,
+                groups: swapGroups,
+                disabled: !swapGroups.length,
+                onPick: target => {
+                    _swapPanes(paneId, target);
+                    showForButton(btn); // refresh options + tab membership labels
+                },
+            });
+
+            const remove = document.createElement("button");
+            remove.type = "button";
+            remove.className = "tab-swap-remove";
+            remove.textContent = "✕";
+            remove.disabled = !_canRemovePane(paneId);
+            remove.title = remove.disabled
+                ? "A view keeps at least one pane"
+                : "Remove from this view (the source keeps recording)";
+            remove.setAttribute("aria-label", `Remove ${paneLabel(paneId)} from this view`);
+            remove.addEventListener("click", () => {
+                _removePane(paneId);
+                showForButton(btn);
             });
 
             row.appendChild(name);
             row.appendChild(select);
+            row.appendChild(remove);
             menu.appendChild(row);
         });
+
+        const addRow = document.createElement("div");
+        addRow.className = "tab-swap-row tab-add-row";
+        const addLabel = document.createElement("span");
+        addLabel.className = "tab-swap-pane-name";
+        addLabel.textContent = "Add";
+        const addGroups = _addPaneGroups(tabIdx);
+        const addSelect = _createMenuSelect({
+            placeholder: "add pane…",
+            ariaLabel: `Add a pane to ${TABS[tabIdx].label}`,
+            groups: addGroups,
+            disabled: !addGroups.length,
+            title: addGroups.length ? "" : "Every source is already in this view",
+            onPick: value => {
+                _addPane(tabIdx, value);
+                showForButton(btn);
+            },
+        });
+        addRow.append(addLabel, addSelect);
+        menu.appendChild(addRow);
+
+        if (_layoutIsCustom()) {
+            const reset = document.createElement("button");
+            reset.type = "button";
+            reset.className = "tab-reset-layout";
+            reset.textContent = "Reset layout";
+            reset.title = "Back to the configured views and panes";
+            reset.addEventListener("click", () => {
+                _resetLayout();
+                showForButton(btn);
+            });
+            menu.appendChild(reset);
+        }
 
         const rect = btn.getBoundingClientRect();
         menu.style.left = `${Math.max(8, rect.left)}px`;
@@ -355,6 +656,13 @@ function _buildSwapTargetOptions(select, fromPaneId) {
 
     menu.addEventListener("mouseenter", cancelHide);
     menu.addEventListener("mouseleave", scheduleHide);
+    // A dropdown inside the popup can close under the pointer without a mouseleave;
+    // the popup would then stay open. Any move away from it and the tab bar hides it.
+    document.addEventListener("mousemove", ev => {
+        if (!menu.classList.contains("open")) return;
+        if (menu.contains(ev.target) || tabBar.contains(ev.target)) return;
+        scheduleHide();
+    });
 })();
 
 // ---------------------------------------------------------------------------
@@ -475,6 +783,18 @@ window.__embedLogRefreshLevelControls = () => {
 const FILTER_INPUT_DEBOUNCE_MS = 150;
 
 export function _uiSetupPane(id) {
+    const header = document.querySelector(`#pane-${id} .pane-header`);
+    if (header && !header.querySelector('.pane-close-btn')) {
+        const close = document.createElement('button');
+        close.type = 'button';
+        close.className = 'pane-close-btn';
+        close.textContent = '✕';
+        close.title = 'Remove from this view (the source keeps recording)';
+        close.setAttribute('aria-label', `Remove ${paneLabel(id)} from this view`);
+        close.hidden = true; // shown by refreshPaneControls once the layout is known
+        close.addEventListener('click', () => _removePane(id));
+        header.append(close);
+    }
     const input = document.querySelector(`.filter-input[data-pane="${id}"]`);
     if (input && !input.dataset.searchInitialized) {
         input.dataset.searchInitialized = 'true';
@@ -759,7 +1079,7 @@ if (window.__embedLogProfile?.capabilities?.tx) {
                 else if (!paneRight) paneRight = child;
             }
         }
-        return { tabContent, paneLeft, paneRight };
+        return { paneLeft, paneRight };
     }
 
     function eventX(ev) {
@@ -769,7 +1089,7 @@ if (window.__embedLogProfile?.capabilities?.tx) {
     }
 
     function startDrag(splitter, ev) {
-        const { tabContent, paneLeft, paneRight } = findNeighborPanes(splitter);
+        const { paneLeft, paneRight } = findNeighborPanes(splitter);
         if (!paneLeft || !paneRight) return;
 
         ev.preventDefault();
@@ -778,7 +1098,9 @@ if (window.__embedLogProfile?.capabilities?.tx) {
 
         const startX = eventX(ev);
         const startLeftW = paneLeft.getBoundingClientRect().width;
-        const totalW = tabContent.getBoundingClientRect().width - splitter.offsetWidth;
+        // Only the two neighbours trade width. Sharing the whole tab would squeeze
+        // a third pane to nothing.
+        const totalW = startLeftW + paneRight.getBoundingClientRect().width;
 
         function onMove(moveEv) {
             moveEv.preventDefault();

@@ -1,4 +1,4 @@
-// Tab definitions — each tab shows 1 or 2 panes side-by-side.
+// Tab definitions — each tab shows 1 to 3 panes side-by-side.
 // In live mode TABS/PANES start empty; ws.js populates them dynamically.
 // In static mode (export/merge_logs) a classic <script> sets window.TABS and
 // window.PANES before this module runs so the per-pane state is pre-seeded.

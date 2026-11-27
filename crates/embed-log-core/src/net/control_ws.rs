@@ -272,7 +272,7 @@ async fn handle_control_command(
         "unsubscribe" => Some(handle_unsubscribe(&cmd, state, subscribed_sources, msg_id)),
         "log.inject" => Some(handle_log_inject(&cmd, state, msg_id).await),
         "tx.write" => Some(handle_tx_write(&cmd, state, msg_id).await),
-        "dictionary.stage" | "dictionary.activate" | "dictionary.status" => {
+        "dictionary.stage" | "dictionary.activate" | "dictionary.reload" | "dictionary.status" => {
             Some(handle_dictionary(&cmd, state, cmd_type, msg_id).await)
         }
         "marker.create" => Some(handle_marker_create(&cmd, state, msg_id).await),
@@ -330,10 +330,32 @@ async fn handle_dictionary(
                 .get("parser_type")
                 .and_then(|v| v.as_str())
                 .unwrap_or("zephyr-dict");
+            // Optional: which configured entry this is. Files with identical bytes share
+            // a dictionary_id, so the UI names the entry it picked.
+            let configured_index = match cmd.get("configured_index") {
+                None | Some(serde_json::Value::Null) => None,
+                Some(value) => match value.as_u64() {
+                    Some(index) => Some(index as usize),
+                    None => return error("configured_index must be a non-negative integer"),
+                },
+            };
             control
-                .activate(id, parser, generation)
+                .activate_configured(id, parser, generation, configured_index)
                 .await
                 .map(|status| serde_json::json!({"status": status}))
+        }
+        "dictionary.reload" => {
+            let Some(generation) = cmd.get("expected_generation").and_then(|v| v.as_u64()) else {
+                return error("missing expected_generation (query dictionary.status first)");
+            };
+            control.reload(generation).await.map(|outcome| {
+                serde_json::json!({
+                    "reloaded": outcome.reloaded,
+                    "path": outcome.path,
+                    "dictionary": outcome.dictionary,
+                    "status": outcome.status,
+                })
+            })
         }
         _ => unreachable!(),
     };
@@ -979,7 +1001,7 @@ async fn handle_marker_create(
 
         // Create new marker in frontend-compatible format.
         let now = chrono::Local::now();
-        let new_marker = serde_json::json!({
+        let mut new_marker = serde_json::json!({
             "paneId": source_id,
             "lineIdx": line_idx,
             "endIdx": line_idx,
@@ -988,6 +1010,15 @@ async fn handle_marker_create(
             "createdAt": now.to_rfc3339(),
             "origin": origin,
         });
+        // The session sequence of the marked record, when known: the one identity that
+        // is unique across sources, which a merged pane needs (line_idx is per source).
+        let sequence = cmd
+            .get("sequence")
+            .and_then(|v| v.as_u64())
+            .or_else(|| lookup_sequence_in_replay(&state.replay, source_id, line_idx));
+        if let Some(sequence) = sequence {
+            new_marker["sequence"] = serde_json::json!(sequence);
+        }
 
         // Replace any existing marker at this (paneId, lineIdx) and persist.
         match mgr.replace_marker(source_id, line_idx, new_marker) {
@@ -1022,6 +1053,24 @@ async fn handle_marker_create(
 
 /// Search the replay buffer for a broadcast payload matching `source_id` and `line_idx`.
 /// Returns the `timestamp_num` value if found, or `None`.
+fn lookup_sequence_in_replay(
+    replay: &std::sync::Mutex<std::collections::VecDeque<String>>,
+    source_id: &str,
+    line_idx: u64,
+) -> Option<u64> {
+    let buf = replay.lock().ok()?;
+    buf.iter().find_map(|entry| {
+        let parsed: serde_json::Value = serde_json::from_str(entry).ok()?;
+        let same = parsed.get("source_id").and_then(|v| v.as_str()) == Some(source_id)
+            && parsed.get("line_idx").and_then(|v| v.as_u64()) == Some(line_idx);
+        if same {
+            parsed.get("sequence").and_then(|v| v.as_u64())
+        } else {
+            None
+        }
+    })
+}
+
 fn lookup_timestamp_in_replay(
     replay: &std::sync::Mutex<std::collections::VecDeque<String>>,
     source_id: &str,
@@ -1757,6 +1806,37 @@ mod tests {
         assert_eq!(resp["type"], "error");
         assert!(resp["error"].as_str().unwrap().contains("non-negative"));
 
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test]
+    async fn marker_records_the_sequence_of_the_marked_record() {
+        let (state, dir) = test_state_with_session("marker-sequence");
+        let mut sub = ControlSubscription::new();
+        // Found in the replay by (source, line_idx): the session sequence is the identity.
+        state.replay.lock().unwrap().push_back(
+            r#"{"type":"rx","source_id":"DUT_UART","line_idx":3,"sequence":41,"timestamp_num":5000.0}"#
+                .to_string(),
+        );
+        let _ = handle_control_command(
+            r#"{"id":"m1","type":"marker.create","source_id":"DUT_UART","line_idx":3,"description":"from replay"}"#,
+            &state,
+            &mut sub,
+        )
+        .await;
+        // Or given by the caller, e.g. for a merged pane whose line_idx is ambiguous.
+        let _ = handle_control_command(
+            r#"{"id":"m2","type":"marker.create","source_id":"DUT_UART","line_idx":9,"description":"explicit","timestamp_num":9000.0,"sequence":77}"#,
+            &state,
+            &mut sub,
+        )
+        .await;
+        let raw: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("markers.json")).unwrap())
+                .unwrap();
+        let markers = raw["markers"].as_array().unwrap();
+        assert_eq!(markers[0]["sequence"], 41);
+        assert_eq!(markers[1]["sequence"], 77);
         std::fs::remove_dir_all(dir).ok();
     }
 

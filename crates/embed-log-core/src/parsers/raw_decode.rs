@@ -38,6 +38,7 @@ pub fn decode_log_with_database(
     let mut parser = try_create_dictionary_parser(&ParserConfig {
         parser_type: parser_type.into(),
         database: Some(database.to_string().into()),
+        watch: false,
     })?;
     decode_log(input, parser.as_mut(), parser_type == "zephyr-dict-hex")
 }

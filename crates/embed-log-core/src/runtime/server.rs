@@ -257,16 +257,35 @@ impl LogServer {
                 src.source.set_tx_receiver(tx_receiver);
             }
 
+            if !self.config.server.control_api
+                && src
+                    .source
+                    .parser_config()
+                    .is_some_and(|config| config.watch)
+            {
+                warn!(
+                    "[{}] parser.watch needs server.control_api; the dictionary will not reload automatically",
+                    src.name
+                );
+            }
             if self.config.server.control_api {
-                if let Some(config) = src.source.parser_config() {
+                if let Some(config) = src.source.parser_config().cloned() {
+                    let config = &config;
                     match crate::sources::dictionary::DictionaryControl::new(
                         &src.name,
                         config,
                         session_mgr.clone(),
                     ) {
                         Ok((control, runtime)) => {
-                            dictionaries.insert(src.name.clone(), control);
                             src.source.set_dictionary_runtime(runtime);
+                            // Runtime control is UART-only: other sources drop the runtime,
+                            // and must not offer Reload or a selector that cannot work.
+                            if !control.is_closed() {
+                                if config.watch {
+                                    tokio::spawn(control.clone().watch_active_file());
+                                }
+                                dictionaries.insert(src.name.clone(), control);
+                            }
                         }
                         Err(e) => warn!(
                             "[{}] runtime dictionary control unavailable (database {:?}): {e}; continuing with configured parser",

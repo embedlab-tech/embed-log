@@ -41,6 +41,38 @@ pub struct ConfiguredDictionary {
     pub path: String,
     pub dictionary: Option<DictionaryInfo>,
     pub error: Option<String>,
+    /// The file differs from the snapshot taken at startup or at the last reload
+    /// (for example after a firmware rebuild). Computed on every status read.
+    pub changed_on_disk: bool,
+    #[serde(skip)]
+    stamp: Option<FileStamp>,
+}
+
+impl DictionaryStatus {
+    /// The recorded choice wins while it still holds the active dictionary
+    /// (the active one can also change out of band, for example by a raw-line
+    /// anchor); otherwise the first entry with the active id.
+    fn resolved_active_index(&self) -> Option<usize> {
+        let id = &self.dictionary.as_ref()?.dictionary_id;
+        let holds = |i: usize| {
+            self.configured[i]
+                .dictionary
+                .as_ref()
+                .map(|d| &d.dictionary_id)
+                == Some(id)
+        };
+        self.active_index
+            .filter(|&i| i < self.configured.len() && holds(i))
+            .or_else(|| (0..self.configured.len()).find(|&i| holds(i)))
+    }
+}
+
+/// Cheap change detector for a dictionary file: modification time and size.
+type FileStamp = (std::time::SystemTime, u64);
+
+fn file_stamp(path: &str) -> Option<FileStamp> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.modified().ok()?, meta.len()))
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -53,7 +85,35 @@ pub struct DictionaryStatus {
     pub raw_offset: u64,
     pub raw_error: Option<String>,
     pub configured: Vec<ConfiguredDictionary>,
+    /// The configured entry the active dictionary comes from. Two files with the
+    /// same bytes share a `dictionary_id`, so the entry is tracked on its own:
+    /// Reload and `parser.watch` follow this file, not "the first with this id".
+    pub active_index: Option<usize>,
     pub armed: Option<ArmedStatus>,
+    /// `parser.watch`: the active file is reloaded automatically when it changes.
+    pub watch: bool,
+    /// Why the last automatic reload failed; cleared by the next success.
+    pub watch_error: Option<String>,
+}
+
+/// Result of re-reading the active configured dictionary file.
+#[derive(Clone, Debug, Serialize)]
+pub struct ReloadOutcome {
+    /// `false` when the file is byte-identical to the active dictionary.
+    pub reloaded: bool,
+    pub path: String,
+    pub dictionary: DictionaryInfo,
+    pub status: DictionaryStatus,
+}
+
+fn read_dictionary_file(path: &str) -> Result<String, String> {
+    let mut json = String::new();
+    File::open(path)
+        .map_err(|e| e.to_string())?
+        .take((MAX_DICTIONARY_BYTES + 1) as u64)
+        .read_to_string(&mut json)
+        .map_err(|e| e.to_string())?;
+    Ok(json)
 }
 
 type ActivationResult = (
@@ -125,7 +185,10 @@ impl DictionaryControl {
                 raw_offset: 0,
                 raw_error: None,
                 configured: Vec::new(),
+                active_index: None,
                 armed: None,
+                watch: config.watch,
+                watch_error: None,
             })),
             session,
             artifact_name: format!("{:x}", Sha256::digest(source.as_bytes())),
@@ -144,17 +207,13 @@ impl DictionaryControl {
                 return Err("dictionary path list is empty".into());
             }
             for (index, path) in paths.iter().enumerate() {
-                let staged = (|| {
-                    let mut json = String::new();
-                    File::open(path)
-                        .map_err(|e| e.to_string())?
-                        .take((MAX_DICTIONARY_BYTES + 1) as u64)
-                        .read_to_string(&mut json)
-                        .map_err(|e| e.to_string())?;
-                    control.stage_bytes(&json)
-                })();
+                // Stamp first: a write that lands after the read must show as changed.
+                let stamp = file_stamp(path);
+                let staged = read_dictionary_file(path).and_then(|json| control.stage_bytes(&json));
                 if index == 0 {
-                    control.status.lock().unwrap().dictionary = Some(staged.clone()?);
+                    let mut status = control.status.lock().unwrap();
+                    status.dictionary = Some(staged.clone()?);
+                    status.active_index = Some(0);
                 }
                 control
                     .status
@@ -165,6 +224,8 @@ impl DictionaryControl {
                         path: path.clone(),
                         dictionary: staged.as_ref().ok().cloned(),
                         error: staged.err(),
+                        changed_on_disk: false,
+                        stamp,
                     });
             }
         }
@@ -185,8 +246,20 @@ impl DictionaryControl {
             .join("dictionaries")
     }
 
+    /// The RX owner is gone. Sources that cannot switch dictionaries at runtime
+    /// (anything but UART) drop their runtime straight away.
+    pub fn is_closed(&self) -> bool {
+        self.updates.is_closed()
+    }
+
     pub fn status(&self) -> DictionaryStatus {
-        self.status.lock().unwrap().clone()
+        let mut status = self.status.lock().unwrap().clone();
+        status.active_index = status.resolved_active_index();
+        for item in &mut status.configured {
+            item.changed_on_disk =
+                item.dictionary.is_some() && file_stamp(&item.path) != item.stamp;
+        }
+        status
     }
 
     /// Upload exact UTF-8 JSON bytes, not an arbitrary server-side file path.
@@ -273,8 +346,181 @@ impl DictionaryControl {
         parser_type: &str,
         expected_generation: u64,
     ) -> Result<DictionaryStatus, String> {
-        self.queue_update(dictionary_id, parser_type, expected_generation, None)
+        self.activate_configured(dictionary_id, parser_type, expected_generation, None)
             .await
+    }
+
+    /// Like `activate`, naming the configured entry it comes from. Needed when
+    /// several files hold identical bytes: they share one `dictionary_id`, so the
+    /// id alone cannot say which file Reload and `parser.watch` should follow.
+    pub async fn activate_configured(
+        &self,
+        dictionary_id: &str,
+        parser_type: &str,
+        expected_generation: u64,
+        configured_index: Option<usize>,
+    ) -> Result<DictionaryStatus, String> {
+        if let Some(index) = configured_index {
+            // One critical section: validate the entry, check the generation and move the
+            // choice. A delayed request must not redirect later reloads to another file.
+            let mut status = self.status.lock().unwrap();
+            let entry = status
+                .configured
+                .get(index)
+                .ok_or("unknown configured dictionary index")?;
+            if entry.dictionary.as_ref().map(|d| d.dictionary_id.as_str()) != Some(dictionary_id) {
+                return Err("configured dictionary index does not match dictionary_id".into());
+            }
+            let already_active = status.dictionary.as_ref().map(|d| d.dictionary_id.as_str())
+                == Some(dictionary_id)
+                && status.parser_type == parser_type;
+            if already_active {
+                // Identical bytes under another file: decoding does not change, only the
+                // file that Reload follows.
+                if status.generation != expected_generation {
+                    return Err(format!(
+                        "generation conflict: active generation is {}",
+                        status.generation
+                    ));
+                }
+                status.active_index = Some(index);
+                drop(status);
+                return Ok(self.status());
+            }
+        }
+        self.queue_update(dictionary_id, parser_type, expected_generation, None)
+            .await?;
+        if configured_index.is_some() {
+            self.status.lock().unwrap().active_index = configured_index;
+        }
+        Ok(self.status())
+    }
+
+    /// Re-read the configured file behind the active dictionary and activate it.
+    ///
+    /// For the rebuild loop: the firmware build overwrites the dictionary
+    /// file in place, while the startup snapshot keeps decoding with the old
+    /// one. A missing or invalid file leaves the active dictionary untouched.
+    pub async fn reload(&self, expected_generation: u64) -> Result<ReloadOutcome, String> {
+        let status = self.status();
+        // Checked up front: an unchanged file must not hide that another client
+        // changed the dictionary since the caller last looked.
+        if status.generation != expected_generation {
+            return Err(format!(
+                "generation conflict: active generation is {}",
+                status.generation
+            ));
+        }
+        let active = status
+            .dictionary
+            .as_ref()
+            .ok_or("no active dictionary to reload")?;
+        let index = status
+            .active_index
+            .ok_or("the active dictionary was uploaded, not read from a configured file; select a configured dictionary first")?;
+        let path = status.configured[index].path.clone();
+        // Stamp before reading: a write that lands after the read stays "changed".
+        let stamp = file_stamp(&path);
+        let info = read_dictionary_file(&path)
+            .map_err(|e| format!("cannot read {path}: {e}"))
+            .and_then(|json| self.stage_bytes(&json).map_err(|e| format!("{path}: {e}")))?;
+        if info.dictionary_id == active.dictionary_id {
+            // Same bytes (for example a touched file): the hint is stale, not the dictionary.
+            self.status.lock().unwrap().configured[index].stamp = stamp;
+            return Ok(ReloadOutcome {
+                reloaded: false,
+                path,
+                dictionary: info,
+                status: self.status(),
+            });
+        }
+        self.queue_update(
+            &info.dictionary_id,
+            &status.parser_type,
+            expected_generation,
+            None,
+        )
+        .await?;
+        {
+            let mut current = self.status.lock().unwrap();
+            // Keep the selector bound to the file: it now holds the new content.
+            if let Some(item) = current.configured.get_mut(index) {
+                item.dictionary = Some(info.clone());
+                item.error = None;
+                item.stamp = stamp;
+            }
+            current.active_index = Some(index);
+            // Frequent rebuilds must not exhaust the per-source staging budget.
+            let still_used = current.configured.iter().any(|item| {
+                item.dictionary.as_ref().map(|d| &d.dictionary_id) == Some(&active.dictionary_id)
+            });
+            if !still_used {
+                self.staged.lock().unwrap().remove(&active.dictionary_id);
+            }
+        }
+        Ok(ReloadOutcome {
+            reloaded: true,
+            path,
+            dictionary: info,
+            status: self.status(),
+        })
+    }
+
+    /// `parser.watch`: reload the active file whenever a rebuild overwrites it.
+    ///
+    /// Polls file stamps (no platform watcher), waits until the file stops
+    /// changing so a half-written dictionary is not read, and tries each version
+    /// once: a bad file is reported in `watch_error` until it changes again.
+    /// Ends when the UART source stops.
+    pub async fn watch_active_file(self) {
+        const POLL: Duration = Duration::from_secs(1);
+        const SETTLE: Duration = Duration::from_millis(500);
+        let mut failed: Option<Option<FileStamp>> = None;
+        loop {
+            tokio::time::sleep(POLL).await;
+            if self.updates.is_closed() {
+                return;
+            }
+            let status = self.status();
+            let Some(item) = status.active_index.and_then(|i| status.configured.get(i)) else {
+                continue;
+            };
+            if !item.changed_on_disk {
+                failed = None;
+                continue;
+            }
+            let seen = file_stamp(&item.path);
+            if failed == Some(seen) {
+                continue;
+            }
+            tokio::time::sleep(SETTLE).await;
+            if file_stamp(&item.path) != seen {
+                continue; // still being written; look again next round
+            }
+            match self.reload(self.status().generation).await {
+                Ok(outcome) => {
+                    failed = None;
+                    self.status.lock().unwrap().watch_error = None;
+                    if outcome.reloaded {
+                        tracing::info!(
+                            "[{}] dictionary reloaded from {}",
+                            status.source_id,
+                            outcome.path
+                        );
+                    }
+                }
+                // Another client changed the dictionary first; evaluate again.
+                Err(e) if e.contains("generation conflict") => {}
+                Err(e) => {
+                    tracing::warn!(
+                        "[{}] automatic dictionary reload failed: {e}",
+                        status.source_id
+                    );
+                    self.status.lock().unwrap().watch_error = Some(e);
+                    failed = Some(seen);
+                }
+            }
+        }
     }
 
     async fn queue_update(
@@ -297,6 +543,7 @@ impl DictionaryControl {
             ParserConfig {
                 parser_type: parser_type.into(),
                 database: Some(path.to_string_lossy().into_owned().into()),
+                ..Default::default()
             }
         };
         let parser = try_create_dictionary_parser(&config)?;

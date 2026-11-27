@@ -130,15 +130,7 @@ pub fn hit_test_pane(state: &State, area: Rect, column: u16, row: u16) -> Option
     if panes.is_empty() {
         return None;
     }
-    let ratio = (state.splitter * 100.0).round() as u16;
-    let ratio = ratio.clamp(10, 90);
-    let constraints: Vec<Constraint> = match panes.len() {
-        1 => vec![Constraint::Percentage(100)],
-        _ => vec![
-            Constraint::Percentage(ratio),
-            Constraint::Percentage(100 - ratio),
-        ],
-    };
+    let constraints = pane_constraints(panes.len(), state.splitter);
     let pane_areas = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(constraints)
@@ -203,7 +195,23 @@ fn draw_tab_bar(f: &mut Frame, state: &State, area: Rect) {
     f.render_widget(tabs, area);
 }
 
-/// Render the active tab's panes (1 or 2 side by side).
+/// Horizontal split for a tab's panes: one fills the width, two follow the
+/// splitter ratio, three or more share it equally.
+fn pane_constraints(panes: usize, splitter: f32) -> Vec<Constraint> {
+    match panes {
+        0 | 1 => vec![Constraint::Percentage(100)],
+        2 => {
+            let ratio = ((splitter * 100.0).round() as u16).clamp(10, 90);
+            vec![
+                Constraint::Percentage(ratio),
+                Constraint::Percentage(100 - ratio),
+            ]
+        }
+        n => vec![Constraint::Ratio(1, n as u32); n],
+    }
+}
+
+/// Render the active tab's panes (1 to 3 side by side).
 fn draw_pane_content(f: &mut Frame, state: &State, area: Rect) {
     let panes = state.active_tab_panes();
     if panes.is_empty() {
@@ -220,15 +228,7 @@ fn draw_pane_content(f: &mut Frame, state: &State, area: Rect) {
     }
 
     // Split horizontally across the active tab's panes, using the splitter ratio.
-    let ratio = (state.splitter * 100.0).round() as u16;
-    let ratio = ratio.clamp(10, 90);
-    let constraints: Vec<Constraint> = match panes.len() {
-        1 => vec![Constraint::Percentage(100)],
-        _ => vec![
-            Constraint::Percentage(ratio),
-            Constraint::Percentage(100 - ratio),
-        ],
-    };
+    let constraints = pane_constraints(panes.len(), state.splitter);
     let pane_areas = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(constraints)
@@ -275,7 +275,7 @@ fn draw_pane_content(f: &mut Frame, state: &State, area: Rect) {
         }
 
         let stored = stored.unwrap();
-        let markers = state.markers_for(pane_id);
+        let markers = state.resolved_markers(pane_id);
         let visible = usize::from(content_area.height);
         let (scroll, match_count, rows) = state.viewport(pane_id, visible);
         let mut lines = Vec::with_capacity(rows.len());
@@ -653,5 +653,30 @@ mod tests {
         let out = render(&s, 80, 24);
         assert!(out.contains("UART Main"), "missing UART pane title: {out}");
         assert!(out.contains("uart"), "missing uart kind: {out}");
+    }
+
+    #[test]
+    fn panes_split_the_width_by_count() {
+        let widths = |panes, splitter| {
+            let area = Rect::new(0, 0, 90, 10);
+            Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints(pane_constraints(panes, splitter))
+                .split(area)
+                .iter()
+                .map(|r| r.width)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(widths(1, 0.5), vec![90]);
+        assert_eq!(
+            widths(2, 0.7),
+            vec![63, 27],
+            "two panes follow the splitter"
+        );
+        assert_eq!(
+            widths(3, 0.7),
+            vec![30, 30, 30],
+            "three share the width equally"
+        );
     }
 }

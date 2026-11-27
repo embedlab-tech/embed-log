@@ -170,6 +170,9 @@ must change that name to `zephyr-dict-hex`; the formats are not auto-detected.
 
 The database path resolves relative to the configuration file and must match the firmware build that produced the logs.
 
+After a rebuild, the pane's **Reload** button re-reads the file, or set
+`parser.watch: true` to do that automatically; see `docs/runtime-dictionaries.md`.
+
 UART TX is independent of the receive parser. A dictionary configuration can
 still be used to send shell commands to plaintext firmware. If the database
 cannot be loaded (missing or invalid file), both dictionary parsers report the

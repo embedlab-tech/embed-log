@@ -107,3 +107,24 @@ test('split-tabs and per-pane wrap buttons show their state', async ({ page }) =
   const timestamp = page.locator('#btn-timestamp-mode');
   expect(await timestamp.evaluate(el => getComputedStyle(el, '::before').content)).toBe('"Time: "');
 });
+
+test('the Live button sits in the right group, next to the line counter', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#ws-status')).toContainText(/connected/i, { timeout: 20_000 });
+  const live = page.locator('#toolbar .toolbar-right #btn-jump-all');
+  await expect(live).toHaveCount(1);
+  const [toolbar, liveBox, statsBox, wsBox] = await Promise.all([
+    page.locator('#toolbar').boundingBox(),
+    live.boundingBox(),
+    page.locator('#toolbar-stats').boundingBox(),
+    page.locator('#ws-status').boundingBox(),
+  ]);
+  // Live, then the counter, then the connection state, all at the right edge.
+  expect(liveBox.x + liveBox.width).toBeLessThanOrEqual(statsBox.x + 1);
+  expect(statsBox.x).toBeLessThan(wsBox.x);
+  expect(liveBox.x).toBeGreaterThan(toolbar.x + toolbar.width / 2);
+  expect(liveBox.y).toBeGreaterThanOrEqual(toolbar.y);
+  expect(liveBox.y + liveBox.height).toBeLessThanOrEqual(toolbar.y + toolbar.height);
+  // Still works: it jumps panes to the latest line.
+  await live.click();
+});

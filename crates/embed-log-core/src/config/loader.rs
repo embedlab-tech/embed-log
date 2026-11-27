@@ -515,6 +515,12 @@ fn validate_config(config: &mut AppConfig, config_path: &Path) -> Result<(), Con
                 ctx()
             )));
         }
+        if src.parser.watch && !matches!(parser_type.as_str(), "zephyr-dict" | "zephyr-dict-hex") {
+            return Err(ConfigError::validation(format!(
+                "{}.parser.watch is only valid for parser.type 'zephyr-dict' or 'zephyr-dict-hex' (got {parser_type:?})",
+                ctx()
+            )));
+        }
         if parser_type == "slip-coap" && stype != "uart" {
             return Err(ConfigError::validation(format!(
                 "{}.parser.type 'slip-coap' is only valid for UART sources (got source type {stype:?})",
@@ -605,9 +611,9 @@ fn validate_config(config: &mut AppConfig, config_path: &Path) -> Result<(), Con
                 ctx()
             )));
         }
-        if tab.panes.is_empty() || tab.panes.len() > 2 {
+        if tab.panes.is_empty() || tab.panes.len() > 3 {
             return Err(ConfigError::validation(format!(
-                "{}.panes must contain 1 or 2 pane definitions",
+                "{}.panes must contain 1 to 3 pane definitions",
                 ctx()
             )));
         }
@@ -1247,6 +1253,33 @@ tabs:
     }
 
     #[test]
+    fn dictionary_watch_is_opt_in_and_only_for_dictionary_parsers() {
+        let base =
+            "version: 2\nsources:\n  DUT:\n    type: uart\n    path: /dev/ttyUSB0\n    parser:\n";
+        let path = std::env::temp_dir().join("dictionary-watch-validation.yml");
+        std::fs::write(
+            &path,
+            format!("{base}      type: zephyr-dict\n      database: d.json\n"),
+        )
+        .unwrap();
+        assert!(!load_config(&path).unwrap().sources[0].parser.watch);
+        std::fs::write(
+            &path,
+            format!("{base}      type: zephyr-dict\n      database: d.json\n      watch: true\n"),
+        )
+        .unwrap();
+        assert!(load_config(&path).unwrap().sources[0].parser.watch);
+        std::fs::write(
+            &path,
+            format!("{base}      type: text\n      watch: true\n"),
+        )
+        .unwrap();
+        let error = load_config(&path).unwrap_err().to_string();
+        assert!(error.contains("parser.watch is only valid"), "{error}");
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn control_api_defaults_to_true() {
         let yaml = r#"
 version: 1
@@ -1358,27 +1391,33 @@ tabs:
         assert!(err.to_string().contains("unknown source"), "got: {err}");
     }
 
+    fn tab_with_panes(count: usize) -> AppConfig {
+        let names: Vec<String> = (0..count).map(|i| format!("S{i}")).collect();
+        let sources: String = names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| format!("  - name: {name}\n    type: udp\n    port: {}\n", 6000 + i))
+            .collect();
+        let yaml = format!(
+            "version: 1\nsources:\n{sources}tabs:\n  - label: T\n    panes: [{}]\n",
+            names.join(", ")
+        );
+        serde_yaml::from_str(&yaml).unwrap()
+    }
+
+    #[test]
+    fn a_tab_holds_one_to_three_panes() {
+        for count in 1..=3 {
+            let mut cfg = tab_with_panes(count);
+            validate_config(&mut cfg, Path::new("test")).unwrap_or_else(|e| panic!("{count}: {e}"));
+        }
+    }
+
     #[test]
     fn reject_too_many_panes() {
-        let yaml = r#"
-version: 1
-sources:
-  - name: A
-    type: udp
-    port: 6000
-  - name: B
-    type: udp
-    port: 6001
-  - name: C
-    type: udp
-    port: 6002
-tabs:
-  - label: T
-    panes: [A, B, C]
-"#;
-        let mut cfg: AppConfig = serde_yaml::from_str(yaml).unwrap();
+        let mut cfg = tab_with_panes(4);
         let err = validate_config(&mut cfg, Path::new("test")).unwrap_err();
-        assert!(err.to_string().contains("1 or 2 pane"), "got: {err}");
+        assert!(err.to_string().contains("1 to 3 pane"), "got: {err}");
     }
 
     #[test]

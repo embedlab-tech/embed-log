@@ -622,8 +622,7 @@ function _markerAt(paneId, idx, line = null) {
     const markers = state.markers[paneId];
     if (!markers) return null;
     for (const m of markers) {
-        const end = m.endIdx ?? m.lineIdx;
-        if (idx >= m.lineIdx && idx <= end) return m;
+        if (markerCoversRow(paneId, m, idx)) return m;
     }
     return null;
 }
@@ -979,7 +978,9 @@ function _recordPaneBytes(paneId, newLines) {
     for (const line of newLines) {
         const text = (Array.isArray(line) ? line[1] : line?.rawText) || '';
         const meta = Array.isArray(line) ? line[3] : line;
-        const bytes = _byteSize(text);
+        // A pane counts the record as logged, not the colour added for display. A merged
+        // pane shows a source prefix too and keeps counting what it renders.
+        const bytes = !isMerge && Number.isFinite(meta?.originalBytes) ? meta.originalBytes : _byteSize(text);
         delta += bytes;
         if (!_adjustRecord(paneId, text, meta, 1, isMerge, bytes)) {
             const originalBytes = originalRecordBytes(paneId, text, meta, bytes, isMerge);
@@ -1589,6 +1590,100 @@ function _entryServerLineIdx(entry, paneId, idx) {
         return null;
     }
     return Number.isFinite(entry?.serverLineIdx) ? entry.serverLineIdx : null;
+}
+
+/**
+ * Which row a marker belongs to.
+ *
+ * Plain pane: the marker names a line by the server's per-source line index, not by a
+ * position in this pane, because the pane may hold only part of the session (a replay is
+ * bounded, a reconnect brings back only recent records). Rows without a server index
+ * (static reports, old caches) fall back to their position.
+ *
+ * Merged pane: a line index is only unique within one source (A's first line and B's
+ * first line are both 0) and a marker names no source, so the index cannot tell rows
+ * apart. The record itself is the identity: its session sequence when the marker has
+ * one, else its timestamp. Both travel with the row into exports, so leaving the marked
+ * record out of a selection cannot move the marker to another row.
+ */
+const _isMergePane = paneId => window.__embedLogMerges?.some(merge => merge?.name === paneId) ?? false;
+
+function _rowRecord(paneId, rawIdx) {
+    const entry = state.rawLines[paneId]?.[rawIdx];
+    if (entry === undefined) return null;
+    const meta = _isRawTuple(entry) ? (entry[3] || {}) : entry;
+    const num = meta.absNum ?? meta.numTs;
+    return {
+        sequence: Number.isFinite(meta.sequence) ? meta.sequence : null,
+        num: Number.isFinite(num) ? num : null,
+        serverLineIdx: _entryServerLineIdx(entry, paneId, rawIdx),
+    };
+}
+
+function _rowServerId(paneId, rawIdx) {
+    const row = _rowRecord(paneId, rawIdx);
+    return row === null ? null : (row.serverLineIdx ?? rawIdx);
+}
+
+/** Server line index of a row (its position when it has none). */
+export function serverLineIdxOf(paneId, rawIdx) {
+    return _rowServerId(paneId, rawIdx);
+}
+
+// Rows of a merged pane whose time equals a marker's, counted incrementally: new rows are
+// scanned as they arrive and the result is dropped when the rows are replaced (history
+// prepended, pane cleared).
+const _timeMatchCache = new WeakMap(); // marker object -> scan state (never serialized with it)
+function _timeMatches(paneId, marker) {
+    const lines = state.rawLines[paneId] || [];
+    let found = _timeMatchCache.get(marker);
+    if (!found || found.lines !== lines) {
+        found = { lines, scanned: 0, count: 0, index: -1 };
+        _timeMatchCache.set(marker, found);
+    }
+    for (; found.scanned < lines.length; found.scanned++) {
+        if (_rowRecord(paneId, found.scanned)?.num === marker.numTs) {
+            found.count++;
+            found.index = found.scanned;
+        }
+    }
+    return found;
+}
+
+/**
+ * For an export: give an older merged-pane marker the sequence of the record it names, so
+ * the exported page keeps the identity. A marker whose time is shared by several rows, or
+ * by none, cannot be told apart and is marked unresolved: the page will not draw it.
+ */
+export function markerForExport(paneId, marker) {
+    if (!_isMergePane(paneId) || Number.isFinite(marker.sequence)) return marker;
+    const found = _timeMatches(paneId, marker);
+    const sequence = found.count === 1 ? _rowRecord(paneId, found.index)?.sequence : null;
+    return Number.isFinite(sequence) ? { ...marker, sequence } : { ...marker, unresolved: true };
+}
+
+export function markerCoversRow(paneId, marker, rawIdx) {
+    const row = _rowRecord(paneId, rawIdx);
+    if (row === null) return false;
+    if (_isMergePane(paneId) && (row.sequence !== null || row.num !== null)) {
+        if (Number.isFinite(marker.sequence)) return row.sequence === marker.sequence;
+        if (marker.unresolved) return false;
+        // An older marker names no record. Its time is only safe to go by when it belongs
+        // to exactly one row; with a tie between sources it is not drawn at all.
+        const found = _timeMatches(paneId, marker);
+        return found.count === 1 && found.index === rawIdx;
+    }
+    const id = row.serverLineIdx ?? rawIdx;
+    return id >= marker.lineIdx && id <= (marker.endIdx ?? marker.lineIdx);
+}
+
+/** Local index of the row a marker starts on, or null while that line is not loaded. */
+export function markerRawIndex(paneId, marker) {
+    const lines = state.rawLines[paneId] || [];
+    for (let i = 0; i < lines.length; i++) {
+        if (markerCoversRow(paneId, marker, i)) return i;
+    }
+    return null;
 }
 
 // A time-sync target can be a hidden row (filtered out or an erased console

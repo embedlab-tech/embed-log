@@ -92,17 +92,17 @@ pub fn handle_key(
         // ── Tab navigation ──
         KeyCode::Tab => cycle_tab(state, true),
         KeyCode::BackTab => cycle_tab(state, false),
-        // ── Pane focus (within a 2-pane tab) ──
+        // ── Pane focus (within a tab with several panes) ──
         KeyCode::Char('h') | KeyCode::Left if !key.modifiers.contains(KeyModifiers::SHIFT) => {
             if !state.unwrap {
-                state.active_pane = 0;
+                state.active_pane = state.active_pane.saturating_sub(1);
             }
         }
         KeyCode::Char('l') | KeyCode::Right if !key.modifiers.contains(KeyModifiers::SHIFT) => {
             if !state.unwrap {
                 let panes = state.active_tab_panes();
-                if panes.len() > 1 {
-                    state.active_pane = 1;
+                if state.active_pane + 1 < panes.len() {
+                    state.active_pane += 1;
                 }
             }
         }
@@ -382,6 +382,7 @@ mod tests {
                 "merged",
                 StoredLine {
                     source_id: if i % 2 == 0 { "A" } else { "B" }.into(),
+                    sequence: i as u64 + 1,
                     line_idx: (i / 2) as u64,
                     abs_num: i as f64,
                     message: format!("row-{i}"),
@@ -461,5 +462,37 @@ mod tests {
         assert_eq!(state.active_tab, 0);
         cycle_tab(&mut state, false);
         assert_eq!(state.active_tab, 1);
+    }
+
+    #[tokio::test]
+    async fn pane_focus_steps_through_up_to_three_panes() {
+        let mut state = State::default();
+        state.apply_config(&ConfigMessage {
+            tabs: vec![TabDef {
+                label: "Three".into(),
+                panes: vec!["A".into(), "B".into(), "C".into()],
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        let mut client = crate::client::spawn_client("ws://127.0.0.1:0".into());
+        let mut focus = |code| {
+            handle_key(
+                &mut state,
+                &mut client,
+                &InputKey {
+                    code,
+                    modifiers: KeyModifiers::NONE,
+                },
+                24,
+            );
+            state.active_pane
+        };
+        assert_eq!(focus(KeyCode::Char('l')), 1);
+        assert_eq!(focus(KeyCode::Right), 2);
+        assert_eq!(focus(KeyCode::Char('l')), 2, "stops at the last pane");
+        assert_eq!(focus(KeyCode::Char('h')), 1);
+        assert_eq!(focus(KeyCode::Left), 0);
+        assert_eq!(focus(KeyCode::Char('h')), 0, "stops at the first pane");
     }
 }
