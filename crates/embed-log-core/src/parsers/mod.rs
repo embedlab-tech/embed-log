@@ -1,4 +1,5 @@
 pub mod hex_coap;
+pub mod raw_decode;
 pub mod slip_coap;
 pub mod text;
 pub mod traits;
@@ -10,6 +11,12 @@ pub use text::TextParser;
 pub use traits::StreamParser;
 pub use zephyr_dict::binary::ZephyrDictBinaryParser;
 pub use zephyr_dict::{validate_dictionary, ZephyrDictParser};
+
+/// Prefix of a `.log` line that carries the bytes of a dictionary record that
+/// could not be decoded because no dictionary was available. The rest of the
+/// line is the Base64 of those bytes; `embed-log dictionary decode` turns it
+/// back into text once the matching dictionary is known.
+pub const RAW_LINE_PREFIX: &str = "[dict-raw:v1] ";
 
 /// Decode one line of device console text.
 ///

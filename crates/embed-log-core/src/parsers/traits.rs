@@ -13,4 +13,10 @@ pub trait StreamParser: Send + 'static {
     fn on_idle(&mut self, _idle_for: std::time::Duration) -> Vec<String> {
         Vec::new()
     }
+
+    /// How many dictionary records this parser has decoded so far. Console text that
+    /// passes through does not count, so it cannot stand in for a successful decode.
+    fn decoded_records(&self) -> usize {
+        0
+    }
 }

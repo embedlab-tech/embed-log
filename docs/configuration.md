@@ -175,9 +175,32 @@ After a rebuild, the pane's **Reload** button re-reads the file, or set
 
 UART TX is independent of the receive parser. A dictionary configuration can
 still be used to send shell commands to plaintext firmware. If the database
-cannot be loaded, both dictionary parsers report the error once and preserve
-console text instead of discarding replies; dictionary records are **not decoded**
-in this state. Soft UART idle callbacks also flush non-newline-terminated shell
+cannot be loaded (missing or invalid file), both dictionary parsers report the
+error once and preserve console text instead of discarding replies; dictionary
+records are **not decoded** in this state, but they are **kept**:
+
+- `zephyr-dict` (binary) stores each record as one printable line,
+  `[dict-raw:v1] <base64 of the record bytes>`, so the `.log` stays plain ASCII
+  and nothing is lost. Console text between records stays readable. Without a
+  dictionary the pointer and timestamp sizes are unknown, so records are framed
+  for the common little-endian, 32-bit Zephyr target; for another target the
+  bytes are still all kept, and the decoder below re-synchronizes on them. A
+  record that stalls for 5 s is stored as it is.
+- `zephyr-dict-hex` records are already ASCII (`##ZLOGV1##<hex>`) and stay in
+  the log as they are.
+
+Decode such a log later, once the matching dictionary is known:
+
+```sh
+embed-log dictionary decode session.log --database build/zephyr/log_dictionary.json -o session.decoded.log
+# --parser-type zephyr-dict-hex for HEX logs; "-" reads stdin
+```
+
+Every raw line is replaced by the decoded message (with its original timestamp
+prefix), all other lines are copied unchanged, and the output matches what live
+decoding with that dictionary would have shown. If none of the raw data decodes
+with the given dictionary, the command fails instead of printing plausible but
+wrong text. The decoder is offline and needs no running logger. Soft UART idle callbacks also flush non-newline-terminated shell
 prompts in both modes, without discarding partial dictionary frames.
 
 The binary parser also preserves console text, ANSI sequences, and UTF-8 between

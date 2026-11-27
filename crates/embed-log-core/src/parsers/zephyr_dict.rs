@@ -53,6 +53,7 @@ pub struct ZephyrDictParser {
     hex_parse_stopped: bool,
     dict_buf: Vec<u8>,
     reported_load_error: bool,
+    records: usize,
 }
 
 enum LoadState {
@@ -86,6 +87,7 @@ impl ZephyrDictParser {
             hex_parse_stopped: false,
             dict_buf: Vec::new(),
             reported_load_error: false,
+            records: 0,
         }
     }
 
@@ -262,6 +264,7 @@ impl ZephyrDictParser {
             match take_one_message(&self.dict_buf, db) {
                 TakeResult::NeedMore => break,
                 TakeResult::Consumed { len, mut output } => {
+                    self.records += 1;
                     self.dict_buf.drain(0..len);
                     lines.append(&mut output);
                 }
@@ -284,6 +287,10 @@ impl ZephyrDictParser {
 }
 
 impl StreamParser for ZephyrDictParser {
+    fn decoded_records(&self) -> usize {
+        self.records
+    }
+
     fn feed(&mut self, data: &[u8]) -> Vec<String> {
         let mut lines = Vec::new();
         if let LoadState::Failed(err) = &self.state {
