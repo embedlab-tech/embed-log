@@ -460,3 +460,21 @@ def test_entries_drains_buffer_every_iteration():
     assert entries[0].message == "buffered-1"
     assert entries[1].message == "buffered-2"
     assert client._msg_buffer == deque()  # all drained
+
+
+def test_reload_dictionary_reads_generation_when_not_given(fake_ws):
+    fake_ws.queue_send({"type": "hello.result", "id": "hello-init",
+                        "sources": {"UART_A": {"type": "uart", "writable": True}},
+                        "session": {"id": "s1"}})
+    reply = {"reloaded": True, "path": "/b/log_dictionary.json",
+             "dictionary": {"dictionary_id": "new"}, "status": {"generation": 5}, "ok": True}
+    with EmbedLogClient("ws://127.0.0.1:18080/api/v1/control") as client:
+        with patch.object(client, "dictionary_status", return_value={"generation": 4}), \
+                patch.object(client, "_send_and_wait", return_value=reply) as send:
+            result = client.reload_dictionary("UART_A")
+        assert send.call_args.args[1:3] == ("dictionary.reload", "dictionary.reload.result")
+        assert send.call_args.kwargs["extra"] == {"source_id": "UART_A", "expected_generation": 4}
+        assert result == {key: reply[key] for key in ("reloaded", "path", "dictionary", "status")}
+        with patch.object(client, "_send_and_wait", return_value=reply) as send:
+            client.reload_dictionary("UART_A", expected_generation=9)
+        assert send.call_args.kwargs["extra"]["expected_generation"] == 9

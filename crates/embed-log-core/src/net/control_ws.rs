@@ -272,7 +272,7 @@ async fn handle_control_command(
         "unsubscribe" => Some(handle_unsubscribe(&cmd, state, subscribed_sources, msg_id)),
         "log.inject" => Some(handle_log_inject(&cmd, state, msg_id).await),
         "tx.write" => Some(handle_tx_write(&cmd, state, msg_id).await),
-        "dictionary.stage" | "dictionary.activate" | "dictionary.status" => {
+        "dictionary.stage" | "dictionary.activate" | "dictionary.reload" | "dictionary.status" => {
             Some(handle_dictionary(&cmd, state, cmd_type, msg_id).await)
         }
         "marker.create" => Some(handle_marker_create(&cmd, state, msg_id).await),
@@ -330,10 +330,32 @@ async fn handle_dictionary(
                 .get("parser_type")
                 .and_then(|v| v.as_str())
                 .unwrap_or("zephyr-dict");
+            // Optional: which configured entry this is. Files with identical bytes share
+            // a dictionary_id, so the UI names the entry it picked.
+            let configured_index = match cmd.get("configured_index") {
+                None | Some(serde_json::Value::Null) => None,
+                Some(value) => match value.as_u64() {
+                    Some(index) => Some(index as usize),
+                    None => return error("configured_index must be a non-negative integer"),
+                },
+            };
             control
-                .activate(id, parser, generation)
+                .activate_configured(id, parser, generation, configured_index)
                 .await
                 .map(|status| serde_json::json!({"status": status}))
+        }
+        "dictionary.reload" => {
+            let Some(generation) = cmd.get("expected_generation").and_then(|v| v.as_u64()) else {
+                return error("missing expected_generation (query dictionary.status first)");
+            };
+            control.reload(generation).await.map(|outcome| {
+                serde_json::json!({
+                    "reloaded": outcome.reloaded,
+                    "path": outcome.path,
+                    "dictionary": outcome.dictionary,
+                    "status": outcome.status,
+                })
+            })
         }
         _ => unreachable!(),
     };

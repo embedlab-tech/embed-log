@@ -4,8 +4,229 @@ let available = false;
 let sessionId;
 const pending = new Set();
 const errors = new Map();
+// Result of the user's own Reload. It is only true for the state it was made in,
+// so it is dropped when the dictionary or the file changes, and after a few seconds.
+const notes = new Map();
+const NOTE_MS = 5000;
 
-function activate(source, status, dictionaryId) {
+function setNote(source, text, status) {
+    notes.set(source, {
+        text, generation: status?.generation, id: status?.dictionary?.dictionary_id,
+        index: activeIndexOf(status),
+        until: Date.now() + NOTE_MS,
+    });
+    setTimeout(render, NOTE_MS + 50);
+}
+
+function activeNote(source, status, activeItem) {
+    const note = notes.get(source);
+    if (!note) return '';
+    const valid = Date.now() < note.until && !activeItem?.changed_on_disk
+        && note.generation === status.generation && note.id === status.dictionary?.dictionary_id
+        && note.index === activeIndexOf(status);
+    if (!valid) notes.delete(source);
+    return valid ? note.text : '';
+}
+
+const basename = path => path.split(/[\\/]/).filter(Boolean).pop() || path;
+
+// File name, plus the parent folder only when names would otherwise look identical.
+function shortName(path, all) {
+    const parts = path.split(/[\\/]/).filter(Boolean);
+    const clash = all.filter(other => basename(other.path) === basename(path)).length > 1;
+    return clash && parts.length > 1 ? parts.slice(-2).join('/') : basename(path);
+}
+
+const buildLabel = info => (info?.build_id != null ? `build ${info.build_id}` : '');
+
+// Files with identical bytes share a dictionary_id, so the choice names the entry too.
+function activate(source, status, dictionaryId, configuredIndex) {
+    return control({
+        type: 'dictionary.activate', source_id: source,
+        dictionary_id: dictionaryId, configured_index: configuredIndex,
+        expected_generation: status.generation, parser_type: status.parser_type,
+    }).then(reply => reply.status);
+}
+
+// Which configured entry is active. Older servers do not send active_index.
+function activeIndexOf(status) {
+    if (Number.isInteger(status.active_index)) return status.active_index;
+    const id = status.dictionary?.dictionary_id;
+    return id ? status.configured.findIndex(item => item.dictionary?.dictionary_id === id) : -1;
+}
+
+const reload = (source, status) => control({
+    type: 'dictionary.reload', source_id: source, expected_generation: status.generation,
+});
+
+function reloadMessage(reply) {
+    return reply.reloaded ? `Reloaded${buildLabel(reply.dictionary) ? ` · ${buildLabel(reply.dictionary)}` : ''}` : 'Already up to date';
+}
+
+// One menu open at a time; a click anywhere else closes it.
+let openMenu = null;
+// Closes the open menu. With a row's wrap, only if that row owns it: a status refresh
+// of one UART must not close the list the user is using on another.
+function closeMenu(owner) {
+    if (!openMenu || (owner && openMenu.wrap !== owner)) return;
+    openMenu.menu.hidden = true;
+    openMenu.trigger.setAttribute('aria-expanded', 'false');
+    openMenu = null;
+}
+document.addEventListener('pointerdown', event => {
+    if (openMenu && !openMenu.wrap.contains(event.target)) closeMenu();
+});
+window.addEventListener('resize', () => closeMenu());
+
+// Custom listbox instead of <select>: shows name, build and folder for every choice.
+function createDropdown(source) {
+    const wrap = el('div', 'dictionary-choice');
+    const trigger = el('button', 'dd-trigger');
+    trigger.type = 'button';
+    trigger.setAttribute('role', 'combobox');
+    trigger.setAttribute('aria-haspopup', 'listbox');
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.setAttribute('aria-label', `Dictionary for ${source}`);
+    trigger.append(el('span', 'dd-trigger-name'), el('span', 'dd-trigger-build'), el('span', 'dd-caret', '▾'));
+    const menu = el('ul', 'dd-menu');
+    menu.setAttribute('role', 'listbox');
+    menu.hidden = true;
+    wrap.append(el('span', 'dictionary-choice-label', 'Dictionary'), trigger, menu);
+
+    const options = () => [...menu.querySelectorAll('[role="option"]:not([aria-disabled="true"])')];
+    const focusOption = (offset, from) => {
+        const list = options();
+        if (!list.length) return;
+        const index = Math.max(0, Math.min(list.length - 1, (from ?? list.findIndex(o => o.getAttribute('aria-selected') === 'true')) + offset));
+        list[index].focus();
+    };
+    const open = () => {
+        if (trigger.disabled) return;
+        closeMenu();
+        const box = trigger.getBoundingClientRect();
+        // Fixed so the pane's overflow cannot clip it.
+        Object.assign(menu.style, { left: `${box.left}px`, top: `${box.bottom + 2}px`, minWidth: `${box.width}px` });
+        menu.hidden = false;
+        trigger.setAttribute('aria-expanded', 'true');
+        openMenu = { wrap, menu, trigger };
+        focusOption(0);
+    };
+    const pick = async option => {
+        closeMenu();
+        trigger.focus();
+        const current = sources[source].dictionary;
+        const index = Number(option.dataset.value);
+        const entry = current.configured[index];
+        if (!entry?.dictionary || index === activeIndexOf(current)) return;
+        pending.add(source);
+        errors.delete(source);
+        notes.delete(source);
+        render(); // Keep showing the active one until the RX owner acknowledges.
+        try {
+            const applied = await activate(source, current, entry.dictionary.dictionary_id, index);
+            sources[source].dictionary = applied;
+        } catch (error) {
+            errors.set(source, error.message);
+        } finally {
+            pending.delete(source);
+            render();
+            await refresh(); // Reconcile timeouts and changes by other clients.
+        }
+    };
+    trigger.addEventListener('click', () => (openMenu?.trigger === trigger ? closeMenu() : open()));
+    trigger.addEventListener('keydown', event => {
+        if (['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); open(); }
+    });
+    menu.addEventListener('click', event => {
+        const option = event.target.closest('[role="option"]');
+        if (option && option.getAttribute('aria-disabled') !== 'true') pick(option);
+    });
+    menu.addEventListener('keydown', event => {
+        const list = options();
+        const at = list.indexOf(document.activeElement);
+        if (event.key === 'ArrowDown') { event.preventDefault(); focusOption(1, at); }
+        else if (event.key === 'ArrowUp') { event.preventDefault(); focusOption(-1, at); }
+        else if (event.key === 'Home') { event.preventDefault(); focusOption(0, 0); }
+        else if (event.key === 'End') { event.preventDefault(); focusOption(0, list.length - 1); }
+        else if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (at >= 0) pick(list[at]); }
+        else if (event.key === 'Escape') { event.preventDefault(); closeMenu(); trigger.focus(); }
+        else if (event.key === 'Tab') closeMenu();
+    });
+    return wrap;
+}
+
+function fillMenu(menu, status, activeId, activeIndex) {
+    menu.replaceChildren();
+    const add = (value, title, build, path, { disabled = false, tip = '' } = {}) => {
+        const option = el('li', 'dd-option');
+        option.setAttribute('role', 'option');
+        option.tabIndex = -1;
+        option.dataset.value = value;
+        option.setAttribute('aria-selected', String(value === (activeIndex >= 0 ? String(activeIndex) : 'uploaded')));
+        if (disabled) option.setAttribute('aria-disabled', 'true');
+        if (tip) option.title = tip;
+        const top = el('span', 'dd-option-top');
+        top.append(el('span', 'dd-option-name', title));
+        if (build) top.append(el('span', 'dd-option-build', build));
+        option.append(top);
+        if (path) {
+            const line = el('span', 'dd-option-path');
+            line.append(el('bdi', '', path)); // rtl + bdi: ellipsis on the left, order intact
+            option.append(line);
+        }
+        menu.append(option);
+    };
+    status.configured.forEach((item, index) => {
+        const dir = item.path.replace(/[\\/][^\\/]*$/, '');
+        add(String(index), shortName(item.path, status.configured),
+            item.error ? 'unavailable' : buildLabel(item.dictionary), dir,
+            { disabled: !!item.error, tip: item.error || item.path });
+    });
+    if (activeIndex < 0) {
+        add('uploaded', activeId ? 'Uploaded dictionary' : 'No active dictionary', '', activeId ? `#${activeId.slice(0, 8)}` : '');
+    }
+}
+
+function el(tag, className, text) {
+    const node = document.createElement(tag);
+    node.className = className;
+    if (text) node.textContent = text;
+    return node;
+}
+
+function createRow(source) {
+    const row = el('div', 'dictionary-control');
+    const name = el('span', 'dictionary-name');
+    const meta = el('span', 'dictionary-meta');
+    const pill = el('span', 'dictionary-pill');
+    pill.setAttribute('role', 'status');
+    const button = el('button', 'dictionary-reload', '↻ Reload');
+    button.type = 'button';
+    button.addEventListener('click', async () => {
+        const current = sources[source].dictionary;
+        pending.add(source);
+        errors.delete(source);
+        notes.delete(source);
+        render();
+        try {
+            const reply = await reload(source, current);
+            sources[source].dictionary = reply.status;
+            setNote(source, reloadMessage(reply), reply.status);
+        } catch (error) {
+            errors.set(source, error.message);
+        } finally {
+            pending.delete(source);
+            render();
+            await refresh();
+        }
+    });
+    const error = el('span', 'dictionary-error');
+    error.setAttribute('role', 'alert');
+    row.append(name, meta, button, pill, error);
+    return row;
+}
+
+function control(request) {
     return new Promise((resolve, reject) => {
         const url = new URL('/api/v1/control', location.href);
         url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -20,16 +241,12 @@ function activate(source, status, dictionaryId) {
             if (error) reject(error); else resolve(result);
         };
         const timer = setTimeout(() => finish(new Error('Change not confirmed; checking live status.')), 15000);
-        socket.onopen = () => socket.send(JSON.stringify({
-            type: 'dictionary.activate', id, source_id: source,
-            dictionary_id: dictionaryId, expected_generation: status.generation,
-            parser_type: status.parser_type,
-        }));
+        socket.onopen = () => socket.send(JSON.stringify({ ...request, id }));
         socket.onmessage = event => {
             let reply;
             try { reply = JSON.parse(event.data); } catch { return; }
             if (reply.id !== id) return;
-            finish(reply.ok ? null : new Error(reply.error || 'Dictionary change rejected'), reply.status);
+            finish(reply.ok ? null : new Error(reply.error || 'Dictionary change rejected'), reply);
         };
         socket.onerror = () => finish(new Error('Dictionary control connection failed.'));
         socket.onclose = () => finish(new Error('Dictionary control connection closed.'));
@@ -41,71 +258,80 @@ function render() {
         const source = pane.id.slice('pane-'.length);
         const status = sources[source]?.dictionary;
         let row = pane.querySelector('.dictionary-control');
-        if ((status?.configured?.length || 0) < 2) {
+        if (!status?.configured?.length) {
             if (row) row.remove();
             continue;
         }
         if (!row) {
-            row = document.createElement('div');
-            row.className = 'dictionary-control';
-            const label = document.createElement('label');
-            label.textContent = 'Dictionary ';
-            const select = document.createElement('select');
-            select.setAttribute('aria-label', `Dictionary for ${source}`);
-            label.append(select);
-            const active = document.createElement('span');
-            active.className = 'dictionary-active';
-            const error = document.createElement('span');
-            error.className = 'dictionary-error';
-            error.setAttribute('role', 'alert');
-            row.append(label, active, error);
+            row = createRow(source);
             pane.insertBefore(row, pane.querySelector('.filter-bar'));
-            select.addEventListener('change', async () => {
-                const current = sources[source].dictionary;
-                const selected = select.value;
-                pending.add(source);
-                errors.delete(source);
-                render(); // Restore the active value until the RX owner acknowledges.
-                try {
-                    const applied = await activate(source, current, selected);
-                    sources[source].dictionary = applied;
-                } catch (error) {
-                    errors.set(source, error.message);
-                } finally {
-                    pending.delete(source);
-                    render();
-                    await refresh(); // Reconcile timeouts and changes by other clients.
-                }
-            });
         }
-        const select = row.querySelector('select');
+        // A choice only exists with several configured dictionaries; Reload is always useful.
+        const multiple = status.configured.length > 1;
+        if (multiple && !row.querySelector('.dictionary-choice')) row.prepend(createDropdown(source));
+        if (!multiple) {
+            const own = row.querySelector('.dictionary-choice');
+            if (own) {
+                closeMenu(own);
+                own.remove();
+            }
+        }
         const activeId = status.dictionary?.dictionary_id || '';
-        const signature = JSON.stringify([status.configured, status.dictionary]);
-        if (select.dataset.options !== signature) {
-            select.replaceChildren();
-            for (const item of status.configured) {
-                const option = document.createElement('option');
-                option.value = item.dictionary?.dictionary_id || '';
-                option.textContent = item.path + (item.error ? ' (unavailable)' : '');
-                option.title = item.error || item.path;
-                option.disabled = !!item.error;
-                select.append(option);
+        const activeIndex = activeIndexOf(status);
+        const activeItem = activeIndex >= 0 ? status.configured[activeIndex] : undefined;
+        const choice = row.querySelector('.dictionary-choice');
+        if (choice) {
+            const trigger = choice.querySelector('.dd-trigger');
+            const menu = choice.querySelector('.dd-menu');
+            const signature = JSON.stringify([status.configured, status.dictionary, status.active_index]);
+            if (menu.dataset.options !== signature) {
+                fillMenu(menu, status, activeId, activeIndex);
+                menu.dataset.options = signature;
             }
-            if (!activeId || !status.configured.some(item => item.dictionary?.dictionary_id === activeId)) {
-                const option = document.createElement('option');
-                option.value = activeId;
-                option.textContent = activeId ? `Uploaded dictionary (${activeId.slice(0, 12)})` : 'No active dictionary';
-                select.append(option);
-            }
-            select.dataset.options = signature;
+            trigger.dataset.value = activeIndex >= 0 ? String(activeIndex) : 'uploaded';
+            trigger.querySelector('.dd-trigger-name').textContent = activeItem
+                ? shortName(activeItem.path, status.configured) : (activeId ? 'Uploaded dictionary' : 'No dictionary');
+            trigger.querySelector('.dd-trigger-build').textContent = buildLabel(status.dictionary);
+            trigger.title = activeItem?.path || activeId;
+            trigger.disabled = !available || pending.has(source);
+            if (trigger.disabled) closeMenu(choice);
         }
-        select.value = activeId;
-        select.disabled = !available || pending.has(source);
-        const active = row.querySelector('.dictionary-active');
-        const activePath = status.configured.find(item => item.dictionary?.dictionary_id === activeId)?.path;
-        active.textContent = pending.has(source) ? 'Switching…' : (available ? `Active: ${activePath || activeId || 'none'}` : 'Status unavailable');
-        active.title = activePath || activeId;
-        row.querySelector('.dictionary-error').textContent = errors.get(source) || '';
+
+        // Name and details of the dictionary that is decoding right now.
+        const name = row.querySelector('.dictionary-name');
+        name.hidden = multiple; // the selector already shows the name
+        name.textContent = activeItem ? shortName(activeItem.path, status.configured)
+            : (activeId ? 'Uploaded dictionary' : 'No dictionary');
+        name.title = activeItem?.path || activeId;
+        // The selector's options already carry the build; do not repeat it next to them.
+        const details = [multiple ? '' : buildLabel(status.dictionary), activeId && `#${activeId.slice(0, 8)}`].filter(Boolean);
+        const meta = row.querySelector('.dictionary-meta');
+        meta.textContent = available ? details.join(' · ') : '';
+        meta.title = activeId ? `${activeItem?.path || 'uploaded'}\nsha256 ${activeId}` : '';
+
+        const button = row.querySelector('.dictionary-reload');
+        const fromFile = !!activeItem;
+        button.disabled = !available || pending.has(source) || !fromFile;
+        button.title = fromFile
+            ? 'Re-read the active dictionary file, e.g. after rebuilding the firmware'
+            : 'The active dictionary was uploaded, not read from a file';
+
+        // One state pill: what the user needs to know about the file right now.
+        const changed = !!activeItem?.changed_on_disk && available && !pending.has(source);
+        const note = pending.has(source) ? '' : activeNote(source, status, activeItem);
+        let state = ['', ''];
+        if (!available) state = ['unavailable', 'Status unavailable'];
+        else if (pending.has(source)) state = ['busy', 'Updating…'];
+        else if (changed) state = status.watch ? ['busy', 'File changed · reloading…'] : ['stale', 'File changed — reload to use it'];
+        else if (note) state = ['ok', note];
+        else if (activeItem && status.watch) state = ['auto', 'Auto-reload on'];
+        const pill = row.querySelector('.dictionary-pill');
+        pill.textContent = state[1];
+        pill.dataset.state = state[0];
+        pill.hidden = !state[1];
+        button.classList.toggle('attention', changed && !status.watch);
+        row.querySelector('.dictionary-error').textContent = errors.get(source)
+            || (status.watch_error ? `Auto-reload failed: ${status.watch_error}` : '');
     }
 }
 

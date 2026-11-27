@@ -120,6 +120,10 @@ pub struct ParserConfig {
     /// `type: zephyr-dict` (binary) or `zephyr-dict-hex`; ignored otherwise.
     #[serde(default)]
     pub database: Option<DictionaryPaths>,
+    /// Reload the active dictionary file automatically when a rebuild overwrites
+    /// it. Only for `zephyr-dict` / `zephyr-dict-hex`; needs the control API.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub watch: bool,
 }
 
 impl ParserConfig {
@@ -133,6 +137,7 @@ impl Default for ParserConfig {
         Self {
             parser_type: "text".to_string(),
             database: None,
+            watch: false,
         }
     }
 }
